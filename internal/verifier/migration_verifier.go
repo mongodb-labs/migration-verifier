@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"reflect"
 	"strconv"
@@ -16,16 +15,18 @@ import (
 	"github.com/rs/zerolog"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
 	//TODO: add comments for each of these so the warnings will stop :)
-	MISSING           = "Missing"
-	MISMATCH          = "Mismatch"
-	CLUSTERTARGET     = "dstClient"
-	CLUSTERSOURCE     = "srcClient"
-	SRCNAMESPACEFIELD = "query_filter.namespace"
-	DSTNAMESPACEFIELD = "query_filter.to"
+	Missing           = "Missing"
+	Mismatch          = "Mismatch"
+	ClusterTarget     = "dstClient"
+	ClusterSource     = "srcClient"
+	SrcNamespaceField = "query_filter.namespace"
+	DstNamespaceField = "query_filter.to"
+	NumWorkers        = 10
 	refetch           = "TODO_CHANGE_ME_REFETCH"
 )
 
@@ -34,7 +35,7 @@ type Verifier struct {
 	metaClient *mongo.Client
 	srcClient  *mongo.Client
 	dstClient  *mongo.Client
-	workers    int
+	numWorkers int
 
 	comparisonRetryDelayMillis time.Duration
 	workerSleepDelayMillis     time.Duration
@@ -68,42 +69,71 @@ type VerificationResult struct {
 
 // NewVerifier creates a new Verifier
 func NewVerifier() *Verifier {
-	return &Verifier{}
+	return &Verifier{
+		numWorkers: NumWorkers,
+	}
 }
 
-func (v *Verifier) handleArgs(args []string) error {
-	if len(args) != 3 {
-		panic("usage ./migration_verifier srcClient destination")
+func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
+	appName := "Migration Verifier"
+	opts := &options.ClientOptions{
+		AppName: &appName,
 	}
-	// TODO: handle delays, log setup, and namespaces with command line flags
-	// TODO: decide readPref
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	log.Print("hello world")
+	opts.ApplyURI(uri)
+	return opts
+}
+
+func (verifier *Verifier) GetLogger() *zerolog.Logger {
+	return verifier.logger
+}
+
+func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
+	opts := verifier.getClientOpts(uri)
 	var err error
-	v.srcClient, err = mongo.Connect(context.TODO())
-	if err != nil {
-		return err
-	}
-	if err := v.srcClient.Ping(context.TODO(), nil); err != nil {
-		return err
-	}
-	v.comparisonRetryDelayMillis = 30_000
-	v.workerSleepDelayMillis = 5_000
-	v.metaDBName = "TODO_CHANGE_ME"
-	v.workers = 10 // TODO set reasonable number
-	return nil
+	verifier.metaClient, err = mongo.Connect(ctx, opts)
+	return err
 }
 
-// Run runs the migration_verifier
-func (verifier *Verifier) Run(args []string) {
-	err := verifier.handleArgs(args)
-	if err != nil {
-		panic(err)
-	}
-	doneChan := make(chan bool)
-	go verifier.Verify(doneChan)
+func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
+	opts := verifier.getClientOpts(uri)
+	var err error
+	verifier.srcClient, err = mongo.Connect(ctx, opts)
+	return err
+}
 
-	<-doneChan
+func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
+	opts := verifier.getClientOpts(uri)
+	var err error
+	verifier.srcClient, err = mongo.Connect(ctx, opts)
+	return err
+}
+
+func (verifier *Verifier) SetNumWorkers(arg int) {
+	verifier.numWorkers = arg
+}
+
+func (verifier *Verifier) SetComparisonRetryDelayMillis(arg time.Duration) {
+	verifier.comparisonRetryDelayMillis = arg
+}
+
+func (verifier *Verifier) SetWorkerSleepDelayMillis(arg time.Duration) {
+	verifier.workerSleepDelayMillis = arg
+}
+
+func (verifier *Verifier) SetLogger(arg *zerolog.Logger) {
+	verifier.logger = arg
+}
+
+func (verifier *Verifier) SetSrcNamespaces(arg []string) {
+	verifier.srcNamespaces = arg
+}
+
+func (verifier *Verifier) SetDstNamespaces(arg []string) {
+	verifier.dstNamespaces = arg
+}
+
+func (verifier *Verifier) SetMetaDBName(arg string) {
+	verifier.metaDBName = arg
 }
 
 // DocumentStats gets various status (TODO clarify)
@@ -186,8 +216,8 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap map[interf
 			//verifier.logger.Info().Msg("Document %+v missing on dstClient!", id)
 			mismatchedIds = append(mismatchedIds, VerificationResult{
 				ID:        srcClientDoc.Lookup("_id"),
-				Details:   MISSING,
-				Cluster:   CLUSTERTARGET,
+				Details:   Missing,
+				Cluster:   ClusterTarget,
 				NameSpace: namespace,
 			})
 			continue
@@ -211,8 +241,8 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap map[interf
 				//verifier.logger.Info().Msg("Document %+v missing on srcClient!", id)
 				mismatchedIds = append(mismatchedIds, VerificationResult{
 					ID:      dstClientDoc.Lookup("_id"),
-					Details: MISSING,
-					Cluster: CLUSTERSOURCE,
+					Details: Missing,
+					Cluster: ClusterSource,
 				})
 			}
 		}
@@ -254,18 +284,18 @@ func (verifier *Verifier) manuallyCompareDocumentFields(id interface{}, srcClien
 		srcClientValue, ok := srcClientMap[key]
 		if !ok {
 			//verifier.logger.Info().Msg("Document %s is missing field %s on srcClient cluster!", id, key)
-			results = append(results, VerificationResult{ID: id, Field: key, Details: MISSING, Cluster: CLUSTERSOURCE, NameSpace: namespace})
+			results = append(results, VerificationResult{ID: id, Field: key, Details: Missing, Cluster: ClusterSource, NameSpace: namespace})
 		}
 		dstClientValue, ok := dstClientMap[key]
 		if !ok {
 			//verifier.logger.Info().Msg("Document %s is missing field %s on dstClient cluster!", id, key)
-			results = append(results, VerificationResult{ID: id, Field: key, Details: MISSING, Cluster: CLUSTERTARGET, NameSpace: namespace})
+			results = append(results, VerificationResult{ID: id, Field: key, Details: Missing, Cluster: ClusterTarget, NameSpace: namespace})
 		}
 
 		if !reflect.DeepEqual(srcClientValue, dstClientValue) {
 			details := fmt.Sprintf("Document %s failed comparison on field %s between srcClient (Type: %s) and dstClient (Type: %s)", id, key, srcClientValue.Type, dstClientValue.Type)
 			//verifier.logger.Info(details)
-			results = append(results, VerificationResult{ID: id, Field: key, Details: MISMATCH + " : " + details, Cluster: CLUSTERTARGET, NameSpace: namespace})
+			results = append(results, VerificationResult{ID: id, Field: key, Details: Mismatch + " : " + details, Cluster: ClusterTarget, NameSpace: namespace})
 		}
 	}
 
@@ -443,7 +473,7 @@ func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mong
 	return verifier.dstClient.Database(dbName).Collection(collName)
 }
 
-func (verifier *Verifier) Verify(done <-chan bool) error {
+func (verifier *Verifier) Verify() error {
 	var err error
 
 	// Log out the verification status when initially booting up so it's easy to see the current state
@@ -454,24 +484,13 @@ func (verifier *Verifier) Verify(done <-chan bool) error {
 		verifier.logger.Info().Msgf("Initial verification status: %+v", verificationStatus)
 	}
 
-	verifier.logger.Info().Msgf("Starting %d verification workers", verifier.workers)
+	verifier.logger.Info().Msgf("Starting %d verification workers", verifier.numWorkers)
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := sync.WaitGroup{}
-	for i := 0; i < verifier.workers; i++ {
+	for i := 0; i < verifier.numWorkers; i++ {
 		wg.Add(1)
 		go verifier.Work(i, ctx, &wg)
 		time.Sleep(10 * time.Millisecond)
-	}
-	ticker := time.NewTicker(60 * time.Second)
-	processed := false
-	for !processed {
-		select {
-		case <-done:
-			processed = true
-			break
-		case <-ticker.C:
-			verifier.PrintVerificationSummary(ctx)
-		}
 	}
 
 	waitForTaskCreation := 0
@@ -522,7 +541,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 
 	// cache namespace
 	if len(verifier.srcNamespaces) == 0 {
-		verifier.srcNamespaces = verifier.getNamespaces(ctx, SRCNAMESPACEFIELD)
+		verifier.srcNamespaces = verifier.getNamespaces(ctx, SrcNamespaceField)
 		// if still no namespace, nothing to print!
 		if len(verifier.srcNamespaces) == 0 {
 			verifier.logger.Info().Msg("Unable to find the namespace to display DB stats.")
@@ -531,7 +550,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 	}
 
 	if len(verifier.dstNamespaces) == 0 {
-		verifier.dstNamespaces = verifier.getNamespaces(ctx, DSTNAMESPACEFIELD)
+		verifier.dstNamespaces = verifier.getNamespaces(ctx, DstNamespaceField)
 		if len(verifier.dstNamespaces) == 0 {
 			verifier.dstNamespaces = verifier.srcNamespaces
 		}
