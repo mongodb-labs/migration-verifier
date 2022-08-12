@@ -120,8 +120,8 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 		return nil, nil, nil, err
 	}
 	v.SetNumWorkers(cCtx.Int(numWorkers))
-	v.SetComparisonRetryDelayMillis(time.Millisecond * time.Duration(cCtx.Int64(comparisonRetryDelay)))
-	v.SetWorkerSleepDelayMillis(time.Millisecond * time.Duration(cCtx.Int64(workerSleepDelay)))
+	v.SetComparisonRetryDelayMillis(time.Duration(cCtx.Int64(comparisonRetryDelay)))
+	v.SetWorkerSleepDelayMillis(time.Duration(cCtx.Int64(workerSleepDelay)))
 	logPath := cCtx.String(logPath)
 	var file *os.File
 	var writer *bufio.Writer = nil
