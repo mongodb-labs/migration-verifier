@@ -18,7 +18,7 @@ const (
 	dstURI               = "dstURI"
 	metaURI              = "metaURI"
 	numWorkers           = "numWorkers"
-	comparisonRetryDelay = "comparisongRetryDelay"
+	comparisonRetryDelay = "comparisonRetryDelay"
 	workerSleepDelay     = "workerSleepDelay"
 	logPath              = "logPath"
 	srcNamespaces        = "srcNamespaces"

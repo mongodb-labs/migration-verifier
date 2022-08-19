@@ -243,9 +243,10 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap map[interf
 			if !ok {
 				//verifier.logger.Info().Msg("Document %+v missing on srcClient!", id)
 				mismatchedIds = append(mismatchedIds, VerificationResult{
-					ID:      dstClientDoc.Lookup("_id"),
-					Details: Missing,
-					Cluster: ClusterSource,
+					ID:        dstClientDoc.Lookup("_id"),
+					Details:   Missing,
+					Cluster:   ClusterSource,
+					NameSpace: namespace,
 				})
 			}
 		}
