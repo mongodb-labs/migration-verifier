@@ -81,6 +81,7 @@ buildvariants:
       _platform: rhel70
     tasks:
       - name: lint-go
+    tags: ["commit-queue"]
 
   - name: unit-tests
     display_name: "! Unit Tests"
@@ -90,3 +91,4 @@ buildvariants:
       _platform: rhel70
     tasks:
       - name: test-go
+    tags: ["commit-queue"]
