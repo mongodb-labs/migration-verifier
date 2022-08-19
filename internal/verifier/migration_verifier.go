@@ -179,7 +179,10 @@ func getDocuments(collection *mongo.Collection, task *VerificationTask) (map[int
 	documentMap := make(map[interface{}]bson.Raw)
 	for cursor.Next(ctx) {
 		var rawDoc bson.Raw
-		cursor.Decode(&rawDoc)
+		err := cursor.Decode(&rawDoc)
+		if err != nil {
+			return nil, err
+		}
 		id := rawDoc.Lookup("_id").String()
 
 		documentMap[id] = rawDoc
@@ -352,8 +355,9 @@ func (verifier *Verifier) AddRefetchTask(task *VerificationTask) {
 		_, err := verifier.refetchCollection().InsertOne(context.Background(), model)
 		if err != nil {
 			verifier.logger.Error().Msgf("Error saving refetch document for id %s - %+v", id, err)
-		} else {
-			//verifier.logger.Info().Msg("Saved refetch document for id %s", id)
+			// TODO: see if we need this commented out message
+			// } else {
+			// verifier.logger.Info().Msg("Saved refetch document for id %s", id)
 		}
 	}
 }
@@ -444,9 +448,10 @@ func (verifier *Verifier) verificationTaskCollection() *mongo.Collection {
 	return verifier.metaClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 }
 
-func (verifier *Verifier) verificationRangeCollection() *mongo.Collection {
-	return verifier.metaClient.Database(verifier.metaDBName).Collection(verificationRangeCollection)
-}
+// TODO: this may be necessary, currently unused
+//func (verifier *Verifier) verificationRangeCollection() *mongo.Collection {
+//	return verifier.metaClient.Database(verifier.metaDBName).Collection(verificationRangeCollection)
+//}
 
 func (verifier *Verifier) refetchCollection() *mongo.Collection {
 	return verifier.metaClient.Database(verifier.metaDBName).Collection(refetch)

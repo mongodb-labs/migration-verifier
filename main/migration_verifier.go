@@ -130,7 +130,10 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 		v.SetLogger(&l)
 	} else {
 		if _, err := os.Stat(logPath); os.IsNotExist(err) {
-			os.MkdirAll(path.Dir(logPath), 0770)
+			mkdirErr := os.MkdirAll(path.Dir(logPath), 0770)
+			if mkdirErr != nil {
+				return nil, nil, nil, mkdirErr
+			}
 		}
 		file, err = os.Create(logPath)
 		if err != nil {

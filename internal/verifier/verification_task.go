@@ -23,9 +23,10 @@ const (
 	verificationTaskFailed      = "failed"
 	verificationTaskProcessing  = "processing"
 	verificationTasksCollection = "verification_tasks"
-	verificationRangeCollection = "verification_ranges"
-	verificationTasksRetry      = "retry"
-	verificationTaskMaxRetries  = 5
+	// TODO: This may actually be necessary in the final product
+	//verificationRangeCollection = "verification_ranges"
+	verificationTasksRetry     = "retry"
+	verificationTaskMaxRetries = 5
 
 	verificationTaskVerify  = "verify"
 	verificationTaskPrimary = "primary"
