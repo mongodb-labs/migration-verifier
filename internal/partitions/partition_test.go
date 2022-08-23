@@ -3,8 +3,7 @@ package partitions
 import (
 	"testing"
 
-	"github.com/10gen/mongosync/internal/mongosync/resumedata/phase"
-	"github.com/10gen/mongosync/internal/mongosync/util"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
@@ -77,7 +76,6 @@ func makeTestPartition() (Partition, bson.D) {
 			MongosyncID: "",
 		},
 		Ns:    &Namespace{DB: "testDB", Coll: "testColl"},
-		Phase: phase.PartitionNotStarted,
 		Upper: primitive.ObjectID([12]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2}),
 	}
 	return partition, makeExpectedFilter(partition.Key.Lower, partition.Upper)
