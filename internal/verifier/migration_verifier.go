@@ -3,7 +3,6 @@ package verifier
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -11,9 +10,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/olekukonko/tablewriter"
+	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -153,26 +158,37 @@ func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []strin
 	fmt.Println()
 }
 
-func getDocuments(collection *mongo.Collection, task *VerificationTask) (map[interface{}]bson.Raw, error) {
-	var filter bson.D
+func (verifier *Verifier) getDocuments(collection *mongo.Collection, task *VerificationTask) (map[interface{}]bson.Raw, error) {
+	var findOptions bson.D
 	if len(task.FailedIDs) > 0 {
-		filter = bson.D{
+		filter := bson.D{
 			bson.E{
 				Key:   "_id",
 				Value: bson.M{"$in": task.FailedIDs},
 			},
 		}
-	} else {
-		filter = bson.D{
+		findOptions = bson.D{
+			bson.E{"filter", filter},
+		}
+	} else if len(task.Ids) > 0 {
+		filter := bson.D{
 			bson.E{
 				Key:   "_id",
 				Value: bson.M{"$in": task.Ids},
 			},
 		}
+		findOptions = bson.D{
+			bson.E{"filter", filter},
+		}
+	} else {
+		findOptions = task.QueryFilter.Partition.GetFindOptions()
 	}
+	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
+	verifier.logger.Debug().Msgf("getDocuments findCmd: %s", findCmd)
+
 	ctx := context.Background()
 
-	cursor, err := collection.Find(ctx, filter)
+	cursor, err := collection.Database().RunCommandCursor(ctx, findCmd)
 	if err != nil {
 		return nil, err
 	}
@@ -194,16 +210,16 @@ func getDocuments(collection *mongo.Collection, task *VerificationTask) (map[int
 func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]VerificationResult, error) {
 	var err error
 
-	srcClientMap, err := getDocuments(verifier.srcClientCollection(task), task)
+	srcClientMap, err := verifier.getDocuments(verifier.srcClientCollection(task), task)
 	if err != nil {
 		return nil, err
 	}
 
 	var dstClientMap map[interface{}]bson.Raw
 	if task.QueryFilter.To != "" {
-		dstClientMap, err = getDocuments(verifier.dstClientCollectionByNameSpace(task.QueryFilter.To), task)
+		dstClientMap, err = verifier.getDocuments(verifier.dstClientCollectionByNameSpace(task.QueryFilter.To), task)
 	} else {
-		dstClientMap, err = getDocuments(verifier.dstClientCollection(task), task)
+		dstClientMap, err = verifier.getDocuments(verifier.dstClientCollection(task), task)
 	}
 	if err != nil {
 		return nil, err
@@ -345,6 +361,50 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 	}
 }
 
+func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace string) ([]*partitions.Partition, error) {
+	retryer := retry.New(retry.DefaultDurationLimit)
+	logger := logger.NewLogger(verifier.logger, logger.DefaultLogWriter)
+	dbName, collName := SplitNamespace(namespace)
+	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, logger, retryer,
+		verifier.srcClient.Database(dbName), collName)
+	if err != nil {
+		return nil, err
+	}
+	// The partitioner doles out ranges to replicators; we don't use that functionality so we just pass
+	// one "replicator".
+	replicator1 := partitions.Replicator{ID: "verifier"}
+	replicators := []partitions.Replicator{replicator1}
+	return partitions.PartitionCollection(ctx, namespaceAndUUID, retryer, verifier.srcClient, replicators, logger)
+}
+
+func (verifier *Verifier) ProcessCollectionVerificationTask(ctx context.Context, workerNum int, task *VerificationTask) {
+	// TODO handle metadata and indexes.
+	srcNs := task.QueryFilter.Namespace
+	dstNs := task.QueryFilter.To
+	partitions, err := verifier.getCollectionPartitions(ctx, srcNs)
+	if err != nil {
+		task.Status = verificationTaskFailed
+		verifier.logger.Error().Msgf("[Worker %d] Error partitioning collection: %+v", workerNum, err)
+	} else {
+		task.Status = verificationTaskCompleted
+		verifier.logger.Info().Msgf("[Worker %d] split collection info %d partitions", workerNum, len(partitions))
+		// Use "open" partitions, otherwise out-of-range keys on the destination might be missed
+		partitions[0].Key.Lower = primitive.MinKey{}
+		partitions[len(partitions)-1].Upper = primitive.MaxKey{}
+		for _, partition := range partitions {
+			_, err := InsertPartitionVerificationTask(partition, dstNs, verifier.verificationTaskCollection())
+			if err != nil {
+				task.Status = verificationTaskFailed
+				verifier.logger.Error().Msgf("[Worker %d] Error inserting verifier tasks: %+v", workerNum, err)
+			}
+		}
+	}
+
+	err = verifier.UpdateVerificationTask(task)
+	if err != nil {
+		verifier.logger.Error().Msgf("Failed updating verification status: %v", err)
+	}
+}
 func (verifier *Verifier) AddRefetchTask(task *VerificationTask) {
 	srcNamespace := task.QueryFilter.Namespace
 	dstNamespace := srcNamespace
@@ -379,7 +439,11 @@ func (verifier *Verifier) Work(workerNum int, ctx context.Context, wg *sync.Wait
 			} else if err != nil {
 				panic(err)
 			}
-			verifier.ProcessVerifyTask(workerNum, task)
+			if task.Type == verificationTaskVerifyCollection {
+				verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
+			} else {
+				verifier.ProcessVerifyTask(workerNum, task)
+			}
 		}
 	}
 }
@@ -468,7 +532,7 @@ func (verifier *Verifier) srcClientCollection(task *VerificationTask) *mongo.Col
 
 func (verifier *Verifier) dstClientCollection(task *VerificationTask) *mongo.Collection {
 	if task != nil {
-		dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
+		dbName, collName := SplitNamespace(task.QueryFilter.To)
 		return verifier.dstClient.Database(dbName).Collection(collName)
 	}
 	return nil
@@ -488,6 +552,11 @@ func (verifier *Verifier) Verify() error {
 		verifier.logger.Error().Msgf("Failed getting verification status: %v", err)
 	} else {
 		verifier.logger.Info().Msgf("Initial verification status: %+v", verificationStatus)
+	}
+
+	err = verifier.CreateInitialTasks()
+	if err != nil {
+		return err
 	}
 
 	verifier.logger.Info().Msgf("Starting %d verification workers", verifier.numWorkers)
@@ -522,6 +591,43 @@ func (verifier *Verifier) Verify() error {
 			wg.Wait()
 			break
 		}
+	}
+	return nil
+}
+
+func (verifier *Verifier) CreateInitialTasks() error {
+	// If we don't know the src namespaces, we're definitely not the primary task.
+	if len(verifier.srcNamespaces) == 0 {
+		return nil
+	}
+	if len(verifier.dstNamespaces) == 0 {
+		verifier.dstNamespaces = verifier.srcNamespaces
+	}
+	if len(verifier.srcNamespaces) != len(verifier.dstNamespaces) {
+		err := errors.Errorf("Different number of source and destination namespaces")
+		verifier.logger.Error().Msgf("%s", err)
+		return err
+	}
+	isPrimary, err := verifier.CheckIsPrimary()
+	if err != nil {
+		return err
+	}
+	if !isPrimary {
+		return nil
+	}
+	for i, src := range verifier.srcNamespaces {
+		dst := verifier.dstNamespaces[i]
+		verifier.logger.Info().Msgf("Adding task for %s -> %s", src, dst)
+		_, err := InsertCollectionVerificationTask(src, dst, verifier.verificationTaskCollection())
+		if err != nil {
+			verifier.logger.Error().Msgf("Failed to insert collection verification task: %s", err)
+			return err
+		}
+	}
+
+	err = verifier.UpdatePrimaryTaskComplete()
+	if err != nil {
+		return err
 	}
 	return nil
 }

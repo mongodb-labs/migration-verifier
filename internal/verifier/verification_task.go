@@ -9,8 +9,10 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/partitions"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -28,8 +30,10 @@ const (
 	verificationTasksRetry     = "retry"
 	verificationTaskMaxRetries = 5
 
-	verificationTaskVerify  = "verify"
-	verificationTaskPrimary = "primary"
+	verificationTaskVerify = "verify"
+	// A verifyCollection task verifies collection metadata, and inserts tasks to verify data ranges.
+	verificationTaskVerifyCollection = "verifyCollection"
+	verificationTaskPrimary          = "primary"
 )
 
 // VerificationTask stores source cluster info
@@ -66,11 +70,42 @@ func InsertRetryVerificationTask(failedId interface{}, collection *mongo.Collect
 	return &verificationTask, err
 }
 
+func InsertPartitionVerificationTask(partition *partitions.Partition, dstNamespace string, collection *mongo.Collection) (*VerificationTask, error) {
+	srcNamespace := strings.Join([]string{partition.Ns.DB, partition.Ns.Coll}, ".")
+	verificationTask := VerificationTask{
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskAdded,
+		Type:       verificationTaskVerify,
+		QueryFilter: QueryFilter{
+			Partition: *partition,
+			Namespace: srcNamespace,
+			To:        dstNamespace,
+		},
+		Attempts: 0,
+	}
+	_, err := collection.InsertOne(context.Background(), verificationTask)
+	return &verificationTask, err
+}
+
+func InsertCollectionVerificationTask(srcNamespace string, dstNamespace string, collection *mongo.Collection) (*VerificationTask, error) {
+	verificationTask := VerificationTask{
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskAdded,
+		Type:       verificationTaskVerifyCollection,
+		QueryFilter: QueryFilter{
+			Namespace: srcNamespace,
+			To:        dstNamespace,
+		},
+	}
+	_, err := collection.InsertOne(context.Background(), verificationTask)
+	return &verificationTask, err
+}
+
 func (verifier *Verifier) FindNextVerifyTaskAndUpdate() (*VerificationTask, error) {
 	var verificationTask = VerificationTask{}
 	filter := bson.M{
 		"$and": bson.A{
-			bson.M{"type": verificationTaskVerify},
+			bson.M{"type": bson.M{"$in": bson.A{verificationTaskVerify, verificationTaskVerifyCollection}}},
 			bson.M{"$or": bson.A{
 				bson.M{"status": verificationTaskAdded},
 				bson.M{"$and": bson.A{

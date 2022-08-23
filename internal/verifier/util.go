@@ -3,7 +3,7 @@ package verifier
 import (
 	"strings"
 
-	"go.mongodb.org/mongo-driver/bson"
+	"github.com/10gen/migration-verifier/internal/partitions"
 )
 
 // Specify states
@@ -52,13 +52,9 @@ func (e TaskError) Error() string {
 	return e.Message
 }
 
-// QueryFilter stores namespace and query
+// QueryFilter stores namespace and partition info
 type QueryFilter struct {
-	Filter       bson.D   `json:"filter,omitempty" bson:"filter,omitempty"`
-	Limit        int64    `json:"limit,omitempty" bson:"limit,omitempty"`
-	Masks        []string `json:"masks,omitempty" bson:"masks,omitempty"`
-	Method       string   `json:"method,omitempty" bson:"method,omitempty"`
-	Namespace    string   `json:"namespace" bson:"namespace"`
-	To           string   `json:"to,omitempty" bson:"to,omitempty"`
-	ChannelCount int      `json:"numChan,omitempty" bson:"numChan,omitempty"`
+	Partition partitions.Partition `bson:"partition"`
+	Namespace string               `json:"namespace" bson:"namespace"`
+	To        string               `json:"to,omitempty" bson:"to,omitempty"`
 }
