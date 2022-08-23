@@ -104,7 +104,7 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 	opts := verifier.getClientOpts(uri)
 	var err error
-	verifier.srcClient, err = mongo.Connect(ctx, opts)
+	verifier.dstClient, err = mongo.Connect(ctx, opts)
 	return err
 }
 

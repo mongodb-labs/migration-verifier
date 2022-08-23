@@ -36,7 +36,7 @@ const (
 type VerificationTask struct {
 	PrimaryKey  interface{}          `bson:"_id"`
 	Ids         []interface{}        `bson:"_ids"`
-	Id          int                  `bson:"id"`
+	ID          int                  `bson:"id"`
 	FailedIDs   []interface{}        `bson:"failed_ids"`
 	Attempts    int                  `bson:"attempts"`
 	RetryAfter  time.Time            `bson:"retry_after"`
