@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/10gen/mongosync/internal/mongosync/util"
+	"github.com/10gen/migration-verifier/internal/util"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )

@@ -6,7 +6,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/10gen/mongosync/internal/logger"
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -333,8 +333,9 @@ func GetErrorCode(err error) int {
 // field in a CollectionUUIDMismatch server error. It must only be called on this error.
 //
 // We expect to get this error back in two cases:
-//   (1) If a collection is renamed.
-//   (2) If a collection is dropped.
+//
+//	(1) If a collection is renamed.
+//	(2) If a collection is dropped.
 //
 // In case (1) the collection still exists, so we can look up the `actualCollection` field
 // in the CollectionUUIDMismatch error to get the collection's current name.

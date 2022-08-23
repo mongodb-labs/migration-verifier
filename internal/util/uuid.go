@@ -3,7 +3,6 @@ package util
 import (
 	"fmt"
 
-	"github.com/10gen/mongosync/internal/mongosync/constants"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson/bsoncodec"
 	"go.mongodb.org/mongo-driver/bson/bsontype"
@@ -83,15 +82,4 @@ func (u UUID) String() string {
 // ParseBinary returns a UUID from its binary format.
 func ParseBinary(binUUID *primitive.Binary) UUID {
 	return UUID(uuid.Must(uuid.FromBytes(binUUID.Data)))
-}
-
-// GetCollTempName returns a temporary collection name used for creating or renaming collections on destination cluster.
-func GetCollTempName(collUUID UUID) string {
-	return fmt.Sprintf("%s.%s", constants.CollTempNamePrefix, collUUID)
-}
-
-// GetCollationTranslationCollName returns the full name of the collation collection given the collection
-// name of the change event.
-func GetCollationTranslationCollName(dbName string, collUUID *UUID) string {
-	return fmt.Sprintf("%s.%s.%s", constants.CollationTranslationCollPrefix, dbName, collUUID)
 }

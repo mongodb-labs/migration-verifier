@@ -1,9 +1,21 @@
 package util
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
 )
+
+type UnitTestSuite struct {
+	suite.Suite
+}
+
+func TestUnitTestSuite(t *testing.T) {
+	ts := new(UnitTestSuite)
+	suite.Run(t, ts)
+}
 
 func (suite *UnitTestSuite) TestUUID_MarshalAndUnmarshal() {
 	key1, val1, key2, val2 := NewUUID(), NewUUID(), NewUUID(), NewUUID()

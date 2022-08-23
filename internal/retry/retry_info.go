@@ -6,13 +6,11 @@ import (
 	"github.com/rs/zerolog"
 )
 
-//
 // Info stores information relevant to the retrying done. It should
 // primarily be used within the closure passed to the retry helpers.
 //
 // The attempt number is 0-indexed (0 means this is the first attempt).
 // The duration tracks the duration of retrying for transient errors only.
-//
 type Info struct {
 	attemptNumber int
 

@@ -2,12 +2,13 @@ package logger
 
 import (
 	"context"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
-	"gopkg.in/natefinch/lumberjack.v2"
 	"io"
 	"os"
 	"path"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 const (
@@ -77,7 +78,7 @@ func NewDebugLogger() *Logger {
 func (l *Logger) Rotate() {
 	switch w := l.writer.(type) {
 	case *lumberjack.Logger:
-		w.Rotate()
+		_ = w.Rotate()
 	}
 }
 

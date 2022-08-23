@@ -5,8 +5,8 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/10gen/mongosync/internal/logger"
-	"github.com/10gen/mongosync/internal/mongosync/util"
+	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
 )
 
@@ -86,10 +86,10 @@ func (r Retryer) RunForTransientErrorsOnly(
 // collection name, even if we're also returning an error. The reason is that
 // there is some code that does something like this:
 //
-//     collName, err := retryer.RunForUUIDAndTransientErrors(ctx, logger, collName, f)
-//     if someCondition && isSomeSortOfError(err) {
-//         collName, err := retryer.RunForUUIDAndTransientErrors(ctx, logger, collName, f)
-//     }
+//	collName, err := retryer.RunForUUIDAndTransientErrors(ctx, logger, collName, f)
+//	if someCondition && isSomeSortOfError(err) {
+//	    collName, err := retryer.RunForUUIDAndTransientErrors(ctx, logger, collName, f)
+//	}
 //
 // If we return an empty string on an error then we will break that second
 // call. Arguably, this sort of pattern should maybe be moved into the
