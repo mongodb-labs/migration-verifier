@@ -1,14 +1,11 @@
 package partitions
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/logger"
-	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -34,9 +31,6 @@ type Partition struct {
 	Key PartitionKey `bson:"_id"`
 	Ns  *Namespace   `bson:"namespace"`
 
-	// The current copying status of the partition.
-	Phase phase.PartitionPhase `bson:"partitionPhase"`
-
 	// The upper index key bound for the partition.
 	Upper interface{} `bson:"upperBound"`
 
@@ -48,49 +42,8 @@ type Partition struct {
 // String returns a string representation of the partition.
 func (p *Partition) String() string {
 	return fmt.Sprintf(
-		"{db: %s, coll: %s, collUUID: %s, mongosyncID: %s, lower: %s, upper: %s, phase: %s}",
-		p.Ns.DB, p.Ns.Coll, p.Key.SourceUUID, p.Key.MongosyncID, p.GetLowerBoundString(), p.GetUpperBoundString(), p.Phase)
-}
-
-// Persist writes the partition as a document to the destination cluster.
-func (p *Partition) Persist(
-	ctx context.Context,
-	// TODO (REP-1281) - Having this method take a logger and retryer instead
-	// of having them as part of the Partition struct is kind of gross. But we
-	// construct these partition structs directly in _many_ places, so adding
-	// these fields would be painful. I think the right fix is to add a
-	// constructor for partitions that requires the logger and retryer.
-	logger *logger.Logger,
-	retryer retry.Retryer,
-	dstClient util.DestinationClient,
-) error {
-	dstColl := dstClient.Database(constants.MongosyncDB).Collection(constants.PartitionsColl)
-	bytes, err := bson.Marshal(p)
-	if err != nil {
-		return errors.Wrapf(err, "error marshalling partition")
-	}
-
-	upsert := true
-	err = retryer.RunForTransientErrorsOnly(
-		ctx,
-		logger,
-		func(ri *retry.Info) error {
-			ri.Log(
-				logger.Logger,
-				"replaceOne",
-				dstClient.Type(),
-				constants.MongosyncDB,
-				dstColl.Name(),
-				fmt.Sprintf("persisting partition %s", p),
-			)
-			_, driverErr := dstColl.ReplaceOne(ctx, bson.D{{"_id", p.Key}}, bytes, &options.ReplaceOptions{Upsert: &upsert})
-			return driverErr
-		})
-	if err != nil {
-		return errors.Wrapf(err, "error persisting partition")
-	}
-
-	return nil
+		"{db: %s, coll: %s, collUUID: %s, mongosyncID: %s, lower: %s, upper: %s}",
+		p.Ns.DB, p.Ns.Coll, p.Key.SourceUUID, p.Key.MongosyncID, p.GetLowerBoundString(), p.GetUpperBoundString())
 }
 
 // GetLowerBoundString returns the string representation of this partition's lower bound.

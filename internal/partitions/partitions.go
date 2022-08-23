@@ -8,9 +8,9 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -66,6 +66,13 @@ const (
 	defaultPartitionSizeInBytes = 400 * 1024 * 1024 // = 400 MB
 )
 
+// Replicator contains the id of a mongosync replicator.
+// It is used here to avoid changing the interface of partitioning (from the mongosync version)
+// overmuch.
+type Replicator struct {
+	ID string `bson:"id"`
+}
+
 // Partitions is a slice of partitions.
 type Partitions struct {
 	logger     *logger.Logger
@@ -87,84 +94,6 @@ func (p *Partitions) GetSlice() []*Partition {
 	return p.partitions
 }
 
-// Drop will call a drop collection on the partitions namespace.
-func Drop(ctx context.Context, logger *logger.Logger, retryer retry.Retryer, dstClient util.DestinationClient) error {
-	col := dstClient.Database(constants.MongosyncDB).Collection(constants.PartitionsColl)
-	err := retryer.RunForTransientErrorsOnly(
-		ctx,
-		logger,
-		func(ri *retry.Info) error {
-			ri.Log(logger.Logger, "drop", "destination", constants.MongosyncDB, constants.PartitionsColl, "dropping partitions namespace")
-			return col.Drop(ctx)
-		})
-
-	if err != nil {
-		return errors.Wrapf(err, "error dropping namespace %v.%v", constants.MongosyncDB, constants.PartitionsColl)
-	}
-	return nil
-}
-
-// GetAssignedPartitions issues a find to get all partitions assigned to this mongosync and loads it into memory.
-func GetAssignedPartitions(ctx context.Context, mongosyncID string, logger *logger.Logger, retryer retry.Retryer, dstClient util.DestinationClient) (*Partitions, error) {
-	col := dstClient.Database(constants.MongosyncDB).Collection(constants.PartitionsColl)
-	var partitions *Partitions
-	err := retryer.RunForTransientErrorsOnly(ctx, logger, func(ri *retry.Info) error {
-		ri.Log(logger.Logger, "find", "destination", constants.MongosyncDB, constants.PartitionsColl, "Getting partition info from database.")
-		partitions = NewPartitions(logger)
-		// Find all partitions assigned to mongosyncId.
-		cursor, driverErr := col.Find(ctx, bson.D{primitive.E{"_id.id", mongosyncID}})
-		if driverErr != nil {
-			return errors.Wrapf(driverErr, "failed to call find on destination to get partition info")
-		}
-
-		defer cursor.Close(ctx)
-		for cursor.Next(ctx) {
-			p := Partition{}
-			decodeErr := cursor.Decode(&p)
-			if decodeErr != nil {
-				return errors.Wrapf(decodeErr, "failed to decode partition")
-			}
-			partitions.AppendPartitions([]*Partition{&p})
-
-			ri.IterationSuccess()
-		}
-
-		return cursor.Err()
-	})
-
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get partition info from destination")
-	}
-	return partitions, err
-}
-
-// Persist persists all entries in the partitions map to the destination cluster.
-// This must be called within a transaction in order to make sure we persist all or none of the entries.
-// We explicitly do not use RunRetryableFunc since this is called inside a transaction.
-// See: https://github.com/mongodb/specifications/blob/master/source/transactions/transactions.rst#interaction-with-retryable-writes
-func (p *Partitions) Persist(ctx context.Context, client util.DestinationClient) error {
-	col := client.Database(constants.MongosyncDB).Collection(constants.PartitionsColl)
-
-	for _, p := range p.partitions {
-		bytes, err := bson.Marshal(p)
-		if err != nil {
-			return errors.Wrapf(err, "failed to marshal partition")
-		}
-		_, err = col.InsertOne(ctx, bytes)
-		if err != nil {
-			return errors.Wrapf(err, "failed to perform insert of partition with sourceUUID '%s'", p.Key.SourceUUID.String())
-		}
-	}
-
-	return nil
-}
-
-// GetGlobalLockWriteMask gets the write mask used by global lock to syncronize the access to Persist().
-func (p *Partitions) GetGlobalLockWriteMask() int {
-	// Partitions state is not protected by the global lock.
-	return 0
-}
-
 type minOrMaxBound string
 
 const (
@@ -178,40 +107,40 @@ const (
 // For example, if we split a collection of documents with _id values from 1 to 100 into 4 partitions,
 // then the partitions may look something like [1, 17], [17, 39], [39, 78], [78, 100]. For smaller
 // collections resulting in only one partition, the partition will be [1, 100].
-func PartitionCollection(ctx context.Context, uuidEntry *globalstate.UUIDEntry, retryer retry.Retryer, srcClient util.SourceClient, replicatorList []globalstate.Replicator, subLogger *logger.Logger) ([]*Partition, error) {
+func PartitionCollection(ctx context.Context, uuidEntry *uuidutil.NamespaceAndUUID, retryer retry.Retryer, srcClient *mongo.Client, replicatorList []Replicator, subLogger *logger.Logger) ([]*Partition, error) {
 	return PartitionCollectionWithParameters(ctx, uuidEntry, retryer, srcClient, replicatorList, defaultSampleRate, defaultSampleMinNumDocs, defaultPartitionSizeInBytes, subLogger)
 }
 
 // PartitionCollectionWithParameters is the implementation for PartitionCollection. It is only directly used in integration tests.
-func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *globalstate.UUIDEntry, retryer retry.Retryer, srcClient util.SourceClient, replicatorList []globalstate.Replicator, sampleRate float64, sampleMinNumDocs int, partitionSizeInBytes int64, subLogger *logger.Logger) ([]*Partition, error) {
+func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.NamespaceAndUUID, retryer retry.Retryer, srcClient *mongo.Client, replicatorList []Replicator, sampleRate float64, sampleMinNumDocs int, partitionSizeInBytes int64, subLogger *logger.Logger) ([]*Partition, error) {
 	// Get the source collection.
 	srcDB := srcClient.Database(uuidEntry.DBName)
-	srcColl := srcDB.Collection(uuidEntry.SrcCollName)
+	srcColl := srcDB.Collection(uuidEntry.CollName)
 
 	// Get the collection's size in bytes and its document count. It is okay if these return zero since there might still be
 	// items in the collection. Rely on getOuterIDBound to do a majority read to determine if we continue processing the collection.
-	collSizeInBytes, collDocCount, err := GetSizeAndDocumentCount(ctx, subLogger, retryer, srcColl, uuidEntry.SrcUUID)
+	collSizeInBytes, collDocCount, isCapped, err := GetSizeAndDocumentCount(ctx, subLogger, retryer, srcColl, uuidEntry.UUID)
 	if err != nil {
 		return nil, err
 	}
 
 	// The lower bound for the collection. There is no partitioning to do if the bound is nil.
-	minIDBound, err := getOuterIDBound(ctx, subLogger, retryer, minBound, srcDB, uuidEntry.SrcCollName, uuidEntry.SrcUUID)
+	minIDBound, err := getOuterIDBound(ctx, subLogger, retryer, minBound, srcDB, uuidEntry.CollName, uuidEntry.UUID)
 	if err != nil {
 		return nil, err
 	}
 	if minIDBound == nil {
-		subLogger.Info().Msgf("No minimum _id found for collection %s.%s; will not perform collection copy for this collection.", uuidEntry.DBName, uuidEntry.SrcCollName)
+		subLogger.Info().Msgf("No minimum _id found for collection %s.%s; will not perform collection copy for this collection.", uuidEntry.DBName, uuidEntry.CollName)
 		return nil, nil
 	}
 
 	// The upper bound for the collection. There is no partitioning to do if the bound is nil.
-	maxIDBound, err := getOuterIDBound(ctx, subLogger, retryer, maxBound, srcDB, uuidEntry.SrcCollName, uuidEntry.SrcUUID)
+	maxIDBound, err := getOuterIDBound(ctx, subLogger, retryer, maxBound, srcDB, uuidEntry.CollName, uuidEntry.UUID)
 	if err != nil {
 		return nil, err
 	}
 	if maxIDBound == nil {
-		subLogger.Info().Msgf("No maximum _id found for collection %s.%s; will not perform collection copy for this collection.", uuidEntry.DBName, uuidEntry.SrcCollName)
+		subLogger.Info().Msgf("No maximum _id found for collection %s.%s; will not perform collection copy for this collection.", uuidEntry.DBName, uuidEntry.CollName)
 		return nil, nil
 	}
 
@@ -219,8 +148,6 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *globalsta
 	// must only create one partition for the entire collection. Otherwise, calculate the
 	// appropriate number of partitions.
 	numPartitions := 1
-	isCapped := uuidEntry.CappedSpec != nil
-
 	if !isCapped {
 		numPartitions = getNumPartitions(collSizeInBytes, partitionSizeInBytes)
 	}
@@ -232,7 +159,7 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *globalsta
 	// The intermediate bounds for the collection (i.e. all bounds apart from the lower and upper bounds).
 	// It's okay for these bounds to be nil, since we already have the lower and upper bounds from which
 	// to make at least one partition.
-	midIDBounds, collDropped, err := getMidIDBounds(ctx, subLogger, retryer, srcDB, uuidEntry.SrcCollName, uuidEntry.SrcUUID, collDocCount, numPartitions, sampleMinNumDocs, sampleRate)
+	midIDBounds, collDropped, err := getMidIDBounds(ctx, subLogger, retryer, srcDB, uuidEntry.CollName, uuidEntry.UUID, collDocCount, numPartitions, sampleMinNumDocs, sampleRate)
 	if err != nil {
 		return nil, err
 	}
@@ -258,21 +185,20 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *globalsta
 	// Choose a random index to start to avoid over-assigning partitions to a specific replicator.
 	// rand.Int() generates non-negative integers only.
 	replIndex := rand.Int() % len(replicatorList)
-	subLogger.Info().Msgf("Creating %d partitions for collection %s.%s, isCappedColl: %t", len(allIDBounds)-1, uuidEntry.DBName, uuidEntry.SrcCollName, isCapped)
+	subLogger.Info().Msgf("Creating %d partitions for collection %s.%s, isCappedColl: %t", len(allIDBounds)-1, uuidEntry.DBName, uuidEntry.CollName, isCapped)
 
 	// Create the partitions with the index key bounds.
 	partitions := make([]*Partition, 0, len(allIDBounds)-1)
 
 	for i := 0; i < len(allIDBounds)-1; i++ {
 		partitionKey := PartitionKey{
-			SourceUUID:  uuidEntry.SrcUUID,
+			SourceUUID:  uuidEntry.UUID,
 			MongosyncID: replicatorList[replIndex].ID,
 			Lower:       allIDBounds[i],
 		}
 		partition := &Partition{
 			Key:      partitionKey,
-			Phase:    phase.PartitionNotStarted,
-			Ns:       &Namespace{uuidEntry.DBName, uuidEntry.SrcCollName},
+			Ns:       &Namespace{uuidEntry.DBName, uuidEntry.CollName},
 			Upper:    allIDBounds[i+1],
 			IsCapped: isCapped,
 		}
@@ -284,16 +210,18 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *globalsta
 	return partitions, nil
 }
 
-// GetSizeAndDocumentCount uses collStats to return a collection's byte size and document count, in that order.
+// GetSizeAndDocumentCount uses collStats to return a collection's byte size, document count, and
+// capped status, in that order.
 //
 // Exported for usage in integration tests.
-func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer retry.Retryer, srcColl *mongo.Collection, collUUID util.UUID) (int64, int64, error) {
+func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer retry.Retryer, srcColl *mongo.Collection, collUUID util.UUID) (int64, int64, bool, error) {
 	srcDB := srcColl.Database()
 	collName := srcColl.Name()
 
 	value := struct {
-		Size  int64 `bson:"size"`
-		Count int64 `bson:"count"`
+		Size   int64 `bson:"size"`
+		Count  int64 `bson:"count"`
+		Capped bool  `bson:"capped"`
 	}{}
 
 	currCollName, err := retryer.RunForUUIDAndTransientErrors(ctx, logger, collName, func(ri *retry.Info, collectionName string) error {
@@ -308,7 +236,8 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer
 				}}},
 				bson.D{{"$addFields", bson.D{{"count", "$storageStats.count"}}}},
 				bson.D{{"$addFields", bson.D{{"size", "$storageStats.size"}}}},
-				bson.D{{"$project", bson.D{{"ns", 1}, {"count", 1}, {"size", 1}}}},
+				bson.D{{"$addFields", bson.D{{"capped", "$storageStats.capped"}}}},
+				bson.D{{"$project", bson.D{{"ns", 1}, {"count", 1}, {"size", 1}, {"capped", 1}}}},
 			}},
 			{"cursor", bson.D{}},
 		}
@@ -332,21 +261,21 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer
 	// and the aggregation did not fail so we do not want to return an error. A
 	// NamespaceNotFoundError can happen if the database does not exist.
 	if util.IsNamespaceNotFoundError(err) {
-		return 0, 0, nil
+		return 0, 0, false, nil
 	}
 
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "failed to run aggregation for $collStats for source namespace %s.%s", srcDB.Name(), collName)
+		return 0, 0, false, errors.Wrapf(err, "failed to run aggregation for $collStats for source namespace %s.%s", srcDB.Name(), collName)
 	}
 
 	// CollectionUUIDMismatch where the collection does not exist will return a nil cursor and nil
 	// error.
 	if currCollName == "" {
 		// Return 0, 0, nil as CollectionUUIDMismatch should not cause an initial sync error.
-		return 0, 0, nil
+		return 0, 0, false, nil
 	}
 
-	return value.Size, value.Count, nil
+	return value.Size, value.Count, value.Capped, nil
 }
 
 // getNumPartitions returns the total number of partitions needed for the collection.
@@ -367,7 +296,7 @@ func getNumPartitions(collSizeInBytes, partitionSizeInBytes int64) int {
 }
 
 // getOuterIDBound returns either the smallest or largest _id value in a collection. The minOrMaxBound parameter can be set to "min" or "max" to get either, respectively.
-func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer retry.Retryer, minOrMaxBound minOrMaxBound, srcDB util.SourceDatabase, collName string, collUUID util.UUID) (interface{}, error) {
+func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer retry.Retryer, minOrMaxBound minOrMaxBound, srcDB *mongo.Database, collName string, collUUID util.UUID) (interface{}, error) {
 	// Choose a sort direction based on the minOrMaxBound.
 	var sortDirection int
 	switch minOrMaxBound {
@@ -429,7 +358,7 @@ func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer retr
 // The number of bounds returned is: numPartitions - 1.
 //
 // A nil slice is returned if the collDocCount doesn't meet the sampleMinNumDocs, or if the numPartitions is less than 2.
-func getMidIDBounds(ctx context.Context, logger *logger.Logger, retryer retry.Retryer, srcDB util.SourceDatabase, collName string, collUUID util.UUID, collDocCount int64, numPartitions, sampleMinNumDocs int, sampleRate float64) ([]interface{}, bool, error) {
+func getMidIDBounds(ctx context.Context, logger *logger.Logger, retryer retry.Retryer, srcDB *mongo.Database, collName string, collUUID util.UUID, collDocCount int64, numPartitions, sampleMinNumDocs int, sampleRate float64) ([]interface{}, bool, error) {
 	// We entirely avoid sampling for mid bounds if we don't meet the criteria for the number of documents or partitions.
 	if collDocCount < int64(sampleMinNumDocs) || numPartitions < 2 {
 		return nil, false, nil
