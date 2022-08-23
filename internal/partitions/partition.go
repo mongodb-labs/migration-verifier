@@ -124,23 +124,33 @@ func (p *Partition) FindCmd(
 	if len(batchSize) > 0 {
 		findCmd = append(findCmd, bson.E{"batchSize", batchSize[0]})
 	}
+	findOptions := p.GetFindOptions()
+	findCmd = append(findCmd, findOptions...)
+
+	return findCmd
+}
+
+// GetFindOptions returns only the options necessary to do a find on any given collection with this
+// partition. It is intended to allow the same partitioning to be used on different collections
+// (e.g. use the partitions on the source to read the destination for verification)
+func (p *Partition) GetFindOptions() bson.D {
+	findOptions := bson.D{}
 	if p.IsCapped {
 		// For capped collections, sort the documents by their natural order. We deliberately
 		// exclude the ID filter to ensure that documents are inserted in the correct order.
 		sort := bson.E{"sort", bson.D{{"$natural", 1}}}
-		findCmd = append(findCmd, sort)
+		findOptions = append(findOptions, sort)
 	} else {
 		// For non-capped collections, the cursor should use the ID filter and the _id index.
 		// Get the bounded query filter from the partition to be used in the Find command.
 		filter := p.filter()
 		boundedQueryFilter := bson.E{"filter", filter}
-		findCmd = append(findCmd, boundedQueryFilter)
+		findOptions = append(findOptions, boundedQueryFilter)
 
 		hint := bson.E{"hint", bson.D{{"_id", 1}}}
-		findCmd = append(findCmd, hint)
+		findOptions = append(findOptions, hint)
 	}
-
-	return findCmd
+	return findOptions
 }
 
 // filter returns a range filter on _id to be used in a Find query for the
