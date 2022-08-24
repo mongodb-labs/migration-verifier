@@ -54,7 +54,7 @@ func (e TaskError) Error() string {
 
 // QueryFilter stores namespace and partition info
 type QueryFilter struct {
-	Partition partitions.Partition `bson:"partition"`
-	Namespace string               `json:"namespace" bson:"namespace"`
-	To        string               `json:"to,omitempty" bson:"to,omitempty"`
+	Partition *partitions.Partition `bson:"partition"`
+	Namespace string                `json:"namespace" bson:"namespace"`
+	To        string                `json:"to,omitempty" bson:"to,omitempty"`
 }

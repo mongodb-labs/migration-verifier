@@ -25,10 +25,9 @@ const (
 	verificationTaskFailed      = "failed"
 	verificationTaskProcessing  = "processing"
 	verificationTasksCollection = "verification_tasks"
-	// TODO: This may actually be necessary in the final product
-	//verificationRangeCollection = "verification_ranges"
-	verificationTasksRetry     = "retry"
-	verificationTaskMaxRetries = 5
+	verificationRangeCollection = "verification_ranges"
+	verificationTasksRetry      = "retry"
+	verificationTaskMaxRetries  = 5
 
 	verificationTaskVerify = "verify"
 	// A verifyCollection task verifies collection metadata, and inserts tasks to verify data ranges.
@@ -77,7 +76,7 @@ func InsertPartitionVerificationTask(partition *partitions.Partition, dstNamespa
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerify,
 		QueryFilter: QueryFilter{
-			Partition: *partition,
+			Partition: partition,
 			Namespace: srcNamespace,
 			To:        dstNamespace,
 		},

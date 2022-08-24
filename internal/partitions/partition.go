@@ -134,6 +134,9 @@ func (p *Partition) FindCmd(
 // partition. It is intended to allow the same partitioning to be used on different collections
 // (e.g. use the partitions on the source to read the destination for verification)
 func (p *Partition) GetFindOptions() bson.D {
+	if p == nil {
+		return bson.D{}
+	}
 	findOptions := bson.D{}
 	if p.IsCapped {
 		// For capped collections, sort the documents by their natural order. We deliberately

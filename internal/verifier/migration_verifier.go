@@ -1,10 +1,12 @@
 package verifier
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"reflect"
 	"strconv"
 	"sync"
@@ -125,8 +127,28 @@ func (verifier *Verifier) SetWorkerSleepDelayMillis(arg time.Duration) {
 	verifier.workerSleepDelayMillis = arg
 }
 
-func (verifier *Verifier) SetLogger(arg *zerolog.Logger) {
-	verifier.logger = arg
+func (verifier *Verifier) SetLogger(logPath string) (*os.File, *bufio.Writer, error) {
+	var file *os.File
+	var writer *bufio.Writer = nil
+	if logPath == "stderr" {
+		l := zerolog.New(os.Stderr).With().Timestamp().Logger()
+		verifier.logger = &l
+		return file, writer, nil
+	}
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		mkdirErr := os.MkdirAll(path.Dir(logPath), 0770)
+		if mkdirErr != nil {
+			return nil, nil, mkdirErr
+		}
+	}
+	file, err := os.Create(logPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	writer = bufio.NewWriter(file)
+	l := zerolog.New(writer).With().Timestamp().Logger()
+	verifier.logger = &l
+	return file, writer, nil
 }
 
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {
@@ -221,6 +243,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]Ve
 	} else {
 		dstClientMap, err = verifier.getDocuments(verifier.dstClientCollection(task), task)
 	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -513,10 +536,9 @@ func (verifier *Verifier) verificationTaskCollection() *mongo.Collection {
 	return verifier.metaClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 }
 
-// TODO: this may be necessary, currently unused
-//func (verifier *Verifier) verificationRangeCollection() *mongo.Collection {
-//	return verifier.metaClient.Database(verifier.metaDBName).Collection(verificationRangeCollection)
-//}
+func (verifier *Verifier) verificationRangeCollection() *mongo.Collection {
+	return verifier.metaClient.Database(verifier.metaDBName).Collection(verificationRangeCollection)
+}
 
 func (verifier *Verifier) refetchCollection() *mongo.Collection {
 	return verifier.metaClient.Database(verifier.metaDBName).Collection(refetch)

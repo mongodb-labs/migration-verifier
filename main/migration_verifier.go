@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"os"
-	"path"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/verifier"
@@ -123,25 +122,9 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 	v.SetComparisonRetryDelayMillis(time.Duration(cCtx.Int64(comparisonRetryDelay)))
 	v.SetWorkerSleepDelayMillis(time.Duration(cCtx.Int64(workerSleepDelay)))
 	logPath := cCtx.String(logPath)
-	var file *os.File
-	var writer *bufio.Writer = nil
-	if logPath == "stderr" {
-		l := zerolog.New(os.Stderr).With().Timestamp().Logger()
-		v.SetLogger(&l)
-	} else {
-		if _, err := os.Stat(logPath); os.IsNotExist(err) {
-			mkdirErr := os.MkdirAll(path.Dir(logPath), 0770)
-			if mkdirErr != nil {
-				return nil, nil, nil, mkdirErr
-			}
-		}
-		file, err = os.Create(logPath)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		writer = bufio.NewWriter(file)
-		l := zerolog.New(writer).With().Timestamp().Logger()
-		v.SetLogger(&l)
+	file, writer, err := v.SetLogger(logPath)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	v.SetSrcNamespaces(cCtx.StringSlice(srcNamespaces))
 	v.SetDstNamespaces(cCtx.StringSlice(dstNamespaces))
