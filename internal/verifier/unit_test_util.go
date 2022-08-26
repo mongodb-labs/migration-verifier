@@ -24,7 +24,7 @@ var mongoDownloadMutex sync.Mutex
 
 func stopTestMongods() {
 	// ignore the error as this will fail if mongod is not already running
-	exec.Command("killall", "mongod").Run()
+	_ = exec.Command("killall", "mongod").Run()
 }
 
 func startTestMongods(srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) error {
