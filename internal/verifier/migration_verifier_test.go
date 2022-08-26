@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -24,43 +25,17 @@ func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstanc
 	verifier.SetNumWorkers(3)
 	verifier.SetComparisonRetryDelayMillis(0)
 	verifier.SetWorkerSleepDelayMillis(0)
-	err := verifier.SetMetaURI(context.Background(), "mongodb://localhost:"+metaMongoInstance.port)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = verifier.SetSrcURI(context.Background(), "mongodb://localhost:"+srcMongoInstance.port)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = verifier.SetDstURI(context.Background(), "mongodb://localhost:"+dstMongoInstance.port)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _, err = verifier.SetLogger("stderr")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, verifier.SetMetaURI(context.Background(), "mongodb://localhost:"+metaMongoInstance.port))
+	require.Nil(t, verifier.SetSrcURI(context.Background(), "mongodb://localhost:"+srcMongoInstance.port))
+	require.Nil(t, verifier.SetDstURI(context.Background(), "mongodb://localhost:"+dstMongoInstance.port))
+	_, _, err := verifier.SetLogger("stderr")
+	require.Nil(t, err)
 	verifier.SetMetaDBName("VERIFIER_META")
-	err = verifier.verificationTaskCollection().Drop(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = verifier.verificationRangeCollection().Drop(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = verifier.refetchCollection().Drop(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = verifier.srcClientCollection(&task).Drop(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = verifier.dstClientCollection(&task).Drop(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, verifier.verificationTaskCollection().Drop(context.Background()))
+	require.Nil(t, verifier.verificationRangeCollection().Drop(context.Background()))
+	require.Nil(t, verifier.refetchCollection().Drop(context.Background()))
+	require.Nil(t, verifier.srcClientCollection(&task).Drop(context.Background()))
+	require.Nil(t, verifier.dstClientCollection(&task).Drop(context.Background()))
 	return verifier
 }
 
@@ -94,7 +69,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 						dir:     "dest" + strconv.Itoa(testCnt),
 					}
 
-					testCnt += 1
+					testCnt++
 					verifierCompareDocs(t, srcMongoInstance, dstMongoInstance, metaMongoInstance)
 				})
 			}
@@ -104,21 +79,15 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 func verifierCompareDocs(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) {
 	err := startTestMongods(srcMongoInstance, dstMongoInstance, metaMongoInstance)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 	defer stopTestMongods()
 	verifier := buildVerifier(t, srcMongoInstance, dstMongoInstance, metaMongoInstance)
 	ctx := context.Background()
 	drop := func() {
 		err := verifier.srcClient.Database("keyhole").Drop(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.Nil(t, err)
 		err = verifier.dstClient.Database("keyhole").Drop(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.Nil(t, err)
 	}
 	drop()
 	defer drop()
@@ -134,99 +103,69 @@ func verifierCompareDocs(t *testing.T, srcMongoInstance MongoInstance, dstMongoI
 
 	id := rand.Intn(1000)
 	_, err = verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 123, "name": "foobar"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 123, "name": "foobar"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	task := &VerificationTask{ID: id, QueryFilter: basicQueryFilter("keyhole.dealers")}
 	mismatchedIds, err := verifier.FetchAndCompareDocuments(task)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	assert.Equal(t, 0, len(mismatchedIds))
 	drop()
 
 	// Test different field orders
 	_, err = verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "name": "foobar", "num": 123})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 123, "name": "foobar"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	mismatchedIds, err = verifier.FetchAndCompareDocuments(task)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	assert.Equal(t, 0, len(mismatchedIds))
 
 	drop()
 	id = rand.Intn(1000)
 	_, err = verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 1234, "name": "foobar"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 123, "name": "foobar"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	mismatchedIds, err = verifier.FetchAndCompareDocuments(task)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	assert.Equal(t, 1, len(mismatchedIds))
 	var res int
-	err = mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
 	assert.Equal(t, id, res)
 
 	drop()
 	// Test document missing on target
 	id = rand.Intn(1000)
 	_, err = verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 1234, "name": "foobar"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	mismatchedIds, err = verifier.FetchAndCompareDocuments(task)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 	assert.Equal(t, 1, len(mismatchedIds))
-	err = mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
 	assert.Equal(t, id, res)
 
 	drop()
 	// Test document missing on source
 	id = rand.Intn(1000)
 	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 1234, "name": "foobar"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
 
 	mismatchedIds, err = verifier.FetchAndCompareDocuments(task)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, err)
+
 	assert.Equal(t, 1, len(mismatchedIds), 1)
-	err = mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
 	assert.Equal(t, id, res)
 }
 
