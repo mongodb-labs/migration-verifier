@@ -9,6 +9,7 @@ package verifier
 import (
 	"context"
 	"math/rand"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,7 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-func buildVerifier(t *testing.T) *Verifier {
+func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) *Verifier {
 	qfilter := QueryFilter{Namespace: "keyhole.dealers"}
 	task := VerificationTask{QueryFilter: qfilter}
 
@@ -24,15 +25,15 @@ func buildVerifier(t *testing.T) *Verifier {
 	verifier.SetNumWorkers(3)
 	verifier.SetComparisonRetryDelayMillis(0)
 	verifier.SetWorkerSleepDelayMillis(0)
-	err := verifier.SetMetaURI(context.Background(), "mongodb://localhost:"+metaPort)
+	err := verifier.SetMetaURI(context.Background(), "mongodb://localhost:"+metaMongoInstance.port)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifier.SetSrcURI(context.Background(), "mongodb://localhost:"+sourcePort)
+	err = verifier.SetSrcURI(context.Background(), "mongodb://localhost:"+srcMongoInstance.port)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifier.SetDstURI(context.Background(), "mongodb://localhost:"+destPort)
+	err = verifier.SetDstURI(context.Background(), "mongodb://localhost:"+dstMongoInstance.port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,12 +51,50 @@ func buildVerifier(t *testing.T) *Verifier {
 }
 
 func TestVerifierCompareDocs(t *testing.T) {
-	err := startTestMongods()
+	srcVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
+	destVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
+	metaVersions := []string{"6.0.1"}
+	portOffset := 27001
+	testCnt := 0
+	for _, srcVersion := range srcVersions {
+		for _, destVersion := range destVersions {
+			for _, metaVersion := range metaVersions {
+				testName := srcVersion + "->" + destVersion + ":" + metaVersion
+				t.Run(testName, func(t *testing.T) {
+					// TODO: this should be able to be run in parallel but we run killall mongod in the start of each of these test cases
+					// For now we are going to leave killall in because the tests don't take long and adding the killall makes them very safe
+					// t.Parallel()
+					metaMongoInstance := MongoInstance{
+						version: metaVersion,
+						port:    strconv.Itoa(portOffset + (testCnt * 3)),
+						dir:     "meta" + strconv.Itoa(testCnt),
+					}
+					srcMongoInstance := MongoInstance{
+						version: srcVersion,
+						port:    strconv.Itoa(portOffset + (testCnt * 3) + 1),
+						dir:     "source" + strconv.Itoa(testCnt),
+					}
+					dstMongoInstance := MongoInstance{
+						version: destVersion,
+						port:    strconv.Itoa(portOffset + (testCnt * 3) + 2),
+						dir:     "dest" + strconv.Itoa(testCnt),
+					}
+
+					testCnt += 1
+					verifierCompareDocs(t, srcMongoInstance, dstMongoInstance, metaMongoInstance)
+				})
+			}
+		}
+	}
+}
+
+func verifierCompareDocs(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) {
+	err := startTestMongods(srcMongoInstance, dstMongoInstance, metaMongoInstance)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer stopTestMongods()
-	verifier := buildVerifier(t)
+	verifier := buildVerifier(t, srcMongoInstance, dstMongoInstance, metaMongoInstance)
 	ctx := context.Background()
 	drop := func() {
 		verifier.srcClient.Database("keyhole").Drop(ctx)

@@ -24,6 +24,8 @@ functions:
           build_id: ${build_id}
           build_variant: ${build_variant}
           _platform: ${_platform}
+          _arch: ${_arch}
+          _os: ${_os}
           evg_user: ${evg_user}
           evg_key: ${evg_key}
           release_aws_access_key_id: ${release_aws_access_key_id}
@@ -89,6 +91,9 @@ buildvariants:
       - rhel70-small
     expansions:
       _platform: rhel70
+      _arch: x86_64
+      _os: linux
+      mongodb_distro: mongodb-linux-x86_64-rhel70
     tasks:
       - name: test-go
     tags: ["commit-queue"]

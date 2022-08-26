@@ -65,6 +65,9 @@ PREPARE_SHELL: |
   fi
   export EVG_USER='${evg_user}'
   export EVG_KEY='${evg_key}'
+  export PLATFORM='${_platform}'
+  export ARCH='${_arch}'
+  export OS='${_os}'
 EOT
 # See what we've done
 cat verifier_expansion.yml

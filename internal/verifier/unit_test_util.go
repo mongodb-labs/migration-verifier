@@ -3,46 +3,64 @@ package verifier
 import (
 	"archive/tar"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
+	"sync"
 )
 
-const (
-	mongoDistro               = "mongodb-linux-x86_64-rhel70-6.0.1"
-	metaPort                  = "27001"
-	sourcePort                = "27002"
-	destPort                  = "27003"
-	defaultWaitForMongodsTime = 5 * time.Second
-)
+type MongoInstance struct {
+	port    string
+	version string
+	dir     string
+}
 
-var cachePath = filepath.Join("..", "..", "evergreen")
+var cachePath = filepath.Join("mongodb_exec")
+var mongoDownloadMutex sync.Mutex
 
 func stopTestMongods() {
 	// ignore the error as this will fail if mongod is not already running
 	exec.Command("killall", "mongod").Run()
 }
 
-func startTestMongods() error {
+func startTestMongods(srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) error {
+	// stopTestMongods(srcMongoInstance, dstMongoInstance, metaMongoInstance)
 	stopTestMongods()
-	mongod, err := getMongod()
+	srcMongod, err := getMongod(srcMongoInstance)
+	if err != nil {
+		return err
+	}
+	dstMongod, err := getMongod(dstMongoInstance)
+	if err != nil {
+		return err
+	}
+	metaMongod, err := getMongod(metaMongoInstance)
 	if err != nil {
 		return err
 	}
 
-	metaDir := filepath.Join(cachePath, "meta", "db")
+	metaDir := filepath.Join(cachePath, metaMongoInstance.dir, "db")
+	if err := os.RemoveAll(metaDir); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(metaDir, 0755); err != nil {
 		return err
 	}
-	sourceDir := filepath.Join(cachePath, "source", "db")
+	sourceDir := filepath.Join(cachePath, srcMongoInstance.dir, "db")
+	if err := os.RemoveAll(sourceDir); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(sourceDir, 0755); err != nil {
 		return err
 	}
-	destDir := filepath.Join(cachePath, "dest", "db")
+	destDir := filepath.Join(cachePath, dstMongoInstance.dir, "db")
+	if err := os.RemoveAll(destDir); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return err
 	}
@@ -51,9 +69,9 @@ func startTestMongods() error {
 		return filepath.Join(filepath.Dir(target), "log")
 	}
 
-	metaCmd := exec.Command(mongod, "--port", metaPort, "--dbpath", metaDir, "--logpath", logpath(metaDir))
-	sourceCmd := exec.Command(mongod, "--port", sourcePort, "--dbpath", sourceDir, "--logpath", logpath(sourceDir))
-	destCmd := exec.Command(mongod, "--port", destPort, "--dbpath", destDir, "--logpath", logpath(destDir))
+	metaCmd := exec.Command(metaMongod, "--port", metaMongoInstance.port, "--dbpath", metaDir, "--logpath", logpath(metaDir))
+	sourceCmd := exec.Command(srcMongod, "--port", srcMongoInstance.port, "--dbpath", sourceDir, "--logpath", logpath(sourceDir))
+	destCmd := exec.Command(dstMongod, "--port", dstMongoInstance.port, "--dbpath", destDir, "--logpath", logpath(destDir))
 
 	if err := metaCmd.Start(); err != nil {
 		return err
@@ -65,21 +83,26 @@ func startTestMongods() error {
 		return err
 	}
 
-	time.Sleep(defaultWaitForMongodsTime)
-
 	return nil
 }
 
-func getMongod() (string, error) {
+func getMongod(mongoInstance MongoInstance) (string, error) {
 	localMongoDistro := os.Getenv("MONGODB_DISTRO")
 	if localMongoDistro == "" {
-		localMongoDistro = mongoDistro
+		err := errors.New(`there was no MONGODB_DISTRO specified. Please specify enviorment variable MONGODB_DISTRO.
+For example, MONGODB_DISTRO=mongodb-linux-x86_64-rhel70 is the one used for rhel and MONGODB_DISTRO=mongodb-linux-x86_64-ubuntu1804 is the one used for ubuntu.
+The link can be found at https://www.mongodb.com/try/download/community`)
+		return "", err
 	}
+	localMongoDistro = localMongoDistro + "-" + mongoInstance.version
 
 	mongoDBDir := filepath.Join(cachePath, localMongoDistro)
 	mongod := filepath.Join(mongoDBDir, "bin", "mongod")
+	mongoDownloadMutex.Lock()
+	defer mongoDownloadMutex.Unlock()
 	if _, err := os.Stat(mongoDBDir); os.IsNotExist(err) {
 		url := fmt.Sprintf("https://fastdl.mongodb.org/linux/%s.tgz", localMongoDistro)
+		println("Downloading binary from " + url)
 		r, err := curl(url)
 		if err != nil {
 			return "", err
