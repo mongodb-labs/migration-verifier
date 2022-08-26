@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"reflect"
 	"strconv"
 	"sync"
 	"time"
@@ -46,6 +45,7 @@ type Verifier struct {
 
 	comparisonRetryDelayMillis time.Duration
 	workerSleepDelayMillis     time.Duration
+	ignoreBSONFieldOrder       bool
 
 	logger *zerolog.Logger
 
@@ -163,6 +163,10 @@ func (verifier *Verifier) SetMetaDBName(arg string) {
 	verifier.metaDBName = arg
 }
 
+func (verifier *Verifier) SetIgnoreBSONFieldOrder(arg bool) {
+	verifier.ignoreBSONFieldOrder = arg
+}
+
 // DocumentStats gets various status (TODO clarify)
 func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []string) {
 
@@ -230,11 +234,18 @@ func (verifier *Verifier) getDocuments(collection *mongo.Collection, task *Verif
 }
 
 func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]VerificationResult, error) {
-	var err error
-
-	srcClientMap, err := verifier.getDocuments(verifier.srcClientCollection(task), task)
+	srcClientMap, dstClientMap, err := verifier.fetchDocuments(task)
 	if err != nil {
 		return nil, err
+	}
+	return verifier.compareDocuments(srcClientMap, dstClientMap, task.QueryFilter.Namespace)
+}
+
+// This is split out to allow unit testing of fetching separate from comparison.
+func (verifier *Verifier) fetchDocuments(task *VerificationTask) (map[interface{}]bson.Raw, map[interface{}]bson.Raw, error) {
+	srcClientMap, err := verifier.getDocuments(verifier.srcClientCollection(task), task)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	var dstClientMap map[interface{}]bson.Raw
@@ -245,9 +256,9 @@ func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]Ve
 	}
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return verifier.compareDocuments(srcClientMap, dstClientMap, task.QueryFilter.Namespace)
+	return srcClientMap, dstClientMap, nil
 }
 
 func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap map[interface{}]bson.Raw, namespace string) ([]VerificationResult, error) {
@@ -264,15 +275,10 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap map[interf
 			})
 			continue
 		}
-		match := bytes.Equal(srcClientDoc, dstClientDoc)
-		if match {
-			continue
-		}
-		//verifier.logger.Info().Msg("Byte comparison failed for id %s, falling back to field comparison", id)
 
-		manualMatch, err := verifier.manuallyCompareDocumentFields(srcClientDoc.Lookup("_id"), srcClientDoc, dstClientDoc, namespace)
-		if len(manualMatch) > 0 || err != nil {
-			mismatchedIds = append(mismatchedIds, manualMatch...)
+		misMatch, err := verifier.compareOneDocument(srcClientDoc, dstClientDoc, namespace)
+		if len(misMatch) > 0 || err != nil {
+			mismatchedIds = append(mismatchedIds, misMatch...)
 		}
 	}
 
@@ -294,55 +300,46 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap map[interf
 	return mismatchedIds, nil
 }
 
-func (verifier *Verifier) manuallyCompareDocumentFields(id interface{}, srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
-
-	var results []VerificationResult
-
-	srcClientRaw, err := srcClientDoc.Elements()
-	if err != nil {
-		verifier.logger.Error().Msgf("Error parsing srcClient document id %s - %+v", id, err)
-		return results, err
+func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
+	match := bytes.Equal(srcClientDoc, dstClientDoc)
+	if match {
+		return nil, nil
 	}
-	dstClientRaw, err := dstClientDoc.Elements()
-	if err != nil {
-		verifier.logger.Error().Msgf("Error parsing dstClient document id %s - %+v", id, err)
-		return results, err
-	}
+	//verifier.logger.Info().Msg("Byte comparison failed for id %s, falling back to field comparison", id)
 
-	srcClientMap := map[string]bson.RawValue{}
-	dstClientMap := map[string]bson.RawValue{}
-	allKeys := map[string]bool{}
-	for _, v := range srcClientRaw {
-		key := v.Key()
-		srcClientMap[key] = v.Value()
-		allKeys[key] = true
-	}
-	for _, v := range dstClientRaw {
-		key := v.Key()
-		dstClientMap[key] = v.Value()
-		allKeys[key] = true
-	}
-
-	for key := range allKeys {
-		srcClientValue, ok := srcClientMap[key]
-		if !ok {
-			//verifier.logger.Info().Msg("Document %s is missing field %s on srcClient cluster!", id, key)
-			results = append(results, VerificationResult{ID: id, Field: key, Details: Missing, Cluster: ClusterSource, NameSpace: namespace})
+	id := srcClientDoc.Lookup("_id")
+	if verifier.ignoreBSONFieldOrder {
+		mismatch, err := BsonUnorderedCompareRawDocumentWithDetails(srcClientDoc, dstClientDoc)
+		if err != nil {
+			return nil, err
 		}
-		dstClientValue, ok := dstClientMap[key]
-		if !ok {
-			//verifier.logger.Info().Msg("Document %s is missing field %s on dstClient cluster!", id, key)
-			results = append(results, VerificationResult{ID: id, Field: key, Details: Missing, Cluster: ClusterTarget, NameSpace: namespace})
+		if mismatch == nil {
+			return nil, nil
+		}
+		var results []VerificationResult
+		for _, field := range mismatch.missingFieldOnSrc {
+			results = append(results, VerificationResult{ID: id, Field: field, Details: Missing, Cluster: ClusterSource, NameSpace: namespace})
 		}
 
-		if !reflect.DeepEqual(srcClientValue, dstClientValue) {
-			details := fmt.Sprintf("Document %s failed comparison on field %s between srcClient (Type: %s) and dstClient (Type: %s)", id, key, srcClientValue.Type, dstClientValue.Type)
-			//verifier.logger.Info(details)
-			results = append(results, VerificationResult{ID: id, Field: key, Details: Mismatch + " : " + details, Cluster: ClusterTarget, NameSpace: namespace})
+		for _, field := range mismatch.missingFieldOnDst {
+			results = append(results, VerificationResult{ID: id, Field: field, Details: Missing, Cluster: ClusterTarget, NameSpace: namespace})
 		}
-	}
 
-	return results, nil
+		for _, field := range mismatch.fieldContentsDiffer {
+			srcClientValue := srcClientDoc.Lookup(field)
+			dstClientValue := dstClientDoc.Lookup(field)
+			details := fmt.Sprintf("Document %s failed comparison on field %s between srcClient (Type: %s) and dstClient (Type: %s)", id, field, srcClientValue.Type, dstClientValue.Type)
+			results = append(results, VerificationResult{ID: id, Field: field, Details: Mismatch + " : " + details, Cluster: ClusterTarget, NameSpace: namespace})
+		}
+		return results, nil
+	}
+	// If we're respecting field order we have just done a binary compare so don't know the mismatching fields.
+	return []VerificationResult{{
+		ID:        dstClientDoc.Lookup("_id"),
+		Details:   Mismatch,
+		Cluster:   ClusterTarget,
+		NameSpace: namespace,
+	}}, nil
 }
 
 func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTask) {
@@ -554,7 +551,7 @@ func (verifier *Verifier) srcClientCollection(task *VerificationTask) *mongo.Col
 
 func (verifier *Verifier) dstClientCollection(task *VerificationTask) *mongo.Collection {
 	if task != nil {
-		dbName, collName := SplitNamespace(task.QueryFilter.To)
+		dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
 		return verifier.dstClient.Database(dbName).Collection(collName)
 	}
 	return nil

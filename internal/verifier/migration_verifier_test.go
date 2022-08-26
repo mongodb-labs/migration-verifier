@@ -9,6 +9,8 @@ package verifier
 import (
 	"context"
 	"math/rand"
+	"reflect"
+	"regexp"
 	"strconv"
 	"testing"
 
@@ -39,7 +41,7 @@ func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstanc
 	return verifier
 }
 
-func TestVerifierCompareDocs(t *testing.T) {
+func TestVerifierFetchDocuments(t *testing.T) {
 	srcVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
 	destVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
 	metaVersions := []string{"6.0.1"}
@@ -70,14 +72,32 @@ func TestVerifierCompareDocs(t *testing.T) {
 					}
 
 					testCnt++
-					verifierCompareDocs(t, srcMongoInstance, dstMongoInstance, metaMongoInstance)
+					verifierFetchDocuments(t, srcMongoInstance, dstMongoInstance, metaMongoInstance)
 				})
 			}
 		}
 	}
 }
 
-func verifierCompareDocs(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) {
+func makeRawDoc(t *testing.T, doc interface{}) bson.Raw {
+	raw, err := bson.Marshal(doc)
+	require.Nil(t, err, "Unable to marshal test doc -- programming error in test")
+	return raw
+}
+
+// Using assertions with the values in a call to reflection's MapKeys doesn't work.
+
+func mapKeysAsInterface(myMap interface{}) (result []interface{}) {
+	for _, key := range reflect.ValueOf(myMap).MapKeys() {
+
+		result = append(result, key.Interface())
+	}
+	return
+}
+
+func verifierFetchDocuments(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) {
+	// This test is a stub.
+
 	err := startTestMongods(srcMongoInstance, dstMongoInstance, metaMongoInstance)
 	require.Nil(t, err)
 	defer stopTestMongods()
@@ -102,100 +122,142 @@ func verifierCompareDocs(t *testing.T, srcMongoInstance MongoInstance, dstMongoI
 	}
 
 	id := rand.Intn(1000)
-	_, err = verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 123, "name": "foobar"})
+	_, err = verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.D{{"_id", id}, {"num", 123}, {"name", "srcTest"}})
 	require.Nil(t, err)
-
-	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 123, "name": "foobar"})
+	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.D{{"_id", id}, {"num", 123}, {"name", "dstTest"}})
 	require.Nil(t, err)
-
 	task := &VerificationTask{ID: id, QueryFilter: basicQueryFilter("keyhole.dealers")}
-	mismatchedIds, err := verifier.FetchAndCompareDocuments(task)
+	srcDocumentMap, dstDocumentMap, err := verifier.fetchDocuments(task)
 	require.Nil(t, err)
-
-	assert.Equal(t, 0, len(mismatchedIds))
-	drop()
-
-	// Test different field orders
-	_, err = verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "name": "foobar", "num": 123})
+	rawType, rawIdBytes, err := bson.MarshalValue(id)
 	require.Nil(t, err)
+	rawId := bson.RawValue{Type: rawType, Value: rawIdBytes}
 
-	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 123, "name": "foobar"})
-	require.Nil(t, err)
-
-	mismatchedIds, err = verifier.FetchAndCompareDocuments(task)
-	require.Nil(t, err)
-
-	assert.Equal(t, 0, len(mismatchedIds))
-
-	drop()
-	id = rand.Intn(1000)
-	_, err = verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 1234, "name": "foobar"})
-	require.Nil(t, err)
-
-	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 123, "name": "foobar"})
-	require.Nil(t, err)
-
-	mismatchedIds, err = verifier.FetchAndCompareDocuments(task)
-	require.Nil(t, err)
-
-	assert.Equal(t, 1, len(mismatchedIds))
-	var res int
-	require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
-	assert.Equal(t, id, res)
-
-	drop()
-	// Test document missing on target
-	id = rand.Intn(1000)
-	_, err = verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 1234, "name": "foobar"})
-	require.Nil(t, err)
-
-	mismatchedIds, err = verifier.FetchAndCompareDocuments(task)
-	require.Nil(t, err)
-	assert.Equal(t, 1, len(mismatchedIds))
-	require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
-	assert.Equal(t, id, res)
-
-	drop()
-	// Test document missing on source
-	id = rand.Intn(1000)
-	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": id, "num": 1234, "name": "foobar"})
-	require.Nil(t, err)
-
-	mismatchedIds, err = verifier.FetchAndCompareDocuments(task)
-	require.Nil(t, err)
-
-	assert.Equal(t, 1, len(mismatchedIds), 1)
-	require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
-	assert.Equal(t, id, res)
+	assert.ElementsMatch(t, mapKeysAsInterface(srcDocumentMap), []interface{}{rawId.String()})
+	assert.ElementsMatch(t, mapKeysAsInterface(dstDocumentMap), []interface{}{rawId.String()})
 }
 
-//func getVerificationTasks(t *testing.T, verifier *Verifier) []VerificationTask {
-//	ctx := context.Background()
-//	cursor, err := verifier.verificationTaskCollection().Find(ctx, bson.D{})
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	tasks := []VerificationTask{}
-//	for cursor.Next(ctx) {
-//		var task VerificationTask
-//		err := cursor.Decode(&task)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		tasks = append(tasks, task)
-//	}
-//	return tasks
-//}
+func TestVerifierCompareDocs(t *testing.T) {
+	id := rand.Intn(1000)
+	verifier := NewVerifier()
+	verifier.SetIgnoreBSONFieldOrder(true)
 
-//func countDocs(t *testing.T, col *mongo.Collection) int64 {
-//	count, err := col.CountDocuments(context.Background(), bson.D{})
-//	if err != nil {
-//		t.Fatal(err)
-//	}
+	srcRaw := makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
+	dstRaw := makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
+	namespace := "testdb.testns"
+	mismatchedIds, err := verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
+	require.Nil(t, err)
+	assert.Equal(t, 0, len(mismatchedIds))
+
+	// Test different field orders
+	srcRaw = makeRawDoc(t, bson.D{{"_id", id}, {"name", "foobar"}, {"num", 123}})
+	dstRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
+
+	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
+	require.Nil(t, err)
+	assert.Equal(t, 0, len(mismatchedIds))
+
+	// Test mismatched document
+	id = rand.Intn(1000)
+	srcRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 1234}, {"name", "foobar"}})
+	dstRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
+	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
+	require.Nil(t, err)
+	var res int
+	if assert.Equal(t, 1, len(mismatchedIds)) {
+		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
+		assert.Equal(t, id, res)
+		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchedIds[0].Details)
+	}
+
+	// // Test document missing on target
+	id = rand.Intn(1000)
+	srcRaw = makeRawDoc(t, bson.M{"_id": id, "num": 1234, "name": "foobar"})
+	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{}, namespace)
+	require.Nil(t, err)
+	if assert.Equal(t, 1, len(mismatchedIds)) {
+		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
+		assert.Equal(t, id, res)
+		assert.Equal(t, mismatchedIds[0].Details, Missing)
+		assert.Equal(t, mismatchedIds[0].Cluster, ClusterTarget)
+	}
+
+	// Test document missing on source
+	id = rand.Intn(1000)
+	dstRaw = makeRawDoc(t, bson.M{"_id": id, "num": 1234, "name": "foobar"})
+	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
+	require.Nil(t, err)
+	if assert.Equal(t, 1, len(mismatchedIds)) {
+		assert.Equal(t, mismatchedIds[0].Details, Missing)
+		assert.Equal(t, mismatchedIds[0].Cluster, ClusterSource)
+	}
+}
+
+func TestVerifierCompareDocsOrdered(t *testing.T) {
+	id := rand.Intn(1000)
+	verifier := NewVerifier()
+	verifier.SetIgnoreBSONFieldOrder(false)
+
+	srcRaw := makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
+	dstRaw := makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
+	namespace := "testdb.testns"
+	mismatchedIds, err := verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
+	require.Nil(t, err)
+	assert.Equal(t, 0, len(mismatchedIds))
+
+	// Test different field orders
+	srcRaw = makeRawDoc(t, bson.D{{"_id", id}, {"name", "foobar"}, {"num", 123}})
+	dstRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
+
+	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
+	require.Nil(t, err)
+	if assert.Equal(t, 1, len(mismatchedIds)) {
+		var res int
+		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
+		assert.Equal(t, id, res)
+		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchedIds[0].Details)
+	}
+
+	// Test mismatched document
+	id = rand.Intn(1000)
+	srcRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 1234}, {"name", "foobar"}})
+	dstRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
+	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
+	require.Nil(t, err)
+	var res int
+	if assert.Equal(t, 1, len(mismatchedIds)) {
+		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
+		assert.Equal(t, id, res)
+		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchedIds[0].Details)
+	}
+}
+
+// func getVerificationTasks(t *testing.T, verifier *Verifier) []VerificationTask {
+// 	ctx := context.Background()
+// 	cursor, err := verifier.verificationTaskCollection().Find(ctx, bson.D{})
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	tasks := []VerificationTask{}
+// 	for cursor.Next(ctx) {
+// 		var task VerificationTask
+// 		err := cursor.Decode(&task)
+// 		if err != nil {
+// 			t.Fatal(err)
+// 		}
+// 		tasks = append(tasks, task)
+// 	}
+// 	return tasks
+// }
 //
-//	return count
-//}
-
+// func countDocs(t *testing.T, col *mongo.Collection) int64 {
+// 	count, err := col.CountDocuments(context.Background(), bson.D{})
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	return count
+// }
+//
 //func TestVerifierAddAllTasks(t *testing.T) {
 //	verifier := buildVerifier(t)
 //	ctx := context.Background()

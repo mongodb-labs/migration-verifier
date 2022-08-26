@@ -23,6 +23,7 @@ const (
 	srcNamespaces        = "srcNamespaces"
 	dstNamespaces        = "dstNamespaces"
 	metaDBName           = "metaDBName"
+	ignoreFieldOrder     = "ignoreFieldOrder"
 )
 
 func main() {
@@ -79,6 +80,10 @@ func main() {
 			Value: "migration_verification_metadata",
 			Usage: "`name` of the database in which to store verification metadata",
 		},
+		&cli.BoolFlag{
+			Name:  ignoreFieldOrder,
+			Usage: "Whether or not field order is ignored in documents",
+		},
 	}
 	app := &cli.App{
 		Name:  "migration-verifier",
@@ -129,5 +134,6 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 	v.SetSrcNamespaces(cCtx.StringSlice(srcNamespaces))
 	v.SetDstNamespaces(cCtx.StringSlice(dstNamespaces))
 	v.SetMetaDBName(cCtx.String(metaDBName))
+	v.SetIgnoreBSONFieldOrder(cCtx.Bool(ignoreFieldOrder))
 	return v, file, writer, nil
 }
