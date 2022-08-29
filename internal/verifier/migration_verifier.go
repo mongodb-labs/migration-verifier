@@ -394,7 +394,24 @@ func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace
 	// one "replicator".
 	replicator1 := partitions.Replicator{ID: "verifier"}
 	replicators := []partitions.Replicator{replicator1}
-	return partitions.PartitionCollection(ctx, namespaceAndUUID, retryer, verifier.srcClient, replicators, logger)
+	partitionList, err := partitions.PartitionCollection(ctx, namespaceAndUUID, retryer, verifier.srcClient, replicators, logger)
+	if err != nil {
+		return nil, err
+	}
+	// TODO: Test the empty collection (which returns no partitions)
+	if len(partitionList) == 0 {
+		partitionList = []*partitions.Partition{{
+			Key: partitions.PartitionKey{
+				SourceUUID:  namespaceAndUUID.UUID,
+				MongosyncID: "verifier"},
+			Ns: &partitions.Namespace{
+				DB:   namespaceAndUUID.DBName,
+				Coll: namespaceAndUUID.CollName}}}
+	}
+	// Use "open" partitions, otherwise out-of-range keys on the destination might be missed
+	partitionList[0].Key.Lower = primitive.MinKey{}
+	partitionList[len(partitionList)-1].Upper = primitive.MaxKey{}
+	return partitionList, nil
 }
 
 func (verifier *Verifier) ProcessCollectionVerificationTask(ctx context.Context, workerNum int, task *VerificationTask) {
@@ -408,9 +425,6 @@ func (verifier *Verifier) ProcessCollectionVerificationTask(ctx context.Context,
 	} else {
 		task.Status = verificationTaskCompleted
 		verifier.logger.Info().Msgf("[Worker %d] split collection info %d partitions", workerNum, len(partitions))
-		// Use "open" partitions, otherwise out-of-range keys on the destination might be missed
-		partitions[0].Key.Lower = primitive.MinKey{}
-		partitions[len(partitions)-1].Upper = primitive.MaxKey{}
 		for _, partition := range partitions {
 			_, err := InsertPartitionVerificationTask(partition, dstNs, verifier.verificationTaskCollection())
 			if err != nil {
