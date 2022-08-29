@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // Specify states
@@ -32,6 +33,11 @@ func SplitNamespace(namespace string) (string, string) {
 		return namespace, ""
 	}
 	return namespace[:dot], namespace[dot+1:]
+}
+
+// Returns full name of collection including database name
+func FullName(collection *mongo.Collection) string {
+	return collection.Database().Name() + "." + collection.Name()
 }
 
 // Refetch contains the data necessary to track a refretch

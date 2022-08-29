@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"reflect"
 	"strconv"
 	"sync"
 	"time"
@@ -27,6 +28,7 @@ import (
 const (
 	//TODO: add comments for each of these so the warnings will stop :)
 	Missing           = "Missing"
+	Failed            = "Failed"
 	Mismatch          = "Mismatch"
 	ClusterTarget     = "dstClient"
 	ClusterSource     = "srcClient"
@@ -56,12 +58,13 @@ type Verifier struct {
 
 // VerificationStatus holds the Verification Status
 type VerificationStatus struct {
-	totalTasks      int
-	addedTasks      int
-	processingTasks int
-	failedTasks     int
-	completedTasks  int
-	retryTasks      int
+	totalTasks            int
+	addedTasks            int
+	processingTasks       int
+	failedTasks           int
+	metadataMismatchTasks int
+	completedTasks        int
+	retryTasks            int
 }
 
 // VerificationResult holds the Verification Results
@@ -248,12 +251,7 @@ func (verifier *Verifier) fetchDocuments(task *VerificationTask) (map[interface{
 		return nil, nil, err
 	}
 
-	var dstClientMap map[interface{}]bson.Raw
-	if task.QueryFilter.To != "" {
-		dstClientMap, err = verifier.getDocuments(verifier.dstClientCollectionByNameSpace(task.QueryFilter.To), task)
-	} else {
-		dstClientMap, err = verifier.getDocuments(verifier.dstClientCollection(task), task)
-	}
+	dstClientMap, err := verifier.getDocuments(verifier.dstClientCollection(task), task)
 
 	if err != nil {
 		return nil, nil, err
@@ -300,6 +298,48 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap map[interf
 	return mismatchedIds, nil
 }
 
+func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, id interface{}, fieldPrefix string) (results []VerificationResult) {
+	for _, field := range mismatch.missingFieldOnSrc {
+		result := VerificationResult{
+			Field:     fieldPrefix + field,
+			Details:   Missing,
+			Cluster:   ClusterSource,
+			NameSpace: namespace}
+		if id != nil {
+			result.ID = id
+		}
+		results = append(results, result)
+	}
+
+	for _, field := range mismatch.missingFieldOnDst {
+		result := VerificationResult{
+			Field:     fieldPrefix + field,
+			Details:   Missing,
+			Cluster:   ClusterTarget,
+			NameSpace: namespace}
+		if id != nil {
+			result.ID = id
+		}
+		results = append(results, result)
+	}
+
+	for _, field := range mismatch.fieldContentsDiffer {
+		srcClientValue := srcClientDoc.Lookup(field)
+		dstClientValue := dstClientDoc.Lookup(field)
+		details := Mismatch + fmt.Sprintf(" : Document %s failed comparison on field %s between srcClient (Type: %s) and dstClient (Type: %s)", id, fieldPrefix+field, srcClientValue.Type, dstClientValue.Type)
+		result := VerificationResult{
+			Field:     fieldPrefix + field,
+			Details:   details,
+			Cluster:   ClusterTarget,
+			NameSpace: namespace}
+		if id != nil {
+			result.ID = id
+		}
+		results = append(results, result)
+	}
+	return
+}
+
 func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
 	match := bytes.Equal(srcClientDoc, dstClientDoc)
 	if match {
@@ -316,21 +356,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 		if mismatch == nil {
 			return nil, nil
 		}
-		var results []VerificationResult
-		for _, field := range mismatch.missingFieldOnSrc {
-			results = append(results, VerificationResult{ID: id, Field: field, Details: Missing, Cluster: ClusterSource, NameSpace: namespace})
-		}
-
-		for _, field := range mismatch.missingFieldOnDst {
-			results = append(results, VerificationResult{ID: id, Field: field, Details: Missing, Cluster: ClusterTarget, NameSpace: namespace})
-		}
-
-		for _, field := range mismatch.fieldContentsDiffer {
-			srcClientValue := srcClientDoc.Lookup(field)
-			dstClientValue := dstClientDoc.Lookup(field)
-			details := fmt.Sprintf("Document %s failed comparison on field %s between srcClient (Type: %s) and dstClient (Type: %s)", id, field, srcClientValue.Type, dstClientValue.Type)
-			results = append(results, VerificationResult{ID: id, Field: field, Details: Mismatch + " : " + details, Cluster: ClusterTarget, NameSpace: namespace})
-		}
+		results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, id, "" /* fieldPrefix */)
 		return results, nil
 	}
 	// If we're respecting field order we have just done a binary compare so don't know the mismatching fields.
@@ -414,31 +440,264 @@ func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace
 	return partitionList, nil
 }
 
-func (verifier *Verifier) ProcessCollectionVerificationTask(ctx context.Context, workerNum int, task *VerificationTask) {
-	// TODO handle metadata and indexes.
-	srcNs := task.QueryFilter.Namespace
-	dstNs := task.QueryFilter.To
-	partitions, err := verifier.getCollectionPartitions(ctx, srcNs)
+func (verifier *Verifier) getCollectionSpecification(ctx context.Context, collection *mongo.Collection) (*mongo.CollectionSpecification, error) {
+	filter := bson.D{{"name", collection.Name()}}
+	specifications, err := collection.Database().ListCollectionSpecifications(ctx, filter)
 	if err != nil {
-		task.Status = verificationTaskFailed
-		verifier.logger.Error().Msgf("[Worker %d] Error partitioning collection: %+v", workerNum, err)
-	} else {
-		task.Status = verificationTaskCompleted
-		verifier.logger.Info().Msgf("[Worker %d] split collection info %d partitions", workerNum, len(partitions))
-		for _, partition := range partitions {
-			_, err := InsertPartitionVerificationTask(partition, dstNs, verifier.verificationTaskCollection())
-			if err != nil {
-				task.Status = verificationTaskFailed
-				verifier.logger.Error().Msgf("[Worker %d] Error inserting verifier tasks: %+v", workerNum, err)
-			}
-		}
+		return nil, err
+	}
+	if len(specifications) > 1 {
+		return nil, errors.Errorf("Too many collections named %s %+v", FullName(collection), specifications)
+	}
+	if len(specifications) == 1 {
+		verifier.logger.Debug().Msgf("Collection specification: %+v", specifications[0])
+		return specifications[0], nil
 	}
 
-	err = verifier.UpdateVerificationTask(task)
+	return nil, nil
+}
+
+// Returns a slice of VerificationResults with the differences, and a boolean indicating whether or
+// not the collection data can be safely verified.
+func (verifier *Verifier) compareCollectionSpecifications(srcNs string, dstNs string, srcSpec *mongo.CollectionSpecification, dstSpec *mongo.CollectionSpecification) ([]VerificationResult, bool) {
+	if srcSpec == nil {
+		return []VerificationResult{{
+			NameSpace: srcNs,
+			Cluster:   ClusterSource,
+			Details:   Missing}}, false
+	}
+	if dstSpec == nil {
+		return []VerificationResult{{
+			NameSpace: dstNs,
+			Cluster:   ClusterTarget,
+			Details:   Missing}}, false
+	}
+	if srcSpec.Type != dstSpec.Type {
+		return []VerificationResult{{
+			NameSpace: srcNs,
+			Cluster:   ClusterTarget,
+			Field:     "Type",
+			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Type, dstSpec.Type)}}, false
+		// If the types differ, the rest is not important.
+	}
+	var results []VerificationResult
+	if srcSpec.ReadOnly != dstSpec.ReadOnly {
+		results = append(results, VerificationResult{
+			NameSpace: dstNs,
+			Cluster:   ClusterTarget,
+			Field:     "ReadOnly",
+			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.ReadOnly, dstSpec.ReadOnly)})
+	}
+	if !bytes.Equal(srcSpec.Options, dstSpec.Options) {
+		mismatchDetails, err := BsonUnorderedCompareRawDocumentWithDetails(srcSpec.Options, dstSpec.Options)
+		if err != nil {
+			verifier.logger.Error().Msgf("Unable to parse collection options for %s: %+v", srcNs, err)
+			results = append(results, VerificationResult{
+				NameSpace: dstNs,
+				Cluster:   ClusterTarget,
+				Field:     "Options",
+				Details:   "ParseError " + fmt.Sprintf("%v", err)})
+			return results, false
+		}
+		if mismatchDetails == nil {
+			results = append(results, VerificationResult{
+				NameSpace: dstNs,
+				Cluster:   ClusterTarget,
+				Field:     "Options (Field Order Only)",
+				Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Options, dstSpec.Options)})
+		} else {
+			results = append(results, mismatchResultsToVerificationResults(mismatchDetails, srcSpec.Options, dstSpec.Options, srcNs, nil /* id */, "Options.")...)
+		}
+	}
+	// Do not compare data between capped and uncapped collections because the partitioning is different.
+	canCompareData := srcSpec.Options.Lookup("capped").Equal(dstSpec.Options.Lookup("capped"))
+
+	return results, canCompareData
+}
+
+func compareIndexSpecifications(srcSpec *mongo.IndexSpecification, dstSpec *mongo.IndexSpecification) []VerificationResult {
+	var results []VerificationResult
+	// Order is always significant in the keys document.
+	if !bytes.Equal(srcSpec.KeysDocument, dstSpec.KeysDocument) {
+		results = append(results, VerificationResult{
+			NameSpace: dstSpec.Namespace,
+			Cluster:   ClusterTarget,
+			ID:        dstSpec.Name,
+			Field:     "KeysDocument",
+			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.KeysDocument, dstSpec.KeysDocument)})
+	}
+
+	// We don't check version because it may change when migrating between server versions.
+
+	if !reflect.DeepEqual(srcSpec.ExpireAfterSeconds, dstSpec.ExpireAfterSeconds) {
+		results = append(results, VerificationResult{
+			NameSpace: dstSpec.Namespace,
+			Cluster:   ClusterTarget,
+			ID:        dstSpec.Name,
+			Field:     "ExpireAfterSeconds",
+			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.ExpireAfterSeconds, dstSpec.ExpireAfterSeconds)})
+	}
+
+	if !reflect.DeepEqual(srcSpec.Sparse, dstSpec.Sparse) {
+		results = append(results, VerificationResult{
+			NameSpace: dstSpec.Namespace,
+			Cluster:   ClusterTarget,
+			ID:        dstSpec.Name,
+			Field:     "Sparse",
+			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Sparse, dstSpec.Sparse)})
+	}
+
+	if !reflect.DeepEqual(srcSpec.Unique, dstSpec.Unique) {
+		results = append(results, VerificationResult{
+			NameSpace: dstSpec.Namespace,
+			Cluster:   ClusterTarget,
+			ID:        dstSpec.Name,
+			Field:     "Unique",
+			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Unique, dstSpec.Unique)})
+	}
+
+	if !reflect.DeepEqual(srcSpec.Clustered, dstSpec.Clustered) {
+		results = append(results, VerificationResult{
+			NameSpace: dstSpec.Namespace,
+			Cluster:   ClusterTarget,
+			ID:        dstSpec.Name,
+			Field:     "Clustered",
+			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Clustered, dstSpec.Clustered)})
+	}
+	return results
+}
+
+func (verifier *Verifier) ProcessCollectionVerificationTask(ctx context.Context, workerNum int, task *VerificationTask) {
+	verifier.verifyMetadataAndPartitionCollection(ctx, workerNum, task)
+	err := verifier.UpdateVerificationTask(task)
 	if err != nil {
 		verifier.logger.Error().Msgf("Failed updating verification status: %v", err)
 	}
 }
+
+func (verifier *Verifier) markCollectionFailed(workerNum int, task *VerificationTask, cluster string, namespace string, err error) {
+	task.Status = verificationTaskFailed
+	verifier.logger.Error().Msgf("[Worker %d] Unable to read metadata for collection %s from cluster %s: %+v", workerNum, namespace, cluster, err)
+	task.FailedDocs = append(task.FailedDocs, VerificationResult{
+		NameSpace: namespace,
+		Cluster:   cluster,
+		Details:   Failed + fmt.Sprintf(" %v", err)})
+}
+
+func verifyIndexes(ctx context.Context, workerNum int, task *VerificationTask, srcColl, dstColl *mongo.Collection,
+	srcIdIndexSpec, dstIdIndexSpec *mongo.IndexSpecification) ([]VerificationResult, error) {
+	srcSpecs, err := srcColl.Indexes().ListSpecifications(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if srcIdIndexSpec != nil {
+		srcSpecs = append(srcSpecs, srcIdIndexSpec)
+	}
+	dstSpecs, err := dstColl.Indexes().ListSpecifications(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if dstIdIndexSpec != nil {
+		dstSpecs = append(dstSpecs, dstIdIndexSpec)
+	}
+	var results []VerificationResult
+	srcMap := map[string](*mongo.IndexSpecification){}
+	srcMapUsed := map[string]bool{}
+	for _, srcSpec := range srcSpecs {
+		srcMap[srcSpec.Name] = srcSpec
+	}
+	for _, dstSpec := range dstSpecs {
+		srcSpec := srcMap[dstSpec.Name]
+		if srcSpec == nil {
+			results = append(results, VerificationResult{
+				ID:        dstSpec.Name,
+				Details:   Missing,
+				Cluster:   ClusterSource,
+				NameSpace: FullName(srcColl)})
+		} else {
+			srcMapUsed[srcSpec.Name] = true
+			compareSpecResults := compareIndexSpecifications(srcSpec, dstSpec)
+			if compareSpecResults != nil {
+				results = append(results, compareSpecResults...)
+			}
+		}
+	}
+
+	// Find any index specs which existed in the source cluster but not the target cluster.
+	for _, srcSpec := range srcSpecs {
+		if !srcMapUsed[srcSpec.Name] {
+			results = append(results, VerificationResult{
+				ID:        srcSpec.Name,
+				Details:   Missing,
+				Cluster:   ClusterTarget,
+				NameSpace: FullName(dstColl)})
+		}
+	}
+	return results, nil
+}
+
+func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Context, workerNum int, task *VerificationTask) {
+	srcColl := verifier.srcClientCollection(task)
+	dstColl := verifier.dstClientCollection(task)
+	srcNs := FullName(srcColl)
+	dstNs := FullName(dstColl)
+	srcSpec, srcErr := verifier.getCollectionSpecification(ctx, srcColl)
+	dstSpec, dstErr := verifier.getCollectionSpecification(ctx, dstColl)
+	if srcErr != nil {
+		verifier.markCollectionFailed(workerNum, task, ClusterSource, srcNs, srcErr)
+	}
+	if dstErr != nil {
+		verifier.markCollectionFailed(workerNum, task, ClusterTarget, dstNs, dstErr)
+	}
+	if srcErr != nil || dstErr != nil {
+		return
+	}
+	if srcSpec == nil && dstSpec == nil {
+		verifier.logger.Info().Msgf("[Worker %d] Collection not present on either cluster: %s -> %s", workerNum, srcNs, dstNs)
+		// This counts as success.
+		task.Status = verificationTaskCompleted
+		return
+	}
+	specificationProblems, verifyData := verifier.compareCollectionSpecifications(srcNs, dstNs, srcSpec, dstSpec)
+	if specificationProblems != nil {
+		task.FailedDocs = specificationProblems
+		if !verifyData {
+			task.Status = verificationTaskFailed
+			return
+		}
+		task.Status = verificationTaskMetadataMismatch
+	}
+
+	indexProblems, err := verifyIndexes(ctx, workerNum, task, srcColl, dstColl, srcSpec.IDIndex, dstSpec.IDIndex)
+	if err != nil {
+		task.Status = verificationTaskFailed
+		verifier.logger.Error().Msgf("[Worker %d] Error getting indexes for collection: %+v", workerNum, err)
+		return
+	}
+	if indexProblems != nil {
+		task.FailedDocs = append(task.FailedDocs, indexProblems...)
+		task.Status = verificationTaskMetadataMismatch
+	}
+
+	partitions, err := verifier.getCollectionPartitions(ctx, srcNs)
+	if err != nil {
+		task.Status = verificationTaskFailed
+		verifier.logger.Error().Msgf("[Worker %d] Error partitioning collection: %+v", workerNum, err)
+		return
+	}
+	verifier.logger.Info().Msgf("[Worker %d] split collection info %d partitions", workerNum, len(partitions))
+	for _, partition := range partitions {
+		_, err := InsertPartitionVerificationTask(partition, dstNs, verifier.verificationTaskCollection())
+		if err != nil {
+			task.Status = verificationTaskFailed
+			verifier.logger.Error().Msgf("[Worker %d] Error inserting verifier tasks: %+v", workerNum, err)
+		}
+	}
+	if task.Status == verificationTaskProcessing {
+		task.Status = verificationTaskCompleted
+	}
+}
+
 func (verifier *Verifier) AddRefetchTask(task *VerificationTask) {
 	srcNamespace := task.QueryFilter.Namespace
 	dstNamespace := srcNamespace
@@ -526,6 +785,8 @@ func (verifier *Verifier) GetVerificationStatus() (*VerificationStatus, error) {
 			verificationStatus.processingTasks = count
 		case verificationTaskFailed:
 			verificationStatus.failedTasks = count
+		case verificationTaskMetadataMismatch:
+			verificationStatus.metadataMismatchTasks = count
 		case verificationTaskCompleted:
 			verificationStatus.completedTasks = count
 		case verificationTasksRetry:
@@ -565,8 +826,11 @@ func (verifier *Verifier) srcClientCollection(task *VerificationTask) *mongo.Col
 
 func (verifier *Verifier) dstClientCollection(task *VerificationTask) *mongo.Collection {
 	if task != nil {
-		dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
-		return verifier.dstClient.Database(dbName).Collection(collName)
+		if task.QueryFilter.To != "" {
+			return verifier.dstClientCollectionByNameSpace(task.QueryFilter.To)
+		} else {
+			return verifier.dstClientCollectionByNameSpace(task.QueryFilter.Namespace)
+		}
 	}
 	return nil
 }
@@ -665,11 +929,12 @@ func (verifier *Verifier) CreateInitialTasks() error {
 	return nil
 }
 
-func FetchTasks(ctx context.Context, coll *mongo.Collection) []VerificationTask {
+func FetchFailedTasks(ctx context.Context, coll *mongo.Collection, taskType string) []VerificationTask {
 
 	var failedTasks []VerificationTask
-	status := []string{verificationTasksRetry, verificationTaskFailed}
-	cur, err := coll.Find(ctx, bson.D{bson.E{Key: "status", Value: bson.M{"$in": status}}})
+	status := []string{verificationTasksRetry, verificationTaskFailed, verificationTaskMetadataMismatch}
+	cur, err := coll.Find(ctx, bson.D{bson.E{Key: "type", Value: taskType},
+		bson.E{Key: "status", Value: bson.M{"$in": status}}})
 	if err != nil {
 		return failedTasks
 	}
@@ -747,7 +1012,24 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 		fmt.Print("Differences in counts may be due to query filters\n\n\n")
 	}
 
-	failedTasks := FetchTasks(ctx, verifier.verificationTaskCollection())
+	metadataFailedTasks := FetchFailedTasks(ctx, verifier.verificationTaskCollection(), verificationTaskVerifyCollection)
+	if len(metadataFailedTasks) != 0 {
+		table = tablewriter.NewWriter(os.Stdout)
+		table.SetHeader([]string{"Index", "Cluster", "Type", "Field", "Namespace", "Details"})
+
+		for _, v := range metadataFailedTasks {
+			for _, f := range v.FailedDocs {
+				table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Type), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
+			}
+		}
+		fmt.Println("Collections/Indexes in failed or retry status:")
+		table.Render()
+		fmt.Println()
+	} else {
+		fmt.Print("********** ALL COLLECTION METADATA MATCHES ! **********\n\n")
+	}
+
+	failedTasks := FetchFailedTasks(ctx, verifier.verificationTaskCollection(), verificationTaskVerify)
 	if len(failedTasks) == 0 {
 		// Nothing to print
 		return

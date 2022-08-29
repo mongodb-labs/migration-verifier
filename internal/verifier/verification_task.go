@@ -20,14 +20,17 @@ import (
 )
 
 const (
-	verificationTaskAdded       = "added"
-	verificationTaskCompleted   = "completed"
-	verificationTaskFailed      = "failed"
-	verificationTaskProcessing  = "processing"
-	verificationTasksCollection = "verification_tasks"
-	verificationRangeCollection = "verification_ranges"
-	verificationTasksRetry      = "retry"
-	verificationTaskMaxRetries  = 5
+	verificationTaskAdded     = "added"
+	verificationTaskCompleted = "completed"
+	verificationTaskFailed    = "failed"
+	// This is used for collection verification, and means the task successfully created the data tasks,
+	// but there were mismatches in the metadata/indexes
+	verificationTaskMetadataMismatch = "mismatch"
+	verificationTaskProcessing       = "processing"
+	verificationTasksCollection      = "verification_tasks"
+	verificationRangeCollection      = "verification_ranges"
+	verificationTasksRetry           = "retry"
+	verificationTaskMaxRetries       = 5
 
 	verificationTaskVerify = "verify"
 	// A verifyCollection task verifies collection metadata, and inserts tasks to verify data ranges.

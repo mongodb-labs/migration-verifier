@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"testing"
 
@@ -18,6 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) *Verifier {
@@ -227,6 +230,377 @@ func TestVerifierCompareDocsOrdered(t *testing.T) {
 		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
 		assert.Equal(t, id, res)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchedIds[0].Details)
+	}
+}
+
+func (suite *WithMongodsTestSuite) TestVerifierCompareMetadata() {
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	ctx := context.Background()
+
+	// Collection exists only on source.
+	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
+	suite.Require().Nil(err)
+	task := &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.testColl",
+			To:        "testDb.testColl"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskFailed, task.Status)
+	suite.Equal(1, len(task.FailedDocs))
+	suite.Equal(task.FailedDocs[0].Details, Missing)
+	suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
+	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.testColl")
+
+	// Make sure "To" is respected.
+	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
+	suite.Require().Nil(err)
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.testColl",
+			To:        "testDb.testCollTo"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskFailed, task.Status)
+	suite.Equal(1, len(task.FailedDocs))
+	suite.Equal(task.FailedDocs[0].Details, Missing)
+	suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
+	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.testCollTo")
+
+	// Collection exists only on dest.
+	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "destOnlyColl")
+	suite.Require().Nil(err)
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.destOnlyColl",
+			To:        "testDb.destOnlyColl"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskFailed, task.Status)
+	suite.Equal(1, len(task.FailedDocs))
+	suite.Equal(task.FailedDocs[0].Details, Missing)
+	suite.Equal(task.FailedDocs[0].Cluster, ClusterSource)
+	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.destOnlyColl")
+
+	// A view and a collection are different.
+	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "viewOnSrc", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "viewOnSrc")
+	suite.Require().Nil(err)
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.viewOnSrc",
+			To:        "testDb.viewOnSrc"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskFailed, task.Status)
+	suite.Equal(1, len(task.FailedDocs))
+	suite.Equal(task.FailedDocs[0].Field, "Type")
+	suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
+	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.viewOnSrc")
+
+	// Capped should not match uncapped
+	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "cappedOnDst")
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "cappedOnDst", options.CreateCollection().SetCapped(true).SetSizeInBytes(1024*1024*100))
+	suite.Require().Nil(err)
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.cappedOnDst",
+			To:        "testDb.cappedOnDst"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskFailed, task.Status)
+	// Capped and size should differ
+	var wrongFields []string
+	for _, result := range task.FailedDocs {
+		field := result.Field.(string)
+		suite.Require().NotNil(field)
+		wrongFields = append(wrongFields, field)
+	}
+	suite.ElementsMatch([]string{"Options.capped", "Options.size"}, wrongFields)
+
+	// Default success case
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.testColl",
+			To:        "testDb.testColl"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskCompleted, task.Status)
+
+	// Neither collection exists success case
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.testCollDNE",
+			To:        "testDb.testCollDNE"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskCompleted, task.Status)
+}
+
+func (suite *WithMongodsTestSuite) TestVerifierCompareIndexes() {
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	ctx := context.Background()
+
+	// Missing index on destination.
+	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl1")
+	srcColl := suite.srcMongoClient.Database("testDb").Collection("testColl1")
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl1")
+	suite.Require().Nil(err)
+	dstColl := suite.dstMongoClient.Database("testDb").Collection("testColl1")
+	suite.Require().Nil(err)
+	srcIndexNames, err := srcColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
+	suite.Require().Nil(err)
+	_, err = dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}})
+	suite.Require().Nil(err)
+	task := &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.testColl1",
+			To:        "testDb.testColl1"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskMetadataMismatch, task.Status)
+	if suite.Equal(1, len(task.FailedDocs)) {
+		suite.Equal(srcIndexNames[1], task.FailedDocs[0].ID)
+		suite.Equal(Missing, task.FailedDocs[0].Details)
+		suite.Equal(ClusterTarget, task.FailedDocs[0].Cluster)
+		suite.Equal("testDb.testColl1", task.FailedDocs[0].NameSpace)
+	}
+
+	// Missing index on source
+	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl2")
+	srcColl = suite.srcMongoClient.Database("testDb").Collection("testColl2")
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl2")
+	suite.Require().Nil(err)
+	dstColl = suite.dstMongoClient.Database("testDb").Collection("testColl2")
+	suite.Require().Nil(err)
+	_, err = srcColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}})
+	suite.Require().Nil(err)
+	dstIndexNames, err := dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
+	suite.Require().Nil(err)
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.testColl2",
+			To:        "testDb.testColl2"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskMetadataMismatch, task.Status)
+	if suite.Equal(1, len(task.FailedDocs)) {
+		suite.Equal(dstIndexNames[1], task.FailedDocs[0].ID)
+		suite.Equal(Missing, task.FailedDocs[0].Details)
+		suite.Equal(ClusterSource, task.FailedDocs[0].Cluster)
+		suite.Equal("testDb.testColl2", task.FailedDocs[0].NameSpace)
+	}
+
+	// Different indexes on each
+	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl3")
+	srcColl = suite.srcMongoClient.Database("testDb").Collection("testColl3")
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl3")
+	suite.Require().Nil(err)
+	dstColl = suite.dstMongoClient.Database("testDb").Collection("testColl3")
+	suite.Require().Nil(err)
+	srcIndexNames, err = srcColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"z", 1}, {"q", -1}}}, {Keys: bson.D{{"a", 1}, {"b", -1}}}})
+	suite.Require().Nil(err)
+	dstIndexNames, err = dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
+	suite.Require().Nil(err)
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.testColl3",
+			To:        "testDb.testColl3"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskMetadataMismatch, task.Status)
+	if suite.Equal(2, len(task.FailedDocs)) {
+		sort.Slice(task.FailedDocs, func(i, j int) bool {
+			return task.FailedDocs[i].ID.(string) < task.FailedDocs[j].ID.(string)
+		})
+		suite.Equal(dstIndexNames[1], task.FailedDocs[0].ID)
+		suite.Equal(Missing, task.FailedDocs[0].Details)
+		suite.Equal(ClusterSource, task.FailedDocs[0].Cluster)
+		suite.Equal("testDb.testColl3", task.FailedDocs[0].NameSpace)
+		suite.Equal(srcIndexNames[0], task.FailedDocs[1].ID)
+		suite.Equal(Missing, task.FailedDocs[1].Details)
+		suite.Equal(ClusterTarget, task.FailedDocs[1].Cluster)
+		suite.Equal("testDb.testColl3", task.FailedDocs[1].NameSpace)
+	}
+
+	// Indexes with same names are different
+	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl4")
+	srcColl = suite.srcMongoClient.Database("testDb").Collection("testColl4")
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl4")
+	suite.Require().Nil(err)
+	dstColl = suite.dstMongoClient.Database("testDb").Collection("testColl4")
+	suite.Require().Nil(err)
+	srcIndexNames, err = srcColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"z", 1}, {"q", -1}}, Options: options.Index().SetName("wrong")}, {Keys: bson.D{{"a", 1}, {"b", -1}}}})
+	suite.Require().Nil(err)
+	suite.Require().Equal("wrong", srcIndexNames[0])
+	dstIndexNames, err = dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}, Options: options.Index().SetName("wrong")}})
+	suite.Require().Nil(err)
+	suite.Require().Equal("wrong", dstIndexNames[1])
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.testColl4",
+			To:        "testDb.testColl4"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskMetadataMismatch, task.Status)
+	if suite.Equal(1, len(task.FailedDocs)) {
+		suite.Equal("wrong", task.FailedDocs[0].ID)
+		suite.Regexp(regexp.MustCompile("^"+Mismatch), task.FailedDocs[0].Details)
+		suite.Equal(ClusterTarget, task.FailedDocs[0].Cluster)
+		suite.Equal("testDb.testColl4", task.FailedDocs[0].NameSpace)
+	}
+}
+
+func TestVerifierCompareIndexSpecs(t *testing.T) {
+	// Index specification
+	keysDoc1 := bson.D{{"a", 1}, {"b", -1}}
+	// We marshal the key document twice so they are physically separate memory.
+	keysRaw1, err := bson.Marshal(keysDoc1)
+	require.Nil(t, err)
+	keysRaw2, err := bson.Marshal(keysDoc1)
+	require.Nil(t, err)
+	simpleIndexSpec1 := mongo.IndexSpecification{
+		Name:         "testIndex",
+		Namespace:    "testDB.testIndex",
+		KeysDocument: keysRaw1,
+		Version:      1}
+
+	simpleIndexSpec2 := mongo.IndexSpecification{
+		Name:         "testIndex",
+		Namespace:    "testDB.testIndex",
+		KeysDocument: keysRaw2,
+		Version:      2}
+
+	results := compareIndexSpecifications(&simpleIndexSpec1, &simpleIndexSpec2)
+	assert.Nil(t, results)
+
+	// Changing version should not be an issue
+	simpleIndexSpec3 := simpleIndexSpec2
+	simpleIndexSpec3.Version = 4
+	results = compareIndexSpecifications(&simpleIndexSpec1, &simpleIndexSpec3)
+	assert.Nil(t, results)
+
+	// Changing the key spec order matters
+	keysDoc3 := bson.D{{"b", -1}, {"a", 1}}
+	keysRaw3, err := bson.Marshal(keysDoc3)
+	require.Nil(t, err)
+	simpleIndexSpec3 = simpleIndexSpec2
+	simpleIndexSpec3.KeysDocument = keysRaw3
+	results = compareIndexSpecifications(&simpleIndexSpec1, &simpleIndexSpec3)
+	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
+		result := results[0]
+		assert.Equal(t, "testIndex", result.ID)
+		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, "KeysDocument", result.Field)
+		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+	}
+
+	// Shortening the key mattes
+	keysDoc3 = bson.D{{"a", 1}}
+	keysRaw3, err = bson.Marshal(keysDoc3)
+	require.Nil(t, err)
+	simpleIndexSpec3 = simpleIndexSpec2
+	simpleIndexSpec3.KeysDocument = keysRaw3
+	results = compareIndexSpecifications(&simpleIndexSpec1, &simpleIndexSpec3)
+	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
+		result := results[0]
+		assert.Equal(t, "testIndex", result.ID)
+		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, "KeysDocument", result.Field)
+		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+	}
+
+	var expireAfterSeconds30, expireAfterSeconds0_1, expireAfterSeconds0_2 int32
+	expireAfterSeconds30 = 30
+	expireAfterSeconds0_1, expireAfterSeconds0_2 = 0, 0
+	sparseTrue := true
+	sparseFalse_1, sparseFalse_2 := false, false
+	uniqueTrue := true
+	uniqueFalse_1, uniqueFalse_2 := false, false
+	clusteredTrue := true
+	clusteredFalse_1, clusteredFalse_2 := false, false
+	fullIndexSpec1 := mongo.IndexSpecification{
+		Name:               "testIndex",
+		Namespace:          "testDB.testIndex",
+		KeysDocument:       keysRaw1,
+		Version:            1,
+		ExpireAfterSeconds: &expireAfterSeconds0_1,
+		Sparse:             &sparseFalse_1,
+		Unique:             &uniqueFalse_1,
+		Clustered:          &clusteredFalse_1}
+
+	fullIndexSpec2 := mongo.IndexSpecification{
+		Name:               "testIndex",
+		Namespace:          "testDB.testIndex",
+		KeysDocument:       keysRaw2,
+		Version:            2,
+		ExpireAfterSeconds: &expireAfterSeconds0_2,
+		Sparse:             &sparseFalse_2,
+		Unique:             &uniqueFalse_2,
+		Clustered:          &clusteredFalse_2}
+
+	results = compareIndexSpecifications(&fullIndexSpec1, &fullIndexSpec2)
+	assert.Nil(t, results)
+
+	// The full index spec should not equal the equivalent simple index spec.
+	results = compareIndexSpecifications(&fullIndexSpec1, &simpleIndexSpec2)
+	var diffFields []interface{}
+	for _, result := range results {
+		assert.Equal(t, "testIndex", result.ID)
+		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+		diffFields = append(diffFields, result.Field)
+	}
+	assert.ElementsMatch(t, []string{"Sparse", "Unique", "ExpireAfterSeconds", "Clustered"}, diffFields)
+
+	fullIndexSpec3 := fullIndexSpec2
+	fullIndexSpec3.ExpireAfterSeconds = &expireAfterSeconds30
+	results = compareIndexSpecifications(&fullIndexSpec1, &fullIndexSpec3)
+	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
+		result := results[0]
+		assert.Equal(t, "testIndex", result.ID)
+		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, "ExpireAfterSeconds", result.Field)
+		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+	}
+
+	fullIndexSpec3 = fullIndexSpec2
+	fullIndexSpec3.Sparse = &sparseTrue
+	results = compareIndexSpecifications(&fullIndexSpec1, &fullIndexSpec3)
+	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
+		result := results[0]
+		assert.Equal(t, "testIndex", result.ID)
+		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, "Sparse", result.Field)
+		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+	}
+
+	fullIndexSpec3 = fullIndexSpec2
+	fullIndexSpec3.Unique = &uniqueTrue
+	results = compareIndexSpecifications(&fullIndexSpec1, &fullIndexSpec3)
+	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
+		result := results[0]
+		assert.Equal(t, "testIndex", result.ID)
+		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, "Unique", result.Field)
+		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+	}
+
+	fullIndexSpec3 = fullIndexSpec2
+	fullIndexSpec3.Clustered = &clusteredTrue
+	results = compareIndexSpecifications(&fullIndexSpec1, &fullIndexSpec3)
+	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
+		result := results[0]
+		assert.Equal(t, "testIndex", result.ID)
+		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, "Clustered", result.Field)
+		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
 	}
 }
 
