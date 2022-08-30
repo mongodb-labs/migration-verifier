@@ -16,6 +16,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -41,7 +42,7 @@ func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstanc
 	return verifier
 }
 
-func TestVerifierFetchDocuments(t *testing.T) {
+func TestVerifierMultiversion(t *testing.T) {
 	srcVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
 	destVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
 	metaVersions := []string{"6.0.1"}
@@ -55,24 +56,24 @@ func TestVerifierFetchDocuments(t *testing.T) {
 					// TODO: this should be able to be run in parallel but we run killall mongod in the start of each of these test cases
 					// For now we are going to leave killall in because the tests don't take long and adding the killall makes them very safe
 					// t.Parallel()
-					metaMongoInstance := MongoInstance{
+					testSuite := new(WithMongodsTestSuite)
+					testSuite.metaMongoInstance = MongoInstance{
 						version: metaVersion,
 						port:    strconv.Itoa(portOffset + (testCnt * 3)),
 						dir:     "meta" + strconv.Itoa(testCnt),
 					}
-					srcMongoInstance := MongoInstance{
+					testSuite.srcMongoInstance = MongoInstance{
 						version: srcVersion,
 						port:    strconv.Itoa(portOffset + (testCnt * 3) + 1),
 						dir:     "source" + strconv.Itoa(testCnt),
 					}
-					dstMongoInstance := MongoInstance{
+					testSuite.dstMongoInstance = MongoInstance{
 						version: destVersion,
 						port:    strconv.Itoa(portOffset + (testCnt * 3) + 2),
 						dir:     "dest" + strconv.Itoa(testCnt),
 					}
-
 					testCnt++
-					verifierFetchDocuments(t, srcMongoInstance, dstMongoInstance, metaMongoInstance)
+					suite.Run(t, testSuite)
 				})
 			}
 		}
@@ -95,19 +96,16 @@ func mapKeysAsInterface(myMap interface{}) (result []interface{}) {
 	return
 }
 
-func verifierFetchDocuments(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) {
+func (suite *WithMongodsTestSuite) TestVerifierFetchDocuments() {
 	// This test is a stub.
 
-	err := startTestMongods(srcMongoInstance, dstMongoInstance, metaMongoInstance)
-	require.Nil(t, err)
-	defer stopTestMongods()
-	verifier := buildVerifier(t, srcMongoInstance, dstMongoInstance, metaMongoInstance)
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
 	drop := func() {
 		err := verifier.srcClient.Database("keyhole").Drop(ctx)
-		require.Nil(t, err)
+		suite.Require().Nil(err)
 		err = verifier.dstClient.Database("keyhole").Drop(ctx)
-		require.Nil(t, err)
+		suite.Require().Nil(err)
 	}
 	drop()
 	defer drop()
@@ -122,19 +120,19 @@ func verifierFetchDocuments(t *testing.T, srcMongoInstance MongoInstance, dstMon
 	}
 
 	id := rand.Intn(1000)
-	_, err = verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.D{{"_id", id}, {"num", 123}, {"name", "srcTest"}})
-	require.Nil(t, err)
+	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.D{{"_id", id}, {"num", 123}, {"name", "srcTest"}})
+	suite.Require().Nil(err)
 	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.D{{"_id", id}, {"num", 123}, {"name", "dstTest"}})
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	task := &VerificationTask{ID: id, QueryFilter: basicQueryFilter("keyhole.dealers")}
 	srcDocumentMap, dstDocumentMap, err := verifier.fetchDocuments(task)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	rawType, rawIdBytes, err := bson.MarshalValue(id)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	rawId := bson.RawValue{Type: rawType, Value: rawIdBytes}
 
-	assert.ElementsMatch(t, mapKeysAsInterface(srcDocumentMap), []interface{}{rawId.String()})
-	assert.ElementsMatch(t, mapKeysAsInterface(dstDocumentMap), []interface{}{rawId.String()})
+	suite.ElementsMatch(mapKeysAsInterface(srcDocumentMap), []interface{}{rawId.String()})
+	suite.ElementsMatch(mapKeysAsInterface(dstDocumentMap), []interface{}{rawId.String()})
 }
 
 func TestVerifierCompareDocs(t *testing.T) {

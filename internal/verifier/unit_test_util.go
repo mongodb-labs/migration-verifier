@@ -3,6 +3,7 @@ package verifier
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,12 +12,69 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"testing"
+
+	"github.com/stretchr/testify/suite"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type MongoInstance struct {
 	port    string
 	version string
 	dir     string
+}
+
+type WithMongodsTestSuite struct {
+	suite.Suite
+	srcMongoInstance, dstMongoInstance, metaMongoInstance MongoInstance
+	srcMongoClient, dstMongoClient, metaMongoClient       *mongo.Client
+	initialDbNames                                        map[string]bool
+}
+
+func (suite *WithMongodsTestSuite) SetupSuite() {
+	if testing.Short() {
+		suite.T().Skip("Skipping mongod-requiring tests in short mode")
+	}
+	err := startTestMongods(suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	suite.Require().Nil(err)
+	ctx := context.Background()
+	clientOpts := options.Client().ApplyURI("mongodb://localhost:" + suite.srcMongoInstance.port).SetAppName("Verifier Test Suite")
+	suite.srcMongoClient, err = mongo.Connect(ctx, clientOpts)
+	suite.Require().Nil(err)
+	clientOpts = options.Client().ApplyURI("mongodb://localhost:" + suite.dstMongoInstance.port).SetAppName("Verifier Test Suite")
+	suite.dstMongoClient, err = mongo.Connect(ctx, clientOpts)
+	suite.Require().Nil(err)
+	clientOpts = options.Client().ApplyURI("mongodb://localhost:" + suite.metaMongoInstance.port).SetAppName("Verifier Test Suite")
+	suite.metaMongoClient, err = mongo.Connect(ctx, clientOpts)
+	suite.Require().Nil(err)
+	suite.initialDbNames = map[string]bool{}
+	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient, suite.metaMongoClient} {
+		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
+		suite.Require().Nil(err)
+		for _, dbName := range dbNames {
+			suite.initialDbNames[dbName] = true
+		}
+	}
+}
+
+func (suite *WithMongodsTestSuite) TearDownSuite() {
+	stopTestMongods()
+}
+
+func (suite *WithMongodsTestSuite) TearDownTest() {
+	ctx := context.Background()
+	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient, suite.metaMongoClient} {
+		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
+		suite.Require().Nil(err)
+		for _, dbName := range dbNames {
+			if !suite.initialDbNames[dbName] {
+				err = client.Database(dbName).Drop(ctx)
+				suite.Require().Nil(err)
+			}
+		}
+	}
 }
 
 var cachePath = filepath.Join("mongodb_exec")
