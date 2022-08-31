@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	_ "net/http/pprof"
 	"os"
 	"path"
 	"reflect"
@@ -38,10 +39,15 @@ const (
 	DstNamespaceField = "query_filter.to"
 	NumWorkers        = 10
 	refetch           = "TODO_CHANGE_ME_REFETCH"
+	Idle              = "idle"
+	Check             = "check"
+	Recheck           = "recheck"
 )
 
 // Verifier is the main state for the migration verifier
 type Verifier struct {
+	phase      string
+	port       int
 	metaClient *mongo.Client
 	srcClient  *mongo.Client
 	dstClient  *mongo.Client
@@ -51,22 +57,28 @@ type Verifier struct {
 	workerSleepDelayMillis     time.Duration
 	ignoreBSONFieldOrder       bool
 
-	logger *zerolog.Logger
+	logger *logger.Logger
 
 	srcNamespaces []string
 	dstNamespaces []string
 	metaDBName    string
+
+	changeStreamMux       sync.Mutex
+	changeStreamRunning   bool
+	changeStreamEnderChan chan struct{}
+	changeStreamErrChan   chan error
+	changeStreamDoneChan  chan struct{}
 }
 
 // VerificationStatus holds the Verification Status
 type VerificationStatus struct {
-	totalTasks            int
-	addedTasks            int
-	processingTasks       int
-	failedTasks           int
-	metadataMismatchTasks int
-	completedTasks        int
-	retryTasks            int
+	totalTasks            int `json:"totalTasks"`
+	addedTasks            int `json:"addedTasks"`
+	processingTasks       int `json:"processingTasks"`
+	failedTasks           int `json:"failedTasks"`
+	completedTasks        int `json:"completedTasks"`
+	metadataMismatchTasks int `json:"metadataMismatchTasks"`
+	recheckTasks          int `json:"recheckTasks"`
 }
 
 // VerificationResult holds the Verification Results
@@ -82,7 +94,11 @@ type VerificationResult struct {
 // NewVerifier creates a new Verifier
 func NewVerifier() *Verifier {
 	return &Verifier{
-		numWorkers: NumWorkers,
+		phase:                 Idle,
+		numWorkers:            NumWorkers,
+		changeStreamEnderChan: make(chan struct{}),
+		changeStreamErrChan:   make(chan error),
+		changeStreamDoneChan:  make(chan struct{}),
 	}
 }
 
@@ -97,7 +113,7 @@ func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
 	return opts
 }
 
-func (verifier *Verifier) GetLogger() *zerolog.Logger {
+func (verifier *Verifier) GetLogger() *logger.Logger {
 	return verifier.logger
 }
 
@@ -122,6 +138,10 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 	return err
 }
 
+func (verifier *Verifier) SetServerPort(port int) {
+	verifier.port = port
+}
+
 func (verifier *Verifier) SetNumWorkers(arg int) {
 	verifier.numWorkers = arg
 }
@@ -139,7 +159,7 @@ func (verifier *Verifier) SetLogger(logPath string) (*os.File, *bufio.Writer, er
 	var writer *bufio.Writer = nil
 	if logPath == "stderr" {
 		l := zerolog.New(os.Stderr).With().Timestamp().Logger()
-		verifier.logger = &l
+		verifier.logger = logger.NewLogger(&l, logger.DefaultLogWriter)
 		return file, writer, nil
 	}
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {
@@ -154,7 +174,7 @@ func (verifier *Verifier) SetLogger(logPath string) (*os.File, *bufio.Writer, er
 	}
 	writer = bufio.NewWriter(file)
 	l := zerolog.New(writer).With().Timestamp().Logger()
-	verifier.logger = &l
+	verifier.logger = logger.NewLogger(&l, logger.DefaultLogWriter)
 	return file, writer, nil
 }
 
@@ -227,14 +247,21 @@ func (verifier *Verifier) getDocuments(collection *mongo.Collection, task *Verif
 	}
 	documentMap := make(map[interface{}]bson.Raw)
 	for cursor.Next(ctx) {
-		var rawDoc bson.Raw
-		err := cursor.Decode(&rawDoc)
+		err := cursor.Err()
 		if err != nil {
 			return nil, err
 		}
-		id := rawDoc.Lookup("_id").String()
+		var rawDoc bson.Raw
+		err = cursor.Decode(&rawDoc)
+		if err != nil {
+			return nil, err
+		}
+		data := make(bson.Raw, len(rawDoc))
+		copy(data, rawDoc)
+		idRaw := data.Lookup("_id")
+		idString := RawToString(idRaw)
 
-		documentMap[id] = rawDoc
+		documentMap[idString] = data
 	}
 
 	return documentMap, nil
@@ -268,7 +295,7 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap map[interf
 	for id, srcClientDoc := range srcClientMap {
 		dstClientDoc, ok := dstClientMap[id]
 		if !ok {
-			//verifier.logger.Info().Msg("Document %+v missing on dstClient!", id)
+			//verifier.logger.Info().Msgf("Document %+v missing on dstClient!", id)
 			mismatchedIds = append(mismatchedIds, VerificationResult{
 				ID:        srcClientDoc.Lookup("_id"),
 				Details:   Missing,
@@ -288,7 +315,7 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap map[interf
 		for id, dstClientDoc := range dstClientMap {
 			_, ok := srcClientMap[id]
 			if !ok {
-				//verifier.logger.Info().Msg("Document %+v missing on srcClient!", id)
+				//verifier.logger.Info().Msgf("Document %+v missing on srcClient!", id)
 				mismatchedIds = append(mismatchedIds, VerificationResult{
 					ID:        dstClientDoc.Lookup("_id"),
 					Details:   Missing,
@@ -373,11 +400,16 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 }
 
 func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTask) {
-
+	verifier.logger.Info().Msgf("[Worker %d] Processing verify task", workerNum)
 	var mismatchIDs []interface{}
 
+	// TODO: refactor the below to just add the mismatches when they occur. Rather
+	// splitting the Namespace in two places. This is left this way for now to
+	// ease conflicts in PR merging.
+	dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
 	mismatches, err := verifier.FetchAndCompareDocuments(task)
 	for _, v := range mismatches {
+		verifier.InsertFailedCompareRecheckDoc(dbName, collName, v.ID)
 		mismatchIDs = append(mismatchIDs, v.ID)
 	}
 
@@ -413,10 +445,9 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 
 func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace string) ([]*partitions.Partition, error) {
 	retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
-	logger := logger.NewLogger(verifier.logger, logger.DefaultLogWriter)
 	dbName, collName := SplitNamespace(namespace)
-	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, logger, retryer,
-		verifier.srcClientDatabase(dbName), collName)
+	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, verifier.logger, retryer,
+		verifier.srcClient.Database(dbName), collName)
 	if err != nil {
 		return nil, err
 	}
@@ -424,7 +455,7 @@ func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace
 	// one "replicator".
 	replicator1 := partitions.Replicator{ID: "verifier"}
 	replicators := []partitions.Replicator{replicator1}
-	partitionList, err := partitions.PartitionCollection(ctx, namespaceAndUUID, retryer, verifier.srcClient, replicators, logger)
+	partitionList, err := partitions.PartitionCollection(ctx, namespaceAndUUID, retryer, verifier.srcClient, replicators, verifier.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -572,6 +603,7 @@ func compareIndexSpecifications(srcSpec *mongo.IndexSpecification, dstSpec *mong
 }
 
 func (verifier *Verifier) ProcessCollectionVerificationTask(ctx context.Context, workerNum int, task *VerificationTask) {
+	verifier.logger.Info().Msgf("[Worker %d] Processing collection", workerNum)
 	verifier.verifyMetadataAndPartitionCollection(ctx, workerNum, task)
 	err := verifier.UpdateVerificationTask(task)
 	if err != nil {
@@ -794,7 +826,7 @@ func (verifier *Verifier) GetVerificationStatus() (*VerificationStatus, error) {
 		case verificationTaskCompleted:
 			verificationStatus.completedTasks = count
 		case verificationTasksRetry:
-			verificationStatus.retryTasks = count
+			verificationStatus.recheckTasks = count
 		default:
 			verifier.logger.Info().Msgf("Unknown task status %s", status)
 		}
@@ -849,6 +881,10 @@ func (verifier *Verifier) dstClientDatabase(dbName string) *mongo.Database {
 	return db
 }
 
+func (verifier *Verifier) metaClientCollection(name string) *mongo.Collection {
+	return verifier.metaClient.Database(verifier.metaDBName).Collection(name)
+}
+
 func (verifier *Verifier) srcClientCollection(task *VerificationTask) *mongo.Collection {
 	if task != nil {
 		dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
@@ -873,8 +909,39 @@ func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mong
 	return verifier.dstClientDatabase(dbName).Collection(collName)
 }
 
-func (verifier *Verifier) Verify() error {
+func (verifier *Verifier) StartServer() error {
+	server := NewWebServer(verifier.port, verifier, verifier.logger)
+	server.Run(context.Background())
+	return nil
+}
+
+func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
+	status, err := verifier.GetVerificationStatus()
+	if err != nil {
+		return Progress{Error: err}, err
+	}
+	return Progress{
+		Phase:  verifier.phase,
+		Status: status,
+	}, nil
+}
+
+func (verifier *Verifier) Check(ctx context.Context) error {
 	var err error
+	verifier.logger.Info().Msg("Starting Check")
+
+	verifier.phase = Check
+	defer func() {
+		verifier.phase = Idle
+	}()
+
+	verifier.changeStreamMux.Lock()
+	csRunning := verifier.changeStreamRunning
+	verifier.changeStreamMux.Unlock()
+	if !csRunning {
+		verifier.logger.Info().Msg("Change stream not running, starting change stream")
+		verifier.StartChangeStream(ctx)
+	}
 
 	// Log out the verification status when initially booting up so it's easy to see the current state
 	verificationStatus, err := verifier.GetVerificationStatus()
@@ -900,6 +967,15 @@ func (verifier *Verifier) Verify() error {
 
 	waitForTaskCreation := 0
 	for {
+		select {
+		case err := <-verifier.changeStreamErrChan:
+			cancel()
+			return err
+		case <-ctx.Done():
+			cancel()
+			return nil
+		default:
+		}
 
 		verificationStatus, err := verifier.GetVerificationStatus()
 		if err != nil {
@@ -911,7 +987,7 @@ func (verifier *Verifier) Verify() error {
 		}
 
 		//wait for task to be created, if none of the tasks found.
-		if verificationStatus.addedTasks > 0 || verificationStatus.processingTasks > 0 || verificationStatus.retryTasks > 0 {
+		if verificationStatus.addedTasks > 0 || verificationStatus.processingTasks > 0 || verificationStatus.recheckTasks > 0 {
 			waitForTaskCreation++
 			time.Sleep(15 * time.Second)
 		} else {
@@ -922,6 +998,7 @@ func (verifier *Verifier) Verify() error {
 			break
 		}
 	}
+	verifier.logger.Info().Msg("Check finished")
 	return nil
 }
 

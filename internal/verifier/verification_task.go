@@ -60,18 +60,6 @@ type VerificationRange struct {
 	EndID      primitive.ObjectID `bson:"end_id"`
 }
 
-func InsertRetryVerificationTask(failedId interface{}, collection *mongo.Collection) (*VerificationTask, error) {
-	verificationTask := VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
-		Status:     verificationTaskAdded,
-		Type:       verificationTaskVerify,
-		FailedIDs:  []interface{}{failedId},
-		Attempts:   0,
-	}
-	_, err := collection.InsertOne(context.Background(), verificationTask)
-	return &verificationTask, err
-}
-
 func InsertPartitionVerificationTask(partition *partitions.Partition, dstNamespace string, collection *mongo.Collection) (*VerificationTask, error) {
 	srcNamespace := strings.Join([]string{partition.Ns.DB, partition.Ns.Coll}, ".")
 	verificationTask := VerificationTask{

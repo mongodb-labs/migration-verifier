@@ -86,7 +86,6 @@ func stopTestMongods() {
 }
 
 func startTestMongods(srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) error {
-	// stopTestMongods(srcMongoInstance, dstMongoInstance, metaMongoInstance)
 	stopTestMongods()
 	srcMongod, err := getMongod(srcMongoInstance)
 	if err != nil {
@@ -127,9 +126,12 @@ func startTestMongods(srcMongoInstance MongoInstance, dstMongoInstance MongoInst
 		return filepath.Join(filepath.Dir(target), "log")
 	}
 
-	metaCmd := exec.Command(metaMongod, "--port", metaMongoInstance.port, "--dbpath", metaDir, "--logpath", logpath(metaDir))
-	sourceCmd := exec.Command(srcMongod, "--port", srcMongoInstance.port, "--dbpath", sourceDir, "--logpath", logpath(sourceDir))
-	destCmd := exec.Command(dstMongod, "--port", dstMongoInstance.port, "--dbpath", destDir, "--logpath", logpath(destDir))
+	metaCmd := exec.Command(metaMongod, "--port", metaMongoInstance.port, "--dbpath", metaDir,
+		"--logpath", logpath(metaDir))
+	sourceCmd := exec.Command(srcMongod, "--port", srcMongoInstance.port, "--dbpath", sourceDir,
+		"--logpath", logpath(sourceDir))
+	destCmd := exec.Command(dstMongod, "--port", dstMongoInstance.port, "--dbpath", destDir,
+		"--logpath", logpath(destDir))
 
 	if err := metaCmd.Start(); err != nil {
 		return err
@@ -140,7 +142,6 @@ func startTestMongods(srcMongoInstance MongoInstance, dstMongoInstance MongoInst
 	if err := destCmd.Start(); err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -160,7 +161,7 @@ The link can be found at https://www.mongodb.com/try/download/community`)
 	defer mongoDownloadMutex.Unlock()
 	if _, err := os.Stat(mongoDBDir); os.IsNotExist(err) {
 		url := fmt.Sprintf("https://fastdl.mongodb.org/linux/%s.tgz", localMongoDistro)
-		println("Downloading binary from " + url)
+		fmt.Println("Downloading binary from " + url)
 		r, err := curl(url)
 		if err != nil {
 			return "", err
