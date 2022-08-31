@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // RunForUUIDAndTransientErrors retries f() for the CollectionUUIDMismatch error and for transient errors.
@@ -35,7 +36,7 @@ import (
 //
 // RunForUUIDAndTransientErrors always returns the collection's current name. It returns
 // an error if the duration limit is reached, or if f() returns a non-transient error.
-func (r Retryer) RunForUUIDAndTransientErrors(
+func (r *Retryer) RunForUUIDAndTransientErrors(
 	ctx context.Context, logger *logger.Logger, expectedCollName string, f func(*Info, string) error,
 ) (string, error) {
 	return r.runRetryLoop(ctx, logger, expectedCollName, f, true, true)
@@ -57,7 +58,7 @@ func (r Retryer) RunForUUIDAndTransientErrors(
 // of f() where a collection name is needed. The initial value of this string is expectedCollName.
 //
 // RunForUUIDErrorOnly returns the collection's current name in all cases.
-func (r Retryer) RunForUUIDErrorOnly(
+func (r *Retryer) RunForUUIDErrorOnly(
 	logger *logger.Logger, expectedCollName string, f func(*Info, string) error,
 ) (string, error) {
 	// Since we're not actually sleeping when checking for UUID/name mismatch
@@ -70,7 +71,7 @@ func (r Retryer) RunForUUIDErrorOnly(
 // does not check for UUID mismatch error.
 //
 // RunForUUIDErrorOnly returns the collection's current name if f() succeeds.
-func (r Retryer) RunForTransientErrorsOnly(
+func (r *Retryer) RunForTransientErrorsOnly(
 	ctx context.Context, logger *logger.Logger, f func(*Info) error,
 ) error {
 	wrapper := func(ri *Info, _ string) error {
@@ -94,7 +95,7 @@ func (r Retryer) RunForTransientErrorsOnly(
 // If we return an empty string on an error then we will break that second
 // call. Arguably, this sort of pattern should maybe be moved into the
 // retryer, but until it is we cannot change this function's return vals.
-func (r Retryer) runRetryLoop(
+func (r *Retryer) runRetryLoop(
 	ctx context.Context,
 	logger *logger.Logger,
 	expectedCollName string,
@@ -180,6 +181,15 @@ func (r Retryer) runRetryLoop(
 			continue
 		}
 
+		// If this is the first time we've come across a failure to parse
+		// collection UUID, try again with the UUID elided (if the caller used
+		// RequestWithUUID).
+		if r.retryOnUUIDNotSupported && !r.aggregateDisallowsUUIDs && util.IsFailedToParseError(err) && util.HasServerErrorMessage(err, "collectionUUID") {
+			logger.Info().Msg("Server version does not support UUIDs in 'aggregate' (< 5.0)")
+			r.aggregateDisallowsUUIDs = true
+			continue
+		}
+
 		// If f() returned a transient error, sleep and increase the sleep
 		// time for the next retry, maxing out at the maxSleepTime.
 		if r.shouldRetryWithSleep(logger, handleTransientErrors, sleepTime, err) {
@@ -229,7 +239,7 @@ func (r Retryer) runRetryLoop(
 // https://github.com/mongodb/mongo/blob/303071db10ec4e49c4fd7617d9f59828c47ee06e/jstests/replsets/noop_writes_wait_for_write_concern.js#L1-L6
 //
 
-func (r Retryer) shouldRetryWithSleep(
+func (r *Retryer) shouldRetryWithSleep(
 	logger *logger.Logger,
 	handleTransientErrors bool,
 	sleepTime time.Duration,
@@ -269,4 +279,14 @@ func (r Retryer) shouldRetryWithSleep(
 		Msg("Not retrying on error because it is not transient nor is it in our additional codes list.")
 
 	return false
+}
+
+// Use this method for aggregates which should take a UUID in new versions but not old ones.
+// Pass the request without the collectionUUID field in 'request'.
+// Currently, use only for 'aggregate'; 'find' always supports UUID.
+func (r *Retryer) RequestWithUUID(request bson.D, uuid util.UUID) bson.D {
+	if r.aggregateDisallowsUUIDs {
+		return request
+	}
+	return append(append(bson.D{}, request[0], bson.E{"collectionUUID", uuid}), request[1:]...)
 }

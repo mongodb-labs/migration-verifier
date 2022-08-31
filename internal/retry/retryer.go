@@ -7,9 +7,11 @@ import (
 // Retryer handles retrying operations that fail because of network and UUID
 // mismatch failures.
 type Retryer struct {
-	retryLimit           time.Duration
-	retryRandomly        bool
-	additionalErrorCodes []int
+	retryLimit              time.Duration
+	retryRandomly           bool
+	additionalErrorCodes    []int
+	retryOnUUIDNotSupported bool
+	aggregateDisallowsUUIDs bool
 }
 
 // New returns a new retryer.
@@ -37,4 +39,15 @@ func (r Retryer) WithErrorCodes(codes ...int) Retryer {
 		retryRandomly:        r.retryRandomly,
 		additionalErrorCodes: codes,
 	}
+}
+
+// Mongod versions older than 5.0 do not support collectionUUID in aggregate commands.  This method
+// will result in not using the UUID and instead using the collection name in those cases.  Be
+// warned that this will make the application vulnerable to inconsistencies due to collection
+// renames.
+//
+// See also RequestWithUUID in retry.go
+func (r Retryer) SetRetryOnUUIDNotSupported() Retryer {
+	r.retryOnUUIDNotSupported = true
+	return r
 }

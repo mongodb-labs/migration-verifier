@@ -76,6 +76,11 @@ func IsNoDocumentsError(err error) bool {
 	return err == mongo.ErrNoDocuments
 }
 
+// IsFailedToParseError returns true if this is a FailedToParseError.
+func IsFailedToParseError(err error) bool {
+	return GetErrorCode(err) == 9
+}
+
 // IsContextCanceledError returns true if this is a Context Canceled error.
 func IsContextCanceledError(err error) bool {
 	return strings.Contains(err.Error(), context.Canceled.Error())
@@ -327,6 +332,16 @@ func GetErrorCode(err error) int {
 	default:
 		return 0
 	}
+}
+
+// HasServerErrorMessage returns true if the error is a mongo ServerError and contains the specified
+// error message.
+func HasServerErrorMessage(err error, message string) bool {
+	serverErr, isServerErr := err.(mongo.ServerError)
+	if !isServerErr || serverErr == nil {
+		return false
+	}
+	return serverErr.HasErrorMessage(message)
 }
 
 // GetActualCollectionFromCollectionUUIDMismatchError returns the value of the `actualCollection`

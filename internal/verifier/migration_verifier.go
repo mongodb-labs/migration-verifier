@@ -382,7 +382,7 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 }
 
 func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace string) ([]*partitions.Partition, error) {
-	retryer := retry.New(retry.DefaultDurationLimit)
+	retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
 	logger := logger.NewLogger(verifier.logger, logger.DefaultLogWriter)
 	dbName, collName := SplitNamespace(namespace)
 	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, logger, retryer,

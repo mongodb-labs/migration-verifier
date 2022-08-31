@@ -226,9 +226,8 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer
 
 	currCollName, err := retryer.RunForUUIDAndTransientErrors(ctx, logger, collName, func(ri *retry.Info, collectionName string) error {
 		ri.Log(logger.Logger, "collStats", "source", srcDB.Name(), collectionName, "Retrieving collection size and document count.")
-		request := bson.D{
+		request := retryer.RequestWithUUID(bson.D{
 			{"aggregate", collectionName},
-			{"collectionUUID", collUUID},
 			{"readConcern", bson.D{{"level", "majority"}}},
 			{"pipeline", bson.A{
 				bson.D{{"$collStats", bson.D{
@@ -240,7 +239,7 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer
 				bson.D{{"$project", bson.D{{"ns", 1}, {"count", 1}, {"size", 1}, {"capped", 1}}}},
 			}},
 			{"cursor", bson.D{}},
-		}
+		}, collUUID)
 
 		cursor, driverErr := srcDB.RunCommandCursor(ctx, request)
 		if driverErr != nil {
@@ -313,9 +312,8 @@ func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer retr
 	currCollName, err := retryer.RunForUUIDAndTransientErrors(ctx, subLogger, collName, func(ri *retry.Info, collName string) error {
 		ri.Log(subLogger.Logger, "aggregate", "source", srcDB.Name(), collName, fmt.Sprintf("getting %s _id partition bound", minOrMaxBound))
 		cursor, cmdErr :=
-			srcDB.RunCommandCursor(ctx, bson.D{
+			srcDB.RunCommandCursor(ctx, retryer.RequestWithUUID(bson.D{
 				{"aggregate", collName},
-				{"collectionUUID", collUUID},
 				{"readConcern", bson.D{{"level", "majority"}}},
 				{"pipeline", bson.A{
 					bson.D{{"$sort", bson.D{{"_id", sortDirection}}}},
@@ -324,7 +322,7 @@ func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer retr
 				}},
 				{"hint", bson.D{{"_id", 1}}},
 				{"cursor", bson.D{}},
-			})
+			}, collUUID))
 
 		if cmdErr != nil {
 			return cmdErr
@@ -384,9 +382,8 @@ func getMidIDBounds(ctx context.Context, logger *logger.Logger, retryer retry.Re
 	currCollName, err := retryer.RunForUUIDAndTransientErrors(ctx, logger, collName, func(ri *retry.Info, collName string) error {
 		ri.Log(logger.Logger, "aggregate", "source", srcDB.Name(), collName, "Retrieving mid _id partition bounds using $sample.")
 		cursor, cmdErr :=
-			srcDB.RunCommandCursor(ctx, bson.D{
+			srcDB.RunCommandCursor(ctx, retryer.RequestWithUUID(bson.D{
 				{"aggregate", collName},
-				{"collectionUUID", collUUID},
 				{"pipeline", bson.A{
 					bson.D{{"$sample", bson.D{{"size", numDocsToSample}}}},
 					bson.D{{"$project", bson.D{{"_id", 1}}}},
@@ -398,7 +395,7 @@ func getMidIDBounds(ctx context.Context, logger *logger.Logger, retryer retry.Re
 				}},
 				{"allowDiskUse", true},
 				{"cursor", bson.D{}},
-			})
+			}, collUUID))
 
 		if cmdErr != nil {
 			return errors.Wrapf(cmdErr, "failed to $sample and $bucketAuto documents for source namespace '%s.%s', UUID %s", srcDB.Name(), collName, collUUID.String())
