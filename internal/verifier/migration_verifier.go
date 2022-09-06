@@ -23,6 +23,8 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
 const (
@@ -90,6 +92,8 @@ func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
 		AppName: &appName,
 	}
 	opts.ApplyURI(uri)
+	opts.SetReadConcern(readconcern.Majority())
+	opts.SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
 	return opts
 }
 
@@ -412,7 +416,7 @@ func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace
 	logger := logger.NewLogger(verifier.logger, logger.DefaultLogWriter)
 	dbName, collName := SplitNamespace(namespace)
 	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, logger, retryer,
-		verifier.srcClient.Database(dbName), collName)
+		verifier.srcClientDatabase(dbName), collName)
 	if err != nil {
 		return nil, err
 	}
@@ -804,22 +808,51 @@ func (verifier *Verifier) GetVerificationStatus() (*VerificationStatus, error) {
 	return &verificationStatus, nil
 }
 
+func (verifier *Verifier) verificationDatabase() *mongo.Database {
+	db := verifier.metaClient.Database(verifier.metaDBName)
+	if db.WriteConcern().GetW() != "majority" {
+		verifier.logger.Fatal().Msgf("Verification metadata is not using write concern majority: %+v", db.WriteConcern())
+	}
+	if db.ReadConcern().GetLevel() != "majority" {
+		verifier.logger.Fatal().Msgf("Verification metadata is not using read concern majority: %+v", db.ReadConcern())
+	}
+	return db
+}
+
 func (verifier *Verifier) verificationTaskCollection() *mongo.Collection {
-	return verifier.metaClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
+	return verifier.verificationDatabase().Collection(verificationTasksCollection)
 }
 
 func (verifier *Verifier) verificationRangeCollection() *mongo.Collection {
-	return verifier.metaClient.Database(verifier.metaDBName).Collection(verificationRangeCollection)
+	return verifier.verificationDatabase().Collection(verificationRangeCollection)
 }
 
 func (verifier *Verifier) refetchCollection() *mongo.Collection {
-	return verifier.metaClient.Database(verifier.metaDBName).Collection(refetch)
+	return verifier.verificationDatabase().Collection(refetch)
+}
+
+func (verifier *Verifier) srcClientDatabase(dbName string) *mongo.Database {
+	db := verifier.srcClient.Database(dbName)
+	// No need to check the write concern because we do not write to the source database.
+	if db.ReadConcern().GetLevel() != "majority" {
+		verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
+	}
+	return db
+}
+
+func (verifier *Verifier) dstClientDatabase(dbName string) *mongo.Database {
+	db := verifier.dstClient.Database(dbName)
+	// No need to check the write concern because we do not write to the target database.
+	if db.ReadConcern().GetLevel() != "majority" {
+		verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
+	}
+	return db
 }
 
 func (verifier *Verifier) srcClientCollection(task *VerificationTask) *mongo.Collection {
 	if task != nil {
 		dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
-		return verifier.srcClient.Database(dbName).Collection(collName)
+		return verifier.srcClientDatabase(dbName).Collection(collName)
 	}
 	return nil
 }
@@ -837,7 +870,7 @@ func (verifier *Verifier) dstClientCollection(task *VerificationTask) *mongo.Col
 
 func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mongo.Collection {
 	dbName, collName := SplitNamespace(namespace)
-	return verifier.dstClient.Database(dbName).Collection(collName)
+	return verifier.dstClientDatabase(dbName).Collection(collName)
 }
 
 func (verifier *Verifier) Verify() error {
@@ -978,12 +1011,12 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 	for i, n := range verifier.srcNamespaces {
 		srcDb, srcColl := SplitNamespace(n)
 		if srcDb != "" {
-			srcEst, _ := verifier.srcClient.Database(srcDb).Collection(srcColl).EstimatedDocumentCount(ctx)
+			srcEst, _ := verifier.srcClientDatabase(srcDb).Collection(srcColl).EstimatedDocumentCount(ctx)
 
 			n2 := verifier.dstNamespaces[i]
 			dstDb, dstColl := SplitNamespace(n2)
 			if dstDb != "" {
-				dstEst, _ := verifier.dstClient.Database(dstDb).Collection(dstColl).EstimatedDocumentCount(ctx)
+				dstEst, _ := verifier.dstClientDatabase(dstDb).Collection(dstColl).EstimatedDocumentCount(ctx)
 
 				table.Append([]string{strconv.FormatInt(srcEst, 10), srcDb, srcColl, strconv.FormatInt(dstEst, 10), dstDb, dstColl})
 				if srcEst != dstEst {
