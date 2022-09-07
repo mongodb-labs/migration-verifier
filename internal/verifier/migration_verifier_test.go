@@ -713,6 +713,101 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	}
 }
 
+func (suite *WithMongodsTestSuite) TestVerifierNamespaceList() {
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	ctx := context.Background()
+
+	// Collections on source only
+	err := suite.srcMongoClient.Database("testDb1").CreateCollection(ctx, "testColl1")
+	suite.Require().Nil(err)
+	err = suite.srcMongoClient.Database("testDb1").CreateCollection(ctx, "testColl2")
+	suite.Require().Nil(err)
+	err = verifier.setupAllNamespaceList(ctx)
+	suite.Require().Nil(err)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.srcNamespaces)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.dstNamespaces)
+
+	// Multiple DBs on source
+	err = suite.srcMongoClient.Database("testDb2").CreateCollection(ctx, "testColl3")
+	suite.Require().Nil(err)
+	err = suite.srcMongoClient.Database("testDb2").CreateCollection(ctx, "testColl4")
+	suite.Require().Nil(err)
+	err = verifier.setupAllNamespaceList(ctx)
+	suite.Require().Nil(err)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4"},
+		verifier.srcNamespaces)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4"},
+		verifier.dstNamespaces)
+
+	// Same namespaces on dest
+	err = suite.dstMongoClient.Database("testDb1").CreateCollection(ctx, "testColl1")
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb1").CreateCollection(ctx, "testColl2")
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb2").CreateCollection(ctx, "testColl3")
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb2").CreateCollection(ctx, "testColl4")
+	suite.Require().Nil(err)
+	err = verifier.setupAllNamespaceList(ctx)
+	suite.Require().Nil(err)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4"},
+		verifier.srcNamespaces)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4"},
+		verifier.dstNamespaces)
+
+	// Additional namespaces on dest
+	err = suite.dstMongoClient.Database("testDb3").CreateCollection(ctx, "testColl5")
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb4").CreateCollection(ctx, "testColl6")
+	suite.Require().Nil(err)
+	err = verifier.setupAllNamespaceList(ctx)
+	suite.Require().Nil(err)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
+		"testDb3.testColl5", "testDb4.testColl6"},
+		verifier.srcNamespaces)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
+		"testDb3.testColl5", "testDb4.testColl6"},
+		verifier.dstNamespaces)
+
+	err = suite.srcMongoClient.Database("testDb2").Drop(ctx)
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb2").Drop(ctx)
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb3").Drop(ctx)
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb4").Drop(ctx)
+	suite.Require().Nil(err)
+
+	// Views should not be found
+	pipeline := bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}
+	err = suite.srcMongoClient.Database("testDb1").CreateView(ctx, "testView1", "testColl1", pipeline)
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb1").CreateView(ctx, "testView1", "testColl1", pipeline)
+	suite.Require().Nil(err)
+	err = verifier.setupAllNamespaceList(ctx)
+	suite.Require().Nil(err)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.srcNamespaces)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.dstNamespaces)
+
+	// Collections in admin, config, and local should not be found
+	err = suite.srcMongoClient.Database("local").CreateCollection(ctx, "islocalSrc")
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "islocalDest")
+	suite.Require().Nil(err)
+	err = suite.srcMongoClient.Database("admin").CreateCollection(ctx, "isAdminSrc")
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("admin").CreateCollection(ctx, "isAdminDest")
+	suite.Require().Nil(err)
+	err = suite.srcMongoClient.Database("config").CreateCollection(ctx, "isConfigSrc")
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("config").CreateCollection(ctx, "isConfigDest")
+	suite.Require().Nil(err)
+	err = verifier.setupAllNamespaceList(ctx)
+	suite.Require().Nil(err)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.srcNamespaces)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.dstNamespaces)
+}
+
 // func getVerificationTasks(t *testing.T, verifier *Verifier) []VerificationTask {
 // 	ctx := context.Background()
 // 	cursor, err := verifier.verificationTaskCollection().Find(ctx, bson.D{})

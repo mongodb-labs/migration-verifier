@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/verifier"
+	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
@@ -29,6 +30,7 @@ const (
 	dstNamespace         = "dstNamespace"
 	metaDBName           = "metaDBName"
 	ignoreFieldOrder     = "ignoreFieldOrder"
+	verifyAll            = "verifyAll"
 )
 
 func main() {
@@ -99,6 +101,10 @@ func main() {
 			Name:  ignoreFieldOrder,
 			Usage: "Whether or not field order is ignored in documents",
 		},
+		&cli.BoolFlag{
+			Name:  verifyAll,
+			Usage: "If set, verify all user namespaces",
+		},
 	}
 	app := &cli.App{
 		Name:  "migration-verifier",
@@ -148,8 +154,15 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	v.SetSrcNamespaces(cCtx.StringSlice(srcNamespace))
-	v.SetDstNamespaces(cCtx.StringSlice(dstNamespace))
+	if cCtx.Bool(verifyAll) {
+		if len(cCtx.StringSlice(srcNamespace)) > 0 || len(cCtx.StringSlice(dstNamespace)) > 0 {
+			return nil, nil, nil, errors.Errorf("Setting both verifyAll and explicit namespaces is not supported")
+		}
+		v.SetVerifyAll(true)
+	} else {
+		v.SetSrcNamespaces(cCtx.StringSlice(srcNamespace))
+		v.SetDstNamespaces(cCtx.StringSlice(dstNamespace))
+	}
 	v.SetMetaDBName(cCtx.String(metaDBName))
 	v.SetIgnoreBSONFieldOrder(cCtx.Bool(ignoreFieldOrder))
 	return v, file, writer, nil

@@ -56,6 +56,7 @@ type Verifier struct {
 	comparisonRetryDelayMillis time.Duration
 	workerSleepDelayMillis     time.Duration
 	ignoreBSONFieldOrder       bool
+	verifyAll                  bool
 
 	logger *logger.Logger
 
@@ -192,6 +193,10 @@ func (verifier *Verifier) SetMetaDBName(arg string) {
 
 func (verifier *Verifier) SetIgnoreBSONFieldOrder(arg bool) {
 	verifier.ignoreBSONFieldOrder = arg
+}
+
+func (verifier *Verifier) SetVerifyAll(arg bool) {
+	verifier.verifyAll = arg
 }
 
 // DocumentStats gets various status (TODO clarify)
@@ -1002,18 +1007,48 @@ func (verifier *Verifier) Check(ctx context.Context) error {
 	return nil
 }
 
+func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {
+	// We want to check all user collections on both source and dest.
+	srcNamespaces, err := ListAllUserCollections(ctx, verifier.logger, verifier.srcClient, verifier.metaDBName)
+	if err != nil {
+		return err
+	}
+
+	dstNamespaces, err := ListAllUserCollections(ctx, verifier.logger, verifier.dstClient, verifier.metaDBName)
+	if err != nil {
+		return err
+	}
+
+	srcMap := map[string]bool{}
+	for _, ns := range srcNamespaces {
+		srcMap[ns] = true
+	}
+	for _, ns := range dstNamespaces {
+		if !srcMap[ns] {
+			srcNamespaces = append(srcNamespaces, ns)
+		}
+	}
+	verifier.logger.Info().Msgf("Namespaces to verify %+v", srcNamespaces)
+	// In verifyAll mode, we do not support collection renames, so src and dest lists are the same.
+	verifier.srcNamespaces = srcNamespaces
+	verifier.dstNamespaces = srcNamespaces
+	return nil
+}
+
 func (verifier *Verifier) CreateInitialTasks() error {
 	// If we don't know the src namespaces, we're definitely not the primary task.
-	if len(verifier.srcNamespaces) == 0 {
-		return nil
-	}
-	if len(verifier.dstNamespaces) == 0 {
-		verifier.dstNamespaces = verifier.srcNamespaces
-	}
-	if len(verifier.srcNamespaces) != len(verifier.dstNamespaces) {
-		err := errors.Errorf("Different number of source and destination namespaces")
-		verifier.logger.Error().Msgf("%s", err)
-		return err
+	if !verifier.verifyAll {
+		if len(verifier.srcNamespaces) == 0 {
+			return nil
+		}
+		if len(verifier.dstNamespaces) == 0 {
+			verifier.dstNamespaces = verifier.srcNamespaces
+		}
+		if len(verifier.srcNamespaces) != len(verifier.dstNamespaces) {
+			err := errors.Errorf("Different number of source and destination namespaces")
+			verifier.logger.Error().Msgf("%s", err)
+			return err
+		}
 	}
 	isPrimary, err := verifier.CheckIsPrimary()
 	if err != nil {
@@ -1021,6 +1056,12 @@ func (verifier *Verifier) CreateInitialTasks() error {
 	}
 	if !isPrimary {
 		return nil
+	}
+	if verifier.verifyAll {
+		err := verifier.setupAllNamespaceList(context.Background())
+		if err != nil {
+			return err
+		}
 	}
 	for i, src := range verifier.srcNamespaces {
 		dst := verifier.dstNamespaces[i]
@@ -1158,7 +1199,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 	fmt.Println()
 }
 
-func (verifier Verifier) getNamespaces(ctx context.Context, fieldName string) []string {
+func (verifier *Verifier) getNamespaces(ctx context.Context, fieldName string) []string {
 	var namespaces []string
 	ret, err := verifier.verificationTaskCollection().Distinct(ctx, fieldName, bson.D{})
 	if err != nil {
