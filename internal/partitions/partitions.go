@@ -248,17 +248,9 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer
 
 		defer cursor.Close(ctx)
 		if cursor.Next(ctx) {
-			err := cursor.Err()
-			if err != nil {
-				return err
-			}
-			var rawDoc bson.Raw
-			err = cursor.Decode(&rawDoc)
-			if err != nil {
+			if err := cursor.Decode(&value); err != nil {
 				return errors.Wrapf(err, "failed to decode $collStats response for source namespace %s.%s", srcDB.Name(), collName)
 			}
-			data := make(bson.Raw, len(rawDoc))
-			copy(data, rawDoc)
 		}
 		return nil
 	})
