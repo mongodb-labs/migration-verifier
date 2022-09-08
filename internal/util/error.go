@@ -337,7 +337,8 @@ func GetErrorCode(err error) int {
 // HasServerErrorMessage returns true if the error is a mongo ServerError and contains the specified
 // error message.
 func HasServerErrorMessage(err error, message string) bool {
-	serverErr, isServerErr := err.(mongo.ServerError)
+	cause := errors.Cause(err)
+	serverErr, isServerErr := cause.(mongo.ServerError)
 	if !isServerErr || serverErr == nil {
 		return false
 	}
