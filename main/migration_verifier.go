@@ -31,6 +31,10 @@ const (
 	metaDBName           = "metaDBName"
 	ignoreFieldOrder     = "ignoreFieldOrder"
 	verifyAll            = "verifyAll"
+	startClean           = "clean"
+	partitionSizeMB      = "partitionSizeMB"
+	checkOnly            = "checkOnly"
+	debugFlag            = "debug"
 )
 
 func main() {
@@ -105,6 +109,23 @@ func main() {
 			Name:  verifyAll,
 			Usage: "If set, verify all user namespaces",
 		},
+		&cli.BoolFlag{
+			Name:  startClean,
+			Usage: "If set, drop all previous verification metadata before starting",
+		},
+		&cli.Int64Flag{
+			Name:  partitionSizeMB,
+			Value: 0,
+			Usage: "`Megabytes` to use for a partition.  Change only for debugging. 0 means use partitioner default.",
+		},
+		&cli.BoolFlag{
+			Name:  debugFlag,
+			Usage: "Turn on debug logging",
+		},
+		&cli.BoolFlag{
+			Name:  checkOnly,
+			Usage: "Do not run the webserver or recheck, just run the check (for debugging)",
+		},
 	}
 	app := &cli.App{
 		Name:  "migration-verifier",
@@ -121,8 +142,15 @@ func main() {
 			if err != nil {
 				return err
 			}
-			verifier.StartChangeStream(ctx)
-			return verifier.StartServer()
+			if cCtx.Bool(debugFlag) {
+				zerolog.SetGlobalLevel(zerolog.DebugLevel)
+			}
+			if cCtx.Bool(checkOnly) {
+				return verifier.Check(ctx)
+			} else {
+				verifier.StartChangeStream(ctx)
+				return verifier.StartServer()
+			}
 		},
 	}
 
@@ -149,6 +177,8 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 	v.SetNumWorkers(cCtx.Int(numWorkers))
 	v.SetComparisonRetryDelayMillis(time.Duration(cCtx.Int64(comparisonRetryDelay)))
 	v.SetWorkerSleepDelayMillis(time.Duration(cCtx.Int64(workerSleepDelay)))
+	v.SetPartitionSizeMB(cCtx.Int64(partitionSizeMB))
+	v.SetStartClean(cCtx.Bool(startClean))
 	logPath := cCtx.String(logPath)
 	file, writer, err := v.SetLogger(logPath)
 	if err != nil {

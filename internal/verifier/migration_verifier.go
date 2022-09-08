@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/rand"
 	_ "net/http/pprof"
 	"os"
 	"path"
@@ -57,6 +58,8 @@ type Verifier struct {
 	workerSleepDelayMillis     time.Duration
 	ignoreBSONFieldOrder       bool
 	verifyAll                  bool
+	startClean                 bool
+	partitionSizeInBytes       int64
 
 	logger *logger.Logger
 
@@ -155,6 +158,10 @@ func (verifier *Verifier) SetWorkerSleepDelayMillis(arg time.Duration) {
 	verifier.workerSleepDelayMillis = arg
 }
 
+func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB int64) {
+	verifier.partitionSizeInBytes = partitionSizeMB * 1024 * 1024
+}
+
 func (verifier *Verifier) SetLogger(logPath string) (*os.File, *bufio.Writer, error) {
 	var file *os.File
 	var writer *bufio.Writer = nil
@@ -197,6 +204,10 @@ func (verifier *Verifier) SetIgnoreBSONFieldOrder(arg bool) {
 
 func (verifier *Verifier) SetVerifyAll(arg bool) {
 	verifier.verifyAll = arg
+}
+
+func (verifier *Verifier) SetStartClean(arg bool) {
+	verifier.startClean = arg
 }
 
 // DocumentStats gets various status (TODO clarify)
@@ -460,7 +471,8 @@ func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace
 	// one "replicator".
 	replicator1 := partitions.Replicator{ID: "verifier"}
 	replicators := []partitions.Replicator{replicator1}
-	partitionList, err := partitions.PartitionCollection(ctx, namespaceAndUUID, retryer, verifier.srcClient, replicators, verifier.logger)
+	partitionList, err := partitions.PartitionCollectionWithSize(
+		ctx, namespaceAndUUID, retryer, verifier.srcClient, replicators, verifier.logger, verifier.partitionSizeInBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -477,6 +489,26 @@ func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace
 	// Use "open" partitions, otherwise out-of-range keys on the destination might be missed
 	partitionList[0].Key.Lower = primitive.MinKey{}
 	partitionList[len(partitionList)-1].Upper = primitive.MaxKey{}
+	debugLog := verifier.logger.Debug()
+	if debugLog.Enabled() {
+		debugLog.Msgf("Partitions (%d):", len(partitionList))
+		for i, partition := range partitionList {
+			verifier.logger.Debug().Msgf("Partition %d: %+v -> %+v", i, partition.Key.Lower, partition.Upper)
+		}
+	}
+	rand.Shuffle(len(partitionList), func(i, j int) {
+		tmp := partitionList[i]
+		partitionList[i] = partitionList[j]
+		partitionList[j] = tmp
+	})
+	debugLog = verifier.logger.Debug()
+	if debugLog.Enabled() {
+		debugLog.Msgf("Shuffled Partitions (%d):", len(partitionList))
+		for i, partition := range partitionList {
+			verifier.logger.Debug().Msgf("Shuffled Partition %d: %+v -> %+v", i, partition.Key.Lower, partition.Upper)
+		}
+	}
+
 	return partitionList, nil
 }
 
@@ -933,6 +965,13 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 
 func (verifier *Verifier) Check(ctx context.Context) error {
 	var err error
+	if verifier.startClean {
+		verifier.logger.Info().Msg("Dropping old verifier metadata")
+		err = verifier.verificationDatabase().Drop(ctx)
+		if err != nil {
+			return err
+		}
+	}
 	verifier.logger.Info().Msg("Starting Check")
 
 	verifier.phase = Check

@@ -108,11 +108,27 @@ const (
 // then the partitions may look something like [1, 17], [17, 39], [39, 78], [78, 100]. For smaller
 // collections resulting in only one partition, the partition will be [1, 100].
 func PartitionCollection(ctx context.Context, uuidEntry *uuidutil.NamespaceAndUUID, retryer retry.Retryer, srcClient *mongo.Client, replicatorList []Replicator, subLogger *logger.Logger) ([]*Partition, error) {
-	return PartitionCollectionWithParameters(ctx, uuidEntry, retryer, srcClient, replicatorList, defaultSampleRate, defaultSampleMinNumDocs, defaultPartitionSizeInBytes, subLogger)
+	return PartitionCollectionWithParameters(ctx, uuidEntry, &retryer, srcClient, replicatorList, defaultSampleRate, defaultSampleMinNumDocs, defaultPartitionSizeInBytes, subLogger)
+}
+
+// PartitionCollectionWithSize allows the caller to choose a desired partition size, but not the internal parameters.
+// A partition size of 0 means to use the default.
+func PartitionCollectionWithSize(ctx context.Context, uuidEntry *uuidutil.NamespaceAndUUID, retryer retry.Retryer, srcClient *mongo.Client, replicatorList []Replicator, subLogger *logger.Logger, partitionSizeInBytes int64) ([]*Partition, error) {
+	if partitionSizeInBytes < 0 {
+		subLogger.Warn().Msgf("Partition size of %d bytes is not valid, using default %d.",
+			partitionSizeInBytes, defaultPartitionSizeInBytes)
+	}
+	if partitionSizeInBytes <= 0 {
+		partitionSizeInBytes = defaultPartitionSizeInBytes
+	}
+
+	return PartitionCollectionWithParameters(ctx, uuidEntry, &retryer, srcClient, replicatorList, defaultSampleRate, defaultSampleMinNumDocs, partitionSizeInBytes, subLogger)
 }
 
 // PartitionCollectionWithParameters is the implementation for PartitionCollection. It is only directly used in integration tests.
-func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.NamespaceAndUUID, retryer retry.Retryer, srcClient *mongo.Client, replicatorList []Replicator, sampleRate float64, sampleMinNumDocs int, partitionSizeInBytes int64, subLogger *logger.Logger) ([]*Partition, error) {
+func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.NamespaceAndUUID, retryer *retry.Retryer, srcClient *mongo.Client, replicatorList []Replicator, sampleRate float64, sampleMinNumDocs int, partitionSizeInBytes int64, subLogger *logger.Logger) ([]*Partition, error) {
+	subLogger.Debug().Msgf("Partitioning %s.%s with sampleRate %f, sampleMinNumDocs %d, desired partitionSizeInBytes %d",
+		uuidEntry.DBName, uuidEntry.CollName, sampleRate, sampleMinNumDocs, partitionSizeInBytes)
 	// Get the source collection.
 	srcDB := srcClient.Database(uuidEntry.DBName)
 	srcColl := srcDB.Collection(uuidEntry.CollName)
@@ -132,6 +148,9 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.
 	if minIDBound == nil {
 		subLogger.Info().Msgf("No minimum _id found for collection %s.%s; will not perform collection copy for this collection.", uuidEntry.DBName, uuidEntry.CollName)
 		return nil, nil
+	} else {
+		subLogger.Debug().Msgf("Minimum _id for collection %s.%s: %v",
+			uuidEntry.DBName, uuidEntry.CollName, minIDBound)
 	}
 
 	// The upper bound for the collection. There is no partitioning to do if the bound is nil.
@@ -142,6 +161,9 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.
 	if maxIDBound == nil {
 		subLogger.Info().Msgf("No maximum _id found for collection %s.%s; will not perform collection copy for this collection.", uuidEntry.DBName, uuidEntry.CollName)
 		return nil, nil
+	} else {
+		subLogger.Debug().Msgf("Maximum _id for collection %s.%s: %v",
+			uuidEntry.DBName, uuidEntry.CollName, maxIDBound)
 	}
 
 	// The total number of partitions needed for the collection. If it is a capped collection, we
@@ -214,7 +236,7 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.
 // capped status, in that order.
 //
 // Exported for usage in integration tests.
-func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer retry.Retryer, srcColl *mongo.Collection, collUUID util.UUID) (int64, int64, bool, error) {
+func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer *retry.Retryer, srcColl *mongo.Collection, collUUID util.UUID) (int64, int64, bool, error) {
 	srcDB := srcColl.Database()
 	collName := srcColl.Name()
 
@@ -274,6 +296,9 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer
 		return 0, 0, false, nil
 	}
 
+	logger.Debug().Msgf("Collection %s.%s size: %d, document count: %d, capped: %v",
+		srcDB.Name(), currCollName, value.Size, value.Count, value.Capped)
+
 	return value.Size, value.Count, value.Capped, nil
 }
 
@@ -295,7 +320,7 @@ func getNumPartitions(collSizeInBytes, partitionSizeInBytes int64) int {
 }
 
 // getOuterIDBound returns either the smallest or largest _id value in a collection. The minOrMaxBound parameter can be set to "min" or "max" to get either, respectively.
-func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer retry.Retryer, minOrMaxBound minOrMaxBound, srcDB *mongo.Database, collName string, collUUID util.UUID) (interface{}, error) {
+func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer *retry.Retryer, minOrMaxBound minOrMaxBound, srcDB *mongo.Database, collName string, collUUID util.UUID) (interface{}, error) {
 	// Choose a sort direction based on the minOrMaxBound.
 	var sortDirection int
 	switch minOrMaxBound {
@@ -356,7 +381,7 @@ func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer retr
 // The number of bounds returned is: numPartitions - 1.
 //
 // A nil slice is returned if the collDocCount doesn't meet the sampleMinNumDocs, or if the numPartitions is less than 2.
-func getMidIDBounds(ctx context.Context, logger *logger.Logger, retryer retry.Retryer, srcDB *mongo.Database, collName string, collUUID util.UUID, collDocCount int64, numPartitions, sampleMinNumDocs int, sampleRate float64) ([]interface{}, bool, error) {
+func getMidIDBounds(ctx context.Context, logger *logger.Logger, retryer *retry.Retryer, srcDB *mongo.Database, collName string, collUUID util.UUID, collDocCount int64, numPartitions, sampleMinNumDocs int, sampleRate float64) ([]interface{}, bool, error) {
 	// We entirely avoid sampling for mid bounds if we don't meet the criteria for the number of documents or partitions.
 	if collDocCount < int64(sampleMinNumDocs) || numPartitions < 2 {
 		return nil, false, nil
