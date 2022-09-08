@@ -3,12 +3,16 @@ package main
 import (
 	"bufio"
 	"context"
+	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/verifier"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog/pkgerrors"
 	"github.com/urfave/cli"
 )
 
@@ -19,15 +23,21 @@ const (
 	numWorkers           = "numWorkers"
 	comparisonRetryDelay = "comparisonRetryDelay"
 	workerSleepDelay     = "workerSleepDelay"
+	serverPort           = "serverPort"
 	logPath              = "logPath"
-	srcNamespaces        = "srcNamespaces"
-	dstNamespaces        = "dstNamespaces"
+	srcNamespace         = "srcNamespace"
+	dstNamespace         = "dstNamespace"
 	metaDBName           = "metaDBName"
 	ignoreFieldOrder     = "ignoreFieldOrder"
 )
 
 func main() {
+	go func() {
+		fmt.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
+
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	ctx := context.TODO()
 
@@ -46,6 +56,11 @@ func main() {
 			Name:  metaURI,
 			Value: "mongodb://localhost:27019",
 			Usage: "host `URI` for storing migration verification metadata",
+		},
+		&cli.IntFlag{
+			Name:  serverPort,
+			Value: 27020,
+			Usage: "`port` for the control web server",
 		},
 		&cli.StringFlag{
 			Name:  logPath,
@@ -68,11 +83,11 @@ func main() {
 			Usage: "`milliseconds` workers sleep while waiting for work",
 		},
 		&cli.StringSliceFlag{
-			Name:  srcNamespaces,
+			Name:  srcNamespace,
 			Usage: "source `namespaces` to check",
 		},
 		&cli.StringSliceFlag{
-			Name:  dstNamespaces,
+			Name:  dstNamespace,
 			Usage: "destination `namespaces` to check",
 		},
 		&cli.StringFlag{
@@ -100,12 +115,13 @@ func main() {
 			if err != nil {
 				return err
 			}
-			return verifier.Verify()
+			verifier.StartChangeStream(ctx)
+			return verifier.StartServer()
 		},
 	}
 
 	if err := app.Run(os.Args); err != nil {
-		log.Fatal().Err(err).Msg("Migration Verifier failed")
+		log.Fatal().Err(err).Stack().Msg("Fatal Error")
 	}
 }
 
@@ -123,6 +139,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	v.SetServerPort(cCtx.Int(serverPort))
 	v.SetNumWorkers(cCtx.Int(numWorkers))
 	v.SetComparisonRetryDelayMillis(time.Duration(cCtx.Int64(comparisonRetryDelay)))
 	v.SetWorkerSleepDelayMillis(time.Duration(cCtx.Int64(workerSleepDelay)))
@@ -131,8 +148,8 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	v.SetSrcNamespaces(cCtx.StringSlice(srcNamespaces))
-	v.SetDstNamespaces(cCtx.StringSlice(dstNamespaces))
+	v.SetSrcNamespaces(cCtx.StringSlice(srcNamespace))
+	v.SetDstNamespaces(cCtx.StringSlice(dstNamespace))
 	v.SetMetaDBName(cCtx.String(metaDBName))
 	v.SetIgnoreBSONFieldOrder(cCtx.Bool(ignoreFieldOrder))
 	return v, file, writer, nil

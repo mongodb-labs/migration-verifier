@@ -8,6 +8,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"reflect"
 	"regexp"
@@ -100,7 +101,6 @@ func mapKeysAsInterface(myMap interface{}) (result []interface{}) {
 }
 
 func (suite *WithMongodsTestSuite) TestVerifierFetchDocuments() {
-	// This test is a stub.
 
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
@@ -133,9 +133,118 @@ func (suite *WithMongodsTestSuite) TestVerifierFetchDocuments() {
 	rawType, rawIdBytes, err := bson.MarshalValue(id)
 	suite.Require().Nil(err)
 	rawId := bson.RawValue{Type: rawType, Value: rawIdBytes}
+	stringId := RawToString(rawId)
 
-	suite.ElementsMatch(mapKeysAsInterface(srcDocumentMap), []interface{}{rawId.String()})
-	suite.ElementsMatch(mapKeysAsInterface(dstDocumentMap), []interface{}{rawId.String()})
+	suite.ElementsMatch(mapKeysAsInterface(srcDocumentMap), []interface{}{stringId})
+	suite.ElementsMatch(mapKeysAsInterface(dstDocumentMap), []interface{}{stringId})
+}
+
+func TestRecheckQueue(t *testing.T) {
+	srcVersions := []string{"6.0.1"}
+	destVersions := []string{"6.0.1"}
+	metaVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
+	portOffset := 27001
+	testCnt := 0
+	for _, srcVersion := range srcVersions {
+		for _, destVersion := range destVersions {
+			for _, metaVersion := range metaVersions {
+				testName := srcVersion + "->" + destVersion + ":" + metaVersion
+				t.Run(testName, func(t *testing.T) {
+					// TODO: this should be able to be run in parallel but we run killall mongod in the start of each of these test cases
+					// For now we are going to leave killall in because the tests don't take long and adding the killall makes them very safe
+					// t.Parallel()
+					metaMongoInstance := MongoInstance{
+						version: metaVersion,
+						port:    strconv.Itoa(portOffset + (testCnt * 3)),
+						dir:     "meta" + strconv.Itoa(testCnt),
+					}
+					srcMongoInstance := MongoInstance{
+						version: srcVersion,
+						port:    strconv.Itoa(portOffset + (testCnt * 3) + 1),
+						dir:     "source" + strconv.Itoa(testCnt),
+					}
+					dstMongoInstance := MongoInstance{
+						version: destVersion,
+						port:    strconv.Itoa(portOffset + (testCnt * 3) + 2),
+						dir:     "dest" + strconv.Itoa(testCnt),
+					}
+
+					testCnt++
+					testRecheckQueue(t, srcMongoInstance, dstMongoInstance, metaMongoInstance)
+				})
+			}
+		}
+	}
+}
+
+func testRecheckQueue(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) {
+	ctx := context.Background()
+	err := startTestMongods(srcMongoInstance, dstMongoInstance, metaMongoInstance)
+	require.Nil(t, err)
+	defer stopTestMongods()
+	verifier := buildVerifier(t, srcMongoInstance, dstMongoInstance, metaMongoInstance)
+	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar", 42)
+	require.Nil(t, err)
+	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar", 43)
+	require.Nil(t, err)
+	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar", 44)
+	require.Nil(t, err)
+	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar2", 42)
+	require.Nil(t, err)
+	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar", 44)
+	require.Nil(t, err)
+	event := ParsedEvent{
+		DocKey: DocKey{ID: int32(55)},
+		OpType: "delete",
+		Ns: &Namespace{
+			DB:   "foo",
+			Coll: "bar2",
+		},
+	}
+	err = verifier.HandleChangeStreamEvent(&event)
+	require.Nil(t, err)
+	event.OpType = "insert"
+	err = verifier.HandleChangeStreamEvent(&event)
+	require.Nil(t, err)
+	event.OpType = "replace"
+	err = verifier.HandleChangeStreamEvent(&event)
+	require.Nil(t, err)
+	event.OpType = "update"
+	err = verifier.HandleChangeStreamEvent(&event)
+	require.Nil(t, err)
+	event.OpType = "flibbity"
+	err = verifier.HandleChangeStreamEvent(&event)
+	require.Equal(t, fmt.Errorf(`Not supporting: "flibbity" events`), err)
+
+	cur, err := verifier.GetRecheckDocs(ctx)
+	require.Nil(t, err)
+	var recheck RecheckAggregate
+	more := cur.Next(ctx)
+	require.True(t, more)
+	err = cur.Decode(&recheck)
+	expected := RecheckAggregate{
+		ID: Namespace{
+			DB:   "foo",
+			Coll: "bar",
+		},
+		Ids: []interface{}{int32(42), int32(43), int32(44)},
+	}
+	require.Equal(t, expected, recheck)
+
+	more = cur.Next(ctx)
+	require.True(t, more)
+	err = cur.Decode(&recheck)
+	expected = RecheckAggregate{
+		ID: Namespace{
+			DB:   "foo",
+			Coll: "bar2",
+		},
+		Ids: []interface{}{int32(42), int32(55)},
+	}
+	require.Equal(t, expected, recheck)
+
+	more = cur.Next(ctx)
+	require.False(t, more)
 }
 
 func TestVerifierCompareDocs(t *testing.T) {

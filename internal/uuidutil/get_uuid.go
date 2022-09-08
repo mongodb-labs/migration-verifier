@@ -2,6 +2,7 @@ package uuidutil
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
@@ -57,6 +58,8 @@ func GetCollectionUUID(ctx context.Context, logger *logger.Logger, retryer retry
 	}
 
 	if len(collSpecs) != 1 {
+		fmt.Println("!!!")
+		fmt.Println(collName)
 		return nil, errors.Errorf("number of matching collections should be 1")
 	}
 
