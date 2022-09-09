@@ -99,6 +99,8 @@ func (p *Partition) lowerBoundFromCurrent(current bson.Raw) (interface{}, error)
 // all other collections, the collection will be sorted by the `_id` field. The `lowerBound`
 // argument will determine the starting point for the find. If it is `nil`, then the value of
 // `p.Key.Lower`.
+//
+// This always constructs a non-type-bracketed find command.
 func (p *Partition) FindCmd(
 	// TODO (REP-1281)
 	logger *logger.Logger,
@@ -124,7 +126,7 @@ func (p *Partition) FindCmd(
 	if len(batchSize) > 0 {
 		findCmd = append(findCmd, bson.E{"batchSize", batchSize[0]})
 	}
-	findOptions := p.GetFindOptions()
+	findOptions := p.GetFindOptions(nil)
 	findCmd = append(findCmd, findOptions...)
 
 	return findCmd
@@ -133,7 +135,8 @@ func (p *Partition) FindCmd(
 // GetFindOptions returns only the options necessary to do a find on any given collection with this
 // partition. It is intended to allow the same partitioning to be used on different collections
 // (e.g. use the partitions on the source to read the destination for verification)
-func (p *Partition) GetFindOptions() bson.D {
+// If the passed-in buildinfo indicates a mongodb version < 5.0, type bracketing is not used.
+func (p *Partition) GetFindOptions(buildInfo *bson.M) bson.D {
 	if p == nil {
 		return bson.D{}
 	}
@@ -146,7 +149,27 @@ func (p *Partition) GetFindOptions() bson.D {
 	} else {
 		// For non-capped collections, the cursor should use the ID filter and the _id index.
 		// Get the bounded query filter from the partition to be used in the Find command.
-		filter := p.filter()
+		allowTypeBracketing := false
+		if buildInfo != nil {
+			allowTypeBracketing = true
+			versionArray, ok := (*buildInfo)["versionArray"].(bson.A)
+			//bson values are int32 or int64, never int.
+			if ok {
+				majorVersion, ok := versionArray[0].(int32)
+				if ok {
+					allowTypeBracketing = majorVersion < 5
+				} else {
+					majorVersion64, _ := versionArray[0].(int64)
+					allowTypeBracketing = majorVersion64 < 5
+				}
+			}
+		}
+		var filter bson.D
+		if !allowTypeBracketing {
+			filter = p.filterWithNoTypeBracketing()
+		} else {
+			filter = p.filterWithTypeBracketing()
+		}
 		boundedQueryFilter := bson.E{"filter", filter}
 		findOptions = append(findOptions, boundedQueryFilter)
 
@@ -156,9 +179,10 @@ func (p *Partition) GetFindOptions() bson.D {
 	return findOptions
 }
 
-// filter returns a range filter on _id to be used in a Find query for the
-// partition.
-func (p *Partition) filter() bson.D {
+// filterWithNoTypeBracketing returns a range filter on _id to be used in a Find query for the
+// partition.  This filter will properly handle mixed-type _ids, but on server versions
+// < 5.0, will not use indexes and thus will be very slow
+func (p *Partition) filterWithNoTypeBracketing() bson.D {
 	// We use $expr to avoid type bracketing and allow comparison of different _id types,
 	// and $literal to avoid MQL injection from an _id's value.
 	return bson.D{{"$and", bson.A{
@@ -176,5 +200,17 @@ func (p *Partition) filter() bson.D {
 				bson.D{{"$literal", p.Upper}},
 			}},
 		}}},
+	}}}
+}
+
+// filterWithTypeBracketing returns a range filter on _id to be used in a Find query for the
+// partition.  This filter will not properly handle mixed-type _ids -- if the upper and lower
+// bounds are of different types (except minkey/maxkey), nothing will be returned.
+func (p *Partition) filterWithTypeBracketing() bson.D {
+	return bson.D{{"$and", bson.A{
+		// All _id values >= lower bound.
+		bson.D{{"_id", bson.D{{"$gte", p.Key.Lower}}}},
+		// All _id values <= upper bound.
+		bson.D{{"_id", bson.D{{"$lte", p.Upper}}}},
 	}}}
 }

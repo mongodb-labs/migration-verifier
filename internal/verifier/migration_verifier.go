@@ -47,12 +47,14 @@ const (
 
 // Verifier is the main state for the migration verifier
 type Verifier struct {
-	phase      string
-	port       int
-	metaClient *mongo.Client
-	srcClient  *mongo.Client
-	dstClient  *mongo.Client
-	numWorkers int
+	phase        string
+	port         int
+	metaClient   *mongo.Client
+	srcClient    *mongo.Client
+	dstClient    *mongo.Client
+	srcBuildInfo *bson.M
+	dstBuildInfo *bson.M
+	numWorkers   int
 
 	comparisonRetryDelayMillis time.Duration
 	workerSleepDelayMillis     time.Duration
@@ -132,6 +134,10 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 	opts := verifier.getClientOpts(uri)
 	var err error
 	verifier.srcClient, err = mongo.Connect(ctx, opts)
+	if err != nil {
+		return err
+	}
+	verifier.srcBuildInfo, err = getBuildInfo(ctx, verifier.srcClient)
 	return err
 }
 
@@ -139,6 +145,10 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 	opts := verifier.getClientOpts(uri)
 	var err error
 	verifier.dstClient, err = mongo.Connect(ctx, opts)
+	if err != nil {
+		return err
+	}
+	verifier.dstBuildInfo, err = getBuildInfo(ctx, verifier.dstClient)
 	return err
 }
 
@@ -227,7 +237,7 @@ func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []strin
 	fmt.Println()
 }
 
-func (verifier *Verifier) getDocuments(collection *mongo.Collection, task *VerificationTask) (map[interface{}]bson.Raw, error) {
+func (verifier *Verifier) getDocuments(collection *mongo.Collection, buildInfo *bson.M, task *VerificationTask) (map[interface{}]bson.Raw, error) {
 	var findOptions bson.D
 	if len(task.FailedIDs) > 0 {
 		filter := bson.D{
@@ -250,7 +260,7 @@ func (verifier *Verifier) getDocuments(collection *mongo.Collection, task *Verif
 			bson.E{"filter", filter},
 		}
 	} else {
-		findOptions = task.QueryFilter.Partition.GetFindOptions()
+		findOptions = task.QueryFilter.Partition.GetFindOptions(buildInfo)
 	}
 	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
 	verifier.logger.Debug().Msgf("getDocuments findCmd: %s", findCmd)
@@ -298,12 +308,12 @@ func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]Ve
 
 // This is split out to allow unit testing of fetching separate from comparison.
 func (verifier *Verifier) fetchDocuments(task *VerificationTask) (map[interface{}]bson.Raw, map[interface{}]bson.Raw, error) {
-	srcClientMap, err := verifier.getDocuments(verifier.srcClientCollection(task), task)
+	srcClientMap, err := verifier.getDocuments(verifier.srcClientCollection(task), verifier.srcBuildInfo, task)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	dstClientMap, err := verifier.getDocuments(verifier.dstClientCollection(task), task)
+	dstClientMap, err := verifier.getDocuments(verifier.dstClientCollection(task), verifier.dstBuildInfo, task)
 
 	if err != nil {
 		return nil, nil, err
@@ -1291,4 +1301,18 @@ func (verifier *Verifier) getNamespaces(ctx context.Context, fieldName string) [
 		namespaces = append(namespaces, v.(string))
 	}
 	return namespaces
+}
+
+func getBuildInfo(ctx context.Context, client *mongo.Client) (*bson.M, error) {
+	commandResult := client.Database("admin").RunCommand(ctx, bson.D{{"buildinfo", 1}})
+	if commandResult.Err() != nil {
+		return nil, commandResult.Err()
+	}
+	var buildInfo bson.D
+	err := commandResult.Decode(&buildInfo)
+	if err != nil {
+		return nil, err
+	}
+	buildInfoMap := buildInfo.Map()
+	return &buildInfoMap, nil
 }
