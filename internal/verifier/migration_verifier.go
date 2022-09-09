@@ -423,17 +423,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTask) {
 	verifier.logger.Info().Msgf("[Worker %d] Processing verify task", workerNum)
 
-	// TODO: refactor the below to just add the mismatches when they occur. Rather
-	// splitting the Namespace in two places. This is left this way for now to
-	// ease conflicts in PR merging.
-	dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
 	mismatches, err := verifier.FetchAndCompareDocuments(task)
-	for _, v := range mismatches {
-		err := verifier.InsertFailedCompareRecheckDoc(dbName, collName, v.ID)
-		if err != nil {
-			verifier.logger.Error().Msgf("[Worker %d] Error inserting docmument mismatch into Recheck queue: %+v", workerNum, err)
-		}
-	}
 
 	if err != nil {
 		task.Status = verificationTaskFailed
@@ -443,6 +433,13 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 	} else {
 		task.Status = verificationTaskFailed
 		verifier.logger.Error().Msgf("[Worker %d] Verification Task %+v failed during Check, may pass Recheck", workerNum, task.PrimaryKey)
+		dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
+		for _, v := range mismatches {
+			err := verifier.InsertFailedCompareRecheckDoc(dbName, collName, v.ID)
+			if err != nil {
+				verifier.logger.Error().Msgf("[Worker %d] Error inserting docmument mismatch into Recheck queue: %+v", workerNum, err)
+			}
+		}
 	}
 
 	err = verifier.UpdateVerificationTask(task)
