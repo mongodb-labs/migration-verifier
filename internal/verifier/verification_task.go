@@ -43,9 +43,6 @@ type VerificationTask struct {
 	PrimaryKey  interface{}          `bson:"_id"`
 	Ids         []interface{}        `bson:"_ids"`
 	ID          int                  `bson:"id"`
-	FailedIDs   []interface{}        `bson:"failed_ids"`
-	Attempts    int                  `bson:"attempts"`
-	RetryAfter  time.Time            `bson:"retry_after"`
 	Status      string               `bson:"status"`
 	Type        string               `bson:"type"`
 	ParentID    interface{}          `bson:"parent_id"`
@@ -71,7 +68,6 @@ func InsertPartitionVerificationTask(partition *partitions.Partition, dstNamespa
 			Namespace: srcNamespace,
 			To:        dstNamespace,
 		},
-		Attempts: 0,
 	}
 	_, err := collection.InsertOne(context.Background(), verificationTask)
 	return &verificationTask, err
@@ -96,13 +92,7 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate() (*VerificationTask, erro
 	filter := bson.M{
 		"$and": bson.A{
 			bson.M{"type": bson.M{"$in": bson.A{verificationTaskVerify, verificationTaskVerifyCollection}}},
-			bson.M{"$or": bson.A{
-				bson.M{"status": verificationTaskAdded},
-				bson.M{"$and": bson.A{
-					bson.M{"status": verificationTasksRetry},
-					bson.M{"retry_after": bson.M{"$lte": primitive.NewDateTimeFromTime(time.Now())}},
-				}},
-			}},
+			bson.M{"status": verificationTaskAdded},
 		},
 	}
 
@@ -119,9 +109,6 @@ func (verifier *Verifier) UpdateVerificationTask(task *VerificationTask) error {
 	updateFields := bson.M{
 		"$set": bson.M{
 			"status":      task.Status,
-			"attempts":    task.Attempts,
-			"failed_ids":  task.FailedIDs,
-			"retry_after": task.RetryAfter,
 			"failed_docs": task.FailedDocs,
 		},
 	}
