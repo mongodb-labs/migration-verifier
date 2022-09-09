@@ -261,8 +261,11 @@ func (verifier *Verifier) getDocuments(collection *mongo.Collection, task *Verif
 	if err != nil {
 		return nil, err
 	}
+	var bytesReturned int64
+	bytesReturned, nDocumentsReturned := 0, 0
 	documentMap := make(map[interface{}]bson.Raw)
 	for cursor.Next(ctx) {
+		nDocumentsReturned++
 		err := cursor.Err()
 		if err != nil {
 			return nil, err
@@ -272,6 +275,7 @@ func (verifier *Verifier) getDocuments(collection *mongo.Collection, task *Verif
 		if err != nil {
 			return nil, err
 		}
+		bytesReturned += (int64)(len(rawDoc))
 		data := make(bson.Raw, len(rawDoc))
 		copy(data, rawDoc)
 		idRaw := data.Lookup("_id")
@@ -279,6 +283,7 @@ func (verifier *Verifier) getDocuments(collection *mongo.Collection, task *Verif
 
 		documentMap[idString] = data
 	}
+	verifier.logger.Debug().Msgf("Find returned %d documents containing %d bytes", nDocumentsReturned, bytesReturned)
 
 	return documentMap, nil
 }
@@ -459,14 +464,52 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 	}
 }
 
+func (verifier *Verifier) logShardingInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) {
+	debugMsg := verifier.logger.Debug()
+	if !debugMsg.Enabled() {
+		return
+	}
+	debugMsg.Discard()
+
+	uuid := namespaceAndUUID.UUID
+	namespace := namespaceAndUUID.DBName + "." + namespaceAndUUID.CollName
+	configChunkColl := verifier.srcClientDatabase("config").Collection("chunks")
+	cursor, err := configChunkColl.Find(ctx, bson.D{{"uuid", uuid}})
+	if err != nil {
+		verifier.logger.Debug().Msgf("Unable to read sharding info for %s: %v", namespace, err)
+		return
+	}
+	defer cursor.Close(ctx)
+	printHeader := true
+	for cursor.Next(ctx) {
+		if printHeader {
+			verifier.logger.Debug().Msgf("Collection %s is sharded", namespace)
+			printHeader = false
+		}
+		var result bson.D
+		if err = cursor.Decode(&result); err != nil {
+			verifier.logger.Debug().Msgf("Error decoding sharding info for %s: %v", namespace, err)
+			return
+		}
+		resultMap := result.Map()
+		verifier.logger.Debug().Msgf(" Chunk of %s on %v, range %v to %v", namespace, resultMap["shard"],
+			resultMap["min"], resultMap["max"])
+	}
+	if err = cursor.Err(); err != nil {
+		verifier.logger.Debug().Msgf("Error reading sharding info for %s: %v", namespace, err)
+	}
+}
+
 func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace string) ([]*partitions.Partition, error) {
 	retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
 	dbName, collName := SplitNamespace(namespace)
 	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, verifier.logger, retryer,
-		verifier.srcClient.Database(dbName), collName)
+		verifier.srcClientDatabase(dbName), collName)
 	if err != nil {
 		return nil, err
 	}
+	verifier.logShardingInfo(ctx, namespaceAndUUID)
+
 	// The partitioner doles out ranges to replicators; we don't use that functionality so we just pass
 	// one "replicator".
 	replicator1 := partitions.Replicator{ID: "verifier"}
