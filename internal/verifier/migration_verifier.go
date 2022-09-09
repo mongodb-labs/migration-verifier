@@ -1037,7 +1037,15 @@ func (verifier *Verifier) Check(ctx context.Context) error {
 	verifier.changeStreamMux.Unlock()
 	if !csRunning {
 		verifier.logger.Info().Msg("Change stream not running, starting change stream")
-		verifier.StartChangeStream(ctx)
+		startAtTs, err := GetLastOpTimeAndSyncShardClusterTime(ctx,
+			verifier.logger,
+			retry.New(20*time.Second),
+			verifier.srcClient,
+			true)
+		if err != nil {
+			return err
+		}
+		verifier.StartChangeStream(ctx, startAtTs)
 	}
 
 	// Log out the verification status when initially booting up so it's easy to see the current state
