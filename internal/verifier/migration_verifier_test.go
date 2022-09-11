@@ -222,6 +222,7 @@ func testRecheckQueue(t *testing.T, srcMongoInstance MongoInstance, dstMongoInst
 	more := cur.Next(ctx)
 	require.True(t, more)
 	err = cur.Decode(&recheck)
+	require.Nil(t, err)
 	expected := RecheckAggregate{
 		ID: Namespace{
 			DB:   "foo",
@@ -234,6 +235,7 @@ func testRecheckQueue(t *testing.T, srcMongoInstance MongoInstance, dstMongoInst
 	more = cur.Next(ctx)
 	require.True(t, more)
 	err = cur.Decode(&recheck)
+	require.Nil(t, err)
 	expected = RecheckAggregate{
 		ID: Namespace{
 			DB:   "foo",

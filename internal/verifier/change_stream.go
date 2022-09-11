@@ -84,7 +84,11 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *prim
 				if err := cs.Decode(&changeEvent); err != nil {
 					verifier.logger.Fatal().Err(err).Msg("")
 				}
-				verifier.HandleChangeStreamEvent(&changeEvent)
+				err := verifier.HandleChangeStreamEvent(&changeEvent)
+				if err != nil {
+					verifier.changeStreamErrChan <- err
+					return
+				}
 			}
 		}
 	}
