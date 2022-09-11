@@ -145,9 +145,6 @@ func GetLastOpTimeAndSyncShardClusterTime(
 			"failed to issue appendOplogNote command on source cluster")
 	}
 
-	fmt.Println("!!!")
-	fmt.Println(response)
-	fmt.Println("~~~")
 	// Get the `operationTime` from the response and return it.
 	rawOperationTime, err := response.LookupErr("operationTime")
 	if err != nil {
