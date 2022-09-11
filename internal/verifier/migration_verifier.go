@@ -78,13 +78,13 @@ type Verifier struct {
 
 // VerificationStatus holds the Verification Status
 type VerificationStatus struct {
-	totalTasks            int `json:"totalTasks"`
-	addedTasks            int `json:"addedTasks"`
-	processingTasks       int `json:"processingTasks"`
-	failedTasks           int `json:"failedTasks"`
-	completedTasks        int `json:"completedTasks"`
-	metadataMismatchTasks int `json:"metadataMismatchTasks"`
-	recheckTasks          int `json:"recheckTasks"`
+	TotalTasks            int `json:"totalTasks"`
+	AddedTasks            int `json:"addedTasks"`
+	ProcessingTasks       int `json:"processingTasks"`
+	FailedTasks           int `json:"failedTasks"`
+	CompletedTasks        int `json:"completedTasks"`
+	MetadataMismatchTasks int `json:"metadataMismatchTasks"`
+	RecheckTasks          int `json:"recheckTasks"`
 }
 
 // VerificationResult holds the Verification Results
@@ -440,7 +440,10 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 	dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
 	mismatches, err := verifier.FetchAndCompareDocuments(task)
 	for _, v := range mismatches {
-		verifier.InsertFailedCompareRecheckDoc(dbName, collName, v.ID)
+		err := verifier.InsertFailedCompareRecheckDoc(dbName, collName, v.ID)
+		if err != nil {
+			verifier.logger.Error().Msgf("[Worker %d] Error inserting docmument mismatch into Recheck queue: %+v", workerNum, err)
+		}
 		mismatchIDs = append(mismatchIDs, v.ID)
 	}
 
@@ -903,20 +906,20 @@ func (verifier *Verifier) GetVerificationStatus() (*VerificationStatus, error) {
 		// Status is returned with quotes around it so remove those
 		status = status[1 : len(status)-1]
 		count := int(result.Lookup("count").Int32())
-		verificationStatus.totalTasks += int(count)
+		verificationStatus.TotalTasks += int(count)
 		switch status {
 		case verificationTaskAdded:
-			verificationStatus.addedTasks = count
+			verificationStatus.AddedTasks = count
 		case verificationTaskProcessing:
-			verificationStatus.processingTasks = count
+			verificationStatus.ProcessingTasks = count
 		case verificationTaskFailed:
-			verificationStatus.failedTasks = count
+			verificationStatus.FailedTasks = count
 		case verificationTaskMetadataMismatch:
-			verificationStatus.metadataMismatchTasks = count
+			verificationStatus.MetadataMismatchTasks = count
 		case verificationTaskCompleted:
-			verificationStatus.completedTasks = count
+			verificationStatus.CompletedTasks = count
 		case verificationTasksRetry:
-			verificationStatus.recheckTasks = count
+			verificationStatus.RecheckTasks = count
 		default:
 			verifier.logger.Info().Msgf("Unknown task status %s", status)
 		}
@@ -1001,8 +1004,7 @@ func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mong
 
 func (verifier *Verifier) StartServer() error {
 	server := NewWebServer(verifier.port, verifier, verifier.logger)
-	server.Run(context.Background())
-	return nil
+	return server.Run(context.Background())
 }
 
 func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
@@ -1037,7 +1039,19 @@ func (verifier *Verifier) Check(ctx context.Context) error {
 	verifier.changeStreamMux.Unlock()
 	if !csRunning {
 		verifier.logger.Info().Msg("Change stream not running, starting change stream")
-		verifier.StartChangeStream(ctx)
+		retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
+		startAtTs, err := GetLastOpTimeAndSyncShardClusterTime(ctx,
+			verifier.logger,
+			retryer,
+			verifier.srcClient,
+			true)
+		if err != nil {
+			return err
+		}
+		err = verifier.StartChangeStream(ctx, startAtTs)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Log out the verification status when initially booting up so it's easy to see the current state
@@ -1084,7 +1098,7 @@ func (verifier *Verifier) Check(ctx context.Context) error {
 		}
 
 		//wait for task to be created, if none of the tasks found.
-		if verificationStatus.addedTasks > 0 || verificationStatus.processingTasks > 0 || verificationStatus.recheckTasks > 0 {
+		if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 || verificationStatus.RecheckTasks > 0 {
 			waitForTaskCreation++
 			time.Sleep(15 * time.Second)
 		} else {
@@ -1174,20 +1188,20 @@ func (verifier *Verifier) CreateInitialTasks() error {
 
 func FetchFailedTasks(ctx context.Context, coll *mongo.Collection, taskType string) []VerificationTask {
 
-	var failedTasks []VerificationTask
+	var FailedTasks []VerificationTask
 	status := []string{verificationTasksRetry, verificationTaskFailed, verificationTaskMetadataMismatch}
 	cur, err := coll.Find(ctx, bson.D{bson.E{Key: "type", Value: taskType},
 		bson.E{Key: "status", Value: bson.M{"$in": status}}})
 	if err != nil {
-		return failedTasks
+		return FailedTasks
 	}
 
-	err = cur.All(ctx, &failedTasks)
+	err = cur.All(ctx, &FailedTasks)
 	if err != nil {
-		return failedTasks
+		return FailedTasks
 	}
 
-	return failedTasks
+	return FailedTasks
 }
 
 func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
@@ -1272,8 +1286,8 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 		fmt.Print("********** ALL COLLECTION METADATA MATCHES ! **********\n\n")
 	}
 
-	failedTasks := FetchFailedTasks(ctx, verifier.verificationTaskCollection(), verificationTaskVerify)
-	if len(failedTasks) == 0 {
+	FailedTasks := FetchFailedTasks(ctx, verifier.verificationTaskCollection(), verificationTaskVerify)
+	if len(FailedTasks) == 0 {
 		// Nothing to print
 		return
 	}
@@ -1281,7 +1295,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 	table = tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"ID", "Cluster", "Type", "Field", "Namespace", "Details"})
 
-	for _, v := range failedTasks {
+	for _, v := range FailedTasks {
 		for _, f := range v.FailedDocs {
 			table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Type), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
 		}

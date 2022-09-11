@@ -148,7 +148,6 @@ func main() {
 			if cCtx.Bool(checkOnly) {
 				return verifier.Check(ctx)
 			} else {
-				verifier.StartChangeStream(ctx)
 				return verifier.StartServer()
 			}
 		},

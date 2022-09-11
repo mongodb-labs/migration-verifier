@@ -233,8 +233,7 @@ func successResponse(c *gin.Context) {
 }
 
 func (server *WebServer) operationalErrorResponse(c *gin.Context, err error) {
-	var errorName string
-	errorName = "APIError"
+	errorName := "APIError"
 
 	server.logger.Error().Err(err).Msg("Un-recoverable error during operational API handler, shutting down.")
 	server.mongosyncError = err

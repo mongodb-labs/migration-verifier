@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -46,7 +47,7 @@ func (verifier *Verifier) HandleChangeStreamEvent(changeEvent *ParsedEvent) erro
 }
 
 // StartChangeStream starts the change stream.
-func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
+func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *primitive.Timestamp) error {
 	streamReader := func(cs *mongo.ChangeStream) {
 		var changeEvent ParsedEvent
 		for {
@@ -83,12 +84,16 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 				if err := cs.Decode(&changeEvent); err != nil {
 					verifier.logger.Fatal().Err(err).Msg("")
 				}
-				verifier.HandleChangeStreamEvent(&changeEvent)
+				err := verifier.HandleChangeStreamEvent(&changeEvent)
+				if err != nil {
+					verifier.changeStreamErrChan <- err
+					return
+				}
 			}
 		}
 	}
 	pipeline := []bson.D{}
-	opts := options.ChangeStream().SetMaxAwaitTime(1 * time.Second)
+	opts := options.ChangeStream().SetMaxAwaitTime(1 * time.Second).SetStartAtOperationTime(startTime)
 	srcChangeStream, err := verifier.srcClient.Watch(context.Background(), pipeline, opts)
 	if err != nil {
 		return err
