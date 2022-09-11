@@ -30,7 +30,6 @@ const (
 	verificationTasksCollection      = "verification_tasks"
 	verificationRangeCollection      = "verification_ranges"
 	verificationTasksRetry           = "retry"
-	verificationTaskMaxRetries       = 5
 
 	verificationTaskVerify = "verify"
 	// A verifyCollection task verifies collection metadata, and inserts tasks to verify data ranges.
