@@ -239,17 +239,7 @@ func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []strin
 
 func (verifier *Verifier) getDocuments(collection *mongo.Collection, buildInfo *bson.M, task *VerificationTask) (map[interface{}]bson.Raw, error) {
 	var findOptions bson.D
-	if len(task.FailedIDs) > 0 {
-		filter := bson.D{
-			bson.E{
-				Key:   "_id",
-				Value: bson.M{"$in": task.FailedIDs},
-			},
-		}
-		findOptions = bson.D{
-			bson.E{"filter", filter},
-		}
-	} else if len(task.Ids) > 0 {
+	if len(task.Ids) > 0 {
 		filter := bson.D{
 			bson.E{
 				Key:   "_id",
@@ -432,43 +422,24 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 
 func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTask) {
 	verifier.logger.Info().Msgf("[Worker %d] Processing verify task", workerNum)
-	var mismatchIDs []interface{}
 
-	// TODO: refactor the below to just add the mismatches when they occur. Rather
-	// splitting the Namespace in two places. This is left this way for now to
-	// ease conflicts in PR merging.
-	dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
 	mismatches, err := verifier.FetchAndCompareDocuments(task)
-	for _, v := range mismatches {
-		err := verifier.InsertFailedCompareRecheckDoc(dbName, collName, v.ID)
-		if err != nil {
-			verifier.logger.Error().Msgf("[Worker %d] Error inserting docmument mismatch into Recheck queue: %+v", workerNum, err)
-		}
-		mismatchIDs = append(mismatchIDs, v.ID)
-	}
 
-	task.Attempts++
-	if len(mismatches) > 0 {
-		task.FailedDocs = mismatches
-	}
 	if err != nil {
 		task.Status = verificationTaskFailed
 		verifier.logger.Error().Msgf("[Worker %d] Error comparing docs: %+v", workerNum, err)
 	} else if len(mismatches) == 0 {
-		if len(task.FailedIDs) > 0 {
-			verifier.logger.Info().Msgf("Previously failed document IDs now match! Marking task as complete! Document IDs: %+v", task.FailedIDs)
-		}
 		task.Status = verificationTaskCompleted
-	} else if task.Attempts < verificationTaskMaxRetries {
-		task.Status = verificationTasksRetry
-		task.FailedIDs = mismatchIDs
-		task.RetryAfter = time.Now().Add(verifier.comparisonRetryDelayMillis * time.Millisecond)
-		verifier.logger.Error().Msgf("[Worker %d] Verification Task %+v failed attempt %d/%d, retrying", workerNum, task.PrimaryKey, task.Attempts, verificationTaskMaxRetries)
 	} else {
 		task.Status = verificationTaskFailed
-		task.FailedIDs = mismatchIDs
-		verifier.logger.Error().Msgf("[Worker %d] Verification Task %+v out of retries, failing", workerNum, task.PrimaryKey)
-		verifier.AddRefetchTask(task)
+		verifier.logger.Error().Msgf("[Worker %d] Verification Task %+v failed during Check, may pass Recheck", workerNum, task.PrimaryKey)
+		dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
+		for _, v := range mismatches {
+			err := verifier.InsertFailedCompareRecheckDoc(dbName, collName, v.ID)
+			if err != nil {
+				verifier.logger.Error().Msgf("[Worker %d] Error inserting docmument mismatch into Recheck queue: %+v", workerNum, err)
+			}
+		}
 	}
 
 	err = verifier.UpdateVerificationTask(task)
@@ -824,24 +795,6 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 	}
 	if task.Status == verificationTaskProcessing {
 		task.Status = verificationTaskCompleted
-	}
-}
-
-func (verifier *Verifier) AddRefetchTask(task *VerificationTask) {
-	srcNamespace := task.QueryFilter.Namespace
-	dstNamespace := srcNamespace
-	if task.QueryFilter.To != "" {
-		dstNamespace = task.QueryFilter.To
-	}
-	for _, id := range task.FailedIDs {
-		model := Refetch{ID: id, SrcNamespace: srcNamespace, DestNamespace: dstNamespace, Status: Unprocessed}
-		_, err := verifier.refetchCollection().InsertOne(context.Background(), model)
-		if err != nil {
-			verifier.logger.Error().Msgf("Error saving refetch document for id %s - %+v", id, err)
-			// TODO: see if we need this commented out message
-			// } else {
-			// verifier.logger.Info().Msg("Saved refetch document for id %s", id)
-		}
 	}
 }
 
