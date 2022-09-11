@@ -121,21 +121,21 @@ func GetLastOpTimeAndSyncShardClusterTime(
 	if retryOnLockFailed {
 		retryer = retryer.WithErrorCodes(util.LockFailed)
 	}
-	//_, err := retryer.RunForUUIDAndTransientErrors(ctx, logger, "", func(ri *retry.Info, _ string) error {
-	//	ri.Log(logger.Logger,
-	//		"appendOplogNote",
-	//		"source",
-	//		"",
-	//		"",
-	//		fmt.Sprintf("Running appendOplogNote command. %v", appendOplogNoteCmd))
-	ret := client.Database("admin").RunCommand(ctx, appendOplogNoteCmd)
-	var err error
-	if response, err = ret.DecodeBytes(); err != nil {
-		return nil, err
-	}
+	err := retryer.RunForTransientErrorsOnly(ctx, logger, func(ri *retry.Info) error {
+		ri.Log(logger.Logger,
+			"appendOplogNote",
+			"source",
+			"",
+			"",
+			fmt.Sprintf("Running appendOplogNote command. %v", appendOplogNoteCmd))
+		ret := client.Database("admin").RunCommand(ctx, appendOplogNoteCmd)
+		var err error
+		if response, err = ret.DecodeBytes(); err != nil {
+			return err
+		}
 
-	//return nil
-	//})
+		return nil
+	})
 
 	// When we issue a maxClusterTime lower than any shard's current $cluster_time, we will receive an StaleClusterTime error.
 	// The command will essentially be a noop on that particular shard.

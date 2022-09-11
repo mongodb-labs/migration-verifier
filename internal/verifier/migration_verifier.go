@@ -1035,11 +1035,12 @@ func (verifier *Verifier) Check(ctx context.Context) error {
 	verifier.changeStreamMux.Lock()
 	csRunning := verifier.changeStreamRunning
 	verifier.changeStreamMux.Unlock()
+	retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
 	if !csRunning {
 		verifier.logger.Info().Msg("Change stream not running, starting change stream")
 		startAtTs, err := GetLastOpTimeAndSyncShardClusterTime(ctx,
 			verifier.logger,
-			retry.New(20*time.Second),
+			retryer,
 			verifier.srcClient,
 			true)
 		if err != nil {
