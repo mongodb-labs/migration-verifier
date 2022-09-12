@@ -26,6 +26,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
@@ -62,12 +63,14 @@ type Verifier struct {
 	verifyAll                  bool
 	startClean                 bool
 	partitionSizeInBytes       int64
+	readPreference             *readpref.ReadPref
 
 	logger *logger.Logger
 
 	srcNamespaces []string
 	dstNamespaces []string
 	metaDBName    string
+	srcStartAtTs  *primitive.Timestamp
 
 	changeStreamMux       sync.Mutex
 	changeStreamRunning   bool
@@ -102,6 +105,7 @@ func NewVerifier() *Verifier {
 	return &Verifier{
 		phase:                 Idle,
 		numWorkers:            NumWorkers,
+		readPreference:        readpref.Primary(),
 		changeStreamEnderChan: make(chan struct{}),
 		changeStreamErrChan:   make(chan error),
 		changeStreamDoneChan:  make(chan struct{}),
@@ -220,6 +224,15 @@ func (verifier *Verifier) SetStartClean(arg bool) {
 	verifier.startClean = arg
 }
 
+func (verifier *Verifier) SetReadPreference(arg string) error {
+	mode, err := readpref.ModeFromString(arg)
+	if err != nil {
+		return err
+	}
+	verifier.readPreference, err = readpref.New(mode)
+	return err
+}
+
 // DocumentStats gets various status (TODO clarify)
 func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []string) {
 
@@ -237,8 +250,10 @@ func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []strin
 	fmt.Println()
 }
 
-func (verifier *Verifier) getDocuments(ctx context.Context, collection *mongo.Collection, buildInfo *bson.M, task *VerificationTask) (map[interface{}]bson.Raw, error) {
+func (verifier *Verifier) getDocuments(ctx context.Context, collection *mongo.Collection, buildInfo *bson.M,
+	startAtTs *primitive.Timestamp, task *VerificationTask) (map[interface{}]bson.Raw, error) {
 	var findOptions bson.D
+	runCommandOptions := options.RunCmd()
 	if len(task.Ids) > 0 {
 		filter := bson.D{
 			bson.E{
@@ -252,10 +267,22 @@ func (verifier *Verifier) getDocuments(ctx context.Context, collection *mongo.Co
 	} else {
 		findOptions = task.QueryFilter.Partition.GetFindOptions(buildInfo)
 	}
+	// We only support secondary reads during the check phase, because we don't have the correct startAtTs for the
+	// recheck phase.  In the future we could get it, it would be the cluster time on each cluster after writes were quiesced.
+	if verifier.readPreference.Mode() != readpref.PrimaryMode && verifier.phase == Check {
+		runCommandOptions = runCommandOptions.SetReadPreference(readpref.Nearest())
+		if startAtTs != nil {
+			// In check mode on the source cluster, we never want to read before the change stream start time.
+			findOptions = append(findOptions, bson.E{"readConcern", bson.D{
+				{"level", "majority"},
+				{"afterClusterTime", *startAtTs},
+			}})
+		}
+	}
 	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
-	verifier.logger.Debug().Msgf("getDocuments findCmd: %s", findCmd)
+	verifier.logger.Debug().Msgf("getDocuments findCmd: %s opts: %v", findCmd, *runCommandOptions)
 
-	cursor, err := collection.Database().RunCommandCursor(ctx, findCmd)
+	cursor, err := collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -304,14 +331,16 @@ func (verifier *Verifier) fetchDocuments(task *VerificationTask) (map[interface{
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		srcClientMap, srcErr = verifier.getDocuments(ctx, verifier.srcClientCollection(task), verifier.srcBuildInfo, task)
+		srcClientMap, srcErr = verifier.getDocuments(ctx, verifier.srcClientCollection(task), verifier.srcBuildInfo,
+			verifier.srcStartAtTs, task)
 		if srcErr != nil {
 			cancel()
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		dstClientMap, dstErr = verifier.getDocuments(ctx, verifier.dstClientCollection(task), verifier.dstBuildInfo, task)
+		dstClientMap, dstErr = verifier.getDocuments(ctx, verifier.dstClientCollection(task), verifier.dstBuildInfo,
+			nil /*startAtTs*/, task)
 		if dstErr != nil {
 			cancel()
 		}
@@ -1044,6 +1073,7 @@ func (verifier *Verifier) Check(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		verifier.srcStartAtTs = startAtTs
 	}
 
 	// Log out the verification status when initially booting up so it's easy to see the current state

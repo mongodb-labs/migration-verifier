@@ -32,6 +32,7 @@ const (
 	ignoreFieldOrder     = "ignoreFieldOrder"
 	verifyAll            = "verifyAll"
 	startClean           = "clean"
+	readPreference       = "readPreference"
 	partitionSizeMB      = "partitionSizeMB"
 	checkOnly            = "checkOnly"
 	debugFlag            = "debug"
@@ -112,6 +113,12 @@ func main() {
 		&cli.BoolFlag{
 			Name:  startClean,
 			Usage: "If set, drop all previous verification metadata before starting",
+		},
+		&cli.StringFlag{
+			Name:  readPreference,
+			Value: "primary",
+			Usage: "Read preference for reading data from clusters. " +
+				"May be 'primary', 'secondary', 'primaryPreferred', 'secondaryPreferred', or 'nearest'",
 		},
 		&cli.Int64Flag{
 			Name:  partitionSizeMB,
@@ -194,5 +201,9 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 	}
 	v.SetMetaDBName(cCtx.String(metaDBName))
 	v.SetIgnoreBSONFieldOrder(cCtx.Bool(ignoreFieldOrder))
+	err = v.SetReadPreference(cCtx.String(readPreference))
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	return v, file, writer, nil
 }
