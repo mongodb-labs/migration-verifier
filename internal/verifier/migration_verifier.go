@@ -448,7 +448,8 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 	}
 }
 
-func (verifier *Verifier) logShardingInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) {
+func (verifier *Verifier) logChunkInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) {
+	// Only log full chunk info in debug mode
 	debugMsg := verifier.logger.Debug()
 	if !debugMsg.Enabled() {
 		return
@@ -460,19 +461,14 @@ func (verifier *Verifier) logShardingInfo(ctx context.Context, namespaceAndUUID 
 	configChunkColl := verifier.srcClientDatabase("config").Collection("chunks")
 	cursor, err := configChunkColl.Find(ctx, bson.D{{"uuid", uuid}})
 	if err != nil {
-		verifier.logger.Debug().Msgf("Unable to read sharding info for %s: %v", namespace, err)
+		verifier.logger.Error().Msgf("Unable to read chunk info for %s: %v", namespace, err)
 		return
 	}
 	defer cursor.Close(ctx)
-	printHeader := true
 	for cursor.Next(ctx) {
-		if printHeader {
-			verifier.logger.Debug().Msgf("Collection %s is sharded", namespace)
-			printHeader = false
-		}
 		var result bson.D
 		if err = cursor.Decode(&result); err != nil {
-			verifier.logger.Debug().Msgf("Error decoding sharding info for %s: %v", namespace, err)
+			verifier.logger.Error().Msgf("Error decoding chunk info for %s: %v", namespace, err)
 			return
 		}
 		resultMap := result.Map()
@@ -480,7 +476,36 @@ func (verifier *Verifier) logShardingInfo(ctx context.Context, namespaceAndUUID 
 			resultMap["min"], resultMap["max"])
 	}
 	if err = cursor.Err(); err != nil {
-		verifier.logger.Debug().Msgf("Error reading sharding info for %s: %v", namespace, err)
+		verifier.logger.Error().Msgf("Error reading chunk info for %s: %v", namespace, err)
+	}
+}
+
+func (verifier *Verifier) logShardingInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) {
+	uuid := namespaceAndUUID.UUID
+	namespace := namespaceAndUUID.DBName + "." + namespaceAndUUID.CollName
+	configCollectionsColl := verifier.srcClientDatabase("config").Collection("collections")
+	cursor, err := configCollectionsColl.Find(ctx, bson.D{{"uuid", uuid}})
+	if err != nil {
+		verifier.logger.Error().Msgf("Unable to read sharding info for %s: %v", namespace, err)
+		return
+	}
+	defer cursor.Close(ctx)
+	collectionSharded := false
+	for cursor.Next(ctx) {
+		collectionSharded = true
+		var result bson.D
+		if err = cursor.Decode(&result); err != nil {
+			verifier.logger.Error().Msgf("Error decoding sharding info for %s: %v", namespace, err)
+			return
+		}
+		resultMap := result.Map()
+		verifier.logger.Info().Msgf("Collection %s is sharded with shard key %v", namespace, resultMap["key"])
+	}
+	if err = cursor.Err(); err != nil {
+		verifier.logger.Error().Msgf("Error reading sharding info for %s: %v", namespace, err)
+	}
+	if collectionSharded {
+		verifier.logChunkInfo(ctx, namespaceAndUUID)
 	}
 }
 
