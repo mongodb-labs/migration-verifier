@@ -237,7 +237,7 @@ func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []strin
 	fmt.Println()
 }
 
-func (verifier *Verifier) getDocuments(collection *mongo.Collection, buildInfo *bson.M, task *VerificationTask) (map[interface{}]bson.Raw, error) {
+func (verifier *Verifier) getDocuments(ctx context.Context, collection *mongo.Collection, buildInfo *bson.M, task *VerificationTask) (map[interface{}]bson.Raw, error) {
 	var findOptions bson.D
 	if len(task.Ids) > 0 {
 		filter := bson.D{
@@ -254,8 +254,6 @@ func (verifier *Verifier) getDocuments(collection *mongo.Collection, buildInfo *
 	}
 	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
 	verifier.logger.Debug().Msgf("getDocuments findCmd: %s", findCmd)
-
-	ctx := context.Background()
 
 	cursor, err := collection.Database().RunCommandCursor(ctx, findCmd)
 	if err != nil {
@@ -298,15 +296,31 @@ func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]Ve
 
 // This is split out to allow unit testing of fetching separate from comparison.
 func (verifier *Verifier) fetchDocuments(task *VerificationTask) (map[interface{}]bson.Raw, map[interface{}]bson.Raw, error) {
-	srcClientMap, err := verifier.getDocuments(verifier.srcClientCollection(task), verifier.srcBuildInfo, task)
-	if err != nil {
-		return nil, nil, err
+
+	var srcClientMap, dstClientMap map[interface{}]bson.Raw
+	var srcErr, dstErr error
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		srcClientMap, srcErr = verifier.getDocuments(ctx, verifier.srcClientCollection(task), verifier.srcBuildInfo, task)
+		if srcErr != nil {
+			cancel()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		dstClientMap, dstErr = verifier.getDocuments(ctx, verifier.dstClientCollection(task), verifier.dstBuildInfo, task)
+		if dstErr != nil {
+			cancel()
+		}
+	}()
+	if srcErr != nil {
+		return nil, nil, srcErr
 	}
-
-	dstClientMap, err := verifier.getDocuments(verifier.dstClientCollection(task), verifier.dstBuildInfo, task)
-
-	if err != nil {
-		return nil, nil, err
+	if dstErr != nil {
+		return nil, nil, srcErr
 	}
 	return srcClientMap, dstClientMap, nil
 }
