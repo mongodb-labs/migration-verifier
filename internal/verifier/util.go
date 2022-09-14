@@ -60,6 +60,10 @@ func (ns *Namespace) String() string {
 	return fmt.Sprintf("{ db: %s, coll: %s }", ns.DB, ns.Coll)
 }
 
+func (ns *Namespace) FullName() string {
+	return ns.DB + "." + ns.Coll
+}
+
 // NewNamespace returns a new Namespace struct with the given parameters.
 func NewNamespace(db, coll string) *Namespace {
 	return &Namespace{

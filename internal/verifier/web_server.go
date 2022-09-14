@@ -21,8 +21,9 @@ const RequestInProgressErrorDescription = "Another request is currently in progr
 
 // MigrationVerifierAPI represents the interaction webserver with mongosync
 type MigrationVerifierAPI interface {
-	Check(ctx context.Context) error
-	Recheck(ctx context.Context) error
+	Check(ctx context.Context)
+	WritesOff(ctx context.Context)
+	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
 }
 
@@ -132,7 +133,8 @@ func (server *WebServer) Run(ctx context.Context) error {
 		v1 := api.Group("/v1")
 		{
 			v1.POST("/check", server.operationalAPILockMiddleware(), server.checkEndPoint)
-			v1.POST("/recheck", server.operationalAPILockMiddleware(), server.recheckEndpoint)
+			v1.POST("/writesOff", server.operationalAPILockMiddleware(), server.writesOffEndpoint)
+			v1.POST("/writesOn", server.operationalAPILockMiddleware(), server.writesOnEndpoint)
 			v1.GET("/progress", server.progressEndpoint)
 		}
 	}
@@ -184,15 +186,15 @@ func (server *WebServer) checkEndPoint(c *gin.Context) {
 		return
 	}
 
-	err := server.Mapi.Check(context.Background())
-	if err != nil {
-		server.operationalErrorResponse(c, err)
-		return
-	}
+	server.Mapi.Check(context.Background())
+	//if err != nil {
+	//	server.operationalErrorResponse(c, err)
+	//	return
+	//}
 	successResponse(c)
 }
 
-func (server *WebServer) recheckEndpoint(c *gin.Context) {
+func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 	var json EmptyRequest
 
 	if err := c.ShouldBindJSON(&json); err != nil {
@@ -200,11 +202,19 @@ func (server *WebServer) recheckEndpoint(c *gin.Context) {
 		return
 	}
 
-	err := server.Mapi.Recheck(context.Background())
-	if err != nil {
-		server.operationalErrorResponse(c, err)
+	server.Mapi.WritesOff(context.Background())
+	successResponse(c)
+}
+
+func (server *WebServer) writesOnEndpoint(c *gin.Context) {
+	var json EmptyRequest
+
+	if err := c.ShouldBindJSON(&json); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	server.Mapi.WritesOn(context.Background())
 	successResponse(c)
 }
 

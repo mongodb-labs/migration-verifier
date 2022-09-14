@@ -15,7 +15,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -40,6 +39,7 @@ const (
 // VerificationTask stores source cluster info
 type VerificationTask struct {
 	PrimaryKey  interface{}          `bson:"_id"`
+	Generation  int                  `bson:"generation"`
 	Ids         []interface{}        `bson:"_ids"`
 	ID          int                  `bson:"id"`
 	Status      string               `bson:"status"`
@@ -56,10 +56,45 @@ type VerificationRange struct {
 	EndID      primitive.ObjectID `bson:"end_id"`
 }
 
-func InsertPartitionVerificationTask(partition *partitions.Partition, dstNamespace string, collection *mongo.Collection) (*VerificationTask, error) {
+func (verifier *Verifier) insertCollectionVerificationTask(
+	srcNamespace string,
+	generation int) (*VerificationTask, error) {
+
+	dstNamespace := srcNamespace
+	if len(verifier.nsMap) != 0 {
+		dstNamespace = verifier.nsMap[srcNamespace]
+	}
+	verifier.logger.Info().Msgf("Adding task for %s -> %s", srcNamespace, dstNamespace)
+	verificationTask := VerificationTask{
+		PrimaryKey: primitive.NewObjectID(),
+		Generation: generation,
+		Status:     verificationTaskAdded,
+		Type:       verificationTaskVerifyCollection,
+		QueryFilter: QueryFilter{
+			Namespace: srcNamespace,
+			To:        dstNamespace,
+		},
+	}
+	_, err := verifier.verificationTaskCollection().InsertOne(context.Background(), verificationTask)
+	return &verificationTask, err
+}
+
+func (verifier *Verifier) InsertCollectionVerificationTask(
+	srcNamespace string) (*VerificationTask, error) {
+	return verifier.insertCollectionVerificationTask(srcNamespace, verifier.generation)
+}
+
+func (verifier *Verifier) InsertFailedCollectionVerificationTask(
+	srcNamespace string) (*VerificationTask, error) {
+	return verifier.insertCollectionVerificationTask(srcNamespace, verifier.generation+1)
+}
+
+func (verifier *Verifier) InsertPartitionVerificationTask(partition *partitions.Partition,
+	dstNamespace string) (*VerificationTask, error) {
 	srcNamespace := strings.Join([]string{partition.Ns.DB, partition.Ns.Coll}, ".")
 	verificationTask := VerificationTask{
 		PrimaryKey: primitive.NewObjectID(),
+		Generation: verifier.generation,
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerify,
 		QueryFilter: QueryFilter{
@@ -68,28 +103,60 @@ func InsertPartitionVerificationTask(partition *partitions.Partition, dstNamespa
 			To:        dstNamespace,
 		},
 	}
-	_, err := collection.InsertOne(context.Background(), verificationTask)
+	_, err := verifier.verificationTaskCollection().InsertOne(context.Background(), verificationTask)
 	return &verificationTask, err
 }
 
-func InsertCollectionVerificationTask(srcNamespace string, dstNamespace string, collection *mongo.Collection) (*VerificationTask, error) {
+func (verifier *Verifier) InsertFailedIdVerificationTask(id interface{}, srcNamespace string) error {
+	dstNamespace := srcNamespace
+	if len(verifier.nsMap) != 0 {
+		dstNamespace = verifier.nsMap[srcNamespace]
+	}
+
 	verificationTask := VerificationTask{
 		PrimaryKey: primitive.NewObjectID(),
+		Generation: verifier.generation + 1,
+		Ids:        []interface{}{id},
 		Status:     verificationTaskAdded,
-		Type:       verificationTaskVerifyCollection,
+		Type:       verificationTaskVerify,
 		QueryFilter: QueryFilter{
 			Namespace: srcNamespace,
 			To:        dstNamespace,
 		},
 	}
-	_, err := collection.InsertOne(context.Background(), verificationTask)
-	return &verificationTask, err
+	var ctx = context.Background()
+	_, err := verifier.verificationTaskCollection().InsertOne(ctx, &verificationTask)
+	return err
+}
+
+func (verifier *Verifier) InsertChangeEventIdVerificationTask(ctx context.Context, event *ParsedEvent) error {
+
+	srcNamespace := event.Ns.FullName()
+	dstNamespace := srcNamespace
+	if len(verifier.nsMap) != 0 {
+		dstNamespace = verifier.nsMap[srcNamespace]
+	}
+
+	verificationTask := VerificationTask{
+		PrimaryKey: primitive.NewObjectID(),
+		Generation: verifier.generation + 1,
+		Ids:        []interface{}{event.DocKey.ID},
+		Status:     verificationTaskAdded,
+		Type:       verificationTaskVerify,
+		QueryFilter: QueryFilter{
+			Namespace: srcNamespace,
+			To:        dstNamespace,
+		},
+	}
+	_, err := verifier.verificationTaskCollection().InsertOne(ctx, &verificationTask)
+	return err
 }
 
 func (verifier *Verifier) FindNextVerifyTaskAndUpdate() (*VerificationTask, error) {
 	var verificationTask = VerificationTask{}
 	filter := bson.M{
 		"$and": bson.A{
+			bson.M{"generation": verifier.generation},
 			bson.M{"type": bson.M{"$in": bson.A{verificationTaskVerify, verificationTaskVerifyCollection}}},
 			bson.M{"status": verificationTaskAdded},
 		},
