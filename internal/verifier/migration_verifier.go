@@ -345,6 +345,7 @@ func (verifier *Verifier) fetchDocuments(task *VerificationTask) (map[interface{
 			cancel()
 		}
 	}()
+	wg.Wait()
 	if srcErr != nil {
 		return nil, nil, srcErr
 	}
