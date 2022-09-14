@@ -677,8 +677,11 @@ func (verifier *Verifier) compareCollectionSpecifications(srcNs string, dstNs st
 			results = append(results, mismatchResultsToVerificationResults(mismatchDetails, srcSpec.Options, dstSpec.Options, srcNs, nil /* id */, "Options.")...)
 		}
 	}
+
+	// Don't compare view data; they have no data of their own.
+	canCompareData := srcSpec.Type != "view"
 	// Do not compare data between capped and uncapped collections because the partitioning is different.
-	canCompareData := srcSpec.Options.Lookup("capped").Equal(dstSpec.Options.Lookup("capped"))
+	canCompareData = canCompareData && srcSpec.Options.Lookup("capped").Equal(dstSpec.Options.Lookup("capped"))
 
 	return results, canCompareData
 }
@@ -835,6 +838,15 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 			return
 		}
 		task.Status = verificationTaskMetadataMismatch
+	}
+	if !verifyData {
+		// If the metadata mismatched and we're not checking the actual data, that's a complete failure.
+		if task.Status == verificationTaskMetadataMismatch {
+			task.Status = verificationTaskFailed
+		} else {
+			task.Status = verificationTaskCompleted
+		}
+		return
 	}
 
 	indexProblems, err := verifyIndexes(ctx, workerNum, task, srcColl, dstColl, srcSpec.IDIndex, dstSpec.IDIndex)
@@ -1138,12 +1150,14 @@ func (verifier *Verifier) Check(ctx context.Context) error {
 
 func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {
 	// We want to check all user collections on both source and dest.
-	srcNamespaces, err := ListAllUserCollections(ctx, verifier.logger, verifier.srcClient, verifier.metaDBName)
+	srcNamespaces, err := ListAllUserCollections(ctx, verifier.logger, verifier.srcClient,
+		true /* include views */, verifier.metaDBName)
 	if err != nil {
 		return err
 	}
 
-	dstNamespaces, err := ListAllUserCollections(ctx, verifier.logger, verifier.dstClient, verifier.metaDBName)
+	dstNamespaces, err := ListAllUserCollections(ctx, verifier.logger, verifier.dstClient,
+		true /* include views */, verifier.metaDBName)
 	if err != nil {
 		return err
 	}
@@ -1258,19 +1272,32 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 	for i, n := range verifier.srcNamespaces {
 		srcDb, srcColl := SplitNamespace(n)
 		if srcDb != "" {
-			srcEst, _ := verifier.srcClientDatabase(srcDb).Collection(srcColl).EstimatedDocumentCount(ctx)
+			srcCollection := verifier.srcClientDatabase(srcDb).Collection(srcColl)
+			srcSpec, _ := verifier.getCollectionSpecification(ctx, srcCollection)
+			// "EstimatedDocumentCount" on a view runs its pipeline, so may be very slow
+			var srcEst int64
+			srcIsView := srcSpec != nil && srcSpec.Type == "view"
+			if !srcIsView {
+				srcEst, _ = srcCollection.EstimatedDocumentCount(ctx)
+			}
 
 			n2 := verifier.dstNamespaces[i]
 			dstDb, dstColl := SplitNamespace(n2)
-			if dstDb != "" {
-				dstEst, _ := verifier.dstClientDatabase(dstDb).Collection(dstColl).EstimatedDocumentCount(ctx)
+			if !srcIsView && dstDb != "" {
+				dstCollection := verifier.dstClientDatabase(dstDb).Collection(dstColl)
+				dstSpec, _ := verifier.getCollectionSpecification(ctx, dstCollection)
+				if dstSpec == nil || dstSpec.Type != "view" {
+					dstEst, _ := dstCollection.EstimatedDocumentCount(ctx)
 
-				table.Append([]string{strconv.FormatInt(srcEst, 10), srcDb, srcColl, strconv.FormatInt(dstEst, 10), dstDb, dstColl})
-				if srcEst != dstEst {
-					table2.Append([]string{strconv.FormatInt(srcEst, 10), srcDb, srcColl, strconv.FormatInt(dstEst, 10), dstDb, dstColl})
-					diffCounts++
-				} else {
-					matchingCounts++
+					table.Append([]string{strconv.FormatInt(srcEst, 10), srcDb, srcColl,
+						strconv.FormatInt(dstEst, 10), dstDb, dstColl})
+					if srcEst != dstEst {
+						table2.Append([]string{strconv.FormatInt(srcEst, 10), srcDb, srcColl,
+							strconv.FormatInt(dstEst, 10), dstDb, dstColl})
+						diffCounts++
+					} else {
+						matchingCounts++
+					}
 				}
 			}
 		}

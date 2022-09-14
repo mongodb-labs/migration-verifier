@@ -323,6 +323,119 @@ func TestVerifierCompareDocsOrdered(t *testing.T) {
 	}
 }
 
+func (suite *MultiDataVersionTestSuite) TestVerifierCompareViews() {
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	ctx := context.Background()
+
+	err := suite.srcMongoClient.Database("testDb").CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	suite.Require().Nil(err)
+	task := &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.sameView",
+			To:        "testDb.sameView"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskCompleted, task.Status)
+	suite.Nil(task.FailedDocs)
+
+	// Views must have the same underlying collection
+	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "wrongColl", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "wrongColl", "testColl2", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	suite.Require().Nil(err)
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.wrongColl",
+			To:        "testDb.wrongColl"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskFailed, task.Status)
+	if suite.Equal(1, len(task.FailedDocs)) {
+		suite.Equal(task.FailedDocs[0].Field, "Options.viewOn")
+		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
+		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.wrongColl")
+	}
+
+	// Views must have the same underlying pipeline
+	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "wrongPipeline", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "wrongPipeline", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}, {"a", 0}}}}})
+	suite.Require().Nil(err)
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.wrongPipeline",
+			To:        "testDb.wrongPipeline"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskFailed, task.Status)
+	if suite.Equal(1, len(task.FailedDocs)) {
+		suite.Equal(task.FailedDocs[0].Field, "Options.pipeline")
+		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
+		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.wrongPipeline")
+	}
+
+	// Views must have the same underlying options
+	var collation1, collation2 options.Collation
+	collation1.Locale = "en_US"
+	collation1.CaseLevel = true
+	collation2.Locale = "fr"
+	collation2.Backwards = true
+	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "missingOptionsSrc", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "missingOptionsSrc", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
+	suite.Require().Nil(err)
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.missingOptionsSrc",
+			To:        "testDb.missingOptionsSrc"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskFailed, task.Status)
+	if suite.Equal(1, len(task.FailedDocs)) {
+		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
+		suite.Equal(task.FailedDocs[0].Cluster, ClusterSource)
+		suite.Equal(task.FailedDocs[0].Details, "Missing")
+		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.missingOptionsSrc")
+	}
+
+	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation1))
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	suite.Require().Nil(err)
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.missingOptionsDst",
+			To:        "testDb.missingOptionsDst"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskFailed, task.Status)
+	if suite.Equal(1, len(task.FailedDocs)) {
+		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
+		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
+		suite.Equal(task.FailedDocs[0].Details, "Missing")
+		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.missingOptionsDst")
+	}
+
+	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation1))
+	suite.Require().Nil(err)
+	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
+	suite.Require().Nil(err)
+	task = &VerificationTask{
+		Status: verificationTaskProcessing,
+		QueryFilter: QueryFilter{
+			Namespace: "testDb.differentOptions",
+			To:        "testDb.differentOptions"}}
+	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Equal(verificationTaskFailed, task.Status)
+	if suite.Equal(1, len(task.FailedDocs)) {
+		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
+		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
+		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.differentOptions")
+	}
+}
+
 func (suite *MultiDataVersionTestSuite) TestVerifierCompareMetadata() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
@@ -759,7 +872,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 	err = suite.dstMongoClient.Database("testDb4").Drop(ctx)
 	suite.Require().Nil(err)
 
-	// Views should not be found
+	// Views should be found
 	pipeline := bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}
 	err = suite.srcMongoClient.Database("testDb1").CreateView(ctx, "testView1", "testColl1", pipeline)
 	suite.Require().Nil(err)
@@ -767,8 +880,8 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 	suite.Require().Nil(err)
 	err = verifier.setupAllNamespaceList(ctx)
 	suite.Require().Nil(err)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.srcNamespaces)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.dstNamespaces)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.srcNamespaces)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.dstNamespaces)
 
 	// Collections in admin, config, and local should not be found
 	err = suite.srcMongoClient.Database("local").CreateCollection(ctx, "islocalSrc")
@@ -785,8 +898,8 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 	suite.Require().Nil(err)
 	err = verifier.setupAllNamespaceList(ctx)
 	suite.Require().Nil(err)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.srcNamespaces)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.dstNamespaces)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.srcNamespaces)
+	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.dstNamespaces)
 }
 
 // func getVerificationTasks(t *testing.T, verifier *Verifier) []VerificationTask {
