@@ -105,7 +105,7 @@ func NewVerifier() *Verifier {
 	return &Verifier{
 		phase:                 Idle,
 		numWorkers:            NumWorkers,
-		readPreference:        readpref.Primary(),
+		readPreference:        readpref.Nearest(),
 		changeStreamEnderChan: make(chan struct{}),
 		changeStreamErrChan:   make(chan error),
 		changeStreamDoneChan:  make(chan struct{}),

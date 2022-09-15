@@ -116,7 +116,7 @@ func main() {
 		},
 		&cli.StringFlag{
 			Name:  readPreference,
-			Value: "primary",
+			Value: "nearest",
 			Usage: "Read preference for reading data from clusters. " +
 				"May be 'primary', 'secondary', 'primaryPreferred', 'secondaryPreferred', or 'nearest'",
 		},
