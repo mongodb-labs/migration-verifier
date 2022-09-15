@@ -26,11 +26,30 @@ type MongoInstance struct {
 	dir     string
 }
 
+type WithMongodsTestingSuite interface {
+	suite.TestingSuite
+	SetSrcInstance(MongoInstance)
+	SetDstInstance(MongoInstance)
+	SetMetaInstance(MongoInstance)
+}
+
 type WithMongodsTestSuite struct {
 	suite.Suite
 	srcMongoInstance, dstMongoInstance, metaMongoInstance MongoInstance
 	srcMongoClient, dstMongoClient, metaMongoClient       *mongo.Client
 	initialDbNames                                        map[string]bool
+}
+
+func (suite *WithMongodsTestSuite) SetSrcInstance(instance MongoInstance) {
+	suite.srcMongoInstance = instance
+}
+
+func (suite *WithMongodsTestSuite) SetDstInstance(instance MongoInstance) {
+	suite.dstMongoInstance = instance
+}
+
+func (suite *WithMongodsTestSuite) SetMetaInstance(instance MongoInstance) {
+	suite.metaMongoInstance = instance
 }
 
 func (suite *WithMongodsTestSuite) SetupSuite() {

@@ -24,6 +24,14 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+type MultiDataVersionTestSuite struct {
+	WithMongodsTestSuite
+}
+
+type MultiMetaVersionTestSuite struct {
+	WithMongodsTestSuite
+}
+
 func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) *Verifier {
 	qfilter := QueryFilter{Namespace: "keyhole.dealers"}
 	task := VerificationTask{QueryFilter: qfilter}
@@ -47,9 +55,23 @@ func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstanc
 }
 
 func TestVerifierMultiversion(t *testing.T) {
+	testSuite := new(MultiDataVersionTestSuite)
 	srcVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
 	destVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
 	metaVersions := []string{"6.0.1"}
+	runMultipleVersionTests(t, testSuite, srcVersions, destVersions, metaVersions)
+}
+
+func TestVerifierMultiMetaVersion(t *testing.T) {
+	srcVersions := []string{"6.0.1"}
+	destVersions := []string{"6.0.1"}
+	metaVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
+	testSuite := new(MultiMetaVersionTestSuite)
+	runMultipleVersionTests(t, testSuite, srcVersions, destVersions, metaVersions)
+}
+
+func runMultipleVersionTests(t *testing.T, testSuite WithMongodsTestingSuite,
+	srcVersions, destVersions, metaVersions []string) {
 	portOffset := 27001
 	testCnt := 0
 	for _, srcVersion := range srcVersions {
@@ -60,22 +82,21 @@ func TestVerifierMultiversion(t *testing.T) {
 					// TODO: this should be able to be run in parallel but we run killall mongod in the start of each of these test cases
 					// For now we are going to leave killall in because the tests don't take long and adding the killall makes them very safe
 					// t.Parallel()
-					testSuite := new(WithMongodsTestSuite)
-					testSuite.metaMongoInstance = MongoInstance{
+					testSuite.SetMetaInstance(MongoInstance{
 						version: metaVersion,
 						port:    strconv.Itoa(portOffset + (testCnt * 3)),
 						dir:     "meta" + strconv.Itoa(testCnt),
-					}
-					testSuite.srcMongoInstance = MongoInstance{
+					})
+					testSuite.SetSrcInstance(MongoInstance{
 						version: srcVersion,
 						port:    strconv.Itoa(portOffset + (testCnt * 3) + 1),
 						dir:     "source" + strconv.Itoa(testCnt),
-					}
-					testSuite.dstMongoInstance = MongoInstance{
+					})
+					testSuite.SetDstInstance(MongoInstance{
 						version: destVersion,
 						port:    strconv.Itoa(portOffset + (testCnt * 3) + 2),
 						dir:     "dest" + strconv.Itoa(testCnt),
-					}
+					})
 					testCnt++
 					suite.Run(t, testSuite)
 				})
@@ -100,8 +121,7 @@ func mapKeysAsInterface(myMap interface{}) (result []interface{}) {
 	return
 }
 
-func (suite *WithMongodsTestSuite) TestVerifierFetchDocuments() {
-
+func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
 	drop := func() {
@@ -139,60 +159,19 @@ func (suite *WithMongodsTestSuite) TestVerifierFetchDocuments() {
 	suite.ElementsMatch(mapKeysAsInterface(dstDocumentMap), []interface{}{stringId})
 }
 
-func TestRecheckQueue(t *testing.T) {
-	srcVersions := []string{"6.0.1"}
-	destVersions := []string{"6.0.1"}
-	metaVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
-	portOffset := 27001
-	testCnt := 0
-	for _, srcVersion := range srcVersions {
-		for _, destVersion := range destVersions {
-			for _, metaVersion := range metaVersions {
-				testName := srcVersion + "->" + destVersion + ":" + metaVersion
-				t.Run(testName, func(t *testing.T) {
-					// TODO: this should be able to be run in parallel but we run killall mongod in the start of each of these test cases
-					// For now we are going to leave killall in because the tests don't take long and adding the killall makes them very safe
-					// t.Parallel()
-					metaMongoInstance := MongoInstance{
-						version: metaVersion,
-						port:    strconv.Itoa(portOffset + (testCnt * 3)),
-						dir:     "meta" + strconv.Itoa(testCnt),
-					}
-					srcMongoInstance := MongoInstance{
-						version: srcVersion,
-						port:    strconv.Itoa(portOffset + (testCnt * 3) + 1),
-						dir:     "source" + strconv.Itoa(testCnt),
-					}
-					dstMongoInstance := MongoInstance{
-						version: destVersion,
-						port:    strconv.Itoa(portOffset + (testCnt * 3) + 2),
-						dir:     "dest" + strconv.Itoa(testCnt),
-					}
-
-					testCnt++
-					testRecheckQueue(t, srcMongoInstance, dstMongoInstance, metaMongoInstance)
-				})
-			}
-		}
-	}
-}
-
-func testRecheckQueue(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) {
+func (suite *MultiMetaVersionTestSuite) TestRecheckQueue() {
 	ctx := context.Background()
-	err := startTestMongods(srcMongoInstance, dstMongoInstance, metaMongoInstance)
-	require.Nil(t, err)
-	defer stopTestMongods()
-	verifier := buildVerifier(t, srcMongoInstance, dstMongoInstance, metaMongoInstance)
-	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar", 42)
-	require.Nil(t, err)
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	err := verifier.InsertFailedCompareRecheckDoc("foo", "bar", 42)
+	suite.Require().Nil(err)
 	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar", 43)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar", 44)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar2", 42)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar", 44)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	event := ParsedEvent{
 		DocKey: DocKey{ID: int32(55)},
 		OpType: "delete",
@@ -202,27 +181,27 @@ func testRecheckQueue(t *testing.T, srcMongoInstance MongoInstance, dstMongoInst
 		},
 	}
 	err = verifier.HandleChangeStreamEvent(&event)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	event.OpType = "insert"
 	err = verifier.HandleChangeStreamEvent(&event)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	event.OpType = "replace"
 	err = verifier.HandleChangeStreamEvent(&event)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	event.OpType = "update"
 	err = verifier.HandleChangeStreamEvent(&event)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	event.OpType = "flibbity"
 	err = verifier.HandleChangeStreamEvent(&event)
-	require.Equal(t, fmt.Errorf(`Not supporting: "flibbity" events`), err)
+	suite.Require().Equal(fmt.Errorf(`Not supporting: "flibbity" events`), err)
 
 	cur, err := verifier.GetRecheckDocs(ctx)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	var recheck RecheckAggregate
 	more := cur.Next(ctx)
-	require.True(t, more)
+	suite.Require().True(more)
 	err = cur.Decode(&recheck)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	expected := RecheckAggregate{
 		ID: Namespace{
 			DB:   "foo",
@@ -230,12 +209,12 @@ func testRecheckQueue(t *testing.T, srcMongoInstance MongoInstance, dstMongoInst
 		},
 		Ids: []interface{}{int32(42), int32(43), int32(44)},
 	}
-	require.Equal(t, expected, recheck)
+	suite.Require().Equal(expected, recheck)
 
 	more = cur.Next(ctx)
-	require.True(t, more)
+	suite.Require().True(more)
 	err = cur.Decode(&recheck)
-	require.Nil(t, err)
+	suite.Require().Nil(err)
 	expected = RecheckAggregate{
 		ID: Namespace{
 			DB:   "foo",
@@ -243,10 +222,10 @@ func testRecheckQueue(t *testing.T, srcMongoInstance MongoInstance, dstMongoInst
 		},
 		Ids: []interface{}{int32(42), int32(55)},
 	}
-	require.Equal(t, expected, recheck)
+	suite.Require().Equal(expected, recheck)
 
 	more = cur.Next(ctx)
-	require.False(t, more)
+	suite.Require().False(more)
 }
 
 func TestVerifierCompareDocs(t *testing.T) {
@@ -344,7 +323,7 @@ func TestVerifierCompareDocsOrdered(t *testing.T) {
 	}
 }
 
-func (suite *WithMongodsTestSuite) TestVerifierCompareMetadata() {
+func (suite *MultiDataVersionTestSuite) TestVerifierCompareMetadata() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
 
@@ -450,7 +429,7 @@ func (suite *WithMongodsTestSuite) TestVerifierCompareMetadata() {
 	suite.Equal(verificationTaskCompleted, task.Status)
 }
 
-func (suite *WithMongodsTestSuite) TestVerifierCompareIndexes() {
+func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
 
@@ -715,7 +694,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	}
 }
 
-func (suite *WithMongodsTestSuite) TestVerifierNamespaceList() {
+func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
 
