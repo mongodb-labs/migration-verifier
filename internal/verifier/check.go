@@ -40,7 +40,7 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 	}
 
 	verifier.logger.Info().Msgf("Starting %d verification workers", verifier.numWorkers)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	wg := sync.WaitGroup{}
 	for i := 0; i < verifier.numWorkers; i++ {
 		wg.Add(1)
@@ -104,6 +104,10 @@ func (verifier *Verifier) CheckDriver(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+	}
+	err = verifier.AddMetaIndexes(ctx)
+	if err != nil {
+		return err
 	}
 	verifier.logger.Info().Msg("Starting Check")
 

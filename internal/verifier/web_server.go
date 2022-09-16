@@ -134,7 +134,6 @@ func (server *WebServer) Run(ctx context.Context) error {
 		{
 			v1.POST("/check", server.operationalAPILockMiddleware(), server.checkEndPoint)
 			v1.POST("/writesOff", server.operationalAPILockMiddleware(), server.writesOffEndpoint)
-			v1.POST("/writesOn", server.operationalAPILockMiddleware(), server.writesOnEndpoint)
 			v1.GET("/progress", server.progressEndpoint)
 		}
 	}
@@ -203,18 +202,6 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 	}
 
 	server.Mapi.WritesOff(context.Background())
-	successResponse(c)
-}
-
-func (server *WebServer) writesOnEndpoint(c *gin.Context) {
-	var json EmptyRequest
-
-	if err := c.ShouldBindJSON(&json); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	server.Mapi.WritesOn(context.Background())
 	successResponse(c)
 }
 

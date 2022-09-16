@@ -62,7 +62,11 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 
 	dstNamespace := srcNamespace
 	if len(verifier.nsMap) != 0 {
-		dstNamespace = verifier.nsMap[srcNamespace]
+		var ok bool
+		dstNamespace, ok = verifier.nsMap[srcNamespace]
+		if !ok {
+			return nil, fmt.Errorf("Could not find Namespace %s", srcNamespace)
+		}
 	}
 	verifier.logger.Info().Msgf("Adding task for %s -> %s", srcNamespace, dstNamespace)
 	verificationTask := VerificationTask{
@@ -110,7 +114,11 @@ func (verifier *Verifier) InsertPartitionVerificationTask(partition *partitions.
 func (verifier *Verifier) InsertFailedIdVerificationTask(id interface{}, srcNamespace string) error {
 	dstNamespace := srcNamespace
 	if len(verifier.nsMap) != 0 {
-		dstNamespace = verifier.nsMap[srcNamespace]
+		var ok bool
+		dstNamespace, ok = verifier.nsMap[srcNamespace]
+		if !ok {
+			return fmt.Errorf("Could not find Namespace %s", srcNamespace)
+		}
 	}
 
 	verificationTask := VerificationTask{
@@ -134,7 +142,11 @@ func (verifier *Verifier) InsertChangeEventIdVerificationTask(ctx context.Contex
 	srcNamespace := event.Ns.FullName()
 	dstNamespace := srcNamespace
 	if len(verifier.nsMap) != 0 {
-		dstNamespace = verifier.nsMap[srcNamespace]
+		var ok bool
+		dstNamespace, ok = verifier.nsMap[srcNamespace]
+		if !ok {
+			return fmt.Errorf("Could not find Namespace %s", srcNamespace)
+		}
 	}
 
 	verificationTask := VerificationTask{

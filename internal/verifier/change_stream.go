@@ -46,6 +46,19 @@ func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEve
 	}
 }
 
+func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
+	if len(verifier.srcNamespaces) == 0 {
+		return []bson.D{}
+	}
+	filter := bson.A{}
+	for _, ns := range verifier.srcNamespaces {
+		db, coll := SplitNamespace(ns)
+		filter = append(filter, bson.D{{"ns", bson.D{{"db", db}, {"coll", coll}}}})
+	}
+	stage := bson.D{{"$match", bson.D{{"$or", filter}}}}
+	return []bson.D{stage}
+}
+
 // StartChangeStream starts the change stream.
 func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *primitive.Timestamp) error {
 	streamReader := func(cs *mongo.ChangeStream) {
@@ -92,7 +105,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *prim
 			}
 		}
 	}
-	pipeline := []bson.D{}
+	pipeline := verifier.GetChangeStreamFilter()
 	opts := options.ChangeStream().SetMaxAwaitTime(1 * time.Second).SetStartAtOperationTime(startTime)
 	srcChangeStream, err := verifier.srcClient.Watch(context.Background(), pipeline, opts)
 	if err != nil {
