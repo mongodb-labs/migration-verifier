@@ -198,7 +198,8 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 	verifyTask := func(expectedIds bson.A, expectedNamespace string) {
 		more := cur.Next(ctx)
 		suite.Require().True(more)
-		cur.Decode(&doc)
+		err = cur.Decode(&doc)
+		suite.Require().Nil(err)
 		suite.Require().Equal(expectedIds, doc["_ids"])
 		suite.Require().Equal("added", doc["status"])
 		suite.Require().Equal("verify", doc["type"])

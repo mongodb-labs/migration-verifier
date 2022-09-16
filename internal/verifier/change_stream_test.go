@@ -9,7 +9,9 @@ import (
 
 func TestChangeStreamFilter(t *testing.T) {
 	verifier := Verifier{}
-	require.Equal(t, []bson.D{}, verifier.GetChangeStreamFilter())
+	verifier.SetMetaDBName("metadb")
+	require.Equal(t, []bson.D{{{"$match", bson.D{{"ns.db", bson.D{{"$ne", "metadb"}}}}}}},
+		verifier.GetChangeStreamFilter())
 	verifier.srcNamespaces = []string{"foo.bar", "foo.baz", "test.car", "test.chaz"}
 	require.Equal(t, []bson.D{
 		{{"$match", bson.D{

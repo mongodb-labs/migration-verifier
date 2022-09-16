@@ -48,7 +48,7 @@ func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEve
 
 func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 	if len(verifier.srcNamespaces) == 0 {
-		return []bson.D{}
+		return []bson.D{{bson.E{"$match", bson.D{{"ns.db", bson.D{{"$ne", verifier.metaDBName}}}}}}}
 	}
 	filter := bson.A{}
 	for _, ns := range verifier.srcNamespaces {
@@ -74,11 +74,13 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *prim
 			case <-verifier.changeStreamEnderChan:
 				for cs.TryNext(ctx) {
 					if err := cs.Decode(&changeEvent); err != nil {
-						verifier.logger.Fatal().Err(err).Msg("")
+						verifier.logger.Fatal().Err(err).Msg("Failed to decode change event")
 					}
 					err := verifier.HandleChangeStreamEvent(ctx, &changeEvent)
-					verifier.changeStreamErrChan <- err
-					verifier.logger.Fatal().Err(err).Msg("")
+					if err != nil {
+						verifier.changeStreamErrChan <- err
+						verifier.logger.Fatal().Err(err).Msg("Error handling change event")
+					}
 				}
 				verifier.mux.Lock()
 				verifier.changeStreamRunning = false
@@ -87,6 +89,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *prim
 				// finished the change stream changes so that Recheck can continue.
 				verifier.changeStreamDoneChan <- struct{}{}
 				// since the changeStream is exhausted, we now return
+				verifier.logger.Debug().Msg("Change stream is done")
 				return
 			// the default case is that we are still in the Check phase, in the check phase we still
 			// use TryNext, but we do not exit if TryNext returns false.

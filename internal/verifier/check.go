@@ -29,7 +29,7 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 	verifier.mux.RUnlock()
 	// if lastGeneration and change stream is running, we need to wait for the change streams to end
 	if lastGeneration && csRunning {
-		verifier.logger.Info().Msg("Changestream still running, sinalling that writes are done and waiting for change stream to exit")
+		verifier.logger.Info().Msg("Changestream still running, signalling that writes are done and waiting for change stream to exit")
 		verifier.changeStreamEnderChan <- struct{}{}
 		select {
 		case err := <-verifier.changeStreamErrChan:
@@ -163,14 +163,14 @@ func (verifier *Verifier) CheckDriver(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		verifier.mux.RLock()
+		verifier.mux.Lock()
 		if verifier.lastGeneration {
-			verifier.mux.RUnlock()
+			verifier.mux.Unlock()
 			return nil
 		}
-		verifier.mux.RUnlock()
 		verifier.generation++
 		verifier.phase = Recheck
+		verifier.mux.Unlock()
 	}
 }
 
@@ -247,12 +247,12 @@ func (verifier *Verifier) CreateInitialTasks() error {
 	return nil
 }
 
-func FetchFailedTasks(ctx context.Context, coll *mongo.Collection, taskType string) []VerificationTask {
-
+func FetchFailedTasks(ctx context.Context, coll *mongo.Collection, taskType string, generation int) []VerificationTask {
 	var FailedTasks []VerificationTask
-	phase := []string{verificationTasksRetry, verificationTaskFailed, verificationTaskMetadataMismatch}
+	status := []string{verificationTasksRetry, verificationTaskFailed, verificationTaskMetadataMismatch}
 	cur, err := coll.Find(ctx, bson.D{bson.E{Key: "type", Value: taskType},
-		bson.E{Key: "phase", Value: bson.M{"$in": phase}}})
+		bson.E{Key: "status", Value: bson.M{"$in": status}},
+		bson.E{Key: "generation", Value: generation}})
 	if err != nil {
 		return FailedTasks
 	}
@@ -263,6 +263,32 @@ func FetchFailedTasks(ctx context.Context, coll *mongo.Collection, taskType stri
 	}
 
 	return FailedTasks
+}
+
+func FetchFailedAndIncompleteTasks(ctx context.Context, coll *mongo.Collection, taskType string, generation int) ([]VerificationTask, []VerificationTask) {
+	var FailedTasks, allTasks, IncompleteTasks []VerificationTask
+	failedStatus := map[string]bool{verificationTasksRetry: true, verificationTaskFailed: true, verificationTaskMetadataMismatch: true}
+	cur, err := coll.Find(ctx, bson.D{bson.E{Key: "type", Value: taskType},
+		bson.E{Key: "generation", Value: generation}})
+	if err != nil {
+		return FailedTasks, IncompleteTasks
+	}
+
+	err = cur.All(ctx, &allTasks)
+	if err != nil {
+		return FailedTasks, IncompleteTasks
+	}
+	for _, t := range allTasks {
+		if t.Status != verificationTaskCompleted {
+			if failedStatus[t.Status] {
+				FailedTasks = append(FailedTasks, t)
+			} else {
+				IncompleteTasks = append(IncompleteTasks, t)
+			}
+		}
+	}
+
+	return FailedTasks, IncompleteTasks
 }
 
 func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.WaitGroup) {

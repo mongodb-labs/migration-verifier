@@ -286,6 +286,13 @@ func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []strin
 	fmt.Println()
 }
 
+func (verifier *Verifier) getGeneration() (generation int, lastGeneration bool) {
+	verifier.mux.RLock()
+	generation, lastGeneration = verifier.generation, verifier.lastGeneration
+	verifier.mux.RUnlock()
+	return
+}
+
 func (verifier *Verifier) getDocuments(ctx context.Context, collection *mongo.Collection, buildInfo *bson.M,
 	startAtTs *primitive.Timestamp, task *VerificationTask) (map[interface{}]bson.Raw, error) {
 	var findOptions bson.D
@@ -512,6 +519,7 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 		task.Status = verificationTaskCompleted
 	} else {
 		task.Status = verificationTaskFailed
+		// We know we won't change lastGeneration while verification tasks are running, so no mutex needed here.
 		if verifier.lastGeneration {
 			verifier.logger.Error().Msgf("[Worker %d] Verification Task %+v failed critical section and is a true error",
 				workerNum, task.PrimaryKey)
@@ -520,7 +528,7 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 			for _, v := range mismatches {
 				err := verifier.InsertFailedIdVerificationTask(v.ID, task.QueryFilter.Namespace)
 				if err != nil {
-					verifier.logger.Error().Msgf("[Worker %d] Error inserting docmument mismatch into Recheck queue: %+v", workerNum, err)
+					verifier.logger.Error().Msgf("[Worker %d] Error inserting document mismatch into Recheck queue: %+v", workerNum, err)
 				}
 			}
 		}
@@ -880,7 +888,8 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 				Msg("Unrecoverable error in inserting failed collection verification task")
 		}
 		task.Status = verificationTaskFailed
-		return
+		// Fall through here; comparing the collection specifications will produce the correct
+		// failure output.
 	}
 	specificationProblems, verifyData := verifier.compareCollectionSpecifications(srcNs, dstNs, srcSpec, dstSpec)
 	if specificationProblems != nil {
@@ -935,12 +944,13 @@ func (verifier *Verifier) GetVerificationStatus() (*VerificationStatus, error) {
 	ctx := context.Background()
 	verificationStatus := VerificationStatus{}
 	taskCollection := verifier.verificationTaskCollection()
+	generation, _ := verifier.getGeneration()
 
 	aggregation := []bson.M{
 		{
 			"$match": bson.M{
 				"type":       bson.M{"$ne": "primary"},
-				"generation": verifier.generation,
+				"generation": generation,
 			},
 		},
 		{
@@ -1154,7 +1164,9 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 		fmt.Print("Differences in counts may be due to query filters\n\n\n")
 	}
 
-	metadataFailedTasks := FetchFailedTasks(ctx, verifier.verificationTaskCollection(), verificationTaskVerifyCollection)
+	generation, _ := verifier.getGeneration()
+	metadataFailedTasks, metadataIncompleteTasks :=
+		FetchFailedAndIncompleteTasks(ctx, verifier.verificationTaskCollection(), verificationTaskVerifyCollection, generation)
 	if len(metadataFailedTasks) != 0 {
 		table = tablewriter.NewWriter(os.Stdout)
 		table.SetHeader([]string{"Index", "Cluster", "Type", "Field", "Namespace", "Details"})
@@ -1167,11 +1179,11 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 		fmt.Println("Collections/Indexes in failed or retry status:")
 		table.Render()
 		fmt.Println()
-	} else {
+	} else if len(metadataIncompleteTasks) == 0 {
 		fmt.Print("********** ALL COLLECTION METADATA MATCHES ! **********\n\n")
 	}
 
-	FailedTasks := FetchFailedTasks(ctx, verifier.verificationTaskCollection(), verificationTaskVerify)
+	FailedTasks := FetchFailedTasks(ctx, verifier.verificationTaskCollection(), verificationTaskVerify, generation)
 	if len(FailedTasks) == 0 {
 		// Nothing to print
 		return
