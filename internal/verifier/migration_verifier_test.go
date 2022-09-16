@@ -159,18 +159,16 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	suite.ElementsMatch(mapKeysAsInterface(dstDocumentMap), []interface{}{stringId})
 }
 
-func (suite *MultiMetaVersionTestSuite) TestRecheckQueue() {
+func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 	ctx := context.Background()
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
-	err := verifier.InsertFailedCompareRecheckDoc("foo", "bar", 42)
+	err := verifier.InsertFailedIdVerificationTask(42, "foo.bar")
 	suite.Require().Nil(err)
-	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar", 43)
+	err = verifier.InsertFailedIdVerificationTask(43, "foo.bar")
 	suite.Require().Nil(err)
-	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar", 44)
+	err = verifier.InsertFailedIdVerificationTask(44, "foo.bar")
 	suite.Require().Nil(err)
-	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar2", 42)
-	suite.Require().Nil(err)
-	err = verifier.InsertFailedCompareRecheckDoc("foo", "bar", 44)
+	err = verifier.InsertFailedIdVerificationTask(42, "foo.bar2")
 	suite.Require().Nil(err)
 	event := ParsedEvent{
 		DocKey: DocKey{ID: int32(55)},
@@ -180,52 +178,43 @@ func (suite *MultiMetaVersionTestSuite) TestRecheckQueue() {
 			Coll: "bar2",
 		},
 	}
-	err = verifier.HandleChangeStreamEvent(&event)
+	err = verifier.HandleChangeStreamEvent(ctx, &event)
 	suite.Require().Nil(err)
 	event.OpType = "insert"
-	err = verifier.HandleChangeStreamEvent(&event)
+	err = verifier.HandleChangeStreamEvent(ctx, &event)
 	suite.Require().Nil(err)
 	event.OpType = "replace"
-	err = verifier.HandleChangeStreamEvent(&event)
+	err = verifier.HandleChangeStreamEvent(ctx, &event)
 	suite.Require().Nil(err)
 	event.OpType = "update"
-	err = verifier.HandleChangeStreamEvent(&event)
+	err = verifier.HandleChangeStreamEvent(ctx, &event)
 	suite.Require().Nil(err)
 	event.OpType = "flibbity"
-	err = verifier.HandleChangeStreamEvent(&event)
+	err = verifier.HandleChangeStreamEvent(ctx, &event)
 	suite.Require().Equal(fmt.Errorf(`Not supporting: "flibbity" events`), err)
 
-	cur, err := verifier.GetRecheckDocs(ctx)
-	suite.Require().Nil(err)
-	var recheck RecheckAggregate
-	more := cur.Next(ctx)
-	suite.Require().True(more)
-	err = cur.Decode(&recheck)
-	suite.Require().Nil(err)
-	expected := RecheckAggregate{
-		ID: Namespace{
-			DB:   "foo",
-			Coll: "bar",
-		},
-		Ids: []interface{}{int32(42), int32(43), int32(44)},
+	var doc bson.M
+	cur, err := verifier.verificationTaskCollection().Find(ctx, bson.M{"generation": 1})
+	verifyTask := func(expectedIds bson.A, expectedNamespace string) {
+		more := cur.Next(ctx)
+		suite.Require().True(more)
+		cur.Decode(&doc)
+		suite.Require().Equal(expectedIds, doc["_ids"])
+		suite.Require().Equal("added", doc["status"])
+		suite.Require().Equal("verify", doc["type"])
+		suite.Require().Equal(expectedNamespace, doc["query_filter"].(bson.M)["namespace"])
 	}
-	suite.Require().Equal(expected, recheck)
-
-	more = cur.Next(ctx)
-	suite.Require().True(more)
-	err = cur.Decode(&recheck)
-	suite.Require().Nil(err)
-	expected = RecheckAggregate{
-		ID: Namespace{
-			DB:   "foo",
-			Coll: "bar2",
-		},
-		Ids: []interface{}{int32(42), int32(55)},
-	}
-	suite.Require().Equal(expected, recheck)
-
-	more = cur.Next(ctx)
-	suite.Require().False(more)
+	// TODO: REP-1466: this test will fail once we are grouping correctly. In particular the
+	// multiple 55s are a problem
+	verifyTask(bson.A{int32(42)}, "foo.bar")
+	verifyTask(bson.A{int32(43)}, "foo.bar")
+	verifyTask(bson.A{int32(44)}, "foo.bar")
+	verifyTask(bson.A{int32(42)}, "foo.bar2")
+	verifyTask(bson.A{int32(55)}, "foo.bar2")
+	verifyTask(bson.A{int32(55)}, "foo.bar2")
+	verifyTask(bson.A{int32(55)}, "foo.bar2")
+	verifyTask(bson.A{int32(55)}, "foo.bar2")
+	suite.Require().False(cur.Next(ctx))
 }
 
 func TestVerifierCompareDocs(t *testing.T) {

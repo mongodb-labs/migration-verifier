@@ -148,6 +148,15 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 	opts := verifier.getClientOpts(uri)
 	var err error
 	verifier.metaClient, err = mongo.Connect(ctx, opts)
+	if err != nil {
+		return err
+	}
+	return err
+}
+
+func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
+	model := mongo.IndexModel{Keys: bson.M{"generation": 1}}
+	_, err := verifier.verificationTaskCollection().Indexes().CreateOne(ctx, model)
 	return err
 }
 
@@ -862,7 +871,14 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 			task.Status = verificationTaskCompleted
 			return
 		}
-		verifier.InsertFailedCollectionVerificationTask(srcNs)
+		_, err := verifier.InsertFailedCollectionVerificationTask(srcNs)
+		if err != nil {
+			verifier.
+				logger.
+				Fatal().
+				Err(err).
+				Msg("Unrecoverable error in inserting failed collection verification task")
+		}
 		task.Status = verificationTaskFailed
 		return
 	}
@@ -1018,10 +1034,6 @@ func (verifier *Verifier) dstClientDatabase(dbName string) *mongo.Database {
 		verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
 	}
 	return db
-}
-
-func (verifier *Verifier) metaClientCollection(name string) *mongo.Collection {
-	return verifier.metaClient.Database(verifier.metaDBName).Collection(name)
 }
 
 func (verifier *Verifier) srcClientCollection(task *VerificationTask) *mongo.Collection {
