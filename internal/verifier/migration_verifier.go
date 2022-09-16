@@ -48,14 +48,18 @@ const (
 
 // Verifier is the main state for the migration verifier
 type Verifier struct {
-	phase        string
-	port         int
-	metaClient   *mongo.Client
-	srcClient    *mongo.Client
-	dstClient    *mongo.Client
-	srcBuildInfo *bson.M
-	dstBuildInfo *bson.M
-	numWorkers   int
+	writesOff      bool
+	lastGeneration bool
+	running        bool
+	generation     int
+	phase          string
+	port           int
+	metaClient     *mongo.Client
+	srcClient      *mongo.Client
+	dstClient      *mongo.Client
+	srcBuildInfo   *bson.M
+	dstBuildInfo   *bson.M
+	numWorkers     int
 
 	comparisonRetryDelayMillis time.Duration
 	workerSleepDelayMillis     time.Duration
@@ -69,10 +73,11 @@ type Verifier struct {
 
 	srcNamespaces []string
 	dstNamespaces []string
+	nsMap         map[string]string
 	metaDBName    string
 	srcStartAtTs  *primitive.Timestamp
 
-	changeStreamMux       sync.Mutex
+	mux                   sync.RWMutex
 	changeStreamRunning   bool
 	changeStreamEnderChan chan struct{}
 	changeStreamErrChan   chan error
@@ -121,6 +126,18 @@ func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
 	opts.SetReadConcern(readconcern.Majority())
 	opts.SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
 	return opts
+}
+
+func (verifier *Verifier) WritesOff(ctx context.Context) {
+	verifier.mux.Lock()
+	verifier.writesOff = true
+	verifier.mux.Unlock()
+}
+
+func (verifier *Verifier) WritesOn(ctx context.Context) {
+	verifier.mux.Lock()
+	verifier.writesOff = false
+	verifier.mux.Unlock()
 }
 
 func (verifier *Verifier) GetLogger() *logger.Logger {
@@ -208,6 +225,16 @@ func (verifier *Verifier) SetDstNamespaces(arg []string) {
 	verifier.dstNamespaces = arg
 }
 
+func (verifier *Verifier) SetNamespaceMap() {
+	verifier.nsMap = make(map[string]string)
+	if len(verifier.dstNamespaces) == 0 {
+		return
+	}
+	for i, ns := range verifier.srcNamespaces {
+		verifier.nsMap[ns] = verifier.dstNamespaces[i]
+	}
+}
+
 func (verifier *Verifier) SetMetaDBName(arg string) {
 	verifier.metaDBName = arg
 }
@@ -233,7 +260,7 @@ func (verifier *Verifier) SetReadPreference(arg string) error {
 	return err
 }
 
-// DocumentStats gets various status (TODO clarify)
+// DocumentStats gets various stats (TODO clarify)
 func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []string) {
 
 	table := tablewriter.NewWriter(os.Stdout)
@@ -476,12 +503,16 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 		task.Status = verificationTaskCompleted
 	} else {
 		task.Status = verificationTaskFailed
-		verifier.logger.Error().Msgf("[Worker %d] Verification Task %+v failed during Check, may pass Recheck", workerNum, task.PrimaryKey)
-		dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
-		for _, v := range mismatches {
-			err := verifier.InsertFailedCompareRecheckDoc(dbName, collName, v.ID)
-			if err != nil {
-				verifier.logger.Error().Msgf("[Worker %d] Error inserting docmument mismatch into Recheck queue: %+v", workerNum, err)
+		if verifier.lastGeneration {
+			verifier.logger.Error().Msgf("[Worker %d] Verification Task %+v failed critical section and is a true error",
+				workerNum, task.PrimaryKey)
+		} else {
+			verifier.logger.Info().Msgf("[Worker %d] Verification Task %+v failed, may pass next generation", workerNum, task.PrimaryKey)
+			for _, v := range mismatches {
+				err := verifier.InsertFailedIdVerificationTask(v.ID, task.QueryFilter.Namespace)
+				if err != nil {
+					verifier.logger.Error().Msgf("[Worker %d] Error inserting docmument mismatch into Recheck queue: %+v", workerNum, err)
+				}
 			}
 		}
 	}
@@ -824,10 +855,15 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 	if srcErr != nil || dstErr != nil {
 		return
 	}
-	if srcSpec == nil && dstSpec == nil {
-		verifier.logger.Info().Msgf("[Worker %d] Collection not present on either cluster: %s -> %s", workerNum, srcNs, dstNs)
-		// This counts as success.
-		task.Status = verificationTaskCompleted
+	if dstSpec == nil {
+		if srcSpec == nil {
+			verifier.logger.Info().Msgf("[Worker %d] Collection not present on either cluster: %s -> %s", workerNum, srcNs, dstNs)
+			// This counts as success.
+			task.Status = verificationTaskCompleted
+			return
+		}
+		verifier.InsertFailedCollectionVerificationTask(srcNs)
+		task.Status = verificationTaskFailed
 		return
 	}
 	specificationProblems, verifyData := verifier.compareCollectionSpecifications(srcNs, dstNs, srcSpec, dstSpec)
@@ -868,7 +904,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 	}
 	verifier.logger.Info().Msgf("[Worker %d] split collection info %d partitions", workerNum, len(partitions))
 	for _, partition := range partitions {
-		_, err := InsertPartitionVerificationTask(partition, dstNs, verifier.verificationTaskCollection())
+		_, err := verifier.InsertPartitionVerificationTask(partition, dstNs)
 		if err != nil {
 			task.Status = verificationTaskFailed
 			verifier.logger.Error().Msgf("[Worker %d] Error inserting verifier tasks: %+v", workerNum, err)
@@ -876,31 +912,6 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 	}
 	if task.Status == verificationTaskProcessing {
 		task.Status = verificationTaskCompleted
-	}
-}
-
-func (verifier *Verifier) Work(workerNum int, ctx context.Context, wg *sync.WaitGroup) {
-	defer wg.Done()
-	verifier.logger.Info().Msgf("[Worker %d] Started", workerNum)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			task, err := verifier.FindNextVerifyTaskAndUpdate()
-			if errors.Is(err, mongo.ErrNoDocuments) {
-				verifier.logger.Info().Msgf("[Worker %d] No tasks found, sleeping...", workerNum)
-				time.Sleep(verifier.workerSleepDelayMillis * time.Millisecond)
-				continue
-			} else if err != nil {
-				panic(err)
-			}
-			if task.Type == verificationTaskVerifyCollection {
-				verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
-			} else {
-				verifier.ProcessVerifyTask(workerNum, task)
-			}
-		}
 	}
 }
 
@@ -912,7 +923,8 @@ func (verifier *Verifier) GetVerificationStatus() (*VerificationStatus, error) {
 	aggregation := []bson.M{
 		{
 			"$match": bson.M{
-				"type": bson.M{"$ne": "primary"},
+				"type":       bson.M{"$ne": "primary"},
+				"generation": verifier.generation,
 			},
 		},
 		{
@@ -1050,195 +1062,6 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 		Phase:  verifier.phase,
 		Status: status,
 	}, nil
-}
-
-func (verifier *Verifier) Check(ctx context.Context) error {
-	var err error
-	if verifier.startClean {
-		verifier.logger.Info().Msg("Dropping old verifier metadata")
-		err = verifier.verificationDatabase().Drop(ctx)
-		if err != nil {
-			return err
-		}
-	}
-	verifier.logger.Info().Msg("Starting Check")
-
-	verifier.phase = Check
-	defer func() {
-		verifier.phase = Idle
-	}()
-
-	verifier.changeStreamMux.Lock()
-	csRunning := verifier.changeStreamRunning
-	verifier.changeStreamMux.Unlock()
-	if !csRunning {
-		verifier.logger.Info().Msg("Change stream not running, starting change stream")
-		retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
-		startAtTs, err := GetLastOpTimeAndSyncShardClusterTime(ctx,
-			verifier.logger,
-			retryer,
-			verifier.srcClient,
-			true)
-		if err != nil {
-			return err
-		}
-		err = verifier.StartChangeStream(ctx, startAtTs)
-		if err != nil {
-			return err
-		}
-		verifier.srcStartAtTs = startAtTs
-	}
-
-	// Log out the verification status when initially booting up so it's easy to see the current state
-	verificationStatus, err := verifier.GetVerificationStatus()
-	if err != nil {
-		verifier.logger.Error().Msgf("Failed getting verification status: %v", err)
-	} else {
-		verifier.logger.Info().Msgf("Initial verification status: %+v", verificationStatus)
-	}
-
-	err = verifier.CreateInitialTasks()
-	if err != nil {
-		return err
-	}
-
-	verifier.logger.Info().Msgf("Starting %d verification workers", verifier.numWorkers)
-	ctx, cancel := context.WithCancel(context.Background())
-	wg := sync.WaitGroup{}
-	for i := 0; i < verifier.numWorkers; i++ {
-		wg.Add(1)
-		go verifier.Work(i, ctx, &wg)
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	waitForTaskCreation := 0
-	for {
-		select {
-		case err := <-verifier.changeStreamErrChan:
-			cancel()
-			return err
-		case <-ctx.Done():
-			cancel()
-			return nil
-		default:
-		}
-
-		verificationStatus, err := verifier.GetVerificationStatus()
-		if err != nil {
-			verifier.logger.Error().Msgf("Failed getting verification status: %v", err)
-		}
-
-		if waitForTaskCreation%2 == 0 {
-			verifier.PrintVerificationSummary(ctx)
-		}
-
-		//wait for task to be created, if none of the tasks found.
-		if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 || verificationStatus.RecheckTasks > 0 {
-			waitForTaskCreation++
-			time.Sleep(15 * time.Second)
-		} else {
-			verifier.PrintVerificationSummary(ctx)
-			verifier.logger.Info().Msg("Verification tasks complete")
-			cancel()
-			wg.Wait()
-			break
-		}
-	}
-	verifier.logger.Info().Msg("Check finished")
-	return nil
-}
-
-func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {
-	// We want to check all user collections on both source and dest.
-	srcNamespaces, err := ListAllUserCollections(ctx, verifier.logger, verifier.srcClient,
-		true /* include views */, verifier.metaDBName)
-	if err != nil {
-		return err
-	}
-
-	dstNamespaces, err := ListAllUserCollections(ctx, verifier.logger, verifier.dstClient,
-		true /* include views */, verifier.metaDBName)
-	if err != nil {
-		return err
-	}
-
-	srcMap := map[string]bool{}
-	for _, ns := range srcNamespaces {
-		srcMap[ns] = true
-	}
-	for _, ns := range dstNamespaces {
-		if !srcMap[ns] {
-			srcNamespaces = append(srcNamespaces, ns)
-		}
-	}
-	verifier.logger.Info().Msgf("Namespaces to verify %+v", srcNamespaces)
-	// In verifyAll mode, we do not support collection renames, so src and dest lists are the same.
-	verifier.srcNamespaces = srcNamespaces
-	verifier.dstNamespaces = srcNamespaces
-	return nil
-}
-
-func (verifier *Verifier) CreateInitialTasks() error {
-	// If we don't know the src namespaces, we're definitely not the primary task.
-	if !verifier.verifyAll {
-		if len(verifier.srcNamespaces) == 0 {
-			return nil
-		}
-		if len(verifier.dstNamespaces) == 0 {
-			verifier.dstNamespaces = verifier.srcNamespaces
-		}
-		if len(verifier.srcNamespaces) != len(verifier.dstNamespaces) {
-			err := errors.Errorf("Different number of source and destination namespaces")
-			verifier.logger.Error().Msgf("%s", err)
-			return err
-		}
-	}
-	isPrimary, err := verifier.CheckIsPrimary()
-	if err != nil {
-		return err
-	}
-	if !isPrimary {
-		return nil
-	}
-	if verifier.verifyAll {
-		err := verifier.setupAllNamespaceList(context.Background())
-		if err != nil {
-			return err
-		}
-	}
-	for i, src := range verifier.srcNamespaces {
-		dst := verifier.dstNamespaces[i]
-		verifier.logger.Info().Msgf("Adding task for %s -> %s", src, dst)
-		_, err := InsertCollectionVerificationTask(src, dst, verifier.verificationTaskCollection())
-		if err != nil {
-			verifier.logger.Error().Msgf("Failed to insert collection verification task: %s", err)
-			return err
-		}
-	}
-
-	err = verifier.UpdatePrimaryTaskComplete()
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func FetchFailedTasks(ctx context.Context, coll *mongo.Collection, taskType string) []VerificationTask {
-
-	var FailedTasks []VerificationTask
-	status := []string{verificationTasksRetry, verificationTaskFailed, verificationTaskMetadataMismatch}
-	cur, err := coll.Find(ctx, bson.D{bson.E{Key: "type", Value: taskType},
-		bson.E{Key: "status", Value: bson.M{"$in": status}}})
-	if err != nil {
-		return FailedTasks
-	}
-
-	err = cur.All(ctx, &FailedTasks)
-	if err != nil {
-		return FailedTasks
-	}
-
-	return FailedTasks
 }
 
 func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {

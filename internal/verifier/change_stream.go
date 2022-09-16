@@ -31,7 +31,7 @@ type DocKey struct {
 
 // HandleChangeStreamEvent performs the necessary work for change stream events that occur during
 // operation.
-func (verifier *Verifier) HandleChangeStreamEvent(changeEvent *ParsedEvent) error {
+func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEvent *ParsedEvent) error {
 	switch changeEvent.OpType {
 	case "delete":
 		fallthrough
@@ -40,7 +40,7 @@ func (verifier *Verifier) HandleChangeStreamEvent(changeEvent *ParsedEvent) erro
 	case "replace":
 		fallthrough
 	case "update":
-		return verifier.InsertChangeEventRecheckDoc(changeEvent)
+		return verifier.InsertChangeEventIdVerificationTask(ctx, changeEvent)
 	default:
 		return fmt.Errorf(`Not supporting: "` + changeEvent.OpType + `" events`)
 	}
@@ -63,13 +63,13 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *prim
 					if err := cs.Decode(&changeEvent); err != nil {
 						verifier.logger.Fatal().Err(err).Msg("")
 					}
-					err := verifier.HandleChangeStreamEvent(&changeEvent)
+					err := verifier.HandleChangeStreamEvent(ctx, &changeEvent)
 					verifier.changeStreamErrChan <- err
 					verifier.logger.Fatal().Err(err).Msg("")
 				}
-				verifier.changeStreamMux.Lock()
+				verifier.mux.Lock()
 				verifier.changeStreamRunning = false
-				verifier.changeStreamMux.Unlock()
+				verifier.mux.Unlock()
 				// since we have started Recheck, we must signal that we have
 				// finished the change stream changes so that Recheck can continue.
 				verifier.changeStreamDoneChan <- struct{}{}
@@ -84,7 +84,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *prim
 				if err := cs.Decode(&changeEvent); err != nil {
 					verifier.logger.Fatal().Err(err).Msg("")
 				}
-				err := verifier.HandleChangeStreamEvent(&changeEvent)
+				err := verifier.HandleChangeStreamEvent(ctx, &changeEvent)
 				if err != nil {
 					verifier.changeStreamErrChan <- err
 					return
@@ -98,9 +98,9 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *prim
 	if err != nil {
 		return err
 	}
-	verifier.changeStreamMux.Lock()
+	verifier.mux.Lock()
 	verifier.changeStreamRunning = true
-	verifier.changeStreamMux.Unlock()
+	verifier.mux.Unlock()
 	go streamReader(srcChangeStream)
 	return nil
 }

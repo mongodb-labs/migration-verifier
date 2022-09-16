@@ -153,7 +153,7 @@ func main() {
 				zerolog.SetGlobalLevel(zerolog.DebugLevel)
 			}
 			if cCtx.Bool(checkOnly) {
-				return verifier.Check(ctx)
+				return verifier.CheckDriver(ctx)
 			} else {
 				return verifier.StartServer()
 			}
@@ -198,6 +198,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 	} else {
 		v.SetSrcNamespaces(cCtx.StringSlice(srcNamespace))
 		v.SetDstNamespaces(cCtx.StringSlice(dstNamespace))
+		v.SetNamespaceMap()
 	}
 	v.SetMetaDBName(cCtx.String(metaDBName))
 	v.SetIgnoreBSONFieldOrder(cCtx.Bool(ignoreFieldOrder))
