@@ -255,10 +255,14 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer
 				bson.D{{"$collStats", bson.D{
 					{"storageStats", bson.E{"scale", 1}},
 				}}},
-				bson.D{{"$addFields", bson.D{{"count", "$storageStats.count"}}}},
-				bson.D{{"$addFields", bson.D{{"size", "$storageStats.size"}}}},
-				bson.D{{"$addFields", bson.D{{"capped", "$storageStats.capped"}}}},
-				bson.D{{"$project", bson.D{{"ns", 1}, {"count", 1}, {"size", 1}, {"capped", 1}}}},
+				// The "$group" here behaves as a project and rename when there's only one
+				// document (non-sharded case).  When there are multiple documents (one for
+				// each shard) it correctly sums the counts and sizes from each shard.
+				bson.D{{"$group", bson.D{
+					{"_id", "ns"},
+					{"count", bson.D{{"$sum", "$storageStats.count"}}},
+					{"size", bson.D{{"$sum", "$storageStats.size"}}},
+					{"capped", bson.D{{"$first", "$capped"}}}}}},
 			}},
 			{"cursor", bson.D{}},
 		}, collUUID)
