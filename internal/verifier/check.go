@@ -13,6 +13,9 @@ import (
 
 // Check is the asynchronous entry point to Check, should only be called by the web server. Use
 // CheckDriver directly for synchronous run.
+// testChan is a pair of channels for coordinating generations in tests.
+// testChan[0] is a channel signalled when when a generation is complete
+// testChan[1] is a channel signalled when Check should continue with the next generation.
 func (verifier *Verifier) Check(ctx context.Context) {
 	go func() {
 		err := verifier.CheckDriver(ctx)
@@ -49,6 +52,7 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 		time.Sleep(10 * time.Millisecond)
 	}
 
+	verifier.logger.Info().Msgf("Starting Check generation %d", verifier.generation)
 	waitForTaskCreation := 0
 	for {
 		select {
@@ -86,7 +90,7 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 	return nil
 }
 
-func (verifier *Verifier) CheckDriver(ctx context.Context) error {
+func (verifier *Verifier) CheckDriver(ctx context.Context, testChan ...chan struct{}) error {
 	verifier.mux.Lock()
 	if verifier.running {
 		verifier.mux.Unlock()
@@ -94,10 +98,12 @@ func (verifier *Verifier) CheckDriver(ctx context.Context) error {
 		return nil
 	}
 	verifier.running = true
-	defer func() {
-		verifier.running = false
-	}()
 	verifier.mux.Unlock()
+	defer func() {
+		verifier.mux.Lock()
+		verifier.running = false
+		verifier.mux.Unlock()
+	}()
 	var err error
 	if verifier.startClean {
 		verifier.logger.Info().Msg("Dropping old verifier metadata")
@@ -155,6 +161,14 @@ func (verifier *Verifier) CheckDriver(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		// we will only coordinate when the number of channels is exactly 2.
+		// * Channel 0 signals a generation is done
+		// * Channel 1 signals to check to continue the next generation
+		if len(testChan) == 2 {
+			testChan[0] <- struct{}{}
+			<-testChan[1]
+		}
+		time.Sleep(verifier.generationPauseDelayMillis * time.Millisecond)
 		verifier.mux.Lock()
 		if verifier.lastGeneration {
 			verifier.mux.Unlock()
@@ -186,6 +200,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+
 		err = verifier.ClearRecheckDocs(ctx, oldGeneration)
 		if err != nil {
 			verifier.logger.Error().Msgf("Failed trying to clear out old recheck docs, continuing: %v",
@@ -321,7 +336,7 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.Wait
 		default:
 			task, err := verifier.FindNextVerifyTaskAndUpdate()
 			if errors.Is(err, mongo.ErrNoDocuments) {
-				verifier.logger.Info().Msgf("[Worker %d] No tasks found, sleeping...", workerNum)
+				verifier.logger.Debug().Msgf("[Worker %d] No tasks found, sleeping...", workerNum)
 				time.Sleep(verifier.workerSleepDelayMillis * time.Millisecond)
 				continue
 			} else if err != nil {

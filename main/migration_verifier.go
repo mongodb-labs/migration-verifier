@@ -22,7 +22,7 @@ const (
 	dstURI               = "dstURI"
 	metaURI              = "metaURI"
 	numWorkers           = "numWorkers"
-	comparisonRetryDelay = "comparisonRetryDelay"
+	generationPauseDelay = "generationPauseDelay"
 	workerSleepDelay     = "workerSleepDelay"
 	serverPort           = "serverPort"
 	logPath              = "logPath"
@@ -80,9 +80,9 @@ func main() {
 			Usage: "`number` of worker threads to use for verification",
 		},
 		&cli.Int64Flag{
-			Name:  comparisonRetryDelay,
+			Name:  generationPauseDelay,
 			Value: 1_000,
-			Usage: "`milliseconds` to wait between retries on a comparisonRetryDelay",
+			Usage: "`milliseconds` to wait between generations of rechecking, allowing for more time to turn off writes",
 		},
 		&cli.Int64Flag{
 			Name:  workerSleepDelay,
@@ -182,7 +182,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 	}
 	v.SetServerPort(cCtx.Int(serverPort))
 	v.SetNumWorkers(cCtx.Int(numWorkers))
-	v.SetComparisonRetryDelayMillis(time.Duration(cCtx.Int64(comparisonRetryDelay)))
+	v.SetGenerationPauseDelayMillis(time.Duration(cCtx.Int64(generationPauseDelay)))
 	v.SetWorkerSleepDelayMillis(time.Duration(cCtx.Int64(workerSleepDelay)))
 	v.SetPartitionSizeMB(cCtx.Int64(partitionSizeMB))
 	v.SetStartClean(cCtx.Bool(startClean))
