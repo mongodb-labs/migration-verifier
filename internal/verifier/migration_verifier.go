@@ -1081,8 +1081,9 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 		return Progress{Error: err}, err
 	}
 	return Progress{
-		Phase:  verifier.phase,
-		Status: status,
+		Phase:      verifier.phase,
+		Generation: verifier.generation,
+		Status:     status,
 	}, nil
 }
 

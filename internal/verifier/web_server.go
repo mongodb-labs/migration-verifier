@@ -207,9 +207,10 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 
 // Progress represents the structure of the JSON response from the Progress end point.
 type Progress struct {
-	Phase  string              `json:"phase"`
-	Error  error               `json:"error"`
-	Status *VerificationStatus `json:"verificationStatus"`
+	Phase      string              `json:"phase"`
+	Generation int                 `json:"generation"`
+	Error      error               `json:"error"`
+	Status     *VerificationStatus `json:"verificationStatus"`
 }
 
 // progressEndpoint implements the gin handle for the progress endpoint.

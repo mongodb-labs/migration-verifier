@@ -892,6 +892,32 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.dstNamespaces)
 }
 
+func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	ctx := context.Background()
+
+	err := verifier.verificationDatabase().CreateCollection(ctx, verificationTasksCollection)
+	metaColl := verifier.verificationDatabase().Collection(verificationTasksCollection)
+	suite.Require().Nil(err)
+	metaColl.InsertMany(ctx, []interface{}{
+		bson.M{"generation": 0, "status": "added", "type": "verify"},
+		bson.M{"generation": 0, "status": "processing", "type": "verify"},
+		bson.M{"generation": 0, "status": "failed", "type": "verify"},
+		bson.M{"generation": 0, "status": "mismatch", "type": "verify"},
+		bson.M{"generation": 0, "status": "completed", "type": "verify"},
+		bson.M{"generation": 0, "status": "retry", "type": "verify"},
+	})
+
+	status, err := verifier.GetVerificationStatus()
+	suite.Require().Nil(err)
+	suite.Equal(1, status.AddedTasks)
+	suite.Equal(1, status.ProcessingTasks)
+	suite.Equal(1, status.FailedTasks)
+	suite.Equal(1, status.MetadataMismatchTasks)
+	suite.Equal(1, status.CompletedTasks)
+	suite.Equal(1, status.RecheckTasks)
+}
+
 // func getVerificationTasks(t *testing.T, verifier *Verifier) []VerificationTask {
 // 	ctx := context.Background()
 // 	cursor, err := verifier.verificationTaskCollection().Find(ctx, bson.D{})
