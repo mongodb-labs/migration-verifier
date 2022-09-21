@@ -75,7 +75,7 @@ buildvariants:
   #     Static Checks Buildvariant      #
   #######################################
 
-  - name: static-analysis
+  - name: static-analysis-required
     display_name: "! Static Analysis"
     run_on:
       - rhel70-small
@@ -85,7 +85,7 @@ buildvariants:
       - name: lint-go
     tags: ["commit-queue"]
 
-  - name: unit-tests
+  - name: unit-tests-required
     display_name: "! Unit Tests"
     run_on:
       - rhel70-small
