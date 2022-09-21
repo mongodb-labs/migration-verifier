@@ -890,10 +890,8 @@ func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
 
-	err := verifier.verificationDatabase().CreateCollection(ctx, verificationTasksCollection)
 	metaColl := verifier.verificationDatabase().Collection(verificationTasksCollection)
-	suite.Require().Nil(err)
-	metaColl.InsertMany(ctx, []interface{}{
+	_, err := metaColl.InsertMany(ctx, []interface{}{
 		bson.M{"generation": 0, "status": "added", "type": "verify"},
 		bson.M{"generation": 0, "status": "processing", "type": "verify"},
 		bson.M{"generation": 0, "status": "failed", "type": "verify"},
@@ -901,6 +899,7 @@ func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
 		bson.M{"generation": 0, "status": "completed", "type": "verify"},
 		bson.M{"generation": 0, "status": "retry", "type": "verify"},
 	})
+	suite.Require().Nil(err)
 
 	status, err := verifier.GetVerificationStatus()
 	suite.Require().Nil(err)

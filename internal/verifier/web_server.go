@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -92,7 +92,7 @@ func (server *WebServer) RequestAndResponseLogger() gin.HandlerFunc {
 		var buf []byte
 		if c.Request.Body != nil {
 			// The request body can only be read once.
-			buf, _ = ioutil.ReadAll(c.Request.Body)
+			buf, _ = io.ReadAll(c.Request.Body)
 		}
 		server.logger.Info().Str("uri", c.Request.RequestURI).
 			Str("method", c.Request.Method).
@@ -102,7 +102,7 @@ func (server *WebServer) RequestAndResponseLogger() gin.HandlerFunc {
 			Msg("received request")
 
 		// Reinstate the request body.
-		c.Request.Body = ioutil.NopCloser(bytes.NewBuffer(buf))
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(buf))
 
 		// Add the UUID to the header.
 		c.Header("Trace-Id", traceID)

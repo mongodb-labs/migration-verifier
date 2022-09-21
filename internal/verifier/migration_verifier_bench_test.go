@@ -76,9 +76,22 @@ func BenchmarkGeneric(t *testing.B) {
 		t.Fatal(err)
 	}
 	verifier.SetMetaDBName(metaDBName)
-	verifier.verificationTaskCollection().Drop(context.Background())
-	verifier.verificationRangeCollection().Drop(context.Background())
-	verifier.refetchCollection().Drop(context.Background())
+	err = verifier.verificationTaskCollection().Drop(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = verifier.verificationRangeCollection().Drop(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = verifier.verificationDatabase().Collection(recheckQueue).Drop(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = verifier.refetchCollection().Drop(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	println("Starting tasks")
 	for _, namespace := range namespaces {
