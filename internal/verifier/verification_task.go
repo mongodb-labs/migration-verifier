@@ -111,7 +111,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(partition *partitions.
 	return &verificationTask, err
 }
 
-func (verifier *Verifier) InsertFailedIdVerificationTask(id interface{}, srcNamespace string) error {
+func (verifier *Verifier) InsertFailedIdsVerificationTask(ids []interface{}, srcNamespace string) error {
 	dstNamespace := srcNamespace
 	if len(verifier.nsMap) != 0 {
 		var ok bool
@@ -124,7 +124,7 @@ func (verifier *Verifier) InsertFailedIdVerificationTask(id interface{}, srcName
 	verificationTask := VerificationTask{
 		PrimaryKey: primitive.NewObjectID(),
 		Generation: verifier.generation + 1,
-		Ids:        []interface{}{id},
+		Ids:        ids,
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerify,
 		QueryFilter: QueryFilter{

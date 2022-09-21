@@ -40,7 +40,7 @@ func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEve
 	case "replace":
 		fallthrough
 	case "update":
-		return verifier.InsertChangeEventIdVerificationTask(ctx, changeEvent)
+		return verifier.InsertChangeEventRecheckDoc(ctx, changeEvent)
 	default:
 		return fmt.Errorf(`Not supporting: "` + changeEvent.OpType + `" events`)
 	}

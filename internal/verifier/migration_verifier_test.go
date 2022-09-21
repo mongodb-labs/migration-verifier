@@ -51,6 +51,8 @@ func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstanc
 	require.Nil(t, verifier.refetchCollection().Drop(context.Background()))
 	require.Nil(t, verifier.srcClientCollection(&task).Drop(context.Background()))
 	require.Nil(t, verifier.dstClientCollection(&task).Drop(context.Background()))
+	require.Nil(t, verifier.verificationDatabase().Collection(recheckQueue).Drop(context.Background()))
+	require.Nil(t, verifier.AddMetaIndexes(context.Background()))
 	return verifier
 }
 
@@ -162,13 +164,11 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 	ctx := context.Background()
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
-	err := verifier.InsertFailedIdVerificationTask(42, "foo.bar")
+	err := verifier.InsertFailedCompareRecheckDocs("foo.bar", []interface{}{42}, []int{100})
 	suite.Require().Nil(err)
-	err = verifier.InsertFailedIdVerificationTask(43, "foo.bar")
+	err = verifier.InsertFailedCompareRecheckDocs("foo.bar", []interface{}{43, 44}, []int{100, 100})
 	suite.Require().Nil(err)
-	err = verifier.InsertFailedIdVerificationTask(44, "foo.bar")
-	suite.Require().Nil(err)
-	err = verifier.InsertFailedIdVerificationTask(42, "foo.bar2")
+	err = verifier.InsertFailedCompareRecheckDocs("foo.bar2", []interface{}{42}, []int{100})
 	suite.Require().Nil(err)
 	event := ParsedEvent{
 		DocKey: DocKey{ID: int32(55)},
@@ -193,6 +193,8 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 	err = verifier.HandleChangeStreamEvent(ctx, &event)
 	suite.Require().Equal(fmt.Errorf(`Not supporting: "flibbity" events`), err)
 
+	err = verifier.GenerateRecheckTasks(ctx, verifier.generation)
+	suite.Require().Nil(err)
 	var doc bson.M
 	cur, err := verifier.verificationTaskCollection().Find(ctx, bson.M{"generation": 1})
 	verifyTask := func(expectedIds bson.A, expectedNamespace string) {
@@ -205,16 +207,8 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 		suite.Require().Equal("verify", doc["type"])
 		suite.Require().Equal(expectedNamespace, doc["query_filter"].(bson.M)["namespace"])
 	}
-	// TODO: REP-1466: this test will fail once we are grouping correctly. In particular the
-	// multiple 55s are a problem
-	verifyTask(bson.A{int32(42)}, "foo.bar")
-	verifyTask(bson.A{int32(43)}, "foo.bar")
-	verifyTask(bson.A{int32(44)}, "foo.bar")
-	verifyTask(bson.A{int32(42)}, "foo.bar2")
-	verifyTask(bson.A{int32(55)}, "foo.bar2")
-	verifyTask(bson.A{int32(55)}, "foo.bar2")
-	verifyTask(bson.A{int32(55)}, "foo.bar2")
-	verifyTask(bson.A{int32(55)}, "foo.bar2")
+	verifyTask(bson.A{int32(42), int32(43), int32(44)}, "foo.bar")
+	verifyTask(bson.A{int32(42), int32(55)}, "foo.bar2")
 	suite.Require().False(cur.Next(ctx))
 }
 

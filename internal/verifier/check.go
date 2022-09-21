@@ -22,13 +22,11 @@ func (verifier *Verifier) Check(ctx context.Context) {
 	}()
 }
 
-func (verifier *Verifier) CheckWorker(ctx context.Context) error {
+func (verifier *Verifier) waitForChangeStream() error {
 	verifier.mux.RLock()
 	csRunning := verifier.changeStreamRunning
-	lastGeneration := verifier.lastGeneration
 	verifier.mux.RUnlock()
-	// if lastGeneration and change stream is running, we need to wait for the change streams to end
-	if lastGeneration && csRunning {
+	if csRunning {
 		verifier.logger.Info().Msg("Changestream still running, signalling that writes are done and waiting for change stream to exit")
 		verifier.changeStreamEnderChan <- struct{}{}
 		select {
@@ -38,7 +36,10 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 			break
 		}
 	}
+	return nil
+}
 
+func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 	verifier.logger.Info().Msgf("Starting %d verification workers", verifier.numWorkers)
 	ctx, cancel := context.WithCancel(ctx)
 	wg := sync.WaitGroup{}
@@ -150,15 +151,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context) error {
 	}
 	// Now enter the multi-generational steady check state
 	for {
-		verifier.mux.Lock()
-		// possible issue: turning the writes off at the exact same time a new iteration starts
-		// will result in an extra iteration. The odds of this are lower and the user should be
-		// paying attention. Also, this should not matter too much because any failures will be
-		// caught again on the next iteration.
-		if verifier.writesOff {
-			verifier.lastGeneration = true
-		}
-		verifier.mux.Unlock()
 		err := verifier.CheckWorker(ctx)
 		if err != nil {
 			return err
@@ -168,9 +160,37 @@ func (verifier *Verifier) CheckDriver(ctx context.Context) error {
 			verifier.mux.Unlock()
 			return nil
 		}
+		// TODO: wait here until writesOff is hit or enough time has passed, so we don't spin
+		// doing empty rechecks.
+
+		// possible issue: turning the writes off at the exact same time a new iteration starts
+		// will result in an extra iteration. The odds of this are lower and the user should be
+		// paying attention. Also, this should not matter too much because any failures will be
+		// caught again on the next iteration.
+		if verifier.writesOff {
+			// It's necessary to wait for the change stream to finish before incrementing the
+			// generation number, or the last changes will not be checked.
+			verifier.mux.Unlock()
+			err := verifier.waitForChangeStream()
+			if err != nil {
+				return err
+			}
+			verifier.mux.Lock()
+			verifier.lastGeneration = true
+		}
+		oldGeneration := verifier.generation
 		verifier.generation++
 		verifier.phase = Recheck
 		verifier.mux.Unlock()
+		err = verifier.GenerateRecheckTasks(ctx, oldGeneration)
+		if err != nil {
+			return err
+		}
+		err = verifier.ClearRecheckDocs(ctx, oldGeneration)
+		if err != nil {
+			verifier.logger.Error().Msgf("Failed trying to clear out old recheck docs, continuing: %v",
+				err)
+		}
 	}
 }
 

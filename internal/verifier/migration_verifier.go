@@ -103,6 +103,10 @@ type VerificationResult struct {
 	Details   interface{}
 	Cluster   interface{}
 	NameSpace interface{}
+	// The data size of the largest of the mismatched objects.
+	// Note this is not persisted; it is used only to ensure recheck tasks
+	// don't get too large.
+	dataSize int
 }
 
 // NewVerifier creates a new Verifier
@@ -111,6 +115,7 @@ func NewVerifier() *Verifier {
 		phase:                 Idle,
 		numWorkers:            NumWorkers,
 		readPreference:        readpref.Nearest(),
+		partitionSizeInBytes:  400 * 1024 * 1024,
 		changeStreamEnderChan: make(chan struct{}),
 		changeStreamErrChan:   make(chan error),
 		changeStreamDoneChan:  make(chan struct{}),
@@ -157,6 +162,11 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 	model := mongo.IndexModel{Keys: bson.M{"generation": 1}}
 	_, err := verifier.verificationTaskCollection().Indexes().CreateOne(ctx, model)
+	if err != nil {
+		return err
+	}
+	model = mongo.IndexModel{Keys: bson.D{{"_id.generation", 1}}}
+	_, err = verifier.verificationDatabase().Collection(recheckQueue).Indexes().CreateOne(ctx, model)
 	return err
 }
 
@@ -409,6 +419,7 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap map[interf
 				Details:   Missing,
 				Cluster:   ClusterTarget,
 				NameSpace: namespace,
+				dataSize:  len(srcClientDoc),
 			})
 			continue
 		}
@@ -429,6 +440,7 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap map[interf
 					Details:   Missing,
 					Cluster:   ClusterSource,
 					NameSpace: namespace,
+					dataSize:  len(dstClientDoc),
 				})
 			}
 		}
@@ -498,12 +510,18 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 		results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, id, "" /* fieldPrefix */)
 		return results, nil
 	}
+	dataSize := len(srcClientDoc)
+	if dataSize < len(dstClientDoc) {
+		dataSize = len(dstClientDoc)
+	}
+
 	// If we're respecting field order we have just done a binary compare so don't know the mismatching fields.
 	return []VerificationResult{{
 		ID:        dstClientDoc.Lookup("_id"),
 		Details:   Mismatch,
 		Cluster:   ClusterTarget,
 		NameSpace: namespace,
+		dataSize:  dataSize,
 	}}, nil
 }
 
@@ -525,11 +543,15 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 				workerNum, task.PrimaryKey)
 		} else {
 			verifier.logger.Info().Msgf("[Worker %d] Verification Task %+v failed, may pass next generation", workerNum, task.PrimaryKey)
+			var ids []interface{}
+			var dataSizes []int
 			for _, v := range mismatches {
-				err := verifier.InsertFailedIdVerificationTask(v.ID, task.QueryFilter.Namespace)
-				if err != nil {
-					verifier.logger.Error().Msgf("[Worker %d] Error inserting document mismatch into Recheck queue: %+v", workerNum, err)
-				}
+				ids = append(ids, v.ID)
+				dataSizes = append(dataSizes, v.dataSize)
+			}
+			err := verifier.InsertFailedCompareRecheckDocs(task.QueryFilter.Namespace, ids, dataSizes)
+			if err != nil {
+				verifier.logger.Error().Msgf("[Worker %d] Error inserting document mismatch into Recheck queue: %+v", workerNum, err)
 			}
 		}
 	}
