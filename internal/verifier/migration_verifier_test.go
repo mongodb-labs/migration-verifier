@@ -29,6 +29,10 @@ type MultiDataVersionTestSuite struct {
 	WithMongodsTestSuite
 }
 
+type MultiSourceVersionTestSuite struct {
+	WithMongodsTestSuite
+}
+
 type MultiMetaVersionTestSuite struct {
 	WithMongodsTestSuite
 }
@@ -61,6 +65,14 @@ func TestVerifierMultiversion(t *testing.T) {
 	testSuite := new(MultiDataVersionTestSuite)
 	srcVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
 	destVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
+	metaVersions := []string{"6.0.1"}
+	runMultipleVersionTests(t, testSuite, srcVersions, destVersions, metaVersions)
+}
+
+func TestVerifierMultiSourceversion(t *testing.T) {
+	testSuite := new(MultiSourceVersionTestSuite)
+	srcVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
+	destVersions := []string{"6.0.1"}
 	metaVersions := []string{"6.0.1"}
 	runMultipleVersionTests(t, testSuite, srcVersions, destVersions, metaVersions)
 }

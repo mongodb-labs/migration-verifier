@@ -82,6 +82,7 @@ type Verifier struct {
 	changeStreamEnderChan chan struct{}
 	changeStreamErrChan   chan error
 	changeStreamDoneChan  chan struct{}
+	lastChangeEventTime   *primitive.Timestamp
 }
 
 // VerificationStatus holds the Verification Status
@@ -320,12 +321,11 @@ func (verifier *Verifier) getDocuments(ctx context.Context, collection *mongo.Co
 	} else {
 		findOptions = task.QueryFilter.Partition.GetFindOptions(buildInfo)
 	}
-	// We only support secondary reads during the initial check (generation 0), because we don't have the correct startAtTs for the
-	// recheck phase.  In the future we could get it, it would be the cluster time on each cluster after writes were quiesced.
-	if verifier.readPreference.Mode() != readpref.PrimaryMode && verifier.generation == 0 {
+	if verifier.readPreference.Mode() != readpref.PrimaryMode {
 		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
 		if startAtTs != nil {
-			// In check mode on the source cluster, we never want to read before the change stream start time.
+			// We never want to read before the change stream start time, or for the last generation,
+			// the change stream end time.
 			findOptions = append(findOptions, bson.E{"readConcern", bson.D{
 				{"level", "majority"},
 				{"afterClusterTime", *startAtTs},

@@ -141,7 +141,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, testChan ...chan stru
 		if err != nil {
 			return err
 		}
-		verifier.srcStartAtTs = startAtTs
 	}
 	// Log out the verification status when initially booting up so it's easy to see the current state
 	verificationStatus, err := verifier.GetVerificationStatus()

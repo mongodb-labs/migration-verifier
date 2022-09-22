@@ -13,10 +13,11 @@ import (
 
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
 type ParsedEvent struct {
-	ID     interface{} `bson:"_id"`
-	OpType string      `bson:"operationType"`
-	Ns     *Namespace  `bson:"ns,omitempty"`
-	DocKey DocKey      `bson:"documentKey,omitempty"`
+	ID          interface{}          `bson:"_id"`
+	OpType      string               `bson:"operationType"`
+	Ns          *Namespace           `bson:"ns,omitempty"`
+	DocKey      DocKey               `bson:"documentKey,omitempty"`
+	ClusterTime *primitive.Timestamp `bson:"clusterTime,omitEmpty"`
 }
 
 func (pe *ParsedEvent) String() string {
@@ -32,6 +33,11 @@ type DocKey struct {
 // HandleChangeStreamEvent performs the necessary work for change stream events that occur during
 // operation.
 func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEvent *ParsedEvent) error {
+	if changeEvent.ClusterTime != nil &&
+		(verifier.lastChangeEventTime == nil ||
+			primitive.CompareTimestamp(*verifier.lastChangeEventTime, *changeEvent.ClusterTime) < 0) {
+		verifier.lastChangeEventTime = changeEvent.ClusterTime
+	}
 	switch changeEvent.OpType {
 	case "delete":
 		fallthrough
@@ -84,6 +90,9 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *prim
 				}
 				verifier.mux.Lock()
 				verifier.changeStreamRunning = false
+				if verifier.lastChangeEventTime != nil {
+					verifier.srcStartAtTs = verifier.lastChangeEventTime
+				}
 				verifier.mux.Unlock()
 				// since we have started Recheck, we must signal that we have
 				// finished the change stream changes so that Recheck can continue.
@@ -110,6 +119,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *prim
 	}
 	pipeline := verifier.GetChangeStreamFilter()
 	opts := options.ChangeStream().SetMaxAwaitTime(1 * time.Second).SetStartAtOperationTime(startTime)
+	verifier.srcStartAtTs = startTime
 	srcChangeStream, err := verifier.srcClient.Watch(context.Background(), pipeline, opts)
 	if err != nil {
 		return err
