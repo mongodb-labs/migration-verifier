@@ -48,7 +48,7 @@ To filter namespaces (allow list):
 ```
 
 
-Note: that this will check from` foo.bar &lt;-> foo.bar, foo.yar &lt;-> foo.yar, `and` mixed.namespaces &lt;-> can.work`
+Note: that this will check from` foo.bar <-> foo.bar, foo.yar <-> foo.yar, `and` mixed.namespaces <-> can.work`
 
 For checking namespaces with differing names between source and destination, the namespaces must be explicitly enumerated on the command line with the` --srcNamespace and --dstNamespace` flags. Names in the same position are considered to be the same:
 
@@ -58,11 +58,11 @@ migration-verifier … --srcNamespace foo.bar --srcNamespace foo.baz --dstNamesp
 ```
 
 
-will result in the mapping `foo.bar &lt;-> foo.bar1, foo.baz &lt;-> bar.bar2`
+will result in the mapping `foo.bar <-> foo.bar1, foo.baz <-> bar.bar2`
 
-By default, the verifier will read from all nodes (primary and secondary).  This can be changed with option “`--readPreference &lt;preference>`” where `&lt;preference>` can be “`primary`”, “`secondary`”, “`primaryPreferred`”, “`secondaryPreferred`”, or “`nearest`” (same as default).  
+By default, the verifier will read from all nodes (primary and secondary).  This can be changed with option “`--readPreference <preference>`” where `<preference>` can be “`primary`”, “`secondary`”, “`primaryPreferred`”, “`secondaryPreferred`”, or “`nearest`” (same as default).  
 
-To set a port, use `--serverPort &lt;port number>`. The default is 27020.
+To set a port, use `--serverPort <port number>`. The default is 27020.
 
 
 ## Send the Verifier Process Commands: 
