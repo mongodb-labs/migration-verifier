@@ -130,13 +130,14 @@ The migration-verifier has two steps:
 1. The initial check
     1. The verifier partitions up the data into 400MB (configurable) chunks and spins up many worker goroutines (threads) to read from both the source and destination.
     2. The verifier compares the documents on the source and destination by bytes and if they are different, it then checks field by field in case the field ordering has changed (since field ordering isn't required to be the same for the migration to be a success)
+
 2. Iterative checking
-    3. Since writes are coming in while the verification is happening, the verifier could both miss problematic changes made by the migration tool and could have temporary inconsistencies  that will clean themselves up later
-    4. Before starting the initial check, the verifier starts a change stream on the source and keeps track of every document that is modified on the source
-    5. In addition, the verifier keeps track of any documents that fail a check
-    6. The verifier runs rounds of checks continuously until it is told that writes are off, fetching the documents stored from the change stream and that were inconsistent in the previous checking rounds, from both the source and destination and rechecking them. Once again, violations are written down for future checking rounds
-    7. Every document to check is written with a generation number. A checking round checks documents for a specific generation. When a check round begins, we start writing new documents with a new generation number
-    8. The verifier fetches all collection/index/view information on the source and destination and confirms they are identical in every generation. This is duplicated work, but it's fast and convenient for the code.
+    1. Since writes are coming in while the verification is happening, the verifier could both miss problematic changes made by the migration tool and could have temporary inconsistencies  that will clean themselves up later
+    2. Before starting the initial check, the verifier starts a change stream on the source and keeps track of every document that is modified on the source
+    3. In addition, the verifier keeps track of any documents that fail a check
+    4. The verifier runs rounds of checks continuously until it is told that writes are off, fetching the documents stored from the change stream and that were inconsistent in the previous checking rounds, from both the source and destination and rechecking them. Once again, violations are written down for future checking rounds
+    5. Every document to check is written with a generation number. A checking round checks documents for a specific generation. When a check round begins, we start writing new documents with a new generation number
+    6. The verifier fetches all collection/index/view information on the source and destination and confirms they are identical in every generation. This is duplicated work, but it's fast and convenient for the code.
 
 # Checking Failures
 
