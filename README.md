@@ -138,7 +138,6 @@ The migration-verifier has two steps:
     7. Every document to check is written with a generation number. A checking round checks documents for a specific generation. When a check round begins, we start writing new documents with a new generation number
     8. The verifier fetches all collection/index/view information on the source and destination and confirms they are identical in every generation. This is duplicated work, but it's fast and convenient for the code.
 
-
 # Checking Failures
 
 Because the algorithm is generational, the only failures we care about are in the last generation to run. The first goal is to find the last generation:
