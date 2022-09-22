@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -38,7 +39,7 @@ func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstanc
 
 	verifier := NewVerifier()
 	verifier.SetNumWorkers(3)
-	verifier.SetComparisonRetryDelayMillis(0)
+	verifier.SetGenerationPauseDelayMillis(0)
 	verifier.SetWorkerSleepDelayMillis(0)
 	require.Nil(t, verifier.SetMetaURI(context.Background(), "mongodb://localhost:"+metaMongoInstance.port))
 	require.Nil(t, verifier.SetSrcURI(context.Background(), "mongodb://localhost:"+srcMongoInstance.port))
@@ -911,446 +912,100 @@ func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
 	suite.Equal(1, status.RecheckTasks)
 }
 
-// func getVerificationTasks(t *testing.T, verifier *Verifier) []VerificationTask {
-// 	ctx := context.Background()
-// 	cursor, err := verifier.verificationTaskCollection().Find(ctx, bson.D{})
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	tasks := []VerificationTask{}
-// 	for cursor.Next(ctx) {
-// 		var task VerificationTask
-// 		err := cursor.Decode(&task)
-// 		if err != nil {
-// 			t.Fatal(err)
-// 		}
-// 		tasks = append(tasks, task)
-// 	}
-// 	return tasks
-// }
-//
-// func countDocs(t *testing.T, col *mongo.Collection) int64 {
-// 	count, err := col.CountDocuments(context.Background(), bson.D{})
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	return count
-// }
-//
-//func TestVerifierAddAllTasks(t *testing.T) {
-//	verifier := buildVerifier(t)
-//	ctx := context.Background()
-//
-//	// No tasks created yet
-//	_, err := verifier.FindNextVerifyTaskAndUpdate()
-//	assert.NotNil(t, err)
-//
-//	// Insert 2 full batches of documents, and one partial
-//	batchSizes := []int{10, 10, 3}
-//	coll := verifier.srcClient.Database("keyhole").Collection("dealers")
-//	for _, batchSize := range batchSizes {
-//		var docs []interface{}
-//		for i := 0; i < batchSize; i++ {
-//			docs = append(docs, bson.M{"serial": i, "test": true, "name": "foo"})
-//		}
-//		coll.InsertMany(ctx, docs)
-//	}
-//
-//	// Create batches for verification
-//	//err = verifier.CreateAllVerifyTasks()
-//	//if err != nil {
-//	//	t.Fatal(err)
-//	//}
-//
-//	batchesCreated := countDocs(t, verifier.verificationTaskCollection())
-//	assert.Equal(t, int(batchesCreated), 3)
-//
-//	rangesCreated := countDocs(t, verifier.verificationRangeCollection())
-//	assert.Equal(t, int(rangesCreated), 3)
-//
-//	allDocs := map[interface{}]interface{}{}
-//	batches := 0
-//	for {
-//		nextTask, err := verifier.FindNextVerifyTaskAndUpdate()
-//		if err != nil {
-//			break
-//		}
-//		documents, err := getDocuments(verifier.srcClientCollection(nextTask), nextTask)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		for docID, doc := range documents {
-//			allDocs[docID] = doc
-//		}
-//		batches++
-//	}
-//	assert.Equal(t, len(allDocs), 23)
-//	assert.Equal(t, batches, 3)
-//
-//	// drop the task collection and rebuild tasks, this time using the existing ranges
-//	verifier.verificationTaskCollection().Drop(ctx)
-//	_, err = verifier.FindNextVerifyTaskAndUpdate()
-//	assert.NotNil(t, err)
-//
-//	// Ensure range creation covers all docs
-//	for {
-//		nextTask, err := verifier.FindNextVerifyTaskAndUpdate()
-//		if err != nil {
-//			break
-//		}
-//		documents, err := getDocuments(verifier.srcClientCollection(nextTask), nextTask)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		for docID, doc := range documents {
-//			allDocs[docID] = doc
-//		}
-//		batches++
-//	}
-//	assert.Equal(t, len(allDocs), 23)
-//	assert.Equal(t, batches, 3)
-//
-//	// drop the task collection
-//	verifier.verificationTaskCollection().Drop(ctx)
-//	_, err = verifier.FindNextVerifyTaskAndUpdate()
-//	assert.NotNil(t, err)
-//
-//	// delete one of our ranges to ensure that tasks are build from ranges rather than
-//	// from scratch
-//	_, err = verifier.verificationRangeCollection().DeleteOne(ctx, bson.D{})
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//
-//	//err = verifier.CreateAllVerifyTasks()
-//	//if err != nil {
-//	//	t.Fatal(err)
-//	//}
-//
-//	batchesCreated = countDocs(t, verifier.verificationTaskCollection())
-//	assert.Equal(t, int(batchesCreated), 2)
-//}
+func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
+	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
+	verifier.SetNamespaceMap()
 
-//
-//func TestVerifierMultipleMachines(t *testing.T) {
-//	verifier := buildVerifier(t)
-//	ctx := context.Background()
-//
-//	// No tasks created yet
-//	_, err := verifier.FindNextVerifyTaskAndUpdate()
-//	assert.NotNil(t, err)
-//
-//	// Insert 2 full batches of documents, and one partial
-//	batchSizes := []int{10, 10, 3}
-//	coll := verifier.srcClient.Database("keyhole").Collection("dealers")
-//	for _, batchSize := range batchSizes {
-//		var docs []interface{}
-//		for i := 0; i < batchSize; i++ {
-//			docs = append(docs, bson.M{"serial": i, "test": true, "name": "foo"})
-//		}
-//		coll.InsertMany(ctx, docs)
-//	}
-//
-//	// Run the initial verifier
-//	if err = verifier.Verify(); err != nil {
-//		t.Fatal(err)
-//	}
-//
-//	status, err := verifier.GetVerificationStatus()
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	assert.Equal(t, status.totalTasks, 4)
-//
-//	// Run another verifier which will see existing verifier and not create new jobs
-//	if err = verifier.Verify(); err != nil {
-//		t.Fatal(err)
-//	}
-//	status, err = verifier.GetVerificationStatus()
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	assert.Equal(t, status.totalTasks, 4)
-//}
-//
-//func TestVerifierAllMatch(t *testing.T) {
-//	var err error
-//	verifier := buildVerifier(t)
-//	ctx := context.Background()
-//	task := &VerificationTask{}
-//	batchSizes := []int{10, 10, 3}
-//	sourceColl := verifier.srcClientCollection(task)
-//	targetColl := verifier.dstClientCollection(task)
-//	for _, batchSize := range batchSizes {
-//		var docs []interface{}
-//		for i := 0; i < batchSize; i++ {
-//			id := primitive.NewObjectID()
-//			docs = append(docs, bson.M{"_id": id, "serial": i, "test": true, "name": "foo"})
-//		}
-//		_, err := sourceColl.InsertMany(ctx, docs)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		_, err = targetColl.InsertMany(ctx, docs)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//	}
-//
-//	if err = verifier.Verify(); err != nil {
-//		t.Fatal(err)
-//	}
-//
-//	tasks := []VerificationTask{}
-//	result, err := verifier.verificationTaskCollection().Find(ctx, bson.D{})
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	err = result.All(ctx, &tasks)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//
-//	for _, task := range tasks {
-//		assert.Equal(t, task.Status, "completed")
-//	}
-//}
-//
-//func TestVerifierMismatch(t *testing.T) {
-//	var err error
-//	verifier := buildVerifier(t)
-//	ctx := context.Background()
-//	task := &VerificationTask{}
-//	batchSizes := []int{10}
-//	sourceColl := verifier.srcClientCollection(task)
-//	targetColl := verifier.dstClientCollection(task)
-//	mismatches := []primitive.ObjectID{}
-//	for _, batchSize := range batchSizes {
-//		var docs []interface{}
-//		var id primitive.ObjectID
-//		for i := 0; i < batchSize; i++ {
-//			id = primitive.NewObjectID()
-//			docs = append(docs, bson.M{"_id": id, "serial": i, "test": true, "name": "foo"})
-//		}
-//		_, err := sourceColl.InsertMany(ctx, docs)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//
-//		// Change contents of the last doc before inserting to target cluster
-//		mismatches = append(mismatches, id)
-//		docs[len(docs)-1] = bson.M{"_id": id, "test": "false", "name": "foo"}
-//		_, err = targetColl.InsertMany(ctx, docs)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//	}
-//
-//	if err = verifier.Verify(); err != nil {
-//		t.Fatal(err)
-//	}
-//
-//	tasks := []VerificationTask{}
-//	result, err := verifier.verificationTaskCollection().Find(ctx, bson.M{"type": verificationTaskVerify})
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	err = result.All(ctx, &tasks)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//
-//	for _, task := range tasks {
-//		assert.Equal(t, task.Status, verificationTaskFailed)
-//	}
-//}
-//
-//func TestVerifierRetries(t *testing.T) {
-//	verifier := buildVerifier(t)
-//	ctx := context.Background()
-//
-//	goodId := primitive.NewObjectID()
-//	verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": goodId, "name": "foo"})
-//	verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": goodId, "name": "foo"})
-//	badId := primitive.NewObjectID()
-//	verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": badId, "name": "bar"})
-//	verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": badId, "name": "baz"})
-//
-//	//firstId, err := primitive.ObjectIDFromHex("000000000000000000000000")
-//	//if err != nil {
-//	//	t.Fatal(err)
-//	//}
-//	//lastId, err := primitive.ObjectIDFromHex("FFFFFFFFFFFFFFFFFFFFFFFF")
-//	//if err != nil {
-//	//	t.Fatal(err)
-//	//}
-//	//_, err = verifier.InsertVerifyTask(firstId, lastId)
-//	//if err != nil {
-//	//	t.Fatal(err)
-//	//}
-//	for i := 0; i < verificationTaskMaxRetries; i++ {
-//		task, err := verifier.FindNextVerifyTaskAndUpdate()
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		verifier.ProcessVerifyTask(0, task)
-//
-//		if i == verificationTaskMaxRetries-1 {
-//			assert.Equal(t, task.Status, verificationTaskFailed)
-//		} else {
-//			assert.Equal(t, task.Status, verificationTasksRetry)
-//		}
-//		assert.Equal(t, len(task.FailedIDs), 1)
-//		assert.Equal(t, task.FailedIDs[0], badId)
-//		assert.Equal(t, task.Attempts, i+1)
-//	}
-//}
-//
-//func TestVerifierRefetchQueue(t *testing.T) {
-//	verifier := buildVerifier(t)
-//	ctx := context.Background()
-//
-//	badId := primitive.NewObjectID()
-//	//verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": badId, "name": "bar"})
-//	//verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.M{"_id": badId, "name": "baz"})
-//	//
-//	//_, err := verifier.InsertVerifyTask(badId, badId)
-//	//if err != nil {
-//	//	t.Fatal(err)
-//	//}
-//	for i := 0; i < verificationTaskMaxRetries; i++ {
-//		task, err := verifier.FindNextVerifyTaskAndUpdate()
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		verifier.ProcessVerifyTask(0, task)
-//
-//		cur, err := verifier.refetchCollection().Find(ctx, bson.M{"status": Unprocessed})
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		var docs []Refetch
-//		err = cur.All(ctx, &docs)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//
-//		if i == verificationTaskMaxRetries-1 {
-//			assert.Equal(t, task.Status, verificationTaskFailed)
-//			assert.Equal(t, len(docs), 1)
-//			refetchDoc := docs[0]
-//			assert.Equal(t, refetchDoc.ID, badId)
-//			//assert.Equal(t, refetchDoc.DB, "keyhole")
-//			//assert.Equal(t, refetchDoc.Collection, "dealers")
-//		} else {
-//			assert.Equal(t, task.Status, verificationTasksRetry)
-//			assert.Equal(t, len(docs), 0)
-//		}
-//		assert.Equal(t, len(task.FailedIDs), 1)
-//		assert.Equal(t, task.FailedIDs[0], badId)
-//		assert.Equal(t, task.Attempts, i+1)
-//	}
-//	numberTasks := countDocs(t, verifier.verificationTaskCollection())
-//
-//	// Ensure refetch will add task to reverify
-//	refetchData(ctx, verifier.mongopush)
-//	newNumberTasks := countDocs(t, verifier.verificationTaskCollection())
-//	assert.Equal(t, newNumberTasks, numberTasks+1)
-//
-//	tasks := []VerificationTask{}
-//	cur, err := verifier.verificationTaskCollection().Find(ctx, bson.M{"status": verificationTaskAdded})
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	err = cur.All(ctx, &tasks)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	assert.Equal(t, len(tasks), 1)
-//	task := tasks[0]
-//	assert.Equal(t, len(task.FailedIDs), 1)
-//	assert.Equal(t, task.FailedIDs[0], badId)
-//}
-//
-//func TestVerifierRangeResplit(t *testing.T) {
-//	verifier := buildVerifier(t)
-//	ctx := context.Background()
-//
-//	// No tasks created yet
-//	_, err := verifier.FindNextVerifyTaskAndUpdate()
-//	assert.NotNil(t, err)
-//
-//	// Insert 2 full batches of documents, and one partial
-//	batchSizes := []int{10, 10, 3}
-//	coll := verifier.srcClient.Database("keyhole").Collection("dealers")
-//	for _, batchSize := range batchSizes {
-//		var docs []interface{}
-//		for i := 0; i < batchSize; i++ {
-//			docs = append(docs, bson.M{"serial": i, "test": true, "name": "foo"})
-//		}
-//		coll.InsertMany(ctx, docs)
-//	}
-//
-//	// Create batches for verification
-//	//err = verifier.CreateAllVerifyTasks()
-//	//if err != nil {
-//	//	t.Fatal(err)
-//	//}
-//
-//	batchesCreated := countDocs(t, verifier.verificationTaskCollection())
-//	assert.Equal(t, int(batchesCreated), 3)
-//	rangesCreated := countDocs(t, verifier.verificationRangeCollection())
-//	assert.Equal(t, int(rangesCreated), 3)
-//
-//	// Make final range larger
-//	var docs []interface{}
-//	for i := 0; i < 20; i++ {
-//		docs = append(docs, bson.M{"serial": i, "test": true, "name": "foo"})
-//	}
-//	coll.InsertMany(ctx, docs)
-//
-//	// drop the task collection and rebuild tasks, this time using the existing ranges
-//	verifier.verificationTaskCollection().Drop(ctx)
-//	_, err = verifier.FindNextVerifyTaskAndUpdate()
-//	assert.NotNil(t, err)
-//
-//	// Create tasks from ranges
-//	//err = verifier.CreateAllVerifyTasks()
-//	//if err != nil {
-//	//	t.Fatal(err)
-//	//}
-//
-//	// Ensure more batches are created this time
-//	batchesCreated = countDocs(t, verifier.verificationTaskCollection())
-//	assert.Equal(t, int(batchesCreated), 5)
-//	rangesCreated = countDocs(t, verifier.verificationRangeCollection())
-//	assert.Equal(t, int(rangesCreated), 5)
-//
-//	allDocs := map[interface{}]interface{}{}
-//	allBatchSizes := []int{}
-//	batches := 0
-//	for {
-//		nextTask, err := verifier.FindNextVerifyTaskAndUpdate()
-//		if err != nil {
-//			break
-//		}
-//		documents, err := getDocuments(verifier.srcClientCollection(nextTask), nextTask)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		batchSize := 0
-//		for docID, doc := range documents {
-//			allDocs[docID] = doc
-//			batchSize++
-//		}
-//		allBatchSizes = append(allBatchSizes, batchSize)
-//		batches++
-//	}
-//	assert.Equal(t, len(allDocs), 43)
-//	assert.Equal(t, batches, 5)
-//	sort.Ints(allBatchSizes)
-//	expectedBatchSizes := []int{3, 11, 11, 11, 11} // batches are size 11 since we use greater/less than or EQUAL to
-//	if !reflect.DeepEqual(allBatchSizes, expectedBatchSizes) {
-//		t.Fatalf("Batch sizes not equal: %+v - %+v", allBatchSizes, expectedBatchSizes)
-//	}
-//}
+	ctx := context.Background()
+
+	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
+	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
+	_, err := srcColl.InsertOne(ctx, bson.M{"_id": 1, "x": 42})
+	suite.Require().Nil(err)
+	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 2, "x": 43})
+	suite.Require().Nil(err)
+	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 1, "x": 42})
+	suite.Require().Nil(err)
+
+	checkDoneChan := make(chan struct{})
+	checkContinueChan := make(chan struct{})
+	go func() {
+		err := verifier.CheckDriver(ctx, checkDoneChan, checkContinueChan)
+		suite.Require().Nil(err)
+	}()
+
+	waitForTasks := func() *VerificationStatus {
+		status, err := verifier.GetVerificationStatus()
+		suite.Require().Nil(err)
+
+		for status.TotalTasks == 0 && verifier.generation < 10 {
+			checkContinueChan <- struct{}{}
+			<-checkDoneChan
+			status, err = verifier.GetVerificationStatus()
+			suite.Require().Nil(err)
+		}
+		return status
+	}
+
+	// wait for one generation to finish
+	<-checkDoneChan
+	status := waitForTasks()
+	suite.Require().Equal(VerificationStatus{TotalTasks: 2, FailedTasks: 1, CompletedTasks: 1}, *status)
+
+	// now patch up the destination
+	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 2, "x": 43})
+	suite.Require().Nil(err)
+
+	// tell check to start the next generation
+	checkContinueChan <- struct{}{}
+
+	// wait for generation to finish
+	<-checkDoneChan
+	status = waitForTasks()
+	// there should be no failures now, since they are are equivalent at this point in time
+	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+
+	// now insert in the source, this should come up next generation
+	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 3, "x": 44})
+	suite.Require().Nil(err)
+
+	// tell check to start the next generation
+	checkContinueChan <- struct{}{}
+
+	// wait for one generation to finish
+	<-checkDoneChan
+	status = waitForTasks()
+
+	// there should be a failure from the src insert
+	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+
+	// now patch up the destination
+	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 3, "x": 44})
+	suite.Require().Nil(err)
+
+	// continue
+	checkContinueChan <- struct{}{}
+
+	// wait for it to finish again, this should be a clean run
+	<-checkDoneChan
+	status = waitForTasks()
+
+	// there should be no failures now, since they are are equivalent at this point in time
+	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+
+	// turn writes off
+	verifier.WritesOff(ctx)
+	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 1019, "x": 1019})
+	suite.Require().Nil(err)
+	checkContinueChan <- struct{}{}
+	<-checkDoneChan
+	// now write to the source, this should not be seen by the change stream which should have ended
+	// because of the calls to WritesOff
+	status, err = verifier.GetVerificationStatus()
+	suite.Require().Nil(err)
+	// there should be a failure from the src insert
+	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+}

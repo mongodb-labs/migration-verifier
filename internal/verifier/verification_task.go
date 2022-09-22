@@ -123,7 +123,7 @@ func (verifier *Verifier) InsertFailedIdsVerificationTask(ids []interface{}, src
 
 	verificationTask := VerificationTask{
 		PrimaryKey: primitive.NewObjectID(),
-		Generation: verifier.generation + 1,
+		Generation: verifier.generation,
 		Ids:        ids,
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerify,
@@ -151,7 +151,7 @@ func (verifier *Verifier) InsertChangeEventIdVerificationTask(ctx context.Contex
 
 	verificationTask := VerificationTask{
 		PrimaryKey: primitive.NewObjectID(),
-		Generation: verifier.generation + 1,
+		Generation: verifier.generation,
 		Ids:        []interface{}{event.DocKey.ID},
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerify,

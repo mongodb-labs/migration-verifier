@@ -56,7 +56,7 @@ func BenchmarkGeneric(t *testing.B) {
 
 	verifier := NewVerifier()
 	verifier.SetNumWorkers(numWorkers)
-	verifier.SetComparisonRetryDelayMillis(0)
+	verifier.SetGenerationPauseDelayMillis(0)
 	verifier.SetWorkerSleepDelayMillis(0)
 	fmt.Printf("meta uri %s\n", metaUri)
 	err := verifier.SetMetaURI(context.Background(), metaUri)

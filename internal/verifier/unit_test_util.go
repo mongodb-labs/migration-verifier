@@ -20,6 +20,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+const replSet string = "rs0"
+
 type MongoInstance struct {
 	port    string
 	version string
@@ -67,6 +69,7 @@ func (suite *WithMongodsTestSuite) SetupSuite() {
 	suite.Require().Nil(err)
 	clientOpts = options.Client().ApplyURI("mongodb://localhost:" + suite.metaMongoInstance.port).SetAppName("Verifier Test Suite")
 	suite.metaMongoClient, err = mongo.Connect(ctx, clientOpts)
+	suite.startReplSet()
 	suite.Require().Nil(err)
 	suite.initialDbNames = map[string]bool{}
 	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient, suite.metaMongoClient} {
@@ -76,6 +79,27 @@ func (suite *WithMongodsTestSuite) SetupSuite() {
 			suite.initialDbNames[dbName] = true
 		}
 	}
+}
+
+func (suite *WithMongodsTestSuite) startReplSet() {
+	ctx := context.Background()
+	clientOpts := options.
+		Client().
+		ApplyURI("mongodb://localhost:" + suite.srcMongoInstance.port).
+		SetDirect(true).
+		SetAppName("Verifier Test Suite")
+	directClient, err := mongo.Connect(ctx, clientOpts)
+	suite.Require().Nil(err)
+	command := bson.M{
+		"replSetInitiate": bson.M{
+			"_id": replSet,
+			"members": bson.A{
+				bson.M{"_id": 0, "host": "localhost:" + suite.srcMongoInstance.port},
+			},
+		},
+	}
+	err = directClient.Database("admin").RunCommand(ctx, command).Err()
+	suite.Require().Nil(err)
 }
 
 func (suite *WithMongodsTestSuite) TearDownSuite() {
@@ -148,7 +172,7 @@ func startTestMongods(srcMongoInstance MongoInstance, dstMongoInstance MongoInst
 	metaCmd := exec.Command(metaMongod, "--port", metaMongoInstance.port, "--dbpath", metaDir,
 		"--logpath", logpath(metaDir))
 	sourceCmd := exec.Command(srcMongod, "--port", srcMongoInstance.port, "--dbpath", sourceDir,
-		"--logpath", logpath(sourceDir))
+		"--logpath", logpath(sourceDir), "--replSet", replSet)
 	destCmd := exec.Command(dstMongod, "--port", dstMongoInstance.port, "--dbpath", destDir,
 		"--logpath", logpath(destDir))
 
