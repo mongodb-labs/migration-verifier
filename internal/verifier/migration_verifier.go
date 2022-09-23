@@ -885,6 +885,16 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 	dstNs := FullName(dstColl)
 	srcSpec, srcErr := verifier.getCollectionSpecification(ctx, srcColl)
 	dstSpec, dstErr := verifier.getCollectionSpecification(ctx, dstColl)
+	insertFailedCollection := func() {
+		_, err := verifier.InsertFailedCollectionVerificationTask(srcNs)
+		if err != nil {
+			verifier.
+				logger.
+				Fatal().
+				Err(err).
+				Msg("Unrecoverable error in inserting failed collection verification task")
+		}
+	}
 	if srcErr != nil {
 		verifier.markCollectionFailed(workerNum, task, ClusterSource, srcNs, srcErr)
 	}
@@ -901,20 +911,13 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 			task.Status = verificationTaskCompleted
 			return
 		}
-		_, err := verifier.InsertFailedCollectionVerificationTask(srcNs)
-		if err != nil {
-			verifier.
-				logger.
-				Fatal().
-				Err(err).
-				Msg("Unrecoverable error in inserting failed collection verification task")
-		}
 		task.Status = verificationTaskFailed
 		// Fall through here; comparing the collection specifications will produce the correct
 		// failure output.
 	}
 	specificationProblems, verifyData := verifier.compareCollectionSpecifications(srcNs, dstNs, srcSpec, dstSpec)
 	if specificationProblems != nil {
+		insertFailedCollection()
 		task.FailedDocs = specificationProblems
 		if !verifyData {
 			task.Status = verificationTaskFailed
@@ -939,6 +942,10 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 		return
 	}
 	if indexProblems != nil {
+		if specificationProblems == nil {
+			// don't insert a failed collection unless we did not insert one above
+			insertFailedCollection()
+		}
 		task.FailedDocs = append(task.FailedDocs, indexProblems...)
 		task.Status = verificationTaskMetadataMismatch
 	}
