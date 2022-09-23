@@ -1,10 +1,3 @@
-[https://github.com/10gen/migration-verifier](https://github.com/10gen/migration-verifier) 
-
-[https://jira.mongodb.org/browse/REP-1333](https://jira.mongodb.org/browse/REP-1333)
-
-[https://github.com/10gen/migration-verifier/pull/8/files](https://github.com/10gen/migration-verifier/pull/8/files) 
-
-
 # Verify Migrations!
 
 
