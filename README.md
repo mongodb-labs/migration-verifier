@@ -179,6 +179,8 @@ Any collection metadata mismatches will occur in a task with the type '`verifyCo
 
 
 ```
+  x = 0
+  db.verification_tasks.find({generation: x, status: 'mismatch'})
   {
     _id: ObjectId("632c9c9f5c71ad5eb4fde2bd"),
     generation: 0,
