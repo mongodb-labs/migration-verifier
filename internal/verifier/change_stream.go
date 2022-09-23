@@ -2,9 +2,11 @@ package verifier
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/keystring"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -118,11 +120,64 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *prim
 		}
 	}
 	pipeline := verifier.GetChangeStreamFilter()
-	opts := options.ChangeStream().SetMaxAwaitTime(1 * time.Second).SetStartAtOperationTime(startTime)
-	verifier.srcStartAtTs = startTime
-	srcChangeStream, err := verifier.srcClient.Watch(context.Background(), pipeline, opts)
+	opts := options.ChangeStream().SetMaxAwaitTime(1 * time.Second)
+	if startTime != nil {
+		opts = opts.SetStartAtOperationTime(startTime)
+		verifier.srcStartAtTs = startTime
+	}
+	sess, err := verifier.srcClient.StartSession()
 	if err != nil {
 		return err
+	}
+	sctx := mongo.NewSessionContext(ctx, sess)
+	srcChangeStream, err := verifier.srcClient.Watch(sctx, pipeline, opts)
+	if err != nil {
+		return err
+	}
+	if startTime == nil {
+		resumeToken := srcChangeStream.ResumeToken()
+		if resumeToken == nil {
+			return errors.New("Resume token is missing; cannot choose start time")
+		}
+		// Change stream token is always a V1 keystring in the _data field
+		resumeTokenDataValue := resumeToken.Lookup("_data")
+		resumeTokenData, ok := resumeTokenDataValue.StringValueOK()
+		if !ok {
+			return fmt.Errorf("Resume token _data is missing or the wrong type: %v",
+				resumeTokenDataValue.Type)
+		}
+		resumeTokenBson, err := keystring.KeystringToBson(keystring.V1, resumeTokenData)
+		if err != nil {
+			return err
+		}
+		// First element is the cluster time we want
+		resumeTokenTime, ok := resumeTokenBson[0].Value.(primitive.Timestamp)
+		if !ok {
+			return errors.New("Resume token lacks a cluster time")
+		}
+		verifier.srcStartAtTs = &resumeTokenTime
+
+		// On sharded servers the resume token time can be ahead of the actual cluster time by one
+		// increment.  In that case we must use the actual cluster time or we will get errors.
+		clusterTimeRaw := sess.ClusterTime()
+		clusterTimeInner, err := clusterTimeRaw.LookupErr("$clusterTime")
+		if err != nil {
+			return err
+		}
+		clusterTimeTsVal, err := bson.Raw(clusterTimeInner.Value).LookupErr("clusterTime")
+		if err != nil {
+			return err
+		}
+		var clusterTimeTs primitive.Timestamp
+		clusterTimeTs.T, clusterTimeTs.I, ok = clusterTimeTsVal.TimestampOK()
+		if !ok {
+			return errors.New("Cluster time is not a timestamp")
+		}
+
+		verifier.logger.Debug().Msgf("Initial cluster time is %+v", clusterTimeTs)
+		if primitive.CompareTimestamp(clusterTimeTs, resumeTokenTime) < 0 {
+			verifier.srcStartAtTs = &clusterTimeTs
+		}
 	}
 	verifier.mux.Lock()
 	verifier.changeStreamRunning = true

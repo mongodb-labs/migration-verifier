@@ -129,14 +129,13 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, testChan ...chan stru
 	if !csRunning {
 		verifier.logger.Info().Msg("Change stream not running, starting change stream")
 		retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
-		startAtTs, err := GetLastOpTimeAndSyncShardClusterTime(ctx,
+		// Ignore the error from this call -- if it fails, we use an alternate method
+		// where we use the change stream's initial resume token.
+		startAtTs, _ := GetLastOpTimeAndSyncShardClusterTime(ctx,
 			verifier.logger,
 			retryer,
 			verifier.srcClient,
 			true)
-		if err != nil {
-			return err
-		}
 		err = verifier.StartChangeStream(ctx, startAtTs)
 		if err != nil {
 			return err

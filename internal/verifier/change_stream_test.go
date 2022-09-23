@@ -82,3 +82,22 @@ func (suite *MultiSourceVersionTestSuite) TestStartAtTimeWithChanges() {
 	<-verifier.changeStreamDoneChan
 	suite.Require().Equal(verifier.srcStartAtTs, newStartTs)
 }
+
+func (suite *MultiSourceVersionTestSuite) TestNoStartAtTime() {
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sess, err := suite.srcMongoClient.StartSession()
+	suite.Require().Nil(err)
+	sctx := mongo.NewSessionContext(ctx, sess)
+	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
+		sctx, bson.D{{"_id", 0}})
+	suite.Require().Nil(err)
+	origStartTs := sess.OperationTime()
+	suite.Require().NotNil(origStartTs)
+	err = verifier.StartChangeStream(ctx, nil)
+	suite.Require().Nil(err)
+	suite.Require().NotNil(verifier.srcStartAtTs)
+	suite.Require().LessOrEqual(primitive.CompareTimestamp(
+		*origStartTs, *verifier.srcStartAtTs), 0)
+}
