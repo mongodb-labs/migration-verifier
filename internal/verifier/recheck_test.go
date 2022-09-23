@@ -40,6 +40,7 @@ func (suite *MultiMetaVersionTestSuite) TestLargeIDInsertions() {
 	suite.Require().Nil(err)
 	suite.ElementsMatch([]interface{}{d1, d2, d3}, results)
 
+	verifier.generation++
 	err = verifier.GenerateRecheckTasks(ctx, 0)
 	suite.Require().Nil(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
@@ -97,6 +98,7 @@ func (suite *MultiMetaVersionTestSuite) TestLargeDataInsertions() {
 	suite.Require().Nil(err)
 	suite.ElementsMatch([]interface{}{d1, d2, d3}, results)
 
+	verifier.generation++
 	err = verifier.GenerateRecheckTasks(ctx, 0)
 	suite.Require().Nil(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
@@ -138,6 +140,7 @@ func (suite *MultiMetaVersionTestSuite) TestMultipleNamespaces() {
 	err = verifier.insertRecheckDocs(ctx, 0, "testDB2", "testColl2", ids, dataSizes)
 	suite.Require().Nil(err)
 
+	verifier.generation++
 	err = verifier.GenerateRecheckTasks(ctx, 0)
 	suite.Require().Nil(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)

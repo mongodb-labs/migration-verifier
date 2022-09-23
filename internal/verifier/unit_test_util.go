@@ -18,6 +18,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
 const replSet string = "rs0"
@@ -61,10 +62,10 @@ func (suite *WithMongodsTestSuite) SetupSuite() {
 	err := startTestMongods(suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	suite.Require().Nil(err)
 	ctx := context.Background()
-	clientOpts := options.Client().ApplyURI("mongodb://localhost:" + suite.srcMongoInstance.port).SetAppName("Verifier Test Suite")
+	clientOpts := options.Client().ApplyURI("mongodb://localhost:" + suite.srcMongoInstance.port).SetAppName("Verifier Test Suite").SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
 	suite.srcMongoClient, err = mongo.Connect(ctx, clientOpts)
 	suite.Require().Nil(err)
-	clientOpts = options.Client().ApplyURI("mongodb://localhost:" + suite.dstMongoInstance.port).SetAppName("Verifier Test Suite")
+	clientOpts = options.Client().ApplyURI("mongodb://localhost:" + suite.dstMongoInstance.port).SetAppName("Verifier Test Suite").SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
 	suite.dstMongoClient, err = mongo.Connect(ctx, clientOpts)
 	suite.Require().Nil(err)
 	clientOpts = options.Client().ApplyURI("mongodb://localhost:" + suite.metaMongoInstance.port).SetAppName("Verifier Test Suite")

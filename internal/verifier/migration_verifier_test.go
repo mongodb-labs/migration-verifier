@@ -206,7 +206,9 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 	err = verifier.HandleChangeStreamEvent(ctx, &event)
 	suite.Require().Equal(fmt.Errorf(`Not supporting: "flibbity" events`), err)
 
-	err = verifier.GenerateRecheckTasks(ctx, verifier.generation)
+	oldGeneration := verifier.generation
+	verifier.generation++
+	err = verifier.GenerateRecheckTasks(ctx, oldGeneration)
 	suite.Require().Nil(err)
 	var doc bson.M
 	cur, err := verifier.verificationTaskCollection().Find(ctx, bson.M{"generation": 1})
