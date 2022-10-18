@@ -7,6 +7,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/verifier"
@@ -197,8 +198,8 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 		}
 		v.SetVerifyAll(true)
 	} else {
-		v.SetSrcNamespaces(cCtx.StringSlice(srcNamespace))
-		v.SetDstNamespaces(cCtx.StringSlice(dstNamespace))
+		v.SetSrcNamespaces(expandCommaSeperators(cCtx.StringSlice(srcNamespace)))
+		v.SetDstNamespaces(expandCommaSeperators(cCtx.StringSlice(dstNamespace)))
 		v.SetNamespaceMap()
 	}
 	v.SetMetaDBName(cCtx.String(metaDBName))
@@ -208,4 +209,15 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 		return nil, nil, nil, err
 	}
 	return v, file, writer, nil
+}
+
+func expandCommaSeperators(in []string) []string {
+	ret := []string{}
+	for _, ns := range in {
+		multiples := strings.Split(ns, ",")
+		for _, sub := range multiples {
+			ret = append(ret, sub)
+		}
+	}
+	return ret
 }
