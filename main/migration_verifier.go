@@ -216,7 +216,7 @@ func expandCommaSeperators(in []string) []string {
 	for _, ns := range in {
 		multiples := strings.Split(ns, ",")
 		for _, sub := range multiples {
-			ret = append(ret, sub)
+			ret = append(ret, strings.Trim(sub, " \t"))
 		}
 	}
 	return ret
