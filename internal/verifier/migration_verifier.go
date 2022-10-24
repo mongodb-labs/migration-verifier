@@ -1219,17 +1219,62 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 		return
 	}
 
+	// First present summaries of failures based on present/missing and differing content
+	table = tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Failure Type", "Count"})
+
+	contentMismatch := 0
+	missing := 0
+	for _, v := range FailedTasks {
+		contentMismatch += len(v.FailedDocs)
+		missing += len(v.Ids)
+	}
+
+	table.Append([]string{"Documents With Differing Content", fmt.Sprintf("%v", contentMismatch)})
+	table.Append([]string{"Documents Missing On Source or Dest", fmt.Sprintf("%v", missing)})
+	fmt.Println("Failure summary:")
+	table.Render()
+	fmt.Println()
+
 	table = tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"ID", "Cluster", "Type", "Field", "Namespace", "Details"})
 
+	i := 0
+OUTA:
 	for _, v := range FailedTasks {
 		for _, f := range v.FailedDocs {
 			table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Type), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
+			i += 1
+			if i > 20 {
+				break OUTA
+			}
 		}
 	}
-	fmt.Println("Documents in tasks in failed or retry status:")
+	fmt.Println("First 20 Documents in tasks in failed status due do differing content:")
 	table.Render()
 	fmt.Println()
+
+	table = tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Document ID", "Source NameSpace", "Destination Namespace"})
+
+	i = 0
+OUTB:
+	for _, v := range FailedTasks {
+		for _, _id := range v.Ids {
+			table.Append([]string{fmt.Sprintf("%v", _id),
+				fmt.Sprintf("%v", v.QueryFilter.Namespace),
+				fmt.Sprintf("%v", v.QueryFilter.To),
+			})
+			i += 1
+			if i > 20 {
+				break OUTB
+			}
+		}
+	}
+	fmt.Println("First 20 Documents present in source/destination missing in destination/source:")
+	table.Render()
+	fmt.Println()
+
 }
 
 func (verifier *Verifier) getNamespaces(ctx context.Context, fieldName string) []string {
