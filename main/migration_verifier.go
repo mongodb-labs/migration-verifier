@@ -37,6 +37,7 @@ const (
 	partitionSizeMB      = "partitionSizeMB"
 	checkOnly            = "checkOnly"
 	debugFlag            = "debug"
+	failureDisplaySize   = "failureDisplaySize"
 )
 
 func main() {
@@ -134,6 +135,11 @@ func main() {
 			Name:  checkOnly,
 			Usage: "Do not run the webserver or recheck, just run the check (for debugging)",
 		},
+		&cli.Int64Flag{
+			Name:  failureDisplaySize,
+			Value: 20,
+			Usage: "Number of failures to display. Will display all failures if the number is within 25% of ths limit",
+		},
 	}
 	app := &cli.App{
 		Name:  "migration-verifier",
@@ -208,6 +214,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	v.SetFailureDisplaySize(cCtx.Int64(failureDisplaySize))
 	return v, file, writer, nil
 }
 

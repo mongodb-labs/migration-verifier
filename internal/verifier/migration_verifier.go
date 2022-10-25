@@ -48,18 +48,19 @@ const (
 
 // Verifier is the main state for the migration verifier
 type Verifier struct {
-	writesOff      bool
-	lastGeneration bool
-	running        bool
-	generation     int
-	phase          string
-	port           int
-	metaClient     *mongo.Client
-	srcClient      *mongo.Client
-	dstClient      *mongo.Client
-	srcBuildInfo   *bson.M
-	dstBuildInfo   *bson.M
-	numWorkers     int
+	writesOff          bool
+	lastGeneration     bool
+	running            bool
+	generation         int
+	phase              string
+	port               int
+	metaClient         *mongo.Client
+	srcClient          *mongo.Client
+	dstClient          *mongo.Client
+	srcBuildInfo       *bson.M
+	dstBuildInfo       *bson.M
+	numWorkers         int
+	failureDisplaySize int64
 
 	generationPauseDelayMillis time.Duration
 	workerSleepDelayMillis     time.Duration
@@ -132,6 +133,10 @@ func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
 	opts.SetReadConcern(readconcern.Majority())
 	opts.SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
 	return opts
+}
+
+func (verifier *Verifier) SetFailureDisplaySize(size int64) {
+	verifier.failureDisplaySize = size
 }
 
 func (verifier *Verifier) WritesOff(ctx context.Context) {
@@ -1239,25 +1244,31 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 	table = tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"ID", "Cluster", "Type", "Field", "Namespace", "Details"})
 
-	i := 0
+	i := int64(0)
+	printAll := int64(contentMismatch) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
 OUTA:
 	for _, v := range FailedTasks {
 		for _, f := range v.FailedDocs {
 			table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Type), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
 			i += 1
-			if i > 20 {
+			if !printAll && i >= verifier.failureDisplaySize {
 				break OUTA
 			}
 		}
 	}
-	fmt.Println("First 20 Documents in tasks in failed status due do differing content:")
+	if printAll {
+		fmt.Println("All Documents in tasks in failed status due do differing content:")
+	} else {
+		fmt.Printf("First %d Documents in tasks in failed status due do differing content:\n", verifier.failureDisplaySize)
+	}
 	table.Render()
 	fmt.Println()
 
 	table = tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Document ID", "Source NameSpace", "Destination Namespace"})
 
-	i = 0
+	i = int64(0)
+	printAll = int64(missing) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
 OUTB:
 	for _, v := range FailedTasks {
 		for _, _id := range v.Ids {
@@ -1266,12 +1277,16 @@ OUTB:
 				fmt.Sprintf("%v", v.QueryFilter.To),
 			})
 			i += 1
-			if i > 20 {
+			if !printAll && i >= verifier.failureDisplaySize {
 				break OUTB
 			}
 		}
 	}
-	fmt.Println("First 20 Documents present in source/destination missing in destination/source:")
+	if printAll {
+		fmt.Println("All documents present in source/destination missing in destination/source:")
+	} else {
+		fmt.Printf("First %d Documents present in source/destination missing in destination/source:\n", verifier.failureDisplaySize)
+	}
 	table.Render()
 	fmt.Println()
 
