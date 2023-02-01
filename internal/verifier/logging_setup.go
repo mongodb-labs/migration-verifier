@@ -11,7 +11,7 @@ import (
 // DefaultLogWriter is the default log io.Writer implementor.
 var DefaultLogWriter = os.Stderr
 
-func GetLogWriter(logPath string) io.Writer {
+func getLogWriter(logPath string) io.Writer {
 	if logPath == "stderr" {
 		return DefaultLogWriter
 	}

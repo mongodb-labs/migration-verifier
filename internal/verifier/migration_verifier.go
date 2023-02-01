@@ -217,7 +217,7 @@ func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB int64) {
 }
 
 func (verifier *Verifier) SetLogger(logPath string) {
-	writer := GetLogWriter(logPath)
+	writer := getLogWriter(logPath)
 	l := zerolog.New(writer).With().Timestamp().Logger()
 	verifier.logger = logger.NewLogger(&l, writer)
 }
