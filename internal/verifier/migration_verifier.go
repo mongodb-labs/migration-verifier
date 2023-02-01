@@ -1,14 +1,12 @@
 package verifier
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"math/rand"
 	_ "net/http/pprof"
 	"os"
-	"path"
 	"reflect"
 	"strconv"
 	"sync"
@@ -218,28 +216,10 @@ func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB int64) {
 	verifier.partitionSizeInBytes = partitionSizeMB * 1024 * 1024
 }
 
-func (verifier *Verifier) SetLogger(logPath string) (*os.File, *bufio.Writer, error) {
-	var file *os.File
-	var writer *bufio.Writer = nil
-	if logPath == "stderr" {
-		l := zerolog.New(os.Stderr).With().Timestamp().Logger()
-		verifier.logger = logger.NewLogger(&l, logger.DefaultLogWriter)
-		return file, writer, nil
-	}
-	if _, err := os.Stat(logPath); os.IsNotExist(err) {
-		mkdirErr := os.MkdirAll(path.Dir(logPath), 0770)
-		if mkdirErr != nil {
-			return nil, nil, mkdirErr
-		}
-	}
-	file, err := os.Create(logPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	writer = bufio.NewWriter(file)
+func (verifier *Verifier) SetLogger(logPath string) {
+	writer := GetLogWriter(logPath)
 	l := zerolog.New(writer).With().Timestamp().Logger()
-	verifier.logger = logger.NewLogger(&l, logger.DefaultLogWriter)
-	return file, writer, nil
+	verifier.logger = logger.NewLogger(&l, writer)
 }
 
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {

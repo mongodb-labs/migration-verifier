@@ -71,10 +71,7 @@ func BenchmarkGeneric(t *testing.B) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = verifier.SetLogger("stderr")
-	if err != nil {
-		t.Fatal(err)
-	}
+	verifier.SetLogger("stderr")
 	verifier.SetMetaDBName(metaDBName)
 	err = verifier.verificationTaskCollection().Drop(context.Background())
 	if err != nil {
