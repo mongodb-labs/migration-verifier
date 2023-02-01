@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"net/http"
@@ -146,13 +145,7 @@ func main() {
 		Usage: "verify migration correctness",
 		Flags: flags,
 		Action: func(cCtx *cli.Context) error {
-			verifier, logFile, logWriter, err := handleArgs(ctx, cCtx)
-			if logFile != nil {
-				defer func() {
-					logWriter.Flush()
-					logFile.Close()
-				}()
-			}
+			verifier, err := handleArgs(ctx, cCtx)
 			if err != nil {
 				return err
 			}
@@ -173,19 +166,19 @@ func main() {
 	}
 }
 
-func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os.File, *bufio.Writer, error) {
+func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, error) {
 	v := verifier.NewVerifier()
 	err := v.SetSrcURI(ctx, cCtx.String(srcURI))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	err = v.SetDstURI(ctx, cCtx.String(dstURI))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	err = v.SetMetaURI(ctx, cCtx.String(metaURI))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	v.SetServerPort(cCtx.Int(serverPort))
 	v.SetNumWorkers(cCtx.Int(numWorkers))
@@ -194,13 +187,13 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 	v.SetPartitionSizeMB(cCtx.Int64(partitionSizeMB))
 	v.SetStartClean(cCtx.Bool(startClean))
 	logPath := cCtx.String(logPath)
-	file, writer, err := v.SetLogger(logPath)
+	v.SetLogger(logPath)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	if cCtx.Bool(verifyAll) {
 		if len(cCtx.StringSlice(srcNamespace)) > 0 || len(cCtx.StringSlice(dstNamespace)) > 0 {
-			return nil, nil, nil, errors.Errorf("Setting both verifyAll and explicit namespaces is not supported")
+			return nil, errors.Errorf("Setting both verifyAll and explicit namespaces is not supported")
 		}
 		v.SetVerifyAll(true)
 	} else {
@@ -212,10 +205,10 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, *os
 	v.SetIgnoreBSONFieldOrder(cCtx.Bool(ignoreFieldOrder))
 	err = v.SetReadPreference(cCtx.String(readPreference))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	v.SetFailureDisplaySize(cCtx.Int64(failureDisplaySize))
-	return v, file, writer, nil
+	return v, nil
 }
 
 func expandCommaSeparators(in []string) []string {
