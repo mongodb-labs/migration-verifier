@@ -1,10 +1,11 @@
 package verifier
 
 import (
-	"github.com/10gen/migration-verifier/internal/logger"
-	"github.com/rs/zerolog/log"
 	"io"
 	"os"
+
+	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/rs/zerolog/log"
 )
 
 // DefaultLogWriter is the default log io.Writer implementor.
