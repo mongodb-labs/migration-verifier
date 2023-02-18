@@ -1105,16 +1105,31 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 
 	// cache namespace
 	if len(verifier.srcNamespaces) == 0 {
-		verifier.srcNamespaces = verifier.getNamespaces(ctx, SrcNamespaceField)
+		namespaces, err := verifier.getNamespaces(ctx, SrcNamespaceField)
+		if err != nil {
+			verifier.logger.Error().Msgf("Failed to learn source namespaces: %s", err)
+			return
+		}
+
+		verifier.srcNamespaces = namespaces
+
 		// if still no namespace, nothing to print!
 		if len(verifier.srcNamespaces) == 0 {
-			verifier.logger.Info().Msg("Unable to find the namespace to display DB stats.")
+			verifier.logger.Info().Msg("Source contains no namespaces.")
 			return
 		}
 	}
 
 	if len(verifier.dstNamespaces) == 0 {
-		verifier.dstNamespaces = verifier.getNamespaces(ctx, DstNamespaceField)
+		namespaces, err := verifier.getNamespaces(ctx, DstNamespaceField)
+
+		if err != nil {
+			verifier.logger.Error().Msgf("Failed to learn destination namespaces: %s", err)
+			return
+		}
+
+		verifier.dstNamespaces = namespaces
+
 		if len(verifier.dstNamespaces) == 0 {
 			verifier.dstNamespaces = verifier.srcNamespaces
 		}
@@ -1133,21 +1148,40 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 		srcDb, srcColl := SplitNamespace(n)
 		if srcDb != "" {
 			srcCollection := verifier.srcClientDatabase(srcDb).Collection(srcColl)
-			srcSpec, _ := verifier.getCollectionSpecification(ctx, srcCollection)
+			srcSpec, err := verifier.getCollectionSpecification(ctx, srcCollection)
+			if err != nil {
+				verifier.logger.Error().Msgf("Failed to fetch the source’s collection specification: %s", err)
+				return
+			}
+
 			// "EstimatedDocumentCount" on a view runs its pipeline, so may be very slow
 			var srcEst int64
 			srcIsView := srcSpec != nil && srcSpec.Type == "view"
 			if !srcIsView {
-				srcEst, _ = srcCollection.EstimatedDocumentCount(ctx)
+				var err error
+				srcEst, err = srcCollection.EstimatedDocumentCount(ctx)
+				if err != nil {
+					verifier.logger.Error().Msgf("Failed to fetch the source’s estimated document count: %s", err)
+					return
+				}
 			}
 
 			n2 := verifier.dstNamespaces[i]
 			dstDb, dstColl := SplitNamespace(n2)
 			if !srcIsView && dstDb != "" {
 				dstCollection := verifier.dstClientDatabase(dstDb).Collection(dstColl)
-				dstSpec, _ := verifier.getCollectionSpecification(ctx, dstCollection)
+				dstSpec, err := verifier.getCollectionSpecification(ctx, dstCollection)
+				if err != nil {
+					verifier.logger.Error().Msgf("Failed to fetch the destination’s collection specification: %s", err)
+					return
+				}
+
 				if dstSpec == nil || dstSpec.Type != "view" {
-					dstEst, _ := dstCollection.EstimatedDocumentCount(ctx)
+					dstEst, err := dstCollection.EstimatedDocumentCount(ctx)
+					if err != nil {
+						verifier.logger.Error().Msgf("Failed to fetch the destination’s estimated document count: %s", err)
+						return
+					}
 
 					table.Append([]string{strconv.FormatInt(srcEst, 10), srcDb, srcColl,
 						strconv.FormatInt(dstEst, 10), dstDb, dstColl})
@@ -1272,16 +1306,16 @@ OUTB:
 
 }
 
-func (verifier *Verifier) getNamespaces(ctx context.Context, fieldName string) []string {
+func (verifier *Verifier) getNamespaces(ctx context.Context, fieldName string) ([]string, error) {
 	var namespaces []string
 	ret, err := verifier.verificationTaskCollection().Distinct(ctx, fieldName, bson.D{})
 	if err != nil {
-		return namespaces
+		return nil, err
 	}
 	for _, v := range ret {
 		namespaces = append(namespaces, v.(string))
 	}
-	return namespaces
+	return namespaces, nil
 }
 
 func getBuildInfo(ctx context.Context, client *mongo.Client) (*bson.M, error) {
