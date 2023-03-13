@@ -36,14 +36,14 @@ func TestBSONUnorderedCompare(t *testing.T) {
 		{"b", 2}}
 
 	result, err := compareDocuments(srcDoc, srcDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Nil(t, result)
 
 	// Missing fields on destination
 	dstDoc := bson.D{
 		{"_id", "a"}}
 	result, err = compareDocuments(srcDoc, dstDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	if assert.NotNil(t, result) {
 		assert.Empty(t, result.missingFieldOnSrc)
 		assert.ElementsMatch(t, result.missingFieldOnDst, []string{"a", "b"})
@@ -58,7 +58,7 @@ func TestBSONUnorderedCompare(t *testing.T) {
 		{"b", 2},
 		{"c", 3}}
 	result, err = compareDocuments(srcDoc, dstDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	if assert.NotNil(t, result) {
 		assert.ElementsMatch(t, result.missingFieldOnSrc, []string{"aa", "c"})
 		assert.Empty(t, result.missingFieldOnDst)
@@ -71,7 +71,7 @@ func TestBSONUnorderedCompare(t *testing.T) {
 		{"b", 2},
 		{"a", 1}}
 	result, err = compareDocuments(srcDoc, dstDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Nil(t, result)
 
 	// Sub-doc order is changed
@@ -86,7 +86,7 @@ func TestBSONUnorderedCompare(t *testing.T) {
 		{"b", 2},
 		{"c", bson.D{{"e", 2}, {"f", 3}, {"d", 1}}}}
 	result, err = compareDocuments(srcDoc, dstDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Nil(t, result)
 
 	// Different types
@@ -101,7 +101,7 @@ func TestBSONUnorderedCompare(t *testing.T) {
 		{"b", "2"},
 		{"c", "cvalue"}}
 	result, err = compareDocuments(srcDoc, dstDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	if assert.NotNil(t, result) {
 		assert.Empty(t, result.missingFieldOnSrc)
 		assert.Empty(t, result.missingFieldOnDst)
@@ -120,7 +120,7 @@ func TestBSONUnorderedCompare(t *testing.T) {
 		{"b", 3},
 		{"c", bson.D{{"d", 1}, {"e", 2}, {"f", 4}}}}
 	result, err = compareDocuments(srcDoc, dstDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	if assert.NotNil(t, result) {
 		assert.Empty(t, result.missingFieldOnSrc)
 		assert.Empty(t, result.missingFieldOnDst)
@@ -141,7 +141,7 @@ func TestBSONUnorderedCompare(t *testing.T) {
 		{"e", 99},
 		{"c", bson.D{{"d", 1}, {"e", 2}, {"f", 4}}}}
 	result, err = compareDocuments(srcDoc, dstDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	if assert.NotNil(t, result) {
 		assert.ElementsMatch(t, result.missingFieldOnSrc, []string{"e"})
 		assert.ElementsMatch(t, result.missingFieldOnDst, []string{"bb"})
@@ -157,7 +157,7 @@ func TestBSONUnorderedCompareArrays(t *testing.T) {
 		{"c", bson.D{{"d", 1}, {"e", 2}, {"f", 3}}},
 		{"arr", bson.A{1, 2, 3, 4}}}
 	result, err := compareDocuments(srcDoc, srcDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Nil(t, result)
 
 	// Array is not equal to doc with elements that look like an array
@@ -168,7 +168,7 @@ func TestBSONUnorderedCompareArrays(t *testing.T) {
 		{"c", bson.D{{"d", 1}, {"e", 2}, {"f", 3}}},
 		{"arr", bson.D{{"0", 1}, {"1", 2}, {"2", 3}, {"3", 4}}}}
 	result, err = compareDocuments(srcDoc, dstDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	if assert.NotNil(t, result) {
 		assert.Empty(t, result.missingFieldOnSrc)
 		assert.Empty(t, result.missingFieldOnDst)
@@ -183,7 +183,7 @@ func TestBSONUnorderedCompareArrays(t *testing.T) {
 		{"c", bson.D{{"d", 1}, {"e", 2}, {"f", 3}}},
 		{"arr", bson.A{1, 4, 3, 2}}}
 	result, err = compareDocuments(srcDoc, dstDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	if assert.NotNil(t, result) {
 		assert.Empty(t, result.missingFieldOnSrc)
 		assert.Empty(t, result.missingFieldOnDst)
@@ -198,7 +198,7 @@ func TestBSONUnorderedCompareArrays(t *testing.T) {
 		{"c", bson.D{{"d", 1}, {"e", 2}, {"f", 3}}},
 		{"arr", bson.A{1, 2, 3, 4, 5}}}
 	result, err = compareDocuments(srcDoc, dstDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	if assert.NotNil(t, result) {
 		assert.Empty(t, result.missingFieldOnSrc)
 		assert.Empty(t, result.missingFieldOnDst)
@@ -213,7 +213,7 @@ func TestBSONUnorderedCompareArrays(t *testing.T) {
 		{"c", bson.D{{"d", 1}, {"e", 2}, {"f", 3}}},
 		{"arr", bson.A{1, 2, 3}}}
 	result, err = compareDocuments(srcDoc, dstDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	if assert.NotNil(t, result) {
 		assert.Empty(t, result.missingFieldOnSrc)
 		assert.Empty(t, result.missingFieldOnDst)
@@ -234,6 +234,6 @@ func TestBSONUnorderedCompareArrays(t *testing.T) {
 		{"c", bson.D{{"d", 1}, {"e", 2}, {"f", 3}}},
 		{"arr", bson.A{1, bson.D{{"h", 5}, {"g", 4}, {"i", 6}}}}}
 	result, err = compareDocuments(srcDoc, dstDoc)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Nil(t, result)
 }

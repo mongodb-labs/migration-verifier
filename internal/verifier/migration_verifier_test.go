@@ -121,7 +121,7 @@ func runMultipleVersionTests(t *testing.T, testSuite WithMongodsTestingSuite,
 
 func makeRawDoc(t *testing.T, doc interface{}) bson.Raw {
 	raw, err := bson.Marshal(doc)
-	require.Nil(t, err, "Unable to marshal test doc -- programming error in test")
+	require.NoError(t, err, "Unable to marshal test doc -- programming error in test")
 	return raw
 }
 
@@ -140,9 +140,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	ctx := context.Background()
 	drop := func() {
 		err := verifier.srcClient.Database("keyhole").Drop(ctx)
-		suite.Require().Nil(err)
+		suite.Require().NoError(err)
 		err = verifier.dstClient.Database("keyhole").Drop(ctx)
-		suite.Require().Nil(err)
+		suite.Require().NoError(err)
 	}
 	drop()
 	defer drop()
@@ -158,14 +158,14 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 
 	id := rand.Intn(1000)
 	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.D{{"_id", id}, {"num", 123}, {"name", "srcTest"}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.D{{"_id", id}, {"num", 123}, {"name", "dstTest"}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task := &VerificationTask{ID: id, QueryFilter: basicQueryFilter("keyhole.dealers")}
 	srcDocumentMap, dstDocumentMap, err := verifier.fetchDocuments(task)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	rawType, rawIdBytes, err := bson.MarshalValue(id)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	rawId := bson.RawValue{Type: rawType, Value: rawIdBytes}
 	stringId := RawToString(rawId)
 
@@ -177,11 +177,11 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 	ctx := context.Background()
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	err := verifier.InsertFailedCompareRecheckDocs("foo.bar", []interface{}{42}, []int{100})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs("foo.bar", []interface{}{43, 44}, []int{100, 100})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs("foo.bar2", []interface{}{42}, []int{100})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	event := ParsedEvent{
 		DocKey: DocKey{ID: int32(55)},
 		OpType: "delete",
@@ -191,16 +191,16 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 		},
 	}
 	err = verifier.HandleChangeStreamEvent(ctx, &event)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	event.OpType = "insert"
 	err = verifier.HandleChangeStreamEvent(ctx, &event)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	event.OpType = "replace"
 	err = verifier.HandleChangeStreamEvent(ctx, &event)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	event.OpType = "update"
 	err = verifier.HandleChangeStreamEvent(ctx, &event)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	event.OpType = "flibbity"
 	err = verifier.HandleChangeStreamEvent(ctx, &event)
 	suite.Require().Equal(fmt.Errorf(`Not supporting: "flibbity" events`), err)
@@ -208,14 +208,14 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 	oldGeneration := verifier.generation
 	verifier.generation++
 	err = verifier.GenerateRecheckTasks(ctx, oldGeneration)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	var doc bson.M
 	cur, err := verifier.verificationTaskCollection().Find(ctx, bson.M{"generation": 1})
 	verifyTask := func(expectedIds bson.A, expectedNamespace string) {
 		more := cur.Next(ctx)
 		suite.Require().True(more)
 		err = cur.Decode(&doc)
-		suite.Require().Nil(err)
+		suite.Require().NoError(err)
 		suite.Require().Equal(expectedIds, doc["_ids"])
 		suite.Require().Equal("added", doc["status"])
 		suite.Require().Equal("verify", doc["type"])
@@ -235,7 +235,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 	dstRaw := makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
 	namespace := "testdb.testns"
 	mismatchedIds, err := verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 0, len(mismatchedIds))
 
 	// Test different field orders
@@ -243,7 +243,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 	dstRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
 
 	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 0, len(mismatchedIds))
 
 	// Test mismatched document
@@ -251,7 +251,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 	srcRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 1234}, {"name", "foobar"}})
 	dstRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
 	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	var res int
 	if assert.Equal(t, 1, len(mismatchedIds)) {
 		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
@@ -263,7 +263,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 	id = rand.Intn(1000)
 	srcRaw = makeRawDoc(t, bson.M{"_id": id, "num": 1234, "name": "foobar"})
 	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{}, namespace)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	if assert.Equal(t, 1, len(mismatchedIds)) {
 		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
 		assert.Equal(t, id, res)
@@ -275,7 +275,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 	id = rand.Intn(1000)
 	dstRaw = makeRawDoc(t, bson.M{"_id": id, "num": 1234, "name": "foobar"})
 	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	if assert.Equal(t, 1, len(mismatchedIds)) {
 		assert.Equal(t, mismatchedIds[0].Details, Missing)
 		assert.Equal(t, mismatchedIds[0].Cluster, ClusterSource)
@@ -291,7 +291,7 @@ func TestVerifierCompareDocsOrdered(t *testing.T) {
 	dstRaw := makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
 	namespace := "testdb.testns"
 	mismatchedIds, err := verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 0, len(mismatchedIds))
 
 	// Test different field orders
@@ -299,7 +299,7 @@ func TestVerifierCompareDocsOrdered(t *testing.T) {
 	dstRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
 
 	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	if assert.Equal(t, 1, len(mismatchedIds)) {
 		var res int
 		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
@@ -312,7 +312,7 @@ func TestVerifierCompareDocsOrdered(t *testing.T) {
 	srcRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 1234}, {"name", "foobar"}})
 	dstRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
 	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	var res int
 	if assert.Equal(t, 1, len(mismatchedIds)) {
 		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
@@ -326,9 +326,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareViews() {
 	ctx := context.Background()
 
 	err := suite.srcMongoClient.Database("testDb").CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task := &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -340,9 +340,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareViews() {
 
 	// Views must have the same underlying collection
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "wrongColl", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "wrongColl", "testColl2", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -358,9 +358,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareViews() {
 
 	// Views must have the same underlying pipeline
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "wrongPipeline", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "wrongPipeline", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}, {"a", 0}}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -381,9 +381,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareViews() {
 	collation2.Locale = "fr"
 	collation2.Backwards = true
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "missingOptionsSrc", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "missingOptionsSrc", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -399,9 +399,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareViews() {
 	}
 
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation1))
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -417,9 +417,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareViews() {
 	}
 
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation1))
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -440,7 +440,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareMetadata() {
 
 	// Collection exists only on source.
 	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task := &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -455,7 +455,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareMetadata() {
 
 	// Make sure "To" is respected.
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -470,7 +470,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareMetadata() {
 
 	// Collection exists only on dest.
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "destOnlyColl")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -485,9 +485,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareMetadata() {
 
 	// A view and a collection are different.
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "viewOnSrc", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "viewOnSrc")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -502,9 +502,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareMetadata() {
 
 	// Capped should not match uncapped
 	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "cappedOnDst")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "cappedOnDst", options.CreateCollection().SetCapped(true).SetSizeInBytes(1024*1024*100))
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -547,15 +547,15 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 	// Missing index on destination.
 	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl1")
 	srcColl := suite.srcMongoClient.Database("testDb").Collection("testColl1")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl1")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	dstColl := suite.dstMongoClient.Database("testDb").Collection("testColl1")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	srcIndexNames, err := srcColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	_, err = dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task := &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -573,15 +573,15 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 	// Missing index on source
 	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl2")
 	srcColl = suite.srcMongoClient.Database("testDb").Collection("testColl2")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl2")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	dstColl = suite.dstMongoClient.Database("testDb").Collection("testColl2")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	_, err = srcColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	dstIndexNames, err := dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -599,15 +599,15 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 	// Different indexes on each
 	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl3")
 	srcColl = suite.srcMongoClient.Database("testDb").Collection("testColl3")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl3")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	dstColl = suite.dstMongoClient.Database("testDb").Collection("testColl3")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	srcIndexNames, err = srcColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"z", 1}, {"q", -1}}}, {Keys: bson.D{{"a", 1}, {"b", -1}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	dstIndexNames, err = dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
@@ -632,16 +632,16 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 	// Indexes with same names are different
 	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl4")
 	srcColl = suite.srcMongoClient.Database("testDb").Collection("testColl4")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl4")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	dstColl = suite.dstMongoClient.Database("testDb").Collection("testColl4")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	srcIndexNames, err = srcColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"z", 1}, {"q", -1}}, Options: options.Index().SetName("wrong")}, {Keys: bson.D{{"a", 1}, {"b", -1}}}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.Require().Equal("wrong", srcIndexNames[0])
 	dstIndexNames, err = dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}, Options: options.Index().SetName("wrong")}})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.Require().Equal("wrong", dstIndexNames[1])
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
@@ -663,9 +663,9 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	keysDoc1 := bson.D{{"a", 1}, {"b", -1}}
 	// We marshal the key document twice so they are physically separate memory.
 	keysRaw1, err := bson.Marshal(keysDoc1)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	keysRaw2, err := bson.Marshal(keysDoc1)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	simpleIndexSpec1 := mongo.IndexSpecification{
 		Name:         "testIndex",
 		Namespace:    "testDB.testIndex",
@@ -690,7 +690,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	// Changing the key spec order matters
 	keysDoc3 := bson.D{{"b", -1}, {"a", 1}}
 	keysRaw3, err := bson.Marshal(keysDoc3)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	simpleIndexSpec3 = simpleIndexSpec2
 	simpleIndexSpec3.KeysDocument = keysRaw3
 	results = compareIndexSpecifications(&simpleIndexSpec1, &simpleIndexSpec3)
@@ -705,7 +705,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	// Shortening the key mattes
 	keysDoc3 = bson.D{{"a", 1}}
 	keysRaw3, err = bson.Marshal(keysDoc3)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	simpleIndexSpec3 = simpleIndexSpec2
 	simpleIndexSpec3.KeysDocument = keysRaw3
 	results = compareIndexSpecifications(&simpleIndexSpec1, &simpleIndexSpec3)
@@ -811,21 +811,21 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 
 	// Collections on source only
 	err := suite.srcMongoClient.Database("testDb1").CreateCollection(ctx, "testColl1")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.srcMongoClient.Database("testDb1").CreateCollection(ctx, "testColl2")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.srcNamespaces)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.dstNamespaces)
 
 	// Multiple DBs on source
 	err = suite.srcMongoClient.Database("testDb2").CreateCollection(ctx, "testColl3")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.srcMongoClient.Database("testDb2").CreateCollection(ctx, "testColl4")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4"},
 		verifier.srcNamespaces)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4"},
@@ -833,15 +833,15 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 
 	// Same namespaces on dest
 	err = suite.dstMongoClient.Database("testDb1").CreateCollection(ctx, "testColl1")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb1").CreateCollection(ctx, "testColl2")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb2").CreateCollection(ctx, "testColl3")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb2").CreateCollection(ctx, "testColl4")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4"},
 		verifier.srcNamespaces)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4"},
@@ -849,11 +849,11 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 
 	// Additional namespaces on dest
 	err = suite.dstMongoClient.Database("testDb3").CreateCollection(ctx, "testColl5")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb4").CreateCollection(ctx, "testColl6")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
 		"testDb3.testColl5", "testDb4.testColl6"},
 		verifier.srcNamespaces)
@@ -862,40 +862,40 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 		verifier.dstNamespaces)
 
 	err = suite.srcMongoClient.Database("testDb2").Drop(ctx)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb2").Drop(ctx)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb3").Drop(ctx)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb4").Drop(ctx)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 
 	// Views should be found
 	pipeline := bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}
 	err = suite.srcMongoClient.Database("testDb1").CreateView(ctx, "testView1", "testColl1", pipeline)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb1").CreateView(ctx, "testView1", "testColl1", pipeline)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.srcNamespaces)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.dstNamespaces)
 
 	// Collections in admin, config, and local should not be found
 	err = suite.srcMongoClient.Database("local").CreateCollection(ctx, "islocalSrc")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "islocalDest")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.srcMongoClient.Database("admin").CreateCollection(ctx, "isAdminSrc")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("admin").CreateCollection(ctx, "isAdminDest")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.srcMongoClient.Database("config").CreateCollection(ctx, "isConfigSrc")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("config").CreateCollection(ctx, "isConfigDest")
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.srcNamespaces)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.dstNamespaces)
 }
@@ -913,10 +913,10 @@ func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
 		bson.M{"generation": 0, "status": "completed", "type": "verify"},
 		bson.M{"generation": 0, "status": "retry", "type": "verify"},
 	})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 
 	status, err := verifier.GetVerificationStatus()
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.Equal(1, status.AddedTasks)
 	suite.Equal(1, status.ProcessingTasks)
 	suite.Equal(1, status.FailedTasks)
@@ -937,28 +937,28 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
 	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
 	_, err := srcColl.InsertOne(ctx, bson.M{"_id": 1, "x": 42})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 2, "x": 43})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 1, "x": 42})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 
 	checkDoneChan := make(chan struct{})
 	checkContinueChan := make(chan struct{})
 	go func() {
 		err := verifier.CheckDriver(ctx, checkDoneChan, checkContinueChan)
-		suite.Require().Nil(err)
+		suite.Require().NoError(err)
 	}()
 
 	waitForTasks := func() *VerificationStatus {
 		status, err := verifier.GetVerificationStatus()
-		suite.Require().Nil(err)
+		suite.Require().NoError(err)
 
 		for status.TotalTasks == 0 && verifier.generation < 10 {
 			checkContinueChan <- struct{}{}
 			<-checkDoneChan
 			status, err = verifier.GetVerificationStatus()
-			suite.Require().Nil(err)
+			suite.Require().NoError(err)
 		}
 		return status
 	}
@@ -970,7 +970,7 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 
 	// now patch up the destination
 	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 2, "x": 43})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 
 	// tell check to start the next generation
 	checkContinueChan <- struct{}{}
@@ -983,7 +983,7 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 
 	// now insert in the source, this should come up next generation
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 3, "x": 44})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 
 	// tell check to start the next generation
 	checkContinueChan <- struct{}{}
@@ -997,7 +997,7 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 
 	// now patch up the destination
 	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 3, "x": 44})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 
 	// continue
 	checkContinueChan <- struct{}{}
@@ -1012,13 +1012,13 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 	// turn writes off
 	verifier.WritesOff(ctx)
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 1019, "x": 1019})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	checkContinueChan <- struct{}{}
 	<-checkDoneChan
 	// now write to the source, this should not be seen by the change stream which should have ended
 	// because of the calls to WritesOff
 	status, err = verifier.GetVerificationStatus()
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	// there should be a failure from the src insert
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
 }

@@ -60930,16 +60930,16 @@ func TestKeystringDecoder(t *testing.T) {
 		fixQuotes := strings.ReplaceAll(testCase.Bson, "'", "\"")
 		err := bson.UnmarshalExtJSON([]byte(fixQuotes), false, &parsedBson)
 		// If this fails it's a problem with the test case
-		require.Nilf(t, err, "Test case %d (%s) failed to decode BSON", i, testCase.Bson)
+		require.NoErrorf(t, err, "Test case %d (%s) failed to decode BSON", i, testCase.Bson)
 
 		out, err := KeystringToBson(testCase.Version, testCase.Keystring)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		if strings.Contains(testCase.Bson, "NaN") {
 			// NaNs can't be compared, so we have to marshal them. This does not give as nice an error.
 			mParsedBson, err := bson.Marshal(parsedBson)
-			require.Nil(t, err)
+			require.NoError(t, err)
 			mActualBson, err := bson.Marshal(out)
-			require.Nil(t, err)
+			require.NoError(t, err)
 			assert.Equalf(t, mParsedBson, mActualBson,
 				"TestCase %d result %+v, expected %+v\nkeystring \"%s\"", i, out, testCase.Bson,
 				testCase.Keystring)

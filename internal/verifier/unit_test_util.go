@@ -60,22 +60,22 @@ func (suite *WithMongodsTestSuite) SetupSuite() {
 		suite.T().Skip("Skipping mongod-requiring tests in short mode")
 	}
 	err := startTestMongods(suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	ctx := context.Background()
 	clientOpts := options.Client().ApplyURI("mongodb://localhost:" + suite.srcMongoInstance.port).SetAppName("Verifier Test Suite").SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
 	suite.srcMongoClient, err = mongo.Connect(ctx, clientOpts)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	clientOpts = options.Client().ApplyURI("mongodb://localhost:" + suite.dstMongoInstance.port).SetAppName("Verifier Test Suite").SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
 	suite.dstMongoClient, err = mongo.Connect(ctx, clientOpts)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	clientOpts = options.Client().ApplyURI("mongodb://localhost:" + suite.metaMongoInstance.port).SetAppName("Verifier Test Suite")
 	suite.metaMongoClient, err = mongo.Connect(ctx, clientOpts)
 	suite.startReplSet()
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.initialDbNames = map[string]bool{}
 	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient, suite.metaMongoClient} {
 		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
-		suite.Require().Nil(err)
+		suite.Require().NoError(err)
 		for _, dbName := range dbNames {
 			suite.initialDbNames[dbName] = true
 		}
@@ -90,7 +90,7 @@ func (suite *WithMongodsTestSuite) startReplSet() {
 		SetDirect(true).
 		SetAppName("Verifier Test Suite")
 	directClient, err := mongo.Connect(ctx, clientOpts)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	command := bson.M{
 		"replSetInitiate": bson.M{
 			"_id": replSet,
@@ -100,7 +100,7 @@ func (suite *WithMongodsTestSuite) startReplSet() {
 		},
 	}
 	err = directClient.Database("admin").RunCommand(ctx, command).Err()
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 }
 
 func (suite *WithMongodsTestSuite) TearDownSuite() {
@@ -111,11 +111,11 @@ func (suite *WithMongodsTestSuite) TearDownTest() {
 	ctx := context.Background()
 	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient, suite.metaMongoClient} {
 		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
-		suite.Require().Nil(err)
+		suite.Require().NoError(err)
 		for _, dbName := range dbNames {
 			if !suite.initialDbNames[dbName] {
 				err = client.Database(dbName).Drop(ctx)
-				suite.Require().Nil(err)
+				suite.Require().NoError(err)
 			}
 		}
 	}

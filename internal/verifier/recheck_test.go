@@ -19,7 +19,7 @@ func (suite *MultiMetaVersionTestSuite) TestLargeIDInsertions() {
 	ids := []interface{}{id1, id2, id3}
 	dataSizes := []int{overlyLarge, overlyLarge, overlyLarge}
 	err := verifier.insertRecheckDocs(ctx, 0, "testDB", "testColl", ids, dataSizes)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	metaColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue)
 	d1 := RecheckDoc{
 		PrimaryKey: RecheckPrimaryKey{
@@ -34,21 +34,21 @@ func (suite *MultiMetaVersionTestSuite) TestLargeIDInsertions() {
 	d3 := d1
 	d3.PrimaryKey.DocumentID = id3
 	cursor, err := metaColl.Find(ctx, bson.D{})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	var results []RecheckDoc
 	err = cursor.All(ctx, &results)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.ElementsMatch([]interface{}{d1, d2, d3}, results)
 
 	verifier.generation++
 	err = verifier.GenerateRecheckTasks(ctx, 0)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err = taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	var actualTasks []VerificationTask
 	err = cursor.All(ctx, &actualTasks)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 
 	t1 := VerificationTask{
 		Generation: 1,
@@ -75,7 +75,7 @@ func (suite *MultiMetaVersionTestSuite) TestLargeDataInsertions() {
 	ids := []interface{}{id1, id2, id3}
 	dataSizes := []int{400 * 1024, 700 * 1024, 1024}
 	err := verifier.insertRecheckDocs(ctx, 0, "testDB", "testColl", ids, dataSizes)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	metaColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue)
 	d1 := RecheckDoc{
 		PrimaryKey: RecheckPrimaryKey{
@@ -92,21 +92,21 @@ func (suite *MultiMetaVersionTestSuite) TestLargeDataInsertions() {
 	d3.PrimaryKey.DocumentID = id3
 	d3.DataSize = dataSizes[2]
 	cursor, err := metaColl.Find(ctx, bson.D{})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	var results []RecheckDoc
 	err = cursor.All(ctx, &results)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.ElementsMatch([]interface{}{d1, d2, d3}, results)
 
 	verifier.generation++
 	err = verifier.GenerateRecheckTasks(ctx, 0)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err = taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	var actualTasks []VerificationTask
 	err = cursor.All(ctx, &actualTasks)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 
 	t1 := VerificationTask{
 		Generation: 1,
@@ -132,23 +132,23 @@ func (suite *MultiMetaVersionTestSuite) TestMultipleNamespaces() {
 	ids := []interface{}{id1, id2, id3}
 	dataSizes := []int{1000, 1000, 1000}
 	err := verifier.insertRecheckDocs(ctx, 0, "testDB1", "testColl1", ids, dataSizes)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.insertRecheckDocs(ctx, 0, "testDB1", "testColl2", ids, dataSizes)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.insertRecheckDocs(ctx, 0, "testDB2", "testColl1", ids, dataSizes)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.insertRecheckDocs(ctx, 0, "testDB2", "testColl2", ids, dataSizes)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 
 	verifier.generation++
 	err = verifier.GenerateRecheckTasks(ctx, 0)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	var actualTasks []VerificationTask
 	err = cursor.All(ctx, &actualTasks)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 
 	t1 := VerificationTask{
 		Generation: 1,
@@ -178,11 +178,11 @@ func (suite *MultiMetaVersionTestSuite) TestGenerationalClear() {
 	ids := []interface{}{id1, id2}
 	dataSizes := []int{1000, 1000}
 	err := verifier.insertRecheckDocs(ctx, 0, "testDB", "testColl", ids, dataSizes)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.insertRecheckDocs(ctx, 1, "testDB", "testColl", ids, dataSizes)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = verifier.insertRecheckDocs(ctx, 2, "testDB", "testColl", ids, dataSizes)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 
 	metaColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue)
 	d1 := RecheckDoc{
@@ -205,33 +205,33 @@ func (suite *MultiMetaVersionTestSuite) TestGenerationalClear() {
 	d6 := d2
 	d6.PrimaryKey.Generation = 2
 	cursor, err := metaColl.Find(ctx, bson.D{})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	var results []RecheckDoc
 	err = cursor.All(ctx, &results)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.ElementsMatch([]interface{}{d1, d2, d3, d4, d5, d6}, results)
 
 	err = verifier.ClearRecheckDocs(ctx, 1)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	cursor, err = metaColl.Find(ctx, bson.D{})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = cursor.All(ctx, &results)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.ElementsMatch([]interface{}{d1, d2, d5, d6}, results)
 
 	err = verifier.ClearRecheckDocs(ctx, 0)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	cursor, err = metaColl.Find(ctx, bson.D{})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = cursor.All(ctx, &results)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.ElementsMatch([]interface{}{d5, d6}, results)
 
 	err = verifier.ClearRecheckDocs(ctx, 2)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	cursor, err = metaColl.Find(ctx, bson.D{})
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	err = cursor.All(ctx, &results)
-	suite.Require().Nil(err)
+	suite.Require().NoError(err)
 	suite.ElementsMatch([]interface{}{}, results)
 }
