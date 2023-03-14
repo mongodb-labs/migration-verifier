@@ -1,6 +1,6 @@
 module github.com/10gen/migration-verifier
 
-go 1.17
+go 1.19
 
 require (
 	github.com/gin-gonic/gin v1.8.1

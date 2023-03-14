@@ -13,7 +13,6 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
-	"strconv"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -86,8 +85,6 @@ func TestVerifierMultiMetaVersion(t *testing.T) {
 
 func runMultipleVersionTests(t *testing.T, testSuite WithMongodsTestingSuite,
 	srcVersions, destVersions, metaVersions []string) {
-	portOffset := 27001
-	testCnt := 0
 	for _, srcVersion := range srcVersions {
 		for _, destVersion := range destVersions {
 			for _, metaVersion := range metaVersions {
@@ -98,20 +95,13 @@ func runMultipleVersionTests(t *testing.T, testSuite WithMongodsTestingSuite,
 					// t.Parallel()
 					testSuite.SetMetaInstance(MongoInstance{
 						version: metaVersion,
-						port:    strconv.Itoa(portOffset + (testCnt * 3)),
-						dir:     "meta" + strconv.Itoa(testCnt),
 					})
 					testSuite.SetSrcInstance(MongoInstance{
 						version: srcVersion,
-						port:    strconv.Itoa(portOffset + (testCnt * 3) + 1),
-						dir:     "source" + strconv.Itoa(testCnt),
 					})
 					testSuite.SetDstInstance(MongoInstance{
 						version: destVersion,
-						port:    strconv.Itoa(portOffset + (testCnt * 3) + 2),
-						dir:     "dest" + strconv.Itoa(testCnt),
 					})
-					testCnt++
 					suite.Run(t, testSuite)
 				})
 			}

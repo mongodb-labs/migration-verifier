@@ -30,12 +30,12 @@ PREPARE_SHELL: |
 
   if [ "Windows_NT" = "$OS" ]; then
     export GOOS="windows"
-    export GOROOT="c:/golang/go1.18"
+    export GOROOT="c:/golang/go1.19"
     export GOCACHE="C:/windows/temp"
-    export PATH="/cygdrive/c/golang/go1.18/bin:/cygdrive/c/mingw-w64/x86_64-4.9.1-posix-seh-rt_v3-rev1/mingw64/bin:/cygdrive/c/sasl/:$PATH"
+    export PATH="/cygdrive/c/golang/go1.19/bin:/cygdrive/c/mingw-w64/x86_64-4.9.1-posix-seh-rt_v3-rev1/mingw64/bin:/cygdrive/c/sasl/:$PATH"
   else
-    export GOROOT=/opt/golang/go1.18
-    export PATH="/opt/golang/go1.18/bin:$PATH"
+    export GOROOT=/opt/golang/go1.19
+    export PATH="/opt/golang/go1.19/bin:$PATH"
   fi;
 
   # Set OS-level default Go configuration

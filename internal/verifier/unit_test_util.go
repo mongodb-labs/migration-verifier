@@ -11,8 +11,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
@@ -26,7 +31,19 @@ const replSet string = "rs0"
 type MongoInstance struct {
 	port    string
 	version string
-	dir     string
+	process *os.Process
+}
+
+// SetPort sets the MongoInstance’s port so that clients can connect
+// to it.
+func (mi *MongoInstance) SetPort(port uint64) {
+	mi.port = strconv.FormatUint(port, 10)
+}
+
+// SetProcess sets the MongoInstance’s process so that we can terminate
+// the process once we’re done with it.
+func (mi *MongoInstance) SetProcess(process *os.Process) {
+	mi.process = process
 }
 
 type WithMongodsTestingSuite interface {
@@ -59,7 +76,7 @@ func (suite *WithMongodsTestSuite) SetupSuite() {
 	if testing.Short() {
 		suite.T().Skip("Skipping mongod-requiring tests in short mode")
 	}
-	err := startTestMongods(suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	err := startTestMongods(suite.T(), &suite.srcMongoInstance, &suite.dstMongoInstance, &suite.metaMongoInstance)
 	suite.Require().NoError(err)
 	ctx := context.Background()
 	clientOpts := options.Client().ApplyURI("mongodb://localhost:" + suite.srcMongoInstance.port).SetAppName("Verifier Test Suite").SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
@@ -104,7 +121,28 @@ func (suite *WithMongodsTestSuite) startReplSet() {
 }
 
 func (suite *WithMongodsTestSuite) TearDownSuite() {
-	stopTestMongods()
+	suite.T().Log("Shutting down mongod instances …")
+
+	instances := []*MongoInstance{
+		&suite.srcMongoInstance,
+		&suite.dstMongoInstance,
+		&suite.metaMongoInstance,
+	}
+
+	theSignal := syscall.SIGTERM
+
+	for _, instance := range instances {
+		proc := instance.process
+
+		if proc != nil {
+			pid := instance.process.Pid
+			suite.T().Logf("Sending SIGTERM to process %d", pid)
+			err := instance.process.Signal(theSignal)
+			if err != nil {
+				suite.T().Logf("Failed to signal process %d: %v", pid, err)
+			}
+		}
+	}
 }
 
 func (suite *WithMongodsTestSuite) TearDownTest() {
@@ -124,69 +162,133 @@ func (suite *WithMongodsTestSuite) TearDownTest() {
 var cachePath = filepath.Join("mongodb_exec")
 var mongoDownloadMutex sync.Mutex
 
-func stopTestMongods() {
-	// ignore the error as this will fail if mongod is not already running
-	_ = exec.Command("killall", "mongod").Run()
+func startTestMongods(t *testing.T, srcMongoInstance *MongoInstance, dstMongoInstance *MongoInstance, metaMongoInstance *MongoInstance) error {
+
+	// Ideally we’d start the mongods in parallel, but in development that
+	// seemed to cause mongod to break on `--port 0`.
+	start := time.Now()
+	err := startOneMongod(t, srcMongoInstance, "--replSet", replSet)
+	if err != nil {
+		return err
+	}
+
+	err = startOneMongod(t, dstMongoInstance)
+	if err != nil {
+		return err
+	}
+
+	err = startOneMongod(t, metaMongoInstance)
+	if err != nil {
+		return err
+	}
+
+	t.Logf("Time elapsed creating mongod instances: %v", time.Since(start))
+
+	return nil
 }
 
-func startTestMongods(srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) error {
-	stopTestMongods()
-	srcMongod, err := getMongod(srcMongoInstance)
+func logpath(target string) string {
+	return filepath.Join(target, "log")
+}
+
+// startOneMongod execs `path` with `extraArgs`. This mongod binds to
+// “port 0”, which causes the OS to pick an arbitrary free port. It also
+// creates a temporary directory for the mongod to do its work. Thus
+// we avoid potential race conditions and interference between test
+// runs & suites.
+//
+// The returns are the process, its listening TCP port, its dbpath,
+// and whatever error may have happened.
+func startOneMongod(t *testing.T, instance *MongoInstance, extraArgs ...string) error {
+
+	// MongoDB 5.0+ writes its logs in line-delimited JSON;
+	// older versions write free text.
+	portRegexpJson := regexp.MustCompile(`"port":([1-9][0-9]*)`)
+	portRegexp := regexp.MustCompile(`port\s([1-9][0-9]*)`)
+
+	mongodPath, err := getMongod(*instance)
 	if err != nil {
 		return err
 	}
-	dstMongod, err := getMongod(dstMongoInstance)
+
+	dir, err := os.MkdirTemp("", "*")
 	if err != nil {
 		return err
 	}
-	metaMongod, err := getMongod(metaMongoInstance)
-	if err != nil {
+
+	lpath := logpath(dir)
+
+	cmdargs := []string{
+		"--port", "0",
+		"--dbpath", dir,
+		"--logpath", lpath,
+	}
+
+	cmdargs = append(cmdargs, extraArgs...)
+
+	t.Logf("Starting mongod: %s %v", mongodPath, cmdargs)
+
+	cmd := exec.Command(mongodPath, cmdargs...)
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
 		return err
 	}
 
-	metaDir := filepath.Join(cachePath, metaMongoInstance.dir, "db")
-	if err := os.RemoveAll(metaDir); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(metaDir, 0755); err != nil {
-		return err
-	}
-	sourceDir := filepath.Join(cachePath, srcMongoInstance.dir, "db")
-	if err := os.RemoveAll(sourceDir); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(sourceDir, 0755); err != nil {
-		return err
-	}
-	destDir := filepath.Join(cachePath, dstMongoInstance.dir, "db")
-	if err := os.RemoveAll(destDir); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return err
+	instance.SetProcess(cmd.Process)
+
+	pid := cmd.Process.Pid
+
+	var finished atomic.Bool
+
+	go func() {
+		err := cmd.Wait()
+		finished.Store(true)
+		if err == nil {
+			t.Logf("mongod process %d ended successfully", pid)
+		} else {
+			t.Logf("mongod process %d: %v", pid, err)
+		}
+
+		err = os.RemoveAll(dir)
+		if err != nil {
+			t.Logf("Failed to remove %s: %v", dir, err)
+		}
+	}()
+
+	duration := time.Minute * 5
+	endAt := time.Now().Add(duration)
+
+	for time.Now().Before(endAt) {
+		if finished.Load() {
+			return fmt.Errorf("mongod process %d ended without storing its listening port in %s", pid, lpath)
+		}
+
+		content, err := os.ReadFile(lpath)
+
+		if err == nil {
+			match := portRegexpJson.FindSubmatch(content)
+			if match == nil {
+				match = portRegexp.FindSubmatch(content)
+			}
+
+			if match != nil {
+				port, _ := strconv.ParseUint(string(match[1]), 10, 16)
+				instance.SetPort(port)
+				return nil
+			}
+		} else if os.IsNotExist(err) {
+			// The log file isn’t created (yet?); loop again.
+		} else {
+			return fmt.Errorf("Unexpected error while reading logfile %s: %v", lpath, err)
+		}
+
+		time.Sleep(time.Millisecond * 100)
 	}
 
-	logpath := func(target string) string {
-		return filepath.Join(filepath.Dir(target), "log")
-	}
-
-	metaCmd := exec.Command(metaMongod, "--port", metaMongoInstance.port, "--dbpath", metaDir,
-		"--logpath", logpath(metaDir))
-	sourceCmd := exec.Command(srcMongod, "--port", srcMongoInstance.port, "--dbpath", sourceDir,
-		"--logpath", logpath(sourceDir), "--replSet", replSet)
-	destCmd := exec.Command(dstMongod, "--port", dstMongoInstance.port, "--dbpath", destDir,
-		"--logpath", logpath(destDir))
-
-	if err := metaCmd.Start(); err != nil {
-		return err
-	}
-	if err := sourceCmd.Start(); err != nil {
-		return err
-	}
-	if err := destCmd.Start(); err != nil {
-		return err
-	}
-	return nil
+	return fmt.Errorf("Timed out (%v) waiting to find mongod process %d’s listening port in %s", duration, pid, lpath)
 }
 
 func getMongod(mongoInstance MongoInstance) (string, error) {
@@ -221,6 +323,12 @@ func curl(url string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Ensure that the HTTP response was a 2xx.
+	if resp.StatusCode/200 != 1 {
+		return nil, fmt.Errorf("HTTP %s (%s)", resp.Status, url)
+	}
+
 	return resp.Body, nil
 }
 
