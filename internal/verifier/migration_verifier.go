@@ -28,6 +28,10 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
+// ReadConcernSetting describes the verifier’s handling of read
+// concern.
+type ReadConcernSetting string
+
 const (
 	//TODO: add comments for each of these so the warnings will stop :)
 	Missing           = "Missing"
@@ -42,6 +46,16 @@ const (
 	Idle              = "idle"
 	Check             = "check"
 	Recheck           = "recheck"
+
+	// ReadConcernMajority means to force majority read concern.
+	// This is generally desirable to ensure consistency.
+	ReadConcernMajority ReadConcernSetting = "forceMajority"
+
+	// ReadConcernIgnore means to use connection-default read concerns.
+	// This setting’s main purpose is to allow local read concern,
+	// which is important for deployments where majority read concern
+	// is unworkable.
+	ReadConcernIgnore ReadConcernSetting = "ignore"
 )
 
 // Verifier is the main state for the migration verifier
@@ -82,6 +96,8 @@ type Verifier struct {
 	changeStreamErrChan   chan error
 	changeStreamDoneChan  chan struct{}
 	lastChangeEventTime   *primitive.Timestamp
+
+	readConcernSetting ReadConcernSetting
 }
 
 // VerificationStatus holds the Verification Status
@@ -109,8 +125,18 @@ type VerificationResult struct {
 	dataSize int
 }
 
+// VerifierSettings is NewVerifier’s argument.
+type VerifierSettings struct {
+	ReadConcernSetting
+}
+
 // NewVerifier creates a new Verifier
-func NewVerifier() *Verifier {
+func NewVerifier(settings VerifierSettings) *Verifier {
+	readConcern := settings.ReadConcernSetting
+	if readConcern == "" {
+		readConcern = ReadConcernMajority
+	}
+
 	return &Verifier{
 		phase:                 Idle,
 		numWorkers:            NumWorkers,
@@ -119,7 +145,13 @@ func NewVerifier() *Verifier {
 		changeStreamEnderChan: make(chan struct{}),
 		changeStreamErrChan:   make(chan error),
 		changeStreamDoneChan:  make(chan struct{}),
+		readConcernSetting:    readConcern,
 	}
+}
+
+// ConfigureReadConcern
+func (verifier *Verifier) ConfigureReadConcern(setting ReadConcernSetting) {
+	verifier.readConcernSetting = setting
 }
 
 func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
@@ -128,8 +160,12 @@ func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
 		AppName: &appName,
 	}
 	opts.ApplyURI(uri)
-	opts.SetReadConcern(readconcern.Majority())
 	opts.SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
+
+	verifier.doIfForceReadConcernMajority(func() {
+		opts.SetReadConcern(readconcern.Majority())
+	})
+
 	return opts
 }
 
@@ -309,12 +345,17 @@ func (verifier *Verifier) getDocuments(ctx context.Context, collection *mongo.Co
 	if verifier.readPreference.Mode() != readpref.PrimaryMode {
 		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
 		if startAtTs != nil {
+			readConcernDoc := bson.D{
+				{"afterClusterTime", *startAtTs},
+			}
+
+			verifier.doIfForceReadConcernMajority(func() {
+				readConcernDoc = append(readConcernDoc, bson.E{"level", "majority"})
+			})
+
 			// We never want to read before the change stream start time, or for the last generation,
 			// the change stream end time.
-			findOptions = append(findOptions, bson.E{"readConcern", bson.D{
-				{"level", "majority"},
-				{"afterClusterTime", *startAtTs},
-			}})
+			findOptions = append(findOptions, bson.E{"readConcern", readConcernDoc})
 		}
 	}
 	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
@@ -1019,14 +1060,30 @@ func (verifier *Verifier) GetVerificationStatus() (*VerificationStatus, error) {
 	return &verificationStatus, nil
 }
 
+func (verifier *Verifier) doIfForceReadConcernMajority(f func()) {
+	switch verifier.readConcernSetting {
+	case ReadConcernMajority:
+		f()
+	case ReadConcernIgnore:
+		// Do nothing.
+	default:
+		// invariant
+		panic("Unknown read concern setting: " + verifier.readConcernSetting)
+	}
+}
+
 func (verifier *Verifier) verificationDatabase() *mongo.Database {
 	db := verifier.metaClient.Database(verifier.metaDBName)
 	if db.WriteConcern().GetW() != "majority" {
 		verifier.logger.Fatal().Msgf("Verification metadata is not using write concern majority: %+v", db.WriteConcern())
 	}
-	if db.ReadConcern().GetLevel() != "majority" {
-		verifier.logger.Fatal().Msgf("Verification metadata is not using read concern majority: %+v", db.ReadConcern())
-	}
+
+	verifier.doIfForceReadConcernMajority(func() {
+		if db.ReadConcern().GetLevel() != "majority" {
+			verifier.logger.Fatal().Msgf("Verification metadata is not using read concern majority: %+v", db.ReadConcern())
+		}
+	})
+
 	return db
 }
 
@@ -1045,18 +1102,22 @@ func (verifier *Verifier) refetchCollection() *mongo.Collection {
 func (verifier *Verifier) srcClientDatabase(dbName string) *mongo.Database {
 	db := verifier.srcClient.Database(dbName)
 	// No need to check the write concern because we do not write to the source database.
-	if db.ReadConcern().GetLevel() != "majority" {
-		verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
-	}
+	verifier.doIfForceReadConcernMajority(func() {
+		if db.ReadConcern().GetLevel() != "majority" {
+			verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
+		}
+	})
 	return db
 }
 
 func (verifier *Verifier) dstClientDatabase(dbName string) *mongo.Database {
 	db := verifier.dstClient.Database(dbName)
 	// No need to check the write concern because we do not write to the target database.
-	if db.ReadConcern().GetLevel() != "majority" {
-		verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
-	}
+	verifier.doIfForceReadConcernMajority(func() {
+		if db.ReadConcern().GetLevel() != "majority" {
+			verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
+		}
+	})
 	return db
 }
 

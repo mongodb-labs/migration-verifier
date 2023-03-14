@@ -18,25 +18,26 @@ import (
 )
 
 const (
-	srcURI               = "srcURI"
-	dstURI               = "dstURI"
-	metaURI              = "metaURI"
-	numWorkers           = "numWorkers"
-	generationPauseDelay = "generationPauseDelay"
-	workerSleepDelay     = "workerSleepDelay"
-	serverPort           = "serverPort"
-	logPath              = "logPath"
-	srcNamespace         = "srcNamespace"
-	dstNamespace         = "dstNamespace"
-	metaDBName           = "metaDBName"
-	ignoreFieldOrder     = "ignoreFieldOrder"
-	verifyAll            = "verifyAll"
-	startClean           = "clean"
-	readPreference       = "readPreference"
-	partitionSizeMB      = "partitionSizeMB"
-	checkOnly            = "checkOnly"
-	debugFlag            = "debug"
-	failureDisplaySize   = "failureDisplaySize"
+	srcURI                = "srcURI"
+	dstURI                = "dstURI"
+	metaURI               = "metaURI"
+	numWorkers            = "numWorkers"
+	generationPauseDelay  = "generationPauseDelay"
+	workerSleepDelay      = "workerSleepDelay"
+	serverPort            = "serverPort"
+	logPath               = "logPath"
+	srcNamespace          = "srcNamespace"
+	dstNamespace          = "dstNamespace"
+	metaDBName            = "metaDBName"
+	ignoreFieldOrder      = "ignoreFieldOrder"
+	verifyAll             = "verifyAll"
+	startClean            = "clean"
+	readPreference        = "readPreference"
+	partitionSizeMB       = "partitionSizeMB"
+	checkOnly             = "checkOnly"
+	debugFlag             = "debug"
+	failureDisplaySize    = "failureDisplaySize"
+	ignoreReadConcernFlag = "ignoreReadConcern"
 )
 
 func main() {
@@ -139,6 +140,10 @@ func main() {
 			Value: 20,
 			Usage: "Number of failures to display. Will display all failures if the number is within 25% of ths limit",
 		},
+		&cli.BoolFlag{
+			Name:  ignoreReadConcernFlag,
+			Usage: "Use connection-default read concerns rather than setting majority read concern. This option may degrade consistency, so only enable it if majority read concern (the default) doesn’t work.",
+		},
 	}
 	app := &cli.App{
 		Name:  "migration-verifier",
@@ -167,7 +172,12 @@ func main() {
 }
 
 func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, error) {
-	v := verifier.NewVerifier()
+	verifierSettings := verifier.VerifierSettings{}
+	if cCtx.Bool(ignoreReadConcernFlag) {
+		verifierSettings.ReadConcernSetting = verifier.ReadConcernIgnore
+	}
+
+	v := verifier.NewVerifier(verifierSettings)
 	err := v.SetSrcURI(ctx, cCtx.String(srcURI))
 	if err != nil {
 		return nil, err

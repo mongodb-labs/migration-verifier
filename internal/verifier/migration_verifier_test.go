@@ -40,7 +40,7 @@ func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstanc
 	qfilter := QueryFilter{Namespace: "keyhole.dealers"}
 	task := VerificationTask{QueryFilter: qfilter}
 
-	verifier := NewVerifier()
+	verifier := NewVerifier(VerifierSettings{})
 	verifier.SetNumWorkers(3)
 	verifier.SetGenerationPauseDelayMillis(0)
 	verifier.SetWorkerSleepDelayMillis(0)
@@ -218,7 +218,7 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 
 func TestVerifierCompareDocs(t *testing.T) {
 	id := rand.Intn(1000)
-	verifier := NewVerifier()
+	verifier := NewVerifier(VerifierSettings{})
 	verifier.SetIgnoreBSONFieldOrder(true)
 
 	srcRaw := makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
@@ -274,7 +274,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 func TestVerifierCompareDocsOrdered(t *testing.T) {
 	id := rand.Intn(1000)
-	verifier := NewVerifier()
+	verifier := NewVerifier(VerifierSettings{})
 	verifier.SetIgnoreBSONFieldOrder(false)
 
 	srcRaw := makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
