@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -26,7 +26,11 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
-const replSet string = "rs0"
+const (
+	replSet              = "rs0"
+	distroEnv            = "MONGODB_DISTRO"
+	currentDownloadsLink = "https://downloads.mongodb.org/current.json"
+)
 
 type MongoInstance struct {
 	port    string
@@ -206,7 +210,7 @@ func startOneMongod(t *testing.T, instance *MongoInstance, extraArgs ...string) 
 	portRegexpJson := regexp.MustCompile(`"port":([1-9][0-9]*)`)
 	portRegexp := regexp.MustCompile(`port\s([1-9][0-9]*)`)
 
-	mongodPath, err := getMongod(*instance)
+	mongodPath, err := getMongod(t, *instance)
 	if err != nil {
 		return err
 	}
@@ -291,23 +295,66 @@ func startOneMongod(t *testing.T, instance *MongoInstance, extraArgs ...string) 
 	return fmt.Errorf("Timed out (%v) waiting to find mongod process %d’s listening port in %s", duration, pid, lpath)
 }
 
-func getMongod(mongoInstance MongoInstance) (string, error) {
-	localMongoDistro := os.Getenv("MONGODB_DISTRO")
-	if localMongoDistro == "" {
-		err := errors.New(`there was no MONGODB_DISTRO specified. Please specify enviorment variable MONGODB_DISTRO.
-For example, MONGODB_DISTRO=mongodb-linux-x86_64-rhel70 is the one used for rhel and MONGODB_DISTRO=mongodb-linux-x86_64-ubuntu1804 is the one used for ubuntu.
-The link can be found at https://www.mongodb.com/try/download/community`)
-		return "", err
-	}
-	localMongoDistro = localMongoDistro + "-" + mongoInstance.version
+var osUrlDir = map[string]string{
+	"linux": "linux",
+	"macos": "osx",
+}
 
-	mongoDBDir := filepath.Join(cachePath, localMongoDistro)
+func getMongoDBDirFromDistro(ourOs, localMongoDistro string) string {
+	mongoDBDir := localMongoDistro
+
+	switch ourOs {
+	case "linux":
+	case "macos":
+		if strings.Contains(localMongoDistro, "arm64") {
+			mongoDBDir = strings.Replace(mongoDBDir, "arm64", "aarch64", 1)
+		}
+	default:
+		panic("Unknown OS: " + ourOs)
+	}
+
+	return filepath.Join(cachePath, mongoDBDir)
+}
+
+// We could use runtime.GOOS and runtime.GOARCH, but since we need the
+// distro anyway to have a download URL we might as well derive the
+// OS and arch from that, too.
+func getOSAndArchFromEnv(t *testing.T) (string, string) {
+	localMongoDistro := os.Getenv(distroEnv)
+	if localMongoDistro == "" {
+		t.Fatalf(`Please set %s in the environment.
+
+Example values:
+- mongodb-linux-x86_64-rhel70
+- mongodb-linux-x86_64-ubuntu1804
+- mongodb-macos-arm64
+
+Links can be found at: %s`,
+			distroEnv, currentDownloadsLink)
+	}
+
+	re := regexp.MustCompile(`^mongodb-([^-]+)-([^-]+)`)
+	pieces := re.FindStringSubmatch(localMongoDistro)
+
+	if pieces == nil {
+		t.Fatalf("Unexpected %s; expected %v", localMongoDistro, re)
+	}
+
+	return pieces[1], pieces[2]
+}
+
+func getMongod(t *testing.T, mongoInstance MongoInstance) (string, error) {
+	ourOs, _ := getOSAndArchFromEnv(t)
+
+	localMongoDistro := os.Getenv(distroEnv) + "-" + mongoInstance.version
+
+	mongoDBDir := getMongoDBDirFromDistro(ourOs, localMongoDistro)
 	mongod := filepath.Join(mongoDBDir, "bin", "mongod")
 	mongoDownloadMutex.Lock()
 	defer mongoDownloadMutex.Unlock()
 	if _, err := os.Stat(mongoDBDir); os.IsNotExist(err) {
-		url := fmt.Sprintf("https://fastdl.mongodb.org/linux/%s.tgz", localMongoDistro)
-		fmt.Println("Downloading binary from " + url)
+		url := fmt.Sprintf("https://fastdl.mongodb.org/%s/%s.tgz", osUrlDir[ourOs], localMongoDistro)
+		t.Logf("Downloading %s", url)
 		r, err := curl(url)
 		if err != nil {
 			return "", err

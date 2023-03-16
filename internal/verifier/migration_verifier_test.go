@@ -24,6 +24,15 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+var macArmMongoVersions []string = []string{
+	"6.2.0", "6.0.1",
+}
+
+var preMacArmMongoVersions []string = []string{
+	"5.3.2", "5.0.11",
+	"4.4.16", "4.2.22",
+}
+
 type MultiDataVersionTestSuite struct {
 	WithMongodsTestSuite
 }
@@ -59,26 +68,43 @@ func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstanc
 	return verifier
 }
 
+func getAllVersions(t *testing.T) []string {
+	var versions []string
+	versions = append(versions, macArmMongoVersions...)
+
+	os, arch := getOSAndArchFromEnv(t)
+
+	if os != "macos" || arch != "arm64" {
+		versions = append(versions, preMacArmMongoVersions...)
+	}
+
+	return versions
+}
+
+func getLatestVersion() string {
+	return macArmMongoVersions[0]
+}
+
 func TestVerifierMultiversion(t *testing.T) {
 	testSuite := new(MultiDataVersionTestSuite)
-	srcVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
-	destVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
-	metaVersions := []string{"6.0.1"}
+	srcVersions := getAllVersions(t)
+	destVersions := getAllVersions(t)
+	metaVersions := []string{getLatestVersion()}
 	runMultipleVersionTests(t, testSuite, srcVersions, destVersions, metaVersions)
 }
 
 func TestVerifierMultiSourceversion(t *testing.T) {
 	testSuite := new(MultiSourceVersionTestSuite)
-	srcVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
-	destVersions := []string{"6.0.1"}
-	metaVersions := []string{"6.0.1"}
+	srcVersions := getAllVersions(t)
+	destVersions := []string{getLatestVersion()}
+	metaVersions := []string{getLatestVersion()}
 	runMultipleVersionTests(t, testSuite, srcVersions, destVersions, metaVersions)
 }
 
 func TestVerifierMultiMetaVersion(t *testing.T) {
-	srcVersions := []string{"6.0.1"}
-	destVersions := []string{"6.0.1"}
-	metaVersions := []string{"6.0.1", "5.3.2", "5.0.11", "4.4.16", "4.2.22"}
+	srcVersions := []string{getLatestVersion()}
+	destVersions := []string{getLatestVersion()}
+	metaVersions := getAllVersions(t)
 	testSuite := new(MultiMetaVersionTestSuite)
 	runMultipleVersionTests(t, testSuite, srcVersions, destVersions, metaVersions)
 }
