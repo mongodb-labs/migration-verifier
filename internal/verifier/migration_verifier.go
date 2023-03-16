@@ -115,7 +115,6 @@ type VerificationStatus struct {
 type VerificationResult struct {
 	ID        interface{}
 	Field     interface{}
-	Type      interface{}
 	Details   interface{}
 	Cluster   interface{}
 	NameSpace interface{}
@@ -1045,8 +1044,6 @@ func (verifier *Verifier) GetVerificationStatus() (*VerificationStatus, error) {
 			verificationStatus.MetadataMismatchTasks = count
 		case verificationTaskCompleted:
 			verificationStatus.CompletedTasks = count
-		case verificationTasksRetry:
-			verificationStatus.RecheckTasks = count
 		default:
 			verifier.logger.Info().Msgf("Unknown task status %s", status)
 		}
@@ -1283,7 +1280,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 
 		for _, v := range metadataFailedTasks {
 			for _, f := range v.FailedDocs {
-				table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Type), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
+				table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
 			}
 		}
 		fmt.Println("Collections/Indexes in failed or retry status:")
@@ -1324,7 +1321,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 OUTA:
 	for _, v := range FailedTasks {
 		for _, f := range v.FailedDocs {
-			table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Type), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
+			table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
 			i += 1
 			if !printAll && i >= verifier.failureDisplaySize {
 				break OUTA

@@ -28,7 +28,6 @@ const (
 	verificationTaskProcessing       = "processing"
 	verificationTasksCollection      = "verification_tasks"
 	verificationRangeCollection      = "verification_ranges"
-	verificationTasksRetry           = "retry"
 
 	verificationTaskVerify = "verify"
 	// A verifyCollection task verifies collection metadata, and inserts tasks to verify data ranges.
@@ -44,7 +43,6 @@ type VerificationTask struct {
 	ID          int                  `bson:"id"`
 	Status      string               `bson:"status"`
 	Type        string               `bson:"type"`
-	ParentID    interface{}          `bson:"parent_id"`
 	FailedDocs  []VerificationResult `bson:"failed_docs,omitempty"`
 	QueryFilter QueryFilter          `json:"query_filter" bson:"query_filter"`
 }

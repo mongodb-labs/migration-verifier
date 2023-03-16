@@ -901,18 +901,16 @@ func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
 		bson.M{"generation": 0, "status": "failed", "type": "verify"},
 		bson.M{"generation": 0, "status": "mismatch", "type": "verify"},
 		bson.M{"generation": 0, "status": "completed", "type": "verify"},
-		bson.M{"generation": 0, "status": "retry", "type": "verify"},
 	})
 	suite.Require().NoError(err)
 
 	status, err := verifier.GetVerificationStatus()
 	suite.Require().NoError(err)
-	suite.Equal(1, status.AddedTasks)
-	suite.Equal(1, status.ProcessingTasks)
-	suite.Equal(1, status.FailedTasks)
-	suite.Equal(1, status.MetadataMismatchTasks)
-	suite.Equal(1, status.CompletedTasks)
-	suite.Equal(1, status.RecheckTasks)
+	suite.Equal(1, status.AddedTasks, "added tasks not equal")
+	suite.Equal(1, status.ProcessingTasks, "processing tasks not equal")
+	suite.Equal(1, status.FailedTasks, "failed tasks not equal")
+	suite.Equal(1, status.MetadataMismatchTasks, "metadata mismatch tasks not equal")
+	suite.Equal(1, status.CompletedTasks, "completed tasks not equal")
 }
 
 func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {

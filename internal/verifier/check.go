@@ -282,7 +282,7 @@ func (verifier *Verifier) CreateInitialTasks() error {
 
 func FetchFailedTasks(ctx context.Context, coll *mongo.Collection, taskType string, generation int) []VerificationTask {
 	var FailedTasks []VerificationTask
-	status := []string{verificationTasksRetry, verificationTaskFailed, verificationTaskMetadataMismatch}
+	status := []string{verificationTaskFailed, verificationTaskMetadataMismatch}
 	cur, err := coll.Find(ctx, bson.D{bson.E{Key: "type", Value: taskType},
 		bson.E{Key: "status", Value: bson.M{"$in": status}},
 		bson.E{Key: "generation", Value: generation}})
@@ -300,7 +300,7 @@ func FetchFailedTasks(ctx context.Context, coll *mongo.Collection, taskType stri
 
 func FetchFailedAndIncompleteTasks(ctx context.Context, coll *mongo.Collection, taskType string, generation int) ([]VerificationTask, []VerificationTask) {
 	var FailedTasks, allTasks, IncompleteTasks []VerificationTask
-	failedStatus := map[string]bool{verificationTasksRetry: true, verificationTaskFailed: true, verificationTaskMetadataMismatch: true}
+	failedStatus := map[string]bool{verificationTaskFailed: true, verificationTaskMetadataMismatch: true}
 	cur, err := coll.Find(ctx, bson.D{bson.E{Key: "type", Value: taskType},
 		bson.E{Key: "generation", Value: generation}})
 	if err != nil {
