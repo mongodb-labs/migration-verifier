@@ -250,7 +250,6 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer
 		ri.Log(logger.Logger, "collStats", "source", srcDB.Name(), collectionName, "Retrieving collection size and document count.")
 		request := retryer.RequestWithUUID(bson.D{
 			{"aggregate", collectionName},
-			{"readConcern", bson.D{{"level", "majority"}}},
 			{"pipeline", bson.A{
 				bson.D{{"$collStats", bson.D{
 					{"storageStats", bson.E{"scale", 1}},
@@ -343,7 +342,6 @@ func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer *ret
 		cursor, cmdErr :=
 			srcDB.RunCommandCursor(ctx, retryer.RequestWithUUID(bson.D{
 				{"aggregate", collName},
-				{"readConcern", bson.D{{"level", "majority"}}},
 				{"pipeline", bson.A{
 					bson.D{{"$sort", bson.D{{"_id", sortDirection}}}},
 					bson.D{{"$project", bson.D{{"_id", 1}}}},

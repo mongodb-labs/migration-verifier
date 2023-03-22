@@ -344,17 +344,15 @@ func (verifier *Verifier) getDocuments(ctx context.Context, collection *mongo.Co
 	if verifier.readPreference.Mode() != readpref.PrimaryMode {
 		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
 		if startAtTs != nil {
-			readConcernDoc := bson.D{
-				{"afterClusterTime", *startAtTs},
-			}
 
-			verifier.doIfForceReadConcernMajority(func() {
-				readConcernDoc = append(readConcernDoc, bson.E{"level", "majority"})
-			})
-
-			// We never want to read before the change stream start time, or for the last generation,
-			// the change stream end time.
-			findOptions = append(findOptions, bson.E{"readConcern", readConcernDoc})
+			// We never want to read before the change stream start time,
+			// or for the last generation, the change stream end time.
+			findOptions = append(
+				findOptions,
+				bson.E{"readConcern", bson.D{
+					{"afterClusterTime", *startAtTs},
+				}},
+			)
 		}
 	}
 	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
