@@ -91,7 +91,7 @@ func (verifier *Verifier) InsertFailedCollectionVerificationTask(
 	return verifier.insertCollectionVerificationTask(srcNamespace, verifier.generation+1)
 }
 
-func (verifier *Verifier) InsertPartitionVerificationTask(partition *partitions.Partition,
+func (verifier *Verifier) InsertPartitionVerificationTask(partition *partitions.Partition, shardKeys []string,
 	dstNamespace string) (*VerificationTask, error) {
 	srcNamespace := strings.Join([]string{partition.Ns.DB, partition.Ns.Coll}, ".")
 	verificationTask := VerificationTask{
@@ -101,6 +101,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(partition *partitions.
 		Type:       verificationTaskVerify,
 		QueryFilter: QueryFilter{
 			Partition: partition,
+			ShardKeys: shardKeys,
 			Namespace: srcNamespace,
 			To:        dstNamespace,
 		},

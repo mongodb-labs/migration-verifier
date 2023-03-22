@@ -2,7 +2,6 @@ package verifier
 
 import (
 	"context"
-	b64 "encoding/base64"
 	"fmt"
 	"strings"
 
@@ -93,13 +92,9 @@ func (e TaskError) Error() string {
 // QueryFilter stores namespace and partition info
 type QueryFilter struct {
 	Partition *partitions.Partition `bson:"partition"`
-	Namespace string                `json:"namespace" bson:"namespace"`
-	To        string                `json:"to,omitempty" bson:"to,omitempty"`
-}
-
-func RawToString(b bson.RawValue) string {
-	return b64.StdEncoding.EncodeToString([]byte{byte(b.Type)}) + "#" +
-		b64.StdEncoding.EncodeToString(b.Value)
+	ShardKeys []string
+	Namespace string `json:"namespace" bson:"namespace"`
+	To        string `json:"to,omitempty" bson:"to,omitempty"`
 }
 
 // GetLastOpTimeAndSyncShardClusterTime retrieves the last operation time on the source. If maxClusterTime is provided,

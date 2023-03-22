@@ -8,10 +8,12 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/documentmap"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
@@ -26,6 +28,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
+	"golang.org/x/exp/maps"
 )
 
 // ReadConcernSetting describes the verifier’s handling of read
@@ -56,6 +59,9 @@ const (
 	// which is important for deployments where majority read concern
 	// is unworkable.
 	ReadConcernIgnore ReadConcernSetting = "ignore"
+
+	configDBName  = "config"
+	collsCollName = "collections"
 )
 
 // Verifier is the main state for the migration verifier
@@ -324,8 +330,8 @@ func (verifier *Verifier) getGeneration() (generation int, lastGeneration bool) 
 	return
 }
 
-func (verifier *Verifier) getDocuments(ctx context.Context, collection *mongo.Collection, buildInfo *bson.M,
-	startAtTs *primitive.Timestamp, task *VerificationTask) (map[interface{}]bson.Raw, error) {
+func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, buildInfo *bson.M,
+	startAtTs *primitive.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
 	if len(task.Ids) > 0 {
@@ -358,35 +364,7 @@ func (verifier *Verifier) getDocuments(ctx context.Context, collection *mongo.Co
 	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
 	verifier.logger.Debug().Msgf("getDocuments findCmd: %s opts: %v", findCmd, *runCommandOptions)
 
-	cursor, err := collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
-	if err != nil {
-		return nil, err
-	}
-	var bytesReturned int64
-	bytesReturned, nDocumentsReturned := 0, 0
-	documentMap := make(map[interface{}]bson.Raw)
-	for cursor.Next(ctx) {
-		nDocumentsReturned++
-		err := cursor.Err()
-		if err != nil {
-			return nil, err
-		}
-		var rawDoc bson.Raw
-		err = cursor.Decode(&rawDoc)
-		if err != nil {
-			return nil, err
-		}
-		bytesReturned += (int64)(len(rawDoc))
-		data := make(bson.Raw, len(rawDoc))
-		copy(data, rawDoc)
-		idRaw := data.Lookup("_id")
-		idString := RawToString(idRaw)
-
-		documentMap[idString] = data
-	}
-	verifier.logger.Debug().Msgf("Find returned %d documents containing %d bytes", nDocumentsReturned, bytesReturned)
-
-	return documentMap, nil
+	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
 }
 
 func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]VerificationResult, error) {
@@ -398,26 +376,41 @@ func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]Ve
 }
 
 // This is split out to allow unit testing of fetching separate from comparison.
-func (verifier *Verifier) fetchDocuments(task *VerificationTask) (map[interface{}]bson.Raw, map[interface{}]bson.Raw, error) {
+func (verifier *Verifier) fetchDocuments(task *VerificationTask) (*documentmap.Map, *documentmap.Map, error) {
 
-	var srcClientMap, dstClientMap map[interface{}]bson.Raw
 	var srcErr, dstErr error
 	var wg sync.WaitGroup
-	ctx, cancel := context.WithCancel(context.Background())
+
+	ctx := context.Background()
+
+	shardFieldNames := task.QueryFilter.ShardKeys
+
+	srcClientMap := documentmap.New(verifier.GetLogger(), shardFieldNames...)
+	dstClientMap := srcClientMap.CloneEmpty()
+
+	ctx, cancel := context.WithCancel(ctx)
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		srcClientMap, srcErr = verifier.getDocuments(ctx, verifier.srcClientCollection(task), verifier.srcBuildInfo,
+		var cursor *mongo.Cursor
+		cursor, srcErr = verifier.getDocumentsCursor(ctx, verifier.srcClientCollection(task), verifier.srcBuildInfo,
 			verifier.srcStartAtTs, task)
-		if srcErr != nil {
+
+		if srcErr == nil {
+			srcErr = srcClientMap.ImportFromCursor(ctx, cursor)
+		} else {
 			cancel()
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		dstClientMap, dstErr = verifier.getDocuments(ctx, verifier.dstClientCollection(task), verifier.dstBuildInfo,
+		var cursor *mongo.Cursor
+		cursor, dstErr = verifier.getDocumentsCursor(ctx, verifier.dstClientCollection(task), verifier.dstBuildInfo,
 			nil /*startAtTs*/, task)
-		if dstErr != nil {
+
+		if dstErr == nil {
+			dstErr = dstClientMap.ImportFromCursor(ctx, cursor)
+		} else {
 			cancel()
 		}
 	}()
@@ -426,46 +419,50 @@ func (verifier *Verifier) fetchDocuments(task *VerificationTask) (map[interface{
 		return nil, nil, srcErr
 	}
 	if dstErr != nil {
-		return nil, nil, srcErr
+		return nil, nil, dstErr
 	}
 	return srcClientMap, dstClientMap, nil
 }
 
-func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap map[interface{}]bson.Raw, namespace string) ([]VerificationResult, error) {
-	var mismatchedIds []VerificationResult
-	for id, srcClientDoc := range srcClientMap {
-		dstClientDoc, ok := dstClientMap[id]
-		if !ok {
-			//verifier.logger.Info().Msgf("Document %+v missing on dstClient!", id)
-			mismatchedIds = append(mismatchedIds, VerificationResult{
-				ID:        srcClientDoc.Lookup("_id"),
-				Details:   Missing,
-				Cluster:   ClusterTarget,
-				NameSpace: namespace,
-				dataSize:  len(srcClientDoc),
-			})
-			continue
-		}
+func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap *documentmap.Map, namespace string) ([]VerificationResult, error) {
+	srcOnly, dstOnly, common := srcClientMap.CompareToMap(dstClientMap)
 
-		misMatch, err := verifier.compareOneDocument(srcClientDoc, dstClientDoc, namespace)
-		if len(misMatch) > 0 || err != nil {
-			mismatchedIds = append(mismatchedIds, misMatch...)
+	srcOnlyLen := len(srcOnly)
+	mismatchedIds := make([]VerificationResult, srcOnlyLen+len(dstOnly))
+
+	// Worthwhile to parallelize?
+
+	for i, mapKey := range srcOnly {
+		mismatchedIds[i] = VerificationResult{
+			ID:        []byte(mapKey),
+			Details:   Missing,
+			Cluster:   ClusterTarget,
+			NameSpace: namespace,
+			dataSize:  len(srcClientMap.Fetch(mapKey)),
 		}
 	}
 
-	if len(srcClientMap) != len(dstClientMap) {
-		for id, dstClientDoc := range dstClientMap {
-			_, ok := srcClientMap[id]
-			if !ok {
-				//verifier.logger.Info().Msgf("Document %+v missing on srcClient!", id)
-				mismatchedIds = append(mismatchedIds, VerificationResult{
-					ID:        dstClientDoc.Lookup("_id"),
-					Details:   Missing,
-					Cluster:   ClusterSource,
-					NameSpace: namespace,
-					dataSize:  len(dstClientDoc),
-				})
-			}
+	for i, mapKey := range dstOnly {
+		mismatchedIds[srcOnlyLen+i] = VerificationResult{
+			ID:        []byte(mapKey),
+			Details:   Missing,
+			Cluster:   ClusterSource,
+			NameSpace: namespace,
+			dataSize:  len(dstClientMap.Fetch(mapKey)),
+		}
+	}
+
+	for _, mapKey := range common {
+		srcDoc := srcClientMap.Fetch(mapKey)
+		dstDoc := dstClientMap.Fetch(mapKey)
+
+		misMatches, err := verifier.compareOneDocument(mapKey, srcDoc, dstDoc, namespace)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(misMatches) > 0 {
+			mismatchedIds = append(mismatchedIds, misMatches...)
 		}
 	}
 
@@ -514,14 +511,13 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 	return
 }
 
-func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
+func (verifier *Verifier) compareOneDocument(mapKey documentmap.MapKey, srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
 	match := bytes.Equal(srcClientDoc, dstClientDoc)
 	if match {
 		return nil, nil
 	}
 	//verifier.logger.Info().Msg("Byte comparison failed for id %s, falling back to field comparison", id)
 
-	id := srcClientDoc.Lookup("_id")
 	if verifier.ignoreBSONFieldOrder {
 		mismatch, err := BsonUnorderedCompareRawDocumentWithDetails(srcClientDoc, dstClientDoc)
 		if err != nil {
@@ -530,7 +526,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 		if mismatch == nil {
 			return nil, nil
 		}
-		results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, id, "" /* fieldPrefix */)
+		results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, []byte(mapKey), "" /* fieldPrefix */)
 		return results, nil
 	}
 	dataSize := len(srcClientDoc)
@@ -540,7 +536,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 
 	// If we're respecting field order we have just done a binary compare so don't know the mismatching fields.
 	return []VerificationResult{{
-		ID:        dstClientDoc.Lookup("_id"),
+		ID:        []byte(mapKey),
 		Details:   Mismatch,
 		Cluster:   ClusterTarget,
 		NameSpace: namespace,
@@ -617,26 +613,33 @@ func (verifier *Verifier) logChunkInfo(ctx context.Context, namespaceAndUUID *uu
 	}
 }
 
-func (verifier *Verifier) logShardingInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) {
+func (verifier *Verifier) getShardingInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) ([]string, error) {
 	uuid := namespaceAndUUID.UUID
 	namespace := namespaceAndUUID.DBName + "." + namespaceAndUUID.CollName
-	configCollectionsColl := verifier.srcClientDatabase("config").Collection("collections")
+	configCollectionsColl := verifier.srcClientDatabase(configDBName).Collection(collsCollName)
 	cursor, err := configCollectionsColl.Find(ctx, bson.D{{"uuid", uuid}})
 	if err != nil {
-		verifier.logger.Error().Msgf("Unable to read sharding info for %s: %v", namespace, err)
-		return
+		return nil, fmt.Errorf("Failed to read sharding info for %s: %v", namespace, err)
 	}
 	defer cursor.Close(ctx)
 	collectionSharded := false
+
+	shardKeys := []string{}
+
 	for cursor.Next(ctx) {
 		collectionSharded = true
-		var result bson.D
-		if err = cursor.Decode(&result); err != nil {
-			verifier.logger.Error().Msgf("Error decoding sharding info for %s: %v", namespace, err)
-			return
+		var result struct {
+			Key bson.M
 		}
-		resultMap := result.Map()
-		verifier.logger.Info().Msgf("Collection %s is sharded with shard key %v", namespace, resultMap["key"])
+
+		if err = cursor.Decode(&result); err != nil {
+			return nil, fmt.Errorf("Failed to decode sharding info for %s: %v", namespace, err)
+		}
+
+		verifier.logger.Info().Msgf("Collection %s is sharded with shard key %v", namespace, result.Key)
+
+		shardKeys = maps.Keys(result.Key)
+		sort.Strings(shardKeys)
 	}
 	if err = cursor.Err(); err != nil {
 		verifier.logger.Error().Msgf("Error reading sharding info for %s: %v", namespace, err)
@@ -644,17 +647,22 @@ func (verifier *Verifier) logShardingInfo(ctx context.Context, namespaceAndUUID 
 	if collectionSharded {
 		verifier.logChunkInfo(ctx, namespaceAndUUID)
 	}
+
+	return shardKeys, nil
 }
 
-func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace string) ([]*partitions.Partition, error) {
+func (verifier *Verifier) getCollectionPartitionsAndShardKeys(ctx context.Context, namespace string) ([]*partitions.Partition, []string, error) {
 	retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
 	dbName, collName := SplitNamespace(namespace)
 	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, verifier.logger, retryer,
 		verifier.srcClientDatabase(dbName), collName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	verifier.logShardingInfo(ctx, namespaceAndUUID)
+	shardKeys, err := verifier.getShardingInfo(ctx, namespaceAndUUID)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// The partitioner doles out ranges to replicators; we don't use that functionality so we just pass
 	// one "replicator".
@@ -663,7 +671,7 @@ func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace
 	partitionList, err := partitions.PartitionCollectionWithSize(
 		ctx, namespaceAndUUID, retryer, verifier.srcClient, replicators, verifier.logger, verifier.partitionSizeInBytes)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// TODO: Test the empty collection (which returns no partitions)
 	if len(partitionList) == 0 {
@@ -698,7 +706,7 @@ func (verifier *Verifier) getCollectionPartitions(ctx context.Context, namespace
 		}
 	}
 
-	return partitionList, nil
+	return partitionList, shardKeys, nil
 }
 
 func (verifier *Verifier) getCollectionSpecification(ctx context.Context, collection *mongo.Collection) (*mongo.CollectionSpecification, error) {
@@ -973,7 +981,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 		task.Status = verificationTaskMetadataMismatch
 	}
 
-	partitions, err := verifier.getCollectionPartitions(ctx, srcNs)
+	partitions, shardKeys, err := verifier.getCollectionPartitionsAndShardKeys(ctx, srcNs)
 	if err != nil {
 		task.Status = verificationTaskFailed
 		verifier.logger.Error().Msgf("[Worker %d] Error partitioning collection: %+v", workerNum, err)
@@ -981,7 +989,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 	}
 	verifier.logger.Info().Msgf("[Worker %d] split collection info %d partitions", workerNum, len(partitions))
 	for _, partition := range partitions {
-		_, err := verifier.InsertPartitionVerificationTask(partition, dstNs)
+		_, err := verifier.InsertPartitionVerificationTask(partition, shardKeys, dstNs)
 		if err != nil {
 			task.Status = verificationTaskFailed
 			verifier.logger.Error().Msgf("[Worker %d] Error inserting verifier tasks: %+v", workerNum, err)

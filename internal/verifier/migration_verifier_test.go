@@ -10,16 +10,20 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"reflect"
 	"regexp"
 	"sort"
 	"testing"
 
+	"github.com/10gen/migration-verifier/internal/documentmap"
+	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -135,22 +139,6 @@ func runMultipleVersionTests(t *testing.T, testSuite WithMongodsTestingSuite,
 	}
 }
 
-func makeRawDoc(t *testing.T, doc interface{}) bson.Raw {
-	raw, err := bson.Marshal(doc)
-	require.NoError(t, err, "Unable to marshal test doc -- programming error in test")
-	return raw
-}
-
-// Using assertions with the values in a call to reflection's MapKeys doesn't work.
-
-func mapKeysAsInterface(myMap interface{}) (result []interface{}) {
-	for _, key := range reflect.ValueOf(myMap).MapKeys() {
-
-		result = append(result, key.Interface())
-	}
-	return
-}
-
 func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
@@ -180,13 +168,15 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	task := &VerificationTask{ID: id, QueryFilter: basicQueryFilter("keyhole.dealers")}
 	srcDocumentMap, dstDocumentMap, err := verifier.fetchDocuments(task)
 	suite.Require().NoError(err)
-	rawType, rawIdBytes, err := bson.MarshalValue(id)
-	suite.Require().NoError(err)
-	rawId := bson.RawValue{Type: rawType, Value: rawIdBytes}
-	stringId := RawToString(rawId)
 
-	suite.ElementsMatch(mapKeysAsInterface(srcDocumentMap), []interface{}{stringId})
-	suite.ElementsMatch(mapKeysAsInterface(dstDocumentMap), []interface{}{stringId})
+	onlySrc, onlyDst, both := srcDocumentMap.CompareToMap(dstDocumentMap)
+	suite.Assert().Empty(onlySrc, "no source-only docs")
+	suite.Assert().Empty(onlyDst, "no destination-only docs")
+	suite.Assert().Equal(1, len(both), "common docs")
+	suite.Assert().NotPanics(
+		func() { srcDocumentMap.Fetch(both[0]) },
+		"doc is fetched",
+	)
 }
 
 func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
@@ -242,98 +232,202 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 	suite.Require().False(cur.Next(ctx))
 }
 
+func makeDocMap(t *testing.T, docs []bson.D, indexFields ...string) *documentmap.Map {
+	cursor := testutil.DocsToCursor(docs)
+
+	dmap := documentmap.New(logger.NewDebugLogger(), indexFields...)
+	err := dmap.ImportFromCursor(context.Background(), cursor)
+	require.NoError(t, err)
+
+	return dmap
+}
+
 func TestVerifierCompareDocs(t *testing.T) {
 	id := rand.Intn(1000)
 	verifier := NewVerifier(VerifierSettings{})
 	verifier.SetIgnoreBSONFieldOrder(true)
 
-	srcRaw := makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
-	dstRaw := makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
+	type compareTest struct {
+		label       string
+		srcDocs     []bson.D
+		dstDocs     []bson.D
+		indexFields []string
+		checkOrder  bool
+		compareFn   func(*testing.T, []VerificationResult)
+	}
+
+	compareTests := []compareTest{
+		{
+			label: "simple equality",
+			srcDocs: []bson.D{
+				{{"_id", id}, {"num", 123}, {"name", "foobar"}},
+			},
+			dstDocs: []bson.D{
+				{{"_id", id}, {"num", 123}, {"name", "foobar"}},
+			},
+			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
+				assert.Empty(t, mismatchedIds)
+			},
+		},
+
+		{
+			label: "different order (ignore)",
+			srcDocs: []bson.D{
+				{{"_id", id}, {"name", "foobar"}, {"num", 123}},
+			},
+			dstDocs: []bson.D{
+				{{"_id", id}, {"num", 123}, {"name", "foobar"}},
+			},
+			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
+				assert.Empty(t, mismatchedIds)
+			},
+		},
+
+		{
+			label:      "different order (check)",
+			checkOrder: true,
+			srcDocs: []bson.D{
+				{{"_id", id}, {"name", "foobar"}, {"num", 123}},
+			},
+			dstDocs: []bson.D{
+				{{"_id", id}, {"num", 123}, {"name", "foobar"}},
+			},
+			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
+				if assert.Equal(t, 1, len(mismatchedIds)) {
+					mmID := mismatchedIds[0].ID.([]byte)
+					rawValue := bson.RawValue{
+						Type:  bsontype.Type(mmID[0]),
+						Value: mmID[1:],
+					}
+
+					var res int
+					require.Nil(t, rawValue.Unmarshal(&res))
+					assert.Equal(t, id, res)
+					assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchedIds[0].Details)
+				}
+			},
+		},
+
+		{
+			label: "mismatched",
+			srcDocs: []bson.D{
+				{{"_id", id}, {"num", 1234}, {"name", "foobar"}},
+			},
+			dstDocs: []bson.D{
+				{{"_id", id}, {"num", 123}, {"name", "foobar"}},
+			},
+			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
+				if assert.Equal(t, 1, len(mismatchedIds)) {
+					mmID := mismatchedIds[0].ID.([]byte)
+					rawValue := bson.RawValue{
+						Type:  bsontype.Type(mmID[0]),
+						Value: mmID[1:],
+					}
+
+					var res int
+					require.Nil(t, rawValue.Unmarshal(&res))
+					assert.Equal(t, id, res)
+					assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchedIds[0].Details)
+				}
+			},
+		},
+
+		{
+			label: "document missing on destination",
+			srcDocs: []bson.D{
+				{{"_id", id}, {"num", 1234}, {"name", "foobar"}},
+			},
+			dstDocs: []bson.D{},
+			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
+				if assert.Equal(t, 1, len(mismatchedIds)) {
+					assert.Equal(t, mismatchedIds[0].Details, Missing)
+					assert.Equal(t, mismatchedIds[0].Cluster, ClusterTarget)
+				}
+			},
+		},
+
+		{
+			label:   "document missing on source",
+			srcDocs: []bson.D{},
+			dstDocs: []bson.D{
+				{{"_id", id}, {"num", 1234}, {"name", "foobar"}},
+			},
+			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
+				if assert.Equal(t, 1, len(mismatchedIds)) {
+					assert.Equal(t, mismatchedIds[0].Details, Missing)
+					assert.Equal(t, mismatchedIds[0].Cluster, ClusterSource)
+				}
+			},
+		},
+
+		{
+			label:       "duplicate ID",
+			indexFields: []string{"sharded"},
+			srcDocs: []bson.D{
+				{{"_id", id}, {"sharded", 123}},
+				{{"_id", id}, {"sharded", 234}},
+				{{"_id", id}, {"sharded", 345}},
+			},
+			dstDocs: []bson.D{
+				{{"_id", id}, {"sharded", 234}},
+				{{"_id", id}, {"sharded", 345}},
+				{{"_id", id}, {"sharded", 123}},
+			},
+			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
+				assert.Empty(t, mismatchedIds)
+			},
+		},
+	}
+
 	namespace := "testdb.testns"
-	mismatchedIds, err := verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.NoError(t, err)
-	assert.Equal(t, 0, len(mismatchedIds))
 
-	// Test different field orders
-	srcRaw = makeRawDoc(t, bson.D{{"_id", id}, {"name", "foobar"}, {"num", 123}})
-	dstRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
+	for _, curTest := range compareTests {
+		verifier.SetIgnoreBSONFieldOrder(!curTest.checkOrder)
 
-	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.NoError(t, err)
-	assert.Equal(t, 0, len(mismatchedIds))
+		indexFields := curTest.indexFields
+		if indexFields == nil {
+			indexFields = []string{}
+		}
 
-	// Test mismatched document
-	id = rand.Intn(1000)
-	srcRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 1234}, {"name", "foobar"}})
-	dstRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
-	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.NoError(t, err)
-	var res int
-	if assert.Equal(t, 1, len(mismatchedIds)) {
-		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
-		assert.Equal(t, id, res)
-		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchedIds[0].Details)
-	}
+		srcDocs := curTest.srcDocs
+		dstDocs := curTest.dstDocs
 
-	// // Test document missing on target
-	id = rand.Intn(1000)
-	srcRaw = makeRawDoc(t, bson.M{"_id": id, "num": 1234, "name": "foobar"})
-	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{}, namespace)
-	require.NoError(t, err)
-	if assert.Equal(t, 1, len(mismatchedIds)) {
-		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
-		assert.Equal(t, id, res)
-		assert.Equal(t, mismatchedIds[0].Details, Missing)
-		assert.Equal(t, mismatchedIds[0].Cluster, ClusterTarget)
-	}
+		permuted := len(srcDocs)*len(dstDocs) > 1
+		curPermutation := 0
 
-	// Test document missing on source
-	id = rand.Intn(1000)
-	dstRaw = makeRawDoc(t, bson.M{"_id": id, "num": 1234, "name": "foobar"})
-	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.NoError(t, err)
-	if assert.Equal(t, 1, len(mismatchedIds)) {
-		assert.Equal(t, mismatchedIds[0].Details, Missing)
-		assert.Equal(t, mismatchedIds[0].Cluster, ClusterSource)
-	}
-}
+		srcPermute := permute.Slice(srcDocs)
+		for srcPermute.Permute() {
+			srcMap := makeDocMap(t, srcDocs, indexFields...)
 
-func TestVerifierCompareDocsOrdered(t *testing.T) {
-	id := rand.Intn(1000)
-	verifier := NewVerifier(VerifierSettings{})
-	verifier.SetIgnoreBSONFieldOrder(false)
+			dstPermute := permute.Slice(dstDocs)
+			for dstPermute.Permute() {
+				dstMap := makeDocMap(t, dstDocs, indexFields...)
+				mismatchedIds, err := verifier.compareDocuments(srcMap, dstMap, namespace)
 
-	srcRaw := makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
-	dstRaw := makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
-	namespace := "testdb.testns"
-	mismatchedIds, err := verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.NoError(t, err)
-	assert.Equal(t, 0, len(mismatchedIds))
+				label := curTest.label
+				if permuted {
+					curPermutation++
+					label += fmt.Sprintf(" permutation %d", curPermutation)
+				}
 
-	// Test different field orders
-	srcRaw = makeRawDoc(t, bson.D{{"_id", id}, {"name", "foobar"}, {"num", 123}})
-	dstRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
+				ok := t.Run(
+					label,
+					func(t *testing.T) {
+						require.NoError(t, err)
+						curTest.compareFn(t, mismatchedIds)
+					},
+				)
 
-	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.NoError(t, err)
-	if assert.Equal(t, 1, len(mismatchedIds)) {
-		var res int
-		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
-		assert.Equal(t, id, res)
-		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchedIds[0].Details)
-	}
-
-	// Test mismatched document
-	id = rand.Intn(1000)
-	srcRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 1234}, {"name", "foobar"}})
-	dstRaw = makeRawDoc(t, bson.D{{"_id", id}, {"num", 123}, {"name", "foobar"}})
-	mismatchedIds, err = verifier.compareDocuments(map[interface{}]bson.Raw{id: srcRaw}, map[interface{}]bson.Raw{id: dstRaw}, namespace)
-	require.NoError(t, err)
-	var res int
-	if assert.Equal(t, 1, len(mismatchedIds)) {
-		require.Nil(t, mismatchedIds[0].ID.(bson.RawValue).Unmarshal(&res))
-		assert.Equal(t, id, res)
-		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchedIds[0].Details)
+				if !ok {
+					if len(curTest.srcDocs) > 0 {
+						t.Logf("src: %v", curTest.srcDocs)
+					}
+					if len(curTest.dstDocs) > 0 {
+						t.Logf("dst: %v", curTest.dstDocs)
+					}
+				}
+			}
+		}
 	}
 }
 
