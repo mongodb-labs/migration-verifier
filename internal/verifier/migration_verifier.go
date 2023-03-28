@@ -331,6 +331,19 @@ func (verifier *Verifier) getGeneration() (generation int, lastGeneration bool) 
 	return
 }
 
+func (verifier *Verifier) getGenerationWhileLocked() (int, bool) {
+
+	// As long as no other goroutine has locked the mux this will
+	// usefully panic if the caller neglected the lock.
+	wasUnlocked := verifier.mux.TryRLock()
+	if wasUnlocked {
+		verifier.mux.RUnlock()
+		panic("getGenerationWhileLocked() while unlocked")
+	}
+
+	return verifier.generation, verifier.lastGeneration
+}
+
 func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, buildInfo *bson.M,
 	startAtTs *primitive.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D

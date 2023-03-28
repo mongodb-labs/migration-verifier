@@ -190,20 +190,20 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, testChan ...chan stru
 			verifier.mux.Lock()
 			verifier.lastGeneration = true
 		}
-		oldGeneration := verifier.generation
 		verifier.generation++
 		verifier.phase = Recheck
-		verifier.mux.Unlock()
-		err = verifier.GenerateRecheckTasks(ctx, oldGeneration)
+		err = verifier.GenerateRecheckTasks(ctx)
 		if err != nil {
+			verifier.mux.Unlock()
 			return err
 		}
 
-		err = verifier.ClearRecheckDocs(ctx, oldGeneration)
+		err = verifier.ClearRecheckDocs(ctx)
 		if err != nil {
 			verifier.logger.Error().Msgf("Failed trying to clear out old recheck docs, continuing: %v",
 				err)
 		}
+		verifier.mux.Unlock()
 	}
 }
 

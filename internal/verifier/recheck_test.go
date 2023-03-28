@@ -18,7 +18,7 @@ func (suite *MultiMetaVersionTestSuite) TestLargeIDInsertions() {
 	id3 := strings.Repeat("c", overlyLarge)
 	ids := []interface{}{id1, id2, id3}
 	dataSizes := []int{overlyLarge, overlyLarge, overlyLarge}
-	err := verifier.insertRecheckDocs(ctx, 0, "testDB", "testColl", ids, dataSizes)
+	err := verifier.insertRecheckDocs(ctx, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 	metaColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue)
 	d1 := RecheckDoc{
@@ -41,7 +41,8 @@ func (suite *MultiMetaVersionTestSuite) TestLargeIDInsertions() {
 	suite.ElementsMatch([]interface{}{d1, d2, d3}, results)
 
 	verifier.generation++
-	err = verifier.GenerateRecheckTasks(ctx, 0)
+	verifier.mux.Lock()
+	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err = taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -74,7 +75,7 @@ func (suite *MultiMetaVersionTestSuite) TestLargeDataInsertions() {
 	id3 := "c"
 	ids := []interface{}{id1, id2, id3}
 	dataSizes := []int{400 * 1024, 700 * 1024, 1024}
-	err := verifier.insertRecheckDocs(ctx, 0, "testDB", "testColl", ids, dataSizes)
+	err := verifier.insertRecheckDocs(ctx, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 	metaColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue)
 	d1 := RecheckDoc{
@@ -99,7 +100,8 @@ func (suite *MultiMetaVersionTestSuite) TestLargeDataInsertions() {
 	suite.ElementsMatch([]interface{}{d1, d2, d3}, results)
 
 	verifier.generation++
-	err = verifier.GenerateRecheckTasks(ctx, 0)
+	verifier.mux.Lock()
+	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err = taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -131,17 +133,18 @@ func (suite *MultiMetaVersionTestSuite) TestMultipleNamespaces() {
 	id3 := "c"
 	ids := []interface{}{id1, id2, id3}
 	dataSizes := []int{1000, 1000, 1000}
-	err := verifier.insertRecheckDocs(ctx, 0, "testDB1", "testColl1", ids, dataSizes)
+	err := verifier.insertRecheckDocs(ctx, "testDB1", "testColl1", ids, dataSizes)
 	suite.Require().NoError(err)
-	err = verifier.insertRecheckDocs(ctx, 0, "testDB1", "testColl2", ids, dataSizes)
+	err = verifier.insertRecheckDocs(ctx, "testDB1", "testColl2", ids, dataSizes)
 	suite.Require().NoError(err)
-	err = verifier.insertRecheckDocs(ctx, 0, "testDB2", "testColl1", ids, dataSizes)
+	err = verifier.insertRecheckDocs(ctx, "testDB2", "testColl1", ids, dataSizes)
 	suite.Require().NoError(err)
-	err = verifier.insertRecheckDocs(ctx, 0, "testDB2", "testColl2", ids, dataSizes)
+	err = verifier.insertRecheckDocs(ctx, "testDB2", "testColl2", ids, dataSizes)
 	suite.Require().NoError(err)
 
 	verifier.generation++
-	err = verifier.GenerateRecheckTasks(ctx, 0)
+	verifier.mux.Lock()
+	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -177,11 +180,17 @@ func (suite *MultiMetaVersionTestSuite) TestGenerationalClear() {
 	id2 := "b"
 	ids := []interface{}{id1, id2}
 	dataSizes := []int{1000, 1000}
-	err := verifier.insertRecheckDocs(ctx, 0, "testDB", "testColl", ids, dataSizes)
+	err := verifier.insertRecheckDocs(ctx, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
-	err = verifier.insertRecheckDocs(ctx, 1, "testDB", "testColl", ids, dataSizes)
+
+	verifier.generation++
+
+	err = verifier.insertRecheckDocs(ctx, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
-	err = verifier.insertRecheckDocs(ctx, 2, "testDB", "testColl", ids, dataSizes)
+
+	verifier.generation++
+
+	err = verifier.insertRecheckDocs(ctx, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
 	metaColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue)
@@ -211,7 +220,10 @@ func (suite *MultiMetaVersionTestSuite) TestGenerationalClear() {
 	suite.Require().NoError(err)
 	suite.ElementsMatch([]interface{}{d1, d2, d3, d4, d5, d6}, results)
 
-	err = verifier.ClearRecheckDocs(ctx, 1)
+	verifier.mux.Lock()
+
+	verifier.generation = 2
+	err = verifier.ClearRecheckDocs(ctx)
 	suite.Require().NoError(err)
 	cursor, err = metaColl.Find(ctx, bson.D{})
 	suite.Require().NoError(err)
@@ -219,7 +231,8 @@ func (suite *MultiMetaVersionTestSuite) TestGenerationalClear() {
 	suite.Require().NoError(err)
 	suite.ElementsMatch([]interface{}{d1, d2, d5, d6}, results)
 
-	err = verifier.ClearRecheckDocs(ctx, 0)
+	verifier.generation = 1
+	err = verifier.ClearRecheckDocs(ctx)
 	suite.Require().NoError(err)
 	cursor, err = metaColl.Find(ctx, bson.D{})
 	suite.Require().NoError(err)
@@ -227,7 +240,8 @@ func (suite *MultiMetaVersionTestSuite) TestGenerationalClear() {
 	suite.Require().NoError(err)
 	suite.ElementsMatch([]interface{}{d5, d6}, results)
 
-	err = verifier.ClearRecheckDocs(ctx, 2)
+	verifier.generation = 3
+	err = verifier.ClearRecheckDocs(ctx)
 	suite.Require().NoError(err)
 	cursor, err = metaColl.Find(ctx, bson.D{})
 	suite.Require().NoError(err)

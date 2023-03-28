@@ -31,25 +31,28 @@ type RecheckDoc struct {
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	namespace string, documentIDs []interface{}, dataSizes []int) error {
-	generation, _ := verifier.getGeneration()
 	dbName, collName := SplitNamespace(namespace)
-	return verifier.insertRecheckDocs(context.Background(), generation,
+	return verifier.insertRecheckDocs(context.Background(),
 		dbName, collName, documentIDs, dataSizes)
 }
 
 func (verifier *Verifier) InsertChangeEventRecheckDoc(ctx context.Context, changeEvent *ParsedEvent) error {
-	generation, _ := verifier.getGeneration()
 	documentIDs := []interface{}{changeEvent.DocKey.ID}
 	// We don't know the document sizes for documents for all change events, so just be conservative
 	// and assume they are maximum size.
 	dataSizes := []int{16 * 1024 * 1024}
 	return verifier.insertRecheckDocs(
-		ctx, generation, changeEvent.Ns.DB, changeEvent.Ns.Coll, documentIDs, dataSizes)
+		ctx, changeEvent.Ns.DB, changeEvent.Ns.Coll, documentIDs, dataSizes)
 }
 
 func (verifier *Verifier) insertRecheckDocs(
-	ctx context.Context, generation int,
+	ctx context.Context,
 	dbName, collName string, documentIDs []interface{}, dataSizes []int) error {
+	verifier.mux.Lock()
+	defer verifier.mux.Unlock()
+
+	generation, _ := verifier.getGenerationWhileLocked()
+
 	models := []mongo.WriteModel{}
 	for i, documentID := range documentIDs {
 		pk := RecheckPrimaryKey{
@@ -67,16 +70,44 @@ func (verifier *Verifier) insertRecheckDocs(
 				SetFilter(recheckDoc).SetReplacement(recheckDoc).SetUpsert(true))
 	}
 	_, err := verifier.verificationDatabase().Collection(recheckQueue).BulkWrite(ctx, models)
+	verifier.logger.Debug().Msgf("Persisted %d recheck doc(s) for generation %d", len(models), generation)
+
 	return err
 }
 
-func (verifier *Verifier) ClearRecheckDocs(ctx context.Context, generation int) error {
+// ClearRecheckDocs deletes the previous generation’s recheck
+// documents from the verifier’s metadata.
+//
+// The verifier **MUST** be locked when this function is called (or panic).
+func (verifier *Verifier) ClearRecheckDocs(ctx context.Context) error {
+	prevGeneration := verifier.getPreviousGenerationWhileLocked()
+
+	verifier.logger.Debug().Msgf("Deleting generation %d’s %s documents", prevGeneration, recheckQueue)
+
 	_, err := verifier.verificationDatabase().Collection(recheckQueue).DeleteMany(
-		ctx, bson.D{{"_id.generation", generation}})
+		ctx, bson.D{{"_id.generation", prevGeneration}})
 	return err
 }
 
-func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context, generation int) error {
+func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
+	generation, _ := verifier.getGenerationWhileLocked()
+	if generation < 1 {
+		panic("Call to ClearRecheckDocs before generation 1")
+	}
+
+	return generation - 1
+}
+
+// GenerateRecheckTasks fetches the previous generation’s recheck
+// documents from the verifier’s metadata and creates current-generation
+// document-verification tasks from them.
+//
+// The verifier **MUST** be locked when this function is called (or panic).
+func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
+	prevGeneration := verifier.getPreviousGenerationWhileLocked()
+
+	verifier.logger.Debug().Msgf("Creating recheck tasks from generation %d’s %s documents", prevGeneration, recheckQueue)
+
 	// We generate one recheck task per collection, unless
 	// 1) The size of the list of IDs would exceed 12MB (a very conservative way of avoiding
 	//    the 16MB BSON limit)
@@ -88,7 +119,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context, generation i
 	var dataSizeAccum int64
 	const maxIdsSize = 12 * 1024 * 1024
 	cursor, err := verifier.verificationDatabase().Collection(recheckQueue).Find(
-		ctx, bson.D{{"_id.generation", generation}}, options.Find().SetSort(bson.D{{"_id", 1}}))
+		ctx, bson.D{{"_id.generation", prevGeneration}}, options.Find().SetSort(bson.D{{"_id", 1}}))
 	if err != nil {
 		return err
 	}
@@ -107,6 +138,9 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context, generation i
 		}
 		idRaw := cursor.Current.Lookup("_id", "docID")
 		idLen := len(idRaw.Value)
+
+		verifier.logger.Debug().Msgf("Found persisted recheck doc for %s.%s", doc.PrimaryKey.DatabaseName, doc.PrimaryKey.CollectionName)
+
 		if doc.PrimaryKey.DatabaseName != prevDBName ||
 			doc.PrimaryKey.CollectionName != prevCollName ||
 			idLenAccum >= maxIdsSize ||
