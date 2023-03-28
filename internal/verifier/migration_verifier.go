@@ -29,6 +29,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 	"golang.org/x/exp/maps"
+	"golang.org/x/sync/errgroup"
 )
 
 // ReadConcernSetting describes the verifier’s handling of read
@@ -379,49 +380,41 @@ func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]Ve
 func (verifier *Verifier) fetchDocuments(task *VerificationTask) (*documentmap.Map, *documentmap.Map, error) {
 
 	var srcErr, dstErr error
-	var wg sync.WaitGroup
 
-	ctx := context.Background()
+	errGroup, ctx := errgroup.WithContext(context.Background())
 
 	shardFieldNames := task.QueryFilter.ShardKeys
 
 	srcClientMap := documentmap.New(verifier.GetLogger(), shardFieldNames...)
 	dstClientMap := srcClientMap.CloneEmpty()
 
-	ctx, cancel := context.WithCancel(ctx)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	errGroup.Go(func() error {
 		var cursor *mongo.Cursor
 		cursor, srcErr = verifier.getDocumentsCursor(ctx, verifier.srcClientCollection(task), verifier.srcBuildInfo,
 			verifier.srcStartAtTs, task)
 
 		if srcErr == nil {
 			srcErr = srcClientMap.ImportFromCursor(ctx, cursor)
-		} else {
-			cancel()
 		}
-	}()
-	go func() {
-		defer wg.Done()
+
+		return srcErr
+	})
+
+	errGroup.Go(func() error {
 		var cursor *mongo.Cursor
 		cursor, dstErr = verifier.getDocumentsCursor(ctx, verifier.dstClientCollection(task), verifier.dstBuildInfo,
 			nil /*startAtTs*/, task)
 
 		if dstErr == nil {
 			dstErr = dstClientMap.ImportFromCursor(ctx, cursor)
-		} else {
-			cancel()
 		}
-	}()
-	wg.Wait()
-	if srcErr != nil {
-		return nil, nil, srcErr
-	}
-	if dstErr != nil {
-		return nil, nil, dstErr
-	}
-	return srcClientMap, dstClientMap, nil
+
+		return dstErr
+	})
+
+	err := errGroup.Wait()
+
+	return srcClientMap, dstClientMap, err
 }
 
 func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap *documentmap.Map, namespace string) ([]VerificationResult, error) {
