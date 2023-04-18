@@ -967,6 +967,8 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb4").CreateCollection(ctx, "testColl6")
 	suite.Require().NoError(err)
+	err = suite.dstMongoClient.Database("mongosync_reserved_for_internal_use").CreateCollection(ctx, "globalState")
+	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
 	suite.Require().NoError(err)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
