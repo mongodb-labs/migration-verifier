@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -297,18 +296,12 @@ func TestVerifierCompareDocs(t *testing.T) {
 			dstDocs: []bson.D{
 				{{"_id", id}, {"num", 123}, {"name", "foobar"}},
 			},
-			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
-				if assert.Equal(t, 1, len(mismatchedIds)) {
-					mmID := mismatchedIds[0].ID.([]byte)
-					rawValue := bson.RawValue{
-						Type:  bsontype.Type(mmID[0]),
-						Value: mmID[1:],
-					}
-
+			compareFn: func(t *testing.T, mismatchResults []VerificationResult) {
+				if assert.Equal(t, 1, len(mismatchResults)) {
 					var res int
-					require.Nil(t, rawValue.Unmarshal(&res))
+					require.Nil(t, mismatchResults[0].ID.(bson.RawValue).Unmarshal(&res))
 					assert.Equal(t, id, res)
-					assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchedIds[0].Details)
+					assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchResults[0].Details)
 				}
 			},
 		},
@@ -321,18 +314,12 @@ func TestVerifierCompareDocs(t *testing.T) {
 			dstDocs: []bson.D{
 				{{"_id", id}, {"num", 123}, {"name", "foobar"}},
 			},
-			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
-				if assert.Equal(t, 1, len(mismatchedIds)) {
-					mmID := mismatchedIds[0].ID.([]byte)
-					rawValue := bson.RawValue{
-						Type:  bsontype.Type(mmID[0]),
-						Value: mmID[1:],
-					}
-
+			compareFn: func(t *testing.T, mismatchResults []VerificationResult) {
+				if assert.Equal(t, 1, len(mismatchResults)) {
 					var res int
-					require.Nil(t, rawValue.Unmarshal(&res))
+					require.Nil(t, mismatchResults[0].ID.(bson.RawValue).Unmarshal(&res))
 					assert.Equal(t, id, res)
-					assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchedIds[0].Details)
+					assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchResults[0].Details)
 				}
 			},
 		},

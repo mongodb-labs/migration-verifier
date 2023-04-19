@@ -118,9 +118,20 @@ type VerificationStatus struct {
 	RecheckTasks          int `json:"recheckTasks"`
 }
 
-// VerificationResult holds the Verification Results
+// VerificationResult holds the Verification Results.
 type VerificationResult struct {
-	ID        interface{}
+
+	// This field gets used differently depending on whether this result
+	// came from a document comparison or something else. If it’s from a
+	// document comparison, it *MUST* be a document ID, not a
+	// documentmap.MapKey, because we query on this to populate verification
+	// tasks for rechecking after a document mismatch. Thus, in sharded
+	// clusters with duplicate document IDs in the same collection, multiple
+	// VerificationResult instances might share the same ID. That’s OK,
+	// though; it’ll just make the recheck include all docs with that ID,
+	// regardless of which ones actually need the recheck.
+	ID interface{}
+
 	Field     interface{}
 	Details   interface{}
 	Cluster   interface{}
@@ -434,13 +445,13 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap *documentm
 	srcOnly, dstOnly, common := srcClientMap.CompareToMap(dstClientMap)
 
 	srcOnlyLen := len(srcOnly)
-	mismatchedIds := make([]VerificationResult, srcOnlyLen+len(dstOnly))
+	mismatchResults := make([]VerificationResult, srcOnlyLen+len(dstOnly))
 
 	// Worthwhile to parallelize?
 
 	for i, mapKey := range srcOnly {
-		mismatchedIds[i] = VerificationResult{
-			ID:        []byte(mapKey),
+		mismatchResults[i] = VerificationResult{
+			ID:        srcClientMap.Fetch(mapKey).Lookup("_id"),
 			Details:   Missing,
 			Cluster:   ClusterTarget,
 			NameSpace: namespace,
@@ -449,8 +460,8 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap *documentm
 	}
 
 	for i, mapKey := range dstOnly {
-		mismatchedIds[srcOnlyLen+i] = VerificationResult{
-			ID:        []byte(mapKey),
+		mismatchResults[srcOnlyLen+i] = VerificationResult{
+			ID:        dstClientMap.Fetch(mapKey).Lookup("_id"),
 			Details:   Missing,
 			Cluster:   ClusterSource,
 			NameSpace: namespace,
@@ -462,17 +473,17 @@ func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap *documentm
 		srcDoc := srcClientMap.Fetch(mapKey)
 		dstDoc := dstClientMap.Fetch(mapKey)
 
-		misMatches, err := verifier.compareOneDocument(mapKey, srcDoc, dstDoc, namespace)
+		misMatches, err := verifier.compareOneDocument(srcDoc, dstDoc, namespace)
 		if err != nil {
 			return nil, err
 		}
 
 		if len(misMatches) > 0 {
-			mismatchedIds = append(mismatchedIds, misMatches...)
+			mismatchResults = append(mismatchResults, misMatches...)
 		}
 	}
 
-	return mismatchedIds, nil
+	return mismatchResults, nil
 }
 
 func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, id interface{}, fieldPrefix string) (results []VerificationResult) {
@@ -517,7 +528,7 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 	return
 }
 
-func (verifier *Verifier) compareOneDocument(mapKey documentmap.MapKey, srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
+func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
 	match := bytes.Equal(srcClientDoc, dstClientDoc)
 	if match {
 		return nil, nil
@@ -532,7 +543,7 @@ func (verifier *Verifier) compareOneDocument(mapKey documentmap.MapKey, srcClien
 		if mismatch == nil {
 			return nil, nil
 		}
-		results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, []byte(mapKey), "" /* fieldPrefix */)
+		results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, srcClientDoc.Lookup("_id"), "" /* fieldPrefix */)
 		return results, nil
 	}
 	dataSize := len(srcClientDoc)
@@ -542,7 +553,7 @@ func (verifier *Verifier) compareOneDocument(mapKey documentmap.MapKey, srcClien
 
 	// If we're respecting field order we have just done a binary compare so don't know the mismatching fields.
 	return []VerificationResult{{
-		ID:        []byte(mapKey),
+		ID:        srcClientDoc.Lookup("_id"),
 		Details:   Mismatch,
 		Cluster:   ClusterTarget,
 		NameSpace: namespace,
