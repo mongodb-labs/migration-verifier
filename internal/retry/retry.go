@@ -185,7 +185,7 @@ func (r *Retryer) runRetryLoop(
 		// collection UUID, try again with the UUID elided (if the caller used
 		// RequestWithUUID).
 		if r.retryOnUUIDNotSupported && !r.aggregateDisallowsUUIDs && util.IsFailedToParseError(err) && util.HasServerErrorMessage(err, "collectionUUID") {
-			logger.Info().Msg("Server version does not support UUIDs in 'aggregate' (< 5.0)")
+			logger.Debug().Msg("Server version (< 5.0) does not support UUIDs in 'aggregate'. Will retry without UUID.")
 			r.aggregateDisallowsUUIDs = true
 			continue
 		}

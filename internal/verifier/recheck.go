@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 
+	"github.com/10gen/migration-verifier/internal/types"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -92,7 +93,7 @@ func (verifier *Verifier) ClearRecheckDocs(ctx context.Context) error {
 func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
 	generation, _ := verifier.getGenerationWhileLocked()
 	if generation < 1 {
-		panic("Call to ClearRecheckDocs before generation 1")
+		panic("This function is forbidden before generation 1!")
 	}
 
 	return generation - 1
@@ -147,7 +148,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			dataSizeAccum >= verifier.partitionSizeInBytes {
 			namespace := prevDBName + "." + prevCollName
 			if len(idAccum) > 0 {
-				err := verifier.InsertFailedIdsVerificationTask(idAccum, namespace)
+				err := verifier.InsertFailedIdsVerificationTask(idAccum, types.ByteCount(dataSizeAccum), namespace)
 				if err != nil {
 					return err
 				}
@@ -168,7 +169,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	}
 	if len(idAccum) > 0 {
 		namespace := prevDBName + "." + prevCollName
-		err := verifier.InsertFailedIdsVerificationTask(idAccum, namespace)
+		err := verifier.InsertFailedIdsVerificationTask(idAccum, types.ByteCount(dataSizeAccum), namespace)
 		if err != nil {
 			return err
 		}

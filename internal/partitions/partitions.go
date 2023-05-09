@@ -7,6 +7,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/pkg/errors"
@@ -101,21 +102,31 @@ const (
 	maxBound minOrMaxBound = "max"
 )
 
-// PartitionCollection splits the source collection into one or more partitions. These partitions are
-// expected to be somewhat similar in size, but this is never guaranteed.
+// PartitionCollectionWithSize splits the source collection into one or more
+// partitions. These partitions are expected to be somewhat similar in size,
+// but this is never guaranteed. The caller can choose a desired partition
+// size, but not the internal parameters.
 //
-// For example, if we split a collection of documents with _id values from 1 to 100 into 4 partitions,
-// then the partitions may look something like [1, 17], [17, 39], [39, 78], [78, 100]. For smaller
-// collections resulting in only one partition, the partition will be [1, 100].
-func PartitionCollection(ctx context.Context, uuidEntry *uuidutil.NamespaceAndUUID, retryer retry.Retryer, srcClient *mongo.Client, replicatorList []Replicator, subLogger *logger.Logger) ([]*Partition, error) {
-	return PartitionCollectionWithParameters(ctx, uuidEntry, &retryer, srcClient, replicatorList, defaultSampleRate, defaultSampleMinNumDocs, defaultPartitionSizeInBytes, subLogger)
-}
-
-// PartitionCollectionWithSize allows the caller to choose a desired partition size, but not the internal parameters.
+// For example, if we split a collection of documents with _id values from 1 to
+// 100 into 4 partitions, then the partitions may look something like [1, 17],
+// [17, 39], [39, 78], [78, 100]. For smaller collections resulting in only one
+// partition, the partition will be [1, 100].
+//
 // A partition size of 0 means to use the default.
-func PartitionCollectionWithSize(ctx context.Context, uuidEntry *uuidutil.NamespaceAndUUID, retryer retry.Retryer, srcClient *mongo.Client, replicatorList []Replicator, subLogger *logger.Logger, partitionSizeInBytes int64) ([]*Partition, error) {
+//
+// Since these are useful elsewhere, this function also returns the
+// collection’s document count and size (in bytes).
+func PartitionCollectionWithSize(
+	ctx context.Context,
+	uuidEntry *uuidutil.NamespaceAndUUID,
+	retryer retry.Retryer,
+	srcClient *mongo.Client,
+	replicatorList []Replicator,
+	subLogger *logger.Logger,
+	partitionSizeInBytes int64,
+) ([]*Partition, types.DocumentCount, types.ByteCount, error) {
 	if partitionSizeInBytes < 0 {
-		subLogger.Warn().Msgf("Partition size of %d bytes is not valid, using default %d.",
+		subLogger.Warn().Msgf("Partition size of %d bytes is not valid; using default %d.",
 			partitionSizeInBytes, defaultPartitionSizeInBytes)
 	}
 	if partitionSizeInBytes <= 0 {
@@ -125,8 +136,21 @@ func PartitionCollectionWithSize(ctx context.Context, uuidEntry *uuidutil.Namesp
 	return PartitionCollectionWithParameters(ctx, uuidEntry, &retryer, srcClient, replicatorList, defaultSampleRate, defaultSampleMinNumDocs, partitionSizeInBytes, subLogger)
 }
 
-// PartitionCollectionWithParameters is the implementation for PartitionCollection. It is only directly used in integration tests.
-func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.NamespaceAndUUID, retryer *retry.Retryer, srcClient *mongo.Client, replicatorList []Replicator, sampleRate float64, sampleMinNumDocs int, partitionSizeInBytes int64, subLogger *logger.Logger) ([]*Partition, error) {
+// PartitionCollectionWithParameters is the implementation for
+// PartitionCollection. It is only directly used in integration tests.
+// See PartitionCollectionWithParameters for a description of inputs
+// & outputs. (Alas, the parameter order differs slightly here …)
+func PartitionCollectionWithParameters(
+	ctx context.Context,
+	uuidEntry *uuidutil.NamespaceAndUUID,
+	retryer *retry.Retryer,
+	srcClient *mongo.Client,
+	replicatorList []Replicator,
+	sampleRate float64,
+	sampleMinNumDocs int,
+	partitionSizeInBytes int64,
+	subLogger *logger.Logger,
+) ([]*Partition, types.DocumentCount, types.ByteCount, error) {
 	subLogger.Debug().Msgf("Partitioning %s.%s with sampleRate %f, sampleMinNumDocs %d, desired partitionSizeInBytes %d",
 		uuidEntry.DBName, uuidEntry.CollName, sampleRate, sampleMinNumDocs, partitionSizeInBytes)
 	// Get the source collection.
@@ -137,17 +161,17 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.
 	// items in the collection. Rely on getOuterIDBound to do a majority read to determine if we continue processing the collection.
 	collSizeInBytes, collDocCount, isCapped, err := GetSizeAndDocumentCount(ctx, subLogger, retryer, srcColl, uuidEntry.UUID)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 
 	// The lower bound for the collection. There is no partitioning to do if the bound is nil.
 	minIDBound, err := getOuterIDBound(ctx, subLogger, retryer, minBound, srcDB, uuidEntry.CollName, uuidEntry.UUID)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	if minIDBound == nil {
 		subLogger.Info().Msgf("No minimum _id found for collection %s.%s; will not perform collection copy for this collection.", uuidEntry.DBName, uuidEntry.CollName)
-		return nil, nil
+		return nil, 0, 0, nil
 	} else {
 		subLogger.Debug().Msgf("Minimum _id for collection %s.%s: %v",
 			uuidEntry.DBName, uuidEntry.CollName, minIDBound)
@@ -156,11 +180,11 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.
 	// The upper bound for the collection. There is no partitioning to do if the bound is nil.
 	maxIDBound, err := getOuterIDBound(ctx, subLogger, retryer, maxBound, srcDB, uuidEntry.CollName, uuidEntry.UUID)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	if maxIDBound == nil {
 		subLogger.Info().Msgf("No maximum _id found for collection %s.%s; will not perform collection copy for this collection.", uuidEntry.DBName, uuidEntry.CollName)
-		return nil, nil
+		return nil, 0, 0, nil
 	} else {
 		subLogger.Debug().Msgf("Maximum _id for collection %s.%s: %v",
 			uuidEntry.DBName, uuidEntry.CollName, maxIDBound)
@@ -183,11 +207,11 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.
 	// to make at least one partition.
 	midIDBounds, collDropped, err := getMidIDBounds(ctx, subLogger, retryer, srcDB, uuidEntry.CollName, uuidEntry.UUID, collDocCount, numPartitions, sampleMinNumDocs, sampleRate)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	if collDropped {
 		// Skip this collection.
-		return nil, nil
+		return nil, 0, 0, nil
 	}
 	if midIDBounds != nil {
 		allIDBounds = append(allIDBounds, midIDBounds...)
@@ -196,7 +220,7 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.
 	allIDBounds = append(allIDBounds, maxIDBound)
 
 	if len(allIDBounds) < 2 {
-		return nil, errors.Errorf("need at least 2 _id bounds to make a partition, but got %d _id bound(s)", len(allIDBounds))
+		return nil, 0, 0, errors.Errorf("need at least 2 _id bounds to make a partition, but got %d _id bound(s)", len(allIDBounds))
 	}
 
 	// TODO (REP-552): Figure out what situations this occurs for, and whether or not it results from a bug.
@@ -207,7 +231,7 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.
 	// Choose a random index to start to avoid over-assigning partitions to a specific replicator.
 	// rand.Int() generates non-negative integers only.
 	replIndex := rand.Int() % len(replicatorList)
-	subLogger.Info().Msgf("Creating %d partitions for collection %s.%s, isCappedColl: %t", len(allIDBounds)-1, uuidEntry.DBName, uuidEntry.CollName, isCapped)
+	subLogger.Debug().Msgf("Creating %d partitions for collection %s.%s, isCappedColl: %t", len(allIDBounds)-1, uuidEntry.DBName, uuidEntry.CollName, isCapped)
 
 	// Create the partitions with the index key bounds.
 	partitions := make([]*Partition, 0, len(allIDBounds)-1)
@@ -229,7 +253,7 @@ func PartitionCollectionWithParameters(ctx context.Context, uuidEntry *uuidutil.
 		replIndex = (replIndex + 1) % len(replicatorList)
 	}
 
-	return partitions, nil
+	return partitions, types.DocumentCount(collDocCount), types.ByteCount(collSizeInBytes), nil
 }
 
 // GetSizeAndDocumentCount uses collStats to return a collection's byte size, document count, and
@@ -371,7 +395,7 @@ func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer *ret
 	}
 
 	if currCollName == "" {
-		subLogger.Info().Msgf("Not getting %s _id bound for source collection '%s.%s', UUID %s, because it was dropped", minOrMaxBound, srcDB.Name(), collName, collUUID.String())
+		subLogger.Debug().Msgf("Not getting %s _id bound for source collection '%s.%s', UUID %s, because it was dropped", minOrMaxBound, srcDB.Name(), collName, collUUID.String())
 		return nil, nil
 	}
 

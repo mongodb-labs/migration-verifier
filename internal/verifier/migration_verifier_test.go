@@ -16,6 +16,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/documentmap"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
@@ -53,6 +54,7 @@ func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstanc
 	task := VerificationTask{QueryFilter: qfilter}
 
 	verifier := NewVerifier(VerifierSettings{})
+	//verifier.SetStartClean(true)
 	verifier.SetNumWorkers(3)
 	verifier.SetGenerationPauseDelayMillis(0)
 	verifier.SetWorkerSleepDelayMillis(0)
@@ -62,7 +64,6 @@ func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstanc
 	verifier.SetLogger("stderr")
 	verifier.SetMetaDBName("VERIFIER_META")
 	require.Nil(t, verifier.verificationTaskCollection().Drop(context.Background()))
-	require.Nil(t, verifier.verificationRangeCollection().Drop(context.Background()))
 	require.Nil(t, verifier.refetchCollection().Drop(context.Background()))
 	require.Nil(t, verifier.srcClientCollection(&task).Drop(context.Background()))
 	require.Nil(t, verifier.dstClientCollection(&task).Drop(context.Background()))
@@ -175,6 +176,197 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	suite.Assert().NotPanics(
 		func() { srcDocumentMap.Fetch(both[0]) },
 		"doc is fetched",
+	)
+}
+
+func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics() {
+	ctx := context.Background()
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+
+	stats, err := verifier.GetNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(
+		[]NamespaceStats{},
+		stats,
+		"Stats are empty at first",
+	)
+
+	// Now add 2 namespaces. Add them “out of order” to test
+	// that we sort the returned array by Namespace.
+
+	task2, err := verifier.InsertCollectionVerificationTask("mydb.coll2")
+	suite.Require().NoError(err)
+
+	task1, err := verifier.InsertCollectionVerificationTask("mydb.coll1")
+	suite.Require().NoError(err)
+
+	stats, err = verifier.GetNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(
+		[]NamespaceStats{
+			{Namespace: task1.QueryFilter.Namespace},
+			{Namespace: task2.QueryFilter.Namespace},
+		},
+		stats,
+		"One stats struct for each namespace",
+	)
+
+	// Now add document counts for each namespace.
+
+	task1.Status = verificationTaskCompleted
+	task1.SourceDocumentCount = 1000
+	task1.SourceByteCount = 10_000
+
+	task2.Status = verificationTaskCompleted
+	task2.SourceDocumentCount = 900
+	task2.SourceByteCount = 9_000
+
+	err = verifier.UpdateVerificationTask(task2)
+	suite.Require().NoError(err)
+
+	err = verifier.UpdateVerificationTask(task1)
+	suite.Require().NoError(err)
+
+	stats, err = verifier.GetNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(
+		[]NamespaceStats{
+			{
+				Namespace:  task1.QueryFilter.Namespace,
+				TotalDocs:  task1.SourceDocumentCount,
+				TotalBytes: task1.SourceByteCount,
+			},
+			{
+				Namespace:  task2.QueryFilter.Namespace,
+				TotalDocs:  task2.SourceDocumentCount,
+				TotalBytes: task2.SourceByteCount,
+			},
+		},
+		stats,
+		"Stats after namespaces are scanned (no partitions added)",
+	)
+
+	// Now add 2 partitions for each namespace.
+
+	task1parts := [2]*VerificationTask{}
+	task2parts := [2]*VerificationTask{}
+	for i := range task1parts {
+		task1part, err := verifier.InsertPartitionVerificationTask(
+			&partitions.Partition{
+				Ns: &partitions.Namespace{DB: "mydb", Coll: "coll1"},
+			},
+			[]string{},
+			"faux.dstnamespace",
+		)
+		suite.Require().NoError(err)
+
+		task1parts[i] = task1part
+
+		task2part, err := verifier.InsertPartitionVerificationTask(
+			&partitions.Partition{
+				Ns: &partitions.Namespace{DB: "mydb", Coll: "coll2"},
+			},
+			[]string{},
+			"faux.dstnamespace",
+		)
+		suite.Require().NoError(err)
+
+		task2parts[i] = task2part
+	}
+
+	stats, err = verifier.GetNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(
+		[]NamespaceStats{
+			{
+				Namespace:       task1.QueryFilter.Namespace,
+				TotalDocs:       task1.SourceDocumentCount,
+				TotalBytes:      task1.SourceByteCount,
+				PartitionsAdded: 2,
+			},
+			{
+				Namespace:       task2.QueryFilter.Namespace,
+				TotalDocs:       task2.SourceDocumentCount,
+				TotalBytes:      task2.SourceByteCount,
+				PartitionsAdded: 2,
+			},
+		},
+		stats,
+		"Stats after namespaces are partitioned",
+	)
+
+	// Now set one task to status=processing
+
+	task1parts[0].Status = verificationTaskProcessing
+	err = verifier.UpdateVerificationTask(task1parts[0])
+	suite.Require().NoError(err)
+
+	stats, err = verifier.GetNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(
+		[]NamespaceStats{
+			{
+				Namespace:            task1.QueryFilter.Namespace,
+				TotalDocs:            task1.SourceDocumentCount,
+				TotalBytes:           task1.SourceByteCount,
+				PartitionsAdded:      1,
+				PartitionsProcessing: 1,
+			},
+			{
+				Namespace:       task2.QueryFilter.Namespace,
+				TotalDocs:       task2.SourceDocumentCount,
+				TotalBytes:      task2.SourceByteCount,
+				PartitionsAdded: 2,
+			},
+		},
+		stats,
+		"Stats after one partition is started",
+	)
+
+	// Now set two other tasks to completed/failed.
+
+	task2parts[0].Status = verificationTaskCompleted
+	task2parts[0].SourceDocumentCount = task2.SourceDocumentCount / 2
+	task2parts[0].SourceByteCount = task2.SourceByteCount / 2
+
+	task2parts[1].Status = verificationTaskCompleted
+	task2parts[1].SourceDocumentCount = task2.SourceDocumentCount / 2
+	task2parts[1].SourceByteCount = task2.SourceByteCount / 2
+
+	err = verifier.UpdateVerificationTask(task2parts[0])
+	suite.Require().NoError(err)
+
+	err = verifier.UpdateVerificationTask(task2parts[1])
+	suite.Require().NoError(err)
+
+	stats, err = verifier.GetNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(
+		[]NamespaceStats{
+			{
+				Namespace:            task1.QueryFilter.Namespace,
+				TotalDocs:            task1.SourceDocumentCount,
+				TotalBytes:           task1.SourceByteCount,
+				PartitionsAdded:      1,
+				PartitionsProcessing: 1,
+			},
+			{
+				Namespace:      task2.QueryFilter.Namespace,
+				TotalDocs:      task2.SourceDocumentCount,
+				TotalBytes:     task2.SourceByteCount,
+				PartitionsDone: 2,
+				DocsCompared:   task2.SourceDocumentCount,
+				BytesCompared:  task2.SourceByteCount,
+			},
+		},
+		stats,
+		"Stats after one namespace is finished",
 	)
 }
 
@@ -662,7 +854,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl1",
-			To:        "testDb.testColl1"}}
+			To:        "testDb.testColl1",
+		},
+	}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
@@ -1057,6 +1251,7 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 		suite.Require().NoError(err)
 
 		for status.TotalTasks == 0 && verifier.generation < 10 {
+			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting another generation …", verifier.generation)
 			checkContinueChan <- struct{}{}
 			<-checkDoneChan
 			status, err = verifier.GetVerificationStatus()

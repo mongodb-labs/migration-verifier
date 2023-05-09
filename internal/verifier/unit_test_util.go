@@ -250,15 +250,19 @@ func startOneMongod(t *testing.T, instance *MongoInstance, extraArgs ...string) 
 	go func() {
 		err := cmd.Wait()
 		finished.Store(true)
+
+		// Use Printf rather than t.Logf below in order to prevent
+		// the race checker from complaining.
+
 		if err == nil {
-			t.Logf("mongod process %d ended successfully", pid)
+			fmt.Printf("mongod process %d ended successfully\n", pid)
 		} else {
-			t.Logf("mongod process %d: %v", pid, err)
+			fmt.Printf("mongod process %d: %v\n", pid, err)
 		}
 
 		err = os.RemoveAll(dir)
 		if err != nil {
-			t.Logf("Failed to remove %s: %v", dir, err)
+			fmt.Printf("Failed to remove %s: %v\n", dir, err)
 		}
 	}()
 

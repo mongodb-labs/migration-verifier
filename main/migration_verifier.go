@@ -44,7 +44,6 @@ func main() {
 	go func() {
 		fmt.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
@@ -73,7 +72,7 @@ func main() {
 		},
 		&cli.StringFlag{
 			Name:  logPath,
-			Value: "stderr",
+			Value: "stdout",
 			Usage: "logging file `path`",
 		},
 		&cli.IntFlag{
@@ -137,8 +136,8 @@ func main() {
 		},
 		&cli.Int64Flag{
 			Name:  failureDisplaySize,
-			Value: 20,
-			Usage: "Number of failures to display. Will display all failures if the number is within 25% of ths limit",
+			Value: verifier.DefaultFailureDisplaySize,
+			Usage: "Number of failures to display. Will display all failures if the number doesn’t exceed this limit by 25%",
 		},
 		&cli.BoolFlag{
 			Name:  ignoreReadConcernFlag,

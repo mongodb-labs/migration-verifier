@@ -4,19 +4,24 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	_ "net/http/pprof"
 	"os"
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/documentmap"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
@@ -63,7 +68,15 @@ const (
 
 	configDBName  = "config"
 	collsCollName = "collections"
+
+	DefaultFailureDisplaySize = 20
+
+	okSymbol    = "\u2705" // white heavy check mark
+	infoSymbol  = "\u24d8" // circled Latin small letter I
+	notOkSymbol = "\u2757" // heavy exclamation mark symbol
 )
+
+var timeFormat = time.RFC3339
 
 // Verifier is the main state for the migration verifier
 type Verifier struct {
@@ -73,6 +86,7 @@ type Verifier struct {
 	generation         int
 	phase              string
 	port               int
+	metaURI            string
 	metaClient         *mongo.Client
 	srcClient          *mongo.Client
 	dstClient          *mongo.Client
@@ -81,6 +95,12 @@ type Verifier struct {
 	numWorkers         int
 	failureDisplaySize int64
 
+	// Used only with generation 0 to defer the first
+	// progress report until after we’ve finished partitioning
+	// every collection.
+	gen0PendingCollectionTasks atomic.Int32
+
+	generationStartTime        time.Time
 	generationPauseDelayMillis time.Duration
 	workerSleepDelayMillis     time.Duration
 	ignoreBSONFieldOrder       bool
@@ -90,6 +110,7 @@ type Verifier struct {
 	readPreference             *readpref.ReadPref
 
 	logger *logger.Logger
+	writer io.Writer
 
 	srcNamespaces []string
 	dstNamespaces []string
@@ -159,6 +180,7 @@ func NewVerifier(settings VerifierSettings) *Verifier {
 		numWorkers:            NumWorkers,
 		readPreference:        readpref.Nearest(),
 		partitionSizeInBytes:  400 * 1024 * 1024,
+		failureDisplaySize:    DefaultFailureDisplaySize,
 		changeStreamEnderChan: make(chan struct{}),
 		changeStreamErrChan:   make(chan error),
 		changeStreamDoneChan:  make(chan struct{}),
@@ -213,6 +235,9 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 	if err != nil {
 		return err
 	}
+
+	verifier.metaURI = uri
+
 	return err
 }
 
@@ -271,7 +296,13 @@ func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB int64) {
 
 func (verifier *Verifier) SetLogger(logPath string) {
 	writer := getLogWriter(logPath)
-	l := zerolog.New(writer).With().Timestamp().Logger()
+	verifier.writer = writer
+
+	consoleWriter := zerolog.ConsoleWriter{
+		Out:        writer,
+		TimeFormat: timeFormat,
+	}
+	l := zerolog.New(consoleWriter).With().Timestamp().Logger()
 	verifier.logger = logger.NewLogger(&l, writer)
 }
 
@@ -392,12 +423,18 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
 }
 
-func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]VerificationResult, error) {
+func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]VerificationResult, types.DocumentCount, types.ByteCount, error) {
 	srcClientMap, dstClientMap, err := verifier.fetchDocuments(task)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
-	return verifier.compareDocuments(srcClientMap, dstClientMap, task.QueryFilter.Namespace)
+
+	docsCount := srcClientMap.Count()
+	bytesCount := srcClientMap.TotalDocsBytes()
+
+	mismatches, err := verifier.compareDocuments(srcClientMap, dstClientMap, task.QueryFilter.Namespace)
+
+	return mismatches, docsCount, bytesCount, err
 }
 
 // This is split out to allow unit testing of fetching separate from comparison.
@@ -441,13 +478,13 @@ func (verifier *Verifier) fetchDocuments(task *VerificationTask) (*documentmap.M
 	return srcClientMap, dstClientMap, err
 }
 
+// This returns an array of VerificationResult instances that
+// describe mismatches.
 func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap *documentmap.Map, namespace string) ([]VerificationResult, error) {
 	srcOnly, dstOnly, common := srcClientMap.CompareToMap(dstClientMap)
 
 	srcOnlyLen := len(srcOnly)
 	mismatchResults := make([]VerificationResult, srcOnlyLen+len(dstOnly))
-
-	// Worthwhile to parallelize?
 
 	for i, mapKey := range srcOnly {
 		mismatchResults[i] = VerificationResult{
@@ -562,32 +599,37 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 }
 
 func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTask) {
-	verifier.logger.Info().Msgf("[Worker %d] Processing verify task", workerNum)
+	verifier.logger.Debug().Msgf("[Worker %d] Processing verify task", workerNum)
 
-	mismatches, err := verifier.FetchAndCompareDocuments(task)
+	mismatches, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(task)
 
 	if err != nil {
 		task.Status = verificationTaskFailed
 		verifier.logger.Error().Msgf("[Worker %d] Error comparing docs: %+v", workerNum, err)
-	} else if len(mismatches) == 0 {
-		task.Status = verificationTaskCompleted
 	} else {
-		task.Status = verificationTaskFailed
-		// We know we won't change lastGeneration while verification tasks are running, so no mutex needed here.
-		if verifier.lastGeneration {
-			verifier.logger.Error().Msgf("[Worker %d] Verification Task %+v failed critical section and is a true error",
-				workerNum, task.PrimaryKey)
+		task.SourceDocumentCount = docsCount
+		task.SourceByteCount = bytesCount
+
+		if len(mismatches) == 0 {
+			task.Status = verificationTaskCompleted
 		} else {
-			verifier.logger.Info().Msgf("[Worker %d] Verification Task %+v failed, may pass next generation", workerNum, task.PrimaryKey)
-			var ids []interface{}
-			var dataSizes []int
-			for _, v := range mismatches {
-				ids = append(ids, v.ID)
-				dataSizes = append(dataSizes, v.dataSize)
-			}
-			err := verifier.InsertFailedCompareRecheckDocs(task.QueryFilter.Namespace, ids, dataSizes)
-			if err != nil {
-				verifier.logger.Error().Msgf("[Worker %d] Error inserting document mismatch into Recheck queue: %+v", workerNum, err)
+			task.Status = verificationTaskFailed
+			// We know we won't change lastGeneration while verification tasks are running, so no mutex needed here.
+			if verifier.lastGeneration {
+				verifier.logger.Error().Msgf("[Worker %d] Verification Task %+v failed critical section and is a true error",
+					workerNum, task.PrimaryKey)
+			} else {
+				verifier.logger.Debug().Msgf("[Worker %d] Verification Task %+v failed, may pass next generation", workerNum, task.PrimaryKey)
+				var ids []interface{}
+				var dataSizes []int
+				for _, v := range mismatches {
+					ids = append(ids, v.ID)
+					dataSizes = append(dataSizes, v.dataSize)
+				}
+				err := verifier.InsertFailedCompareRecheckDocs(task.QueryFilter.Namespace, ids, dataSizes)
+				if err != nil {
+					verifier.logger.Error().Msgf("[Worker %d] Error inserting document mismatch into Recheck queue: %+v", workerNum, err)
+				}
 			}
 		}
 	}
@@ -653,7 +695,7 @@ func (verifier *Verifier) getShardingInfo(ctx context.Context, namespaceAndUUID 
 			return nil, fmt.Errorf("Failed to decode sharding info for %s: %v", namespace, err)
 		}
 
-		verifier.logger.Info().Msgf("Collection %s is sharded with shard key %v", namespace, result.Key)
+		verifier.logger.Debug().Msgf("Collection %s is sharded with shard key %v", namespace, result.Key)
 
 		shardKeys = maps.Keys(result.Key)
 		sort.Strings(shardKeys)
@@ -668,27 +710,32 @@ func (verifier *Verifier) getShardingInfo(ctx context.Context, namespaceAndUUID 
 	return shardKeys, nil
 }
 
-func (verifier *Verifier) getCollectionPartitionsAndShardKeys(ctx context.Context, namespace string) ([]*partitions.Partition, []string, error) {
+// partitionAndInspectNamespace does a few preliminary tasks for the
+// given namespace:
+//  1. Devise partition boundaries.
+//  2. Fetch shard keys.
+//  3. Fetch the size: # of docs, and # of bytes.
+func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, namespace string) ([]*partitions.Partition, []string, types.DocumentCount, types.ByteCount, error) {
 	retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
 	dbName, collName := SplitNamespace(namespace)
 	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, verifier.logger, retryer,
 		verifier.srcClientDatabase(dbName), collName)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 	shardKeys, err := verifier.getShardingInfo(ctx, namespaceAndUUID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 
 	// The partitioner doles out ranges to replicators; we don't use that functionality so we just pass
 	// one "replicator".
 	replicator1 := partitions.Replicator{ID: "verifier"}
 	replicators := []partitions.Replicator{replicator1}
-	partitionList, err := partitions.PartitionCollectionWithSize(
+	partitionList, srcDocs, srcBytes, err := partitions.PartitionCollectionWithSize(
 		ctx, namespaceAndUUID, retryer, verifier.srcClient, replicators, verifier.logger, verifier.partitionSizeInBytes)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 	// TODO: Test the empty collection (which returns no partitions)
 	if len(partitionList) == 0 {
@@ -723,7 +770,7 @@ func (verifier *Verifier) getCollectionPartitionsAndShardKeys(ctx context.Contex
 		}
 	}
 
-	return partitionList, shardKeys, nil
+	return partitionList, shardKeys, srcDocs, srcBytes, nil
 }
 
 func (verifier *Verifier) getCollectionSpecification(ctx context.Context, collection *mongo.Collection) (*mongo.CollectionSpecification, error) {
@@ -740,6 +787,7 @@ func (verifier *Verifier) getCollectionSpecification(ctx context.Context, collec
 		return specifications[0], nil
 	}
 
+	// Collection not found.
 	return nil, nil
 }
 
@@ -857,7 +905,7 @@ func compareIndexSpecifications(srcSpec *mongo.IndexSpecification, dstSpec *mong
 }
 
 func (verifier *Verifier) ProcessCollectionVerificationTask(ctx context.Context, workerNum int, task *VerificationTask) {
-	verifier.logger.Info().Msgf("[Worker %d] Processing collection", workerNum)
+	verifier.logger.Debug().Msgf("[Worker %d] Processing collection", workerNum)
 	verifier.verifyMetadataAndPartitionCollection(ctx, workerNum, task)
 	err := verifier.UpdateVerificationTask(task)
 	if err != nil {
@@ -931,8 +979,21 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 	dstColl := verifier.dstClientCollection(task)
 	srcNs := FullName(srcColl)
 	dstNs := FullName(dstColl)
+
 	srcSpec, srcErr := verifier.getCollectionSpecification(ctx, srcColl)
+	if srcErr != nil {
+		verifier.markCollectionFailed(workerNum, task, ClusterSource, srcNs, srcErr)
+	}
+
 	dstSpec, dstErr := verifier.getCollectionSpecification(ctx, dstColl)
+	if dstErr != nil {
+		verifier.markCollectionFailed(workerNum, task, ClusterTarget, dstNs, dstErr)
+	}
+
+	if srcErr != nil || dstErr != nil {
+		return
+	}
+
 	insertFailedCollection := func() {
 		_, err := verifier.InsertFailedCollectionVerificationTask(srcNs)
 		if err != nil {
@@ -943,15 +1004,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 				Msg("Unrecoverable error in inserting failed collection verification task")
 		}
 	}
-	if srcErr != nil {
-		verifier.markCollectionFailed(workerNum, task, ClusterSource, srcNs, srcErr)
-	}
-	if dstErr != nil {
-		verifier.markCollectionFailed(workerNum, task, ClusterTarget, dstNs, dstErr)
-	}
-	if srcErr != nil || dstErr != nil {
-		return
-	}
+
 	if dstSpec == nil {
 		if srcSpec == nil {
 			verifier.logger.Info().Msgf("[Worker %d] Collection not present on either cluster: %s -> %s", workerNum, srcNs, dstNs)
@@ -998,13 +1051,17 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 		task.Status = verificationTaskMetadataMismatch
 	}
 
-	partitions, shardKeys, err := verifier.getCollectionPartitionsAndShardKeys(ctx, srcNs)
+	partitions, shardKeys, docsCount, bytesCount, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
 	if err != nil {
 		task.Status = verificationTaskFailed
 		verifier.logger.Error().Msgf("[Worker %d] Error partitioning collection: %+v", workerNum, err)
 		return
 	}
-	verifier.logger.Info().Msgf("[Worker %d] split collection info %d partitions", workerNum, len(partitions))
+	verifier.logger.Debug().Msgf("[Worker %d] split collection “%s” into %d partitions", workerNum, srcNs, len(partitions))
+
+	task.SourceDocumentCount = docsCount
+	task.SourceByteCount = bytesCount
+
 	for _, partition := range partitions {
 		_, err := verifier.InsertPartitionVerificationTask(partition, shardKeys, dstNs)
 		if err != nil {
@@ -1012,6 +1069,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 			verifier.logger.Error().Msgf("[Worker %d] Error inserting verifier tasks: %+v", workerNum, err)
 		}
 	}
+
 	if task.Status == verificationTaskProcessing {
 		task.Status = verificationTaskCompleted
 	}
@@ -1019,7 +1077,6 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 
 func (verifier *Verifier) GetVerificationStatus() (*VerificationStatus, error) {
 	ctx := context.Background()
-	verificationStatus := VerificationStatus{}
 	taskCollection := verifier.verificationTaskCollection()
 	generation, _ := verifier.getGeneration()
 
@@ -1047,8 +1104,7 @@ func (verifier *Verifier) GetVerificationStatus() (*VerificationStatus, error) {
 		return nil, err
 	}
 
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Status", "Count"})
+	verificationStatus := VerificationStatus{}
 
 	for _, result := range results {
 		status := result.Lookup("_id").String()
@@ -1056,7 +1112,7 @@ func (verifier *Verifier) GetVerificationStatus() (*VerificationStatus, error) {
 		status = status[1 : len(status)-1]
 		count := int(result.Lookup("count").Int32())
 		verificationStatus.TotalTasks += int(count)
-		switch status {
+		switch verificationTaskStatus(status) {
 		case verificationTaskAdded:
 			verificationStatus.AddedTasks = count
 		case verificationTaskProcessing:
@@ -1070,12 +1126,7 @@ func (verifier *Verifier) GetVerificationStatus() (*VerificationStatus, error) {
 		default:
 			verifier.logger.Info().Msgf("Unknown task status %s", status)
 		}
-
-		table.Append([]string{status, strconv.Itoa(count)})
 	}
-	fmt.Println("\nVerify Tasks:")
-	table.Render()
-	fmt.Println()
 
 	return &verificationStatus, nil
 }
@@ -1109,10 +1160,6 @@ func (verifier *Verifier) verificationDatabase() *mongo.Database {
 
 func (verifier *Verifier) verificationTaskCollection() *mongo.Collection {
 	return verifier.verificationDatabase().Collection(verificationTasksCollection)
-}
-
-func (verifier *Verifier) verificationRangeCollection() *mongo.Collection {
-	return verifier.verificationDatabase().Collection(verificationRangeCollection)
 }
 
 func (verifier *Verifier) refetchCollection() *mongo.Collection {
@@ -1182,14 +1229,16 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 	}, nil
 }
 
-func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
+// Returned boolean indicates that namespaces are cached, and
+// whatever needs them can proceed.
+func (verifier *Verifier) ensureNamespaces(ctx context.Context) bool {
 
 	// cache namespace
 	if len(verifier.srcNamespaces) == 0 {
 		namespaces, err := verifier.getNamespaces(ctx, SrcNamespaceField)
 		if err != nil {
-			verifier.logger.Error().Msgf("Failed to learn source namespaces: %s", err)
-			return
+			verifier.logger.Err(err).Msgf("Failed to learn source namespaces")
+			return false
 		}
 
 		verifier.srcNamespaces = namespaces
@@ -1197,7 +1246,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 		// if still no namespace, nothing to print!
 		if len(verifier.srcNamespaces) == 0 {
 			verifier.logger.Info().Msg("Source contains no namespaces.")
-			return
+			return false
 		}
 	}
 
@@ -1205,8 +1254,8 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 		namespaces, err := verifier.getNamespaces(ctx, DstNamespaceField)
 
 		if err != nil {
-			verifier.logger.Error().Msgf("Failed to learn destination namespaces: %s", err)
-			return
+			verifier.logger.Err(err).Msgf("Failed to learn destination namespaces")
+			return false
 		}
 
 		verifier.dstNamespaces = namespaces
@@ -1216,175 +1265,124 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context) {
 		}
 	}
 
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Src Count", "Src DB", "Src Coll", "Dst Count", "Dst DB", "Dst Coll"})
+	return true
+}
 
-	table2 := tablewriter.NewWriter(os.Stdout)
-	table2.SetHeader([]string{"Src Count", "Src DB", "Src Coll", "Dst Count", "Dst DB", "Dst Coll"})
+const (
+	dividerChar  = "\u2501" // horizontal dash
+	dividerWidth = 76
+)
 
-	diffCounts := 0
-	matchingCounts := 0
+func startReport() *strings.Builder {
+	strBuilder := &strings.Builder{}
 
-	for i, n := range verifier.srcNamespaces {
-		srcDb, srcColl := SplitNamespace(n)
-		if srcDb != "" {
-			srcCollection := verifier.srcClientDatabase(srcDb).Collection(srcColl)
-			srcSpec, err := verifier.getCollectionSpecification(ctx, srcCollection)
-			if err != nil {
-				verifier.logger.Error().Msgf("Failed to fetch the source’s collection specification: %s", err)
-				return
-			}
+	timestampAndSpace := time.Now().Format(timeFormat) + " "
+	divider := strings.Repeat(dividerChar, dividerWidth-len(timestampAndSpace))
 
-			// "EstimatedDocumentCount" on a view runs its pipeline, so may be very slow
-			var srcEst int64
-			srcIsView := srcSpec != nil && srcSpec.Type == "view"
-			if !srcIsView {
-				var err error
-				srcEst, err = srcCollection.EstimatedDocumentCount(ctx)
-				if err != nil {
-					verifier.logger.Error().Msgf("Failed to fetch the source’s estimated document count: %s", err)
-					return
-				}
-			}
+	strBuilder.WriteString(fmt.Sprintf(
+		"\n%s%s\n\n", timestampAndSpace, divider,
+	))
 
-			n2 := verifier.dstNamespaces[i]
-			dstDb, dstColl := SplitNamespace(n2)
-			if !srcIsView && dstDb != "" {
-				dstCollection := verifier.dstClientDatabase(dstDb).Collection(dstColl)
-				dstSpec, err := verifier.getCollectionSpecification(ctx, dstCollection)
-				if err != nil {
-					verifier.logger.Error().Msgf("Failed to fetch the destination’s collection specification: %s", err)
-					return
-				}
+	return strBuilder
+}
 
-				if dstSpec == nil || dstSpec.Type != "view" {
-					dstEst, err := dstCollection.EstimatedDocumentCount(ctx)
-					if err != nil {
-						verifier.logger.Error().Msgf("Failed to fetch the destination’s estimated document count: %s", err)
-						return
-					}
-
-					table.Append([]string{strconv.FormatInt(srcEst, 10), srcDb, srcColl,
-						strconv.FormatInt(dstEst, 10), dstDb, dstColl})
-					if srcEst != dstEst {
-						table2.Append([]string{strconv.FormatInt(srcEst, 10), srcDb, srcColl,
-							strconv.FormatInt(dstEst, 10), dstDb, dstColl})
-						diffCounts++
-					} else {
-						matchingCounts++
-					}
-				}
-			}
-		}
-	}
-
-	fmt.Printf("Collections with matching counts: %d\n\n", matchingCounts)
-
-	if matchingCounts <= 25 {
-		fmt.Println("\nSource / Target Comparison (All collections):")
-		table.Render()
-		fmt.Print("\n")
-	}
-
-	if diffCounts == 0 {
-		fmt.Print("********** ALL COLLECTION COUNTS MATCH ! **********\n\n")
-	} else {
-		fmt.Println("\nSource / Target Comparison (Differing counts only):")
-		table2.Render()
-		fmt.Print("Differences in counts may be due to query filters\n\n\n")
-	}
-
-	generation, _ := verifier.getGeneration()
-	metadataFailedTasks, metadataIncompleteTasks :=
-		FetchFailedAndIncompleteTasks(ctx, verifier.verificationTaskCollection(), verificationTaskVerifyCollection, generation)
-	if len(metadataFailedTasks) != 0 {
-		table = tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Index", "Cluster", "Type", "Field", "Namespace", "Details"})
-
-		for _, v := range metadataFailedTasks {
-			for _, f := range v.FailedDocs {
-				table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
-			}
-		}
-		fmt.Println("Collections/Indexes in failed or retry status:")
-		table.Render()
-		fmt.Println()
-	} else if len(metadataIncompleteTasks) == 0 {
-		fmt.Print("********** ALL COLLECTION METADATA MATCHES ! **********\n\n")
-	}
-
-	FailedTasks := FetchFailedTasks(ctx, verifier.verificationTaskCollection(), verificationTaskVerify, generation)
-	if len(FailedTasks) == 0 {
-		// Nothing to print
+func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatus GenerationStatus) {
+	if !verifier.ensureNamespaces(ctx) {
 		return
 	}
 
-	// First present summaries of failures based on present/missing and differing content
-	table = tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Failure Type", "Count"})
+	strBuilder := startReport()
 
-	contentMismatch := 0
-	missing := 0
-	for _, v := range FailedTasks {
-		contentMismatch += len(v.FailedDocs)
-		missing += len(v.Ids)
+	generation, _ := verifier.getGeneration()
+
+	var header string
+	switch genstatus {
+	case Gen0MetadataAnalysisComplete:
+		header = fmt.Sprintf("Metadata Analysis Complete (Generation #%d)", generation)
+	case GenerationInProgress:
+		header = fmt.Sprintf("Progress Report (Generation #%d)", generation)
+	case GenerationComplete:
+		header = fmt.Sprintf("End of Generation #%d", generation)
+	default:
+		panic("Bad generation status: " + genstatus)
 	}
 
-	table.Append([]string{"Documents With Differing Content", fmt.Sprintf("%v", contentMismatch)})
-	table.Append([]string{"Documents Missing On Source or Dest", fmt.Sprintf("%v", missing)})
-	fmt.Println("Failure summary:")
-	table.Render()
-	fmt.Println()
+	strBuilder.WriteString(header + "\n\n")
 
-	table = tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"ID", "Cluster", "Type", "Field", "Namespace", "Details"})
+	strBuilder.WriteString(fmt.Sprintf(
+		"Generation time elapsed: %s\n",
+		reportutils.DurationToHMS(time.Since(verifier.generationStartTime)),
+	))
 
-	i := int64(0)
-	printAll := int64(contentMismatch) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
-OUTA:
-	for _, v := range FailedTasks {
-		for _, f := range v.FailedDocs {
-			table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
-			i += 1
-			if !printAll && i >= verifier.failureDisplaySize {
-				break OUTA
-			}
+	countsMismatch, err := verifier.reportCollectionCountMismatches(ctx, strBuilder)
+	if err != nil {
+		verifier.logger.Err(err).Msgf("Failed to report collection count mismatches")
+		return
+	}
+
+	metadataMismatches, anyCollsIncomplete, err := verifier.reportCollectionMetadataMismatches(ctx, strBuilder)
+	if err != nil {
+		verifier.logger.Err(err).Msgf("Failed to report collection metadata mismatches")
+		return
+	}
+
+	var hasTasks bool
+	switch genstatus {
+	case Gen0MetadataAnalysisComplete:
+		fallthrough
+	case GenerationInProgress:
+		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder)
+	case GenerationComplete:
+		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder)
+	default:
+		panic("Bad generation status: " + genstatus)
+	}
+
+	if err != nil {
+		verifier.logger.Err(err).Msgf("Failed to report per-namespace statistics")
+	}
+
+	var statusLine string
+
+	if hasTasks {
+		docMismatches, anyPartitionsIncomplete, err := verifier.reportDocumentMismatches(ctx, strBuilder)
+		if err != nil {
+			verifier.logger.Err(err).Msgf("Failed to report document mismatches")
+			return
 		}
-	}
-	if printAll {
-		fmt.Println("All Documents in tasks in failed status due do differing content:")
-	} else {
-		fmt.Printf("First %d Documents in tasks in failed status due do differing content:\n", verifier.failureDisplaySize)
-	}
-	table.Render()
-	fmt.Println()
 
-	table = tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Document ID", "Source NameSpace", "Destination Namespace"})
+		if countsMismatch || metadataMismatches || docMismatches {
+			verifier.printMismatchInvestigationNotes(strBuilder)
 
-	i = int64(0)
-	printAll = int64(missing) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
-OUTB:
-	for _, v := range FailedTasks {
-		for _, _id := range v.Ids {
-			table.Append([]string{fmt.Sprintf("%v", _id),
-				fmt.Sprintf("%v", v.QueryFilter.Namespace),
-				fmt.Sprintf("%v", v.QueryFilter.To),
-			})
-			i += 1
-			if !printAll && i >= verifier.failureDisplaySize {
-				break OUTB
-			}
+			statusLine = fmt.Sprintf(notOkSymbol + " Mismatches found.")
+		} else if anyCollsIncomplete || anyPartitionsIncomplete {
+			statusLine = fmt.Sprintf(infoSymbol + " No mismatches found yet, but verification is still in progress.")
+		} else {
+			statusLine = fmt.Sprintf(okSymbol + " No mismatches found. Source & destination completely match!")
 		}
-	}
-	if printAll {
-		fmt.Println("All documents present in source/destination missing in destination/source:")
 	} else {
-		fmt.Printf("First %d Documents present in source/destination missing in destination/source:\n", verifier.failureDisplaySize)
-	}
-	table.Render()
-	fmt.Println()
+		switch genstatus {
+		case GenerationInProgress:
+			statusLine = "This generation has nothing to compare."
+		case GenerationComplete:
+			statusLine = "This generation had nothing to compare."
+		default:
+			panic("Bad generation status: " + genstatus)
+		}
 
+		statusLine = okSymbol + " " + statusLine
+	}
+
+	strBuilder.WriteString("\n" + statusLine + "\n")
+
+	verifier.writeStringBuilder(strBuilder)
+}
+
+func (verifier *Verifier) writeStringBuilder(builder *strings.Builder) {
+	_, err := verifier.writer.Write([]byte(builder.String()))
+	if err != nil {
+		panic("Failed to write to string builder: " + err.Error())
+	}
 }
 
 func (verifier *Verifier) getNamespaces(ctx context.Context, fieldName string) ([]string, error) {

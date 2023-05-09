@@ -5,21 +5,27 @@ import (
 	"os"
 
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
-// DefaultLogWriter is the default log io.Writer implementor.
-var DefaultLogWriter = os.Stderr
-
 func getLogWriter(logPath string) io.Writer {
-	if logPath == "stderr" {
-		return DefaultLogWriter
+	var writer io.Writer
+
+	switch logPath {
+	case "stdout":
+		writer = os.Stdout
+
+	case "stderr":
+		writer = os.Stderr
+
+	default:
+		if w, err := logger.NewRotatingWriter(logPath); err == nil {
+			return w
+		}
+
+		log.Fatal().Msgf("Failed to open logPath: %s", logPath)
 	}
 
-	if w, err := logger.NewRotatingWriter(logPath); err == nil {
-		return w
-	}
-
-	log.Fatal().Msgf("Failed to open logPath: %s", logPath)
-	return nil
+	return zerolog.SyncWriter(writer)
 }

@@ -2,14 +2,31 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/retry"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
+
+type GenerationStatus string
+
+const (
+	Gen0MetadataAnalysisComplete GenerationStatus = "gen0_metadata_analysis_complete"
+	GenerationInProgress         GenerationStatus = "inprogress"
+	GenerationComplete           GenerationStatus = "complete"
+)
+
+var failedStatus = mapset.NewSet(
+	verificationTaskFailed,
+	verificationTaskMetadataMismatch,
+)
+
+var verificationStatusCheckInterval time.Duration = 15 * time.Second
 
 // Check is the asynchronous entry point to Check, should only be called by the web server. Use
 // CheckDriver directly for synchronous run.
@@ -30,7 +47,7 @@ func (verifier *Verifier) waitForChangeStream() error {
 	csRunning := verifier.changeStreamRunning
 	verifier.mux.RUnlock()
 	if csRunning {
-		verifier.logger.Info().Msg("Changestream still running, signalling that writes are done and waiting for change stream to exit")
+		verifier.logger.Debug().Msg("Changestream still running, signalling that writes are done and waiting for change stream to exit")
 		verifier.changeStreamEnderChan <- struct{}{}
 		select {
 		case err := <-verifier.changeStreamErrChan:
@@ -43,7 +60,7 @@ func (verifier *Verifier) waitForChangeStream() error {
 }
 
 func (verifier *Verifier) CheckWorker(ctx context.Context) error {
-	verifier.logger.Info().Msgf("Starting %d verification workers", verifier.numWorkers)
+	verifier.logger.Debug().Msgf("Starting %d verification workers", verifier.numWorkers)
 	ctx, cancel := context.WithCancel(ctx)
 	wg := sync.WaitGroup{}
 	for i := 0; i < verifier.numWorkers; i++ {
@@ -52,8 +69,21 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	verifier.logger.Info().Msgf("Starting Check generation %d", verifier.generation)
+	generation := verifier.generation
+
+	// Since we do a progress report right at the start we don’t need
+	// this to go in non-debug output.
+	startLabel := fmt.Sprintf("Starting check generation %d", generation)
+	verifier.logger.Debug().Msg(startLabel)
+
+	genStartReport := startReport()
+	genStartReport.WriteString(startLabel + "\n\n")
+	genStartReport.WriteString("Gathering collection metadata …\n")
+
+	verifier.writeStringBuilder(genStartReport)
+
 	waitForTaskCreation := 0
+
 	for {
 		select {
 		case err := <-verifier.changeStreamErrChan:
@@ -71,22 +101,24 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 		}
 
 		if waitForTaskCreation%2 == 0 {
-			verifier.PrintVerificationSummary(ctx)
+			if generation > 0 || verifier.gen0PendingCollectionTasks.Load() == 0 {
+				verifier.PrintVerificationSummary(ctx, GenerationInProgress)
+			}
 		}
 
 		//wait for task to be created, if none of the tasks found.
 		if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 || verificationStatus.RecheckTasks > 0 {
 			waitForTaskCreation++
-			time.Sleep(15 * time.Second)
+			time.Sleep(verificationStatusCheckInterval)
 		} else {
-			verifier.PrintVerificationSummary(ctx)
-			verifier.logger.Info().Msg("Verification tasks complete")
+			verifier.PrintVerificationSummary(ctx, GenerationComplete)
+			verifier.logger.Debug().Msg("Verification tasks complete")
 			cancel()
 			wg.Wait()
 			break
 		}
 	}
-	verifier.logger.Info().Msgf("Check generation %d finished", verifier.generation)
+	verifier.logger.Debug().Msgf("Check generation %d finished", generation)
 	return nil
 }
 
@@ -116,7 +148,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, testChan ...chan stru
 	if err != nil {
 		return err
 	}
-	verifier.logger.Info().Msg("Starting Check")
+	verifier.logger.Debug().Msg("Starting Check")
 
 	verifier.phase = Check
 	defer func() {
@@ -127,7 +159,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, testChan ...chan stru
 	csRunning := verifier.changeStreamRunning
 	verifier.mux.RUnlock()
 	if !csRunning {
-		verifier.logger.Info().Msg("Change stream not running, starting change stream")
+		verifier.logger.Debug().Msg("Change stream not running; starting change stream")
 		retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
 		// Ignore the error from this call -- if it fails, we use an alternate method
 		// where we use the change stream's initial resume token.
@@ -146,7 +178,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, testChan ...chan stru
 	if err != nil {
 		verifier.logger.Error().Msgf("Failed getting verification status: %v", err)
 	} else {
-		verifier.logger.Info().Msgf("Initial verification phase: %+v", verificationStatus)
+		verifier.logger.Debug().Msgf("Initial verification phase: %+v", verificationStatus)
 	}
 
 	err = verifier.CreateInitialTasks()
@@ -155,6 +187,8 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, testChan ...chan stru
 	}
 	// Now enter the multi-generational steady check state
 	for {
+		verifier.generationStartTime = time.Now()
+
 		err := verifier.CheckWorker(ctx)
 		if err != nil {
 			return err
@@ -230,7 +264,7 @@ func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {
 			srcNamespaces = append(srcNamespaces, ns)
 		}
 	}
-	verifier.logger.Info().Msgf("Namespaces to verify %+v", srcNamespaces)
+	verifier.logger.Debug().Msgf("Namespaces to verify %+v", srcNamespaces)
 	// In verifyAll mode, we do not support collection renames, so src and dest lists are the same.
 	verifier.srcNamespaces = srcNamespaces
 	verifier.dstNamespaces = srcNamespaces
@@ -257,6 +291,7 @@ func (verifier *Verifier) CreateInitialTasks() error {
 		return err
 	}
 	if !isPrimary {
+		verifier.logger.Info().Msgf("Primary task already existed; skipping setup")
 		return nil
 	}
 	if verifier.verifyAll {
@@ -273,6 +308,8 @@ func (verifier *Verifier) CreateInitialTasks() error {
 		}
 	}
 
+	verifier.gen0PendingCollectionTasks.Store(int32(len(verifier.srcNamespaces)))
+
 	err = verifier.UpdatePrimaryTaskComplete()
 	if err != nil {
 		return err
@@ -280,53 +317,35 @@ func (verifier *Verifier) CreateInitialTasks() error {
 	return nil
 }
 
-func FetchFailedTasks(ctx context.Context, coll *mongo.Collection, taskType string, generation int) []VerificationTask {
-	var FailedTasks []VerificationTask
-	status := []string{verificationTaskFailed, verificationTaskMetadataMismatch}
-	cur, err := coll.Find(ctx, bson.D{bson.E{Key: "type", Value: taskType},
-		bson.E{Key: "status", Value: bson.M{"$in": status}},
-		bson.E{Key: "generation", Value: generation}})
-	if err != nil {
-		return FailedTasks
-	}
-
-	err = cur.All(ctx, &FailedTasks)
-	if err != nil {
-		return FailedTasks
-	}
-
-	return FailedTasks
-}
-
-func FetchFailedAndIncompleteTasks(ctx context.Context, coll *mongo.Collection, taskType string, generation int) ([]VerificationTask, []VerificationTask) {
+func FetchFailedAndIncompleteTasks(ctx context.Context, coll *mongo.Collection, taskType verificationTaskType, generation int) ([]VerificationTask, []VerificationTask, error) {
 	var FailedTasks, allTasks, IncompleteTasks []VerificationTask
-	failedStatus := map[string]bool{verificationTaskFailed: true, verificationTaskMetadataMismatch: true}
-	cur, err := coll.Find(ctx, bson.D{bson.E{Key: "type", Value: taskType},
-		bson.E{Key: "generation", Value: generation}})
+
+	cur, err := coll.Find(ctx, bson.D{
+		bson.E{Key: "type", Value: taskType},
+		bson.E{Key: "generation", Value: generation},
+	})
 	if err != nil {
-		return FailedTasks, IncompleteTasks
+		return FailedTasks, IncompleteTasks, err
 	}
 
 	err = cur.All(ctx, &allTasks)
 	if err != nil {
-		return FailedTasks, IncompleteTasks
+		return FailedTasks, IncompleteTasks, err
 	}
 	for _, t := range allTasks {
-		if t.Status != verificationTaskCompleted {
-			if failedStatus[t.Status] {
-				FailedTasks = append(FailedTasks, t)
-			} else {
-				IncompleteTasks = append(IncompleteTasks, t)
-			}
+		if failedStatus.Contains(t.Status) {
+			FailedTasks = append(FailedTasks, t)
+		} else if t.Status != verificationTaskCompleted {
+			IncompleteTasks = append(IncompleteTasks, t)
 		}
 	}
 
-	return FailedTasks, IncompleteTasks
+	return FailedTasks, IncompleteTasks, nil
 }
 
 func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.WaitGroup) {
 	defer wg.Done()
-	verifier.logger.Info().Msgf("[Worker %d] Started", workerNum)
+	verifier.logger.Debug().Msgf("[Worker %d] Started", workerNum)
 	for {
 		select {
 		case <-ctx.Done():
@@ -340,8 +359,15 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.Wait
 			} else if err != nil {
 				panic(err)
 			}
+
 			if task.Type == verificationTaskVerifyCollection {
 				verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
+				if task.Generation == 0 {
+					newVal := verifier.gen0PendingCollectionTasks.Add(-1)
+					if newVal == 0 {
+						verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
+					}
+				}
 			} else {
 				verifier.ProcessVerifyTask(workerNum, task)
 			}

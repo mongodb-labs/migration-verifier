@@ -6,6 +6,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -59,6 +60,14 @@ func (s *UnitTestSuite) TestBasics() {
 	dmap1 := New(s.logger, "foo")
 	err := dmap1.ImportFromCursor(context.Background(), cur1)
 	s.Require().NoError(err)
+
+	s.Assert().Equal(types.DocumentCount(3), dmap1.Count(), "docs count")
+
+	expectedSize := 0
+	for _, doc := range raw1 {
+		expectedSize += len(doc)
+	}
+	s.Assert().Equal(types.ByteCount(expectedSize), dmap1.TotalDocsBytes(), "bytes count")
 
 	dmap2 := dmap1.CloneEmpty()
 	err = dmap2.ImportFromCursor(context.Background(), cur2)

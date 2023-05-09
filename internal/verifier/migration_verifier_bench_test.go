@@ -77,10 +77,6 @@ func BenchmarkGeneric(t *testing.B) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifier.verificationRangeCollection().Drop(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
 	err = verifier.verificationDatabase().Collection(recheckQueue).Drop(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -96,10 +92,10 @@ func BenchmarkGeneric(t *testing.B) {
 		qfilter := QueryFilter{Namespace: namespace}
 		task := VerificationTask{QueryFilter: qfilter}
 		// TODO: is this safe?
-		mismatchedIds, err := verifier.FetchAndCompareDocuments(&task)
+		mismatchedIds, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(&task)
 		if err != nil {
 			t.Fatal(err)
 		}
-		fmt.Printf("In namespace %s found %d mismatched docs", namespace, len(mismatchedIds))
+		fmt.Printf("In namespace %s found %d mismatched docs out of %d total (%d bytes)", namespace, len(mismatchedIds), docsCount, bytesCount)
 	}
 }

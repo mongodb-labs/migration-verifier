@@ -32,6 +32,7 @@ import (
 	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/types"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -178,6 +179,21 @@ func (m *Map) Fetch(key MapKey) bson.Raw {
 	}
 
 	return doc
+}
+
+// Count returns the number of documents in the Map.
+func (m *Map) Count() types.DocumentCount {
+	return types.DocumentCount(len(m.internalMap))
+}
+
+// TotalDocsBytes returns the combined byte size of the Map’s documents.
+func (m *Map) TotalDocsBytes() types.ByteCount {
+	var size types.ByteCount
+	for _, doc := range m.internalMap {
+		size += types.ByteCount(len(doc))
+	}
+
+	return size
 }
 
 // ----------------------------------------------------------------------

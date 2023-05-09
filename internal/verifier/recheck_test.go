@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/10gen/migration-verifier/internal/types"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -55,13 +56,20 @@ func (suite *MultiMetaVersionTestSuite) TestLargeIDInsertions() {
 		Generation: 1,
 		Ids:        []interface{}{id1, id2},
 		Status:     verificationTaskAdded,
-		Type:       verificationTaskVerify,
+		Type:       verificationTaskVerifyDocuments,
 		QueryFilter: QueryFilter{
 			Namespace: "testDB.testColl",
 			To:        "testDB.testColl",
-		}}
+		},
+		SourceDocumentCount: 2,
+		SourceByteCount:     types.ByteCount(2 * overlyLarge),
+	}
+
 	t2 := t1
 	t2.Ids = []interface{}{id3}
+	t2.SourceDocumentCount = 1
+	t2.SourceByteCount = types.ByteCount(overlyLarge)
+
 	suite.ElementsMatch([]VerificationTask{t1, t2}, actualTasks)
 }
 
@@ -114,13 +122,20 @@ func (suite *MultiMetaVersionTestSuite) TestLargeDataInsertions() {
 		Generation: 1,
 		Ids:        []interface{}{id1, id2},
 		Status:     verificationTaskAdded,
-		Type:       verificationTaskVerify,
+		Type:       verificationTaskVerifyDocuments,
 		QueryFilter: QueryFilter{
 			Namespace: "testDB.testColl",
 			To:        "testDB.testColl",
-		}}
+		},
+		SourceDocumentCount: 2,
+		SourceByteCount:     1126400,
+	}
+
 	t2 := t1
 	t2.Ids = []interface{}{id3}
+	t2.SourceDocumentCount = 1
+	t2.SourceByteCount = 1024
+
 	suite.ElementsMatch([]VerificationTask{t1, t2}, actualTasks)
 }
 
@@ -157,11 +172,14 @@ func (suite *MultiMetaVersionTestSuite) TestMultipleNamespaces() {
 		Generation: 1,
 		Ids:        []interface{}{id1, id2, id3},
 		Status:     verificationTaskAdded,
-		Type:       verificationTaskVerify,
+		Type:       verificationTaskVerifyDocuments,
 		QueryFilter: QueryFilter{
 			Namespace: "testDB1.testColl1",
 			To:        "testDB1.testColl1",
-		}}
+		},
+		SourceDocumentCount: 3,
+		SourceByteCount:     3000,
+	}
 	t2, t3, t4 := t1, t1, t1
 	t2.QueryFilter.Namespace = "testDB2.testColl1"
 	t3.QueryFilter.To = "testDB1.testColl2"
