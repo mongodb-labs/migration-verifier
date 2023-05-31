@@ -7,7 +7,6 @@ package verifier
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -49,91 +48,6 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 	}
 
 	return false, anyAreIncomplete, nil
-}
-
-// Returned boolean indicates whether any mismatches were found.
-func (verifier *Verifier) reportCollectionCountMismatches(ctx context.Context, strBuilder *strings.Builder) (bool, error) {
-	maxMismatchedCountsToShow := verifier.failureDisplaySize
-
-	mismatchedCountsTable := tablewriter.NewWriter(strBuilder)
-	mismatchedCountsTable.SetHeader([]string{"Namespace (Source)", "Source Count", "Destination Count"})
-	abridgedText := ""
-
-	var diffCounts int64
-
-	for i, n := range verifier.srcNamespaces {
-		srcDb, srcColl := SplitNamespace(n)
-		if srcDb == "" {
-			continue
-		}
-
-		dstDb, dstColl := SplitNamespace(verifier.dstNamespaces[i])
-		if dstDb == "" {
-			continue
-		}
-
-		srcCollection := verifier.srcClientDatabase(srcDb).Collection(srcColl)
-		srcSpec, err := verifier.getCollectionSpecification(ctx, srcCollection)
-		if err != nil {
-			return false, fmt.Errorf("Failed to fetch %s’s specification from the source: %+v", FullName(srcCollection), err)
-		}
-
-		// "EstimatedDocumentCount" on a view runs its pipeline, so may be very slow
-		if srcSpec != nil && srcSpec.Type == "view" {
-			continue
-		}
-
-		srcEst, err := srcCollection.EstimatedDocumentCount(ctx)
-		if err != nil {
-			return false, fmt.Errorf("Failed to fetch %s’s document count from the source: %+v", FullName(srcCollection), err)
-		}
-
-		dstCollection := verifier.dstClientDatabase(dstDb).Collection(dstColl)
-		dstSpec, err := verifier.getCollectionSpecification(ctx, dstCollection)
-		if err != nil {
-			return false, fmt.Errorf("Failed to fetch %s’s specification from the destination: %+v", FullName(dstCollection), err)
-		}
-
-		if dstSpec != nil && dstSpec.Type == "view" {
-			continue
-		}
-
-		dstEst, err := dstCollection.EstimatedDocumentCount(ctx)
-		if err != nil {
-			return false, fmt.Errorf("Failed to fetch %s’s document count from the destination: %+v", FullName(dstCollection), err)
-		}
-
-		// Finally, we have document counts for both source &
-		// destination. Now we can process those:
-
-		if srcEst != dstEst {
-			diffCounts++
-
-			if diffCounts < maxMismatchedCountsToShow {
-				mismatchedCountsTable.Append([]string{
-					FullName(srcCollection),
-					strconv.FormatInt(srcEst, 10),
-					strconv.FormatInt(dstEst, 10),
-				})
-			} else {
-				abridgedText = fmt.Sprintf(" (first %d)", maxMismatchedCountsToShow)
-			}
-		}
-	}
-
-	if diffCounts > 0 {
-		strBuilder.WriteString("\n")
-
-		strBuilder.WriteString(fmt.Sprintf(
-			"Mismatched collection document counts%s:\n",
-			abridgedText,
-		))
-		mismatchedCountsTable.Render()
-
-		return true, nil
-	}
-
-	return false, nil
 }
 
 func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (bool, bool, error) {

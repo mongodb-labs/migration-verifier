@@ -1314,12 +1314,6 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		reportutils.DurationToHMS(time.Since(verifier.generationStartTime)),
 	))
 
-	countsMismatch, err := verifier.reportCollectionCountMismatches(ctx, strBuilder)
-	if err != nil {
-		verifier.logger.Err(err).Msgf("Failed to report collection count mismatches")
-		return
-	}
-
 	metadataMismatches, anyCollsIncomplete, err := verifier.reportCollectionMetadataMismatches(ctx, strBuilder)
 	if err != nil {
 		verifier.logger.Err(err).Msgf("Failed to report collection metadata mismatches")
@@ -1351,7 +1345,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 			return
 		}
 
-		if countsMismatch || metadataMismatches || docMismatches {
+		if metadataMismatches || docMismatches {
 			verifier.printMismatchInvestigationNotes(strBuilder)
 
 			statusLine = fmt.Sprintf(notOkSymbol + " Mismatches found.")
