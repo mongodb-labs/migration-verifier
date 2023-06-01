@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -121,7 +122,7 @@ func main() {
 			Usage: "Read preference for reading data from clusters. " +
 				"May be 'primary', 'secondary', 'primaryPreferred', 'secondaryPreferred', or 'nearest'",
 		},
-		&cli.Int64Flag{
+		&cli.Uint64Flag{
 			Name:  partitionSizeMB,
 			Value: 0,
 			Usage: "`Megabytes` to use for a partition.  Change only for debugging. 0 means use partitioner default.",
@@ -193,7 +194,16 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	v.SetNumWorkers(cCtx.Int(numWorkers))
 	v.SetGenerationPauseDelayMillis(time.Duration(cCtx.Int64(generationPauseDelay)))
 	v.SetWorkerSleepDelayMillis(time.Duration(cCtx.Int64(workerSleepDelay)))
-	v.SetPartitionSizeMB(cCtx.Int64(partitionSizeMB))
+
+	partitionSizeMB := cCtx.Uint64(partitionSizeMB)
+	if partitionSizeMB != 0 {
+		if partitionSizeMB > math.MaxInt64 {
+			return nil, fmt.Errorf("%q may not exceed %d", partitionSizeMB, math.MaxInt64)
+		}
+
+		v.SetPartitionSizeMB(uint32(partitionSizeMB))
+	}
+
 	v.SetStartClean(cCtx.Bool(startClean))
 	logPath := cCtx.String(logPath)
 	v.SetLogger(logPath)

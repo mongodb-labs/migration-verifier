@@ -106,8 +106,13 @@ type Verifier struct {
 	ignoreBSONFieldOrder       bool
 	verifyAll                  bool
 	startClean                 bool
-	partitionSizeInBytes       int64
-	readPreference             *readpref.ReadPref
+
+	// This would seem more ideal as uint64, but changing it would
+	// trigger several other similar type changes, and that’s not really
+	// worthwhile for now.
+	partitionSizeInBytes int64
+
+	readPreference *readpref.ReadPref
 
 	logger *logger.Logger
 	writer io.Writer
@@ -290,8 +295,9 @@ func (verifier *Verifier) SetWorkerSleepDelayMillis(arg time.Duration) {
 	verifier.workerSleepDelayMillis = arg
 }
 
-func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB int64) {
-	verifier.partitionSizeInBytes = partitionSizeMB * 1024 * 1024
+// SetPartitionSizeMB sets the verifier’s maximum partition size in MiB.
+func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
+	verifier.partitionSizeInBytes = int64(partitionSizeMB) * 1024 * 1024
 }
 
 func (verifier *Verifier) SetLogger(logPath string) {
