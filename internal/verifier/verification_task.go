@@ -62,7 +62,7 @@ type VerificationTask struct {
 	Ids         []interface{}          `bson:"_ids"`
 	ID          int                    `bson:"id"`
 	FailedDocs  []VerificationResult   `bson:"failed_docs,omitempty"`
-	QueryFilter QueryFilter            `json:"query_filter" bson:"query_filter"`
+	QueryFilter QueryFilter            `bson:"query_filter"          json:"query_filter"`
 
 	// DocumentCount is set when the verifier is done with the task
 	// (whether we found mismatches or not).

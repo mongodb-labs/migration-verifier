@@ -93,8 +93,8 @@ func (e TaskError) Error() string {
 type QueryFilter struct {
 	Partition *partitions.Partition `bson:"partition"`
 	ShardKeys []string
-	Namespace string `json:"namespace" bson:"namespace"`
-	To        string `json:"to,omitempty" bson:"to,omitempty"`
+	Namespace string `bson:"namespace"    json:"namespace"`
+	To        string `bson:"to,omitempty" json:"to,omitempty"`
 }
 
 // GetLastOpTimeAndSyncShardClusterTime retrieves the last operation time on the source. If maxClusterTime is provided,
