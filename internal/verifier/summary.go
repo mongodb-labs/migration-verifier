@@ -199,8 +199,6 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 	perSecondDataUnit := reportutils.FindBestUnit(bytesPerSecond)
 
 	if totalDocs > 0 {
-		dataUnit := reportutils.FindBestUnit(totalBytes)
-
 		strBuilder.WriteString(fmt.Sprintf(
 			"Total source documents compared: %d of %d (%s%%, %s/sec)\n",
 			comparedDocs,
@@ -208,6 +206,17 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 			reportutils.FmtPercent(comparedDocs, totalDocs),
 			reportutils.FmtFloat(docsPerSecond),
 		))
+	} else {
+		strBuilder.WriteString(fmt.Sprintf(
+			"Total source documents compared: %d (%s/sec)\n",
+			comparedDocs,
+			reportutils.FmtFloat(docsPerSecond),
+		))
+	}
+
+	if totalBytes > 0 {
+		dataUnit := reportutils.FindBestUnit(totalBytes)
+
 		strBuilder.WriteString(fmt.Sprintf(
 			"Total size of those documents: %s of %s %s (%s%%, %s %s/sec)\n",
 			reportutils.BytesToUnit(comparedBytes, dataUnit),
@@ -221,11 +230,6 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		dataUnit := reportutils.FindBestUnit(comparedBytes)
 
 		strBuilder.WriteString(fmt.Sprintf(
-			"Total source documents compared: %d (%s/sec)\n",
-			comparedDocs,
-			reportutils.FmtFloat(docsPerSecond),
-		))
-		strBuilder.WriteString(fmt.Sprintf(
 			"Total size of those documents: %s %s (%s %s/sec)\n",
 			reportutils.BytesToUnit(comparedBytes, dataUnit),
 			dataUnit,
@@ -235,7 +239,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 	}
 
 	table := tablewriter.NewWriter(strBuilder)
-	table.SetHeader([]string{"Src Namespace", "Src Docs Compared", "Src Data Size"})
+	table.SetHeader([]string{"Src Namespace", "Src Docs Compared", "Src Data Compared"})
 
 	tableHasRows := false
 
@@ -246,37 +250,37 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 
 		tableHasRows = true
 
-		// Generation #1 will have TotalDocs and Total Bytes;
-		// subsequent generations won’t.
+		var docsCell string
+		var dataCell string
+
 		if result.TotalDocs > 0 {
+			docsCell = fmt.Sprintf("%d of %d (%s%%)",
+				result.DocsCompared, result.TotalDocs,
+				reportutils.FmtPercent(result.DocsCompared, result.TotalDocs),
+			)
+		} else {
+			docsCell = fmt.Sprintf("%d", result.DocsCompared)
+		}
+
+		if result.TotalBytes > 0 {
 			dataUnit := reportutils.FindBestUnit(result.TotalBytes)
 
-			table.Append([]string{
-				result.Namespace,
-				fmt.Sprintf("%d of %d (%s%%)",
-					result.DocsCompared, result.TotalDocs,
-					reportutils.FmtPercent(result.DocsCompared, result.TotalDocs),
-				),
-
-				fmt.Sprintf("%s of %s %s (%s%%)",
-					reportutils.BytesToUnit(result.BytesCompared, dataUnit),
-					reportutils.BytesToUnit(result.TotalBytes, dataUnit),
-					dataUnit,
-					reportutils.FmtPercent(result.BytesCompared, result.TotalBytes),
-				),
-			})
+			dataCell = fmt.Sprintf("%s of %s %s (%s%%)",
+				reportutils.BytesToUnit(result.BytesCompared, dataUnit),
+				reportutils.BytesToUnit(result.TotalBytes, dataUnit),
+				dataUnit,
+				reportutils.FmtPercent(result.BytesCompared, result.TotalBytes),
+			)
 		} else {
 			dataUnit := reportutils.FindBestUnit(result.BytesCompared)
 
-			table.Append([]string{
-				result.Namespace,
-				fmt.Sprintf("%d", result.DocsCompared),
-				fmt.Sprintf("%s %s",
-					reportutils.BytesToUnit(result.BytesCompared, dataUnit),
-					dataUnit,
-				),
-			})
+			dataCell = fmt.Sprintf("%s %s",
+				reportutils.BytesToUnit(result.BytesCompared, dataUnit),
+				dataUnit,
+			)
 		}
+
+		table.Append([]string{result.Namespace, docsCell, dataCell})
 	}
 
 	if tableHasRows {

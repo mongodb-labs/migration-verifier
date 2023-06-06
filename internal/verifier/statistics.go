@@ -111,12 +111,11 @@ const perNsStatsPipelineTemplate = `[
 			},
 
 			{{/*
-				Verify-collection tasks store document and byte totals,
-				so we always include those.
+				In generation 0 we can get the total docs from the
+				verify-collection tasks.
 
-				Verify-docs tasks include doc & byte totals if a) they’re
-				completed or b) they’re recheck tasks. We only want to
-				consider the latter case, so we exclude based on status.
+				In later generations we don’t have verify-collection tasks,
+				so we add up the individual recheck batch tasks.
 			*/}}
 			"totalDocs": {
 				"$cond": [
@@ -131,15 +130,20 @@ const perNsStatsPipelineTemplate = `[
 					0
 				]
 			},
+
+			{{/*
+				As with totalDocs, in generation 0 we can get totalBytes from
+				the verify-collection tasks.
+
+				Ideally we could also approach later generations as we do with
+				totalDocs; however, the source_bytes_count figures for those
+				tasks aren’t meangingful because change stream events don’t allow
+				us to determine document size. So, after generation 0 we have to
+				report totalBytes as 0.
+			*/}}
 			"totalBytes": {
 				"$cond": [
-					{ "$or": [
-						{ "$eq": [ "$type", "{{.VerifyCollType}}" ] },
-						{ "$and": [
-							{ "$eq": [ "$type", "{{.VerifyDocsType}}" ] },
-							{ "$ne": [ "$generation", 0 ] }
-						] }
-					] },
+					{ "$eq": [ "$type", "{{.VerifyCollType}}" ] },
 					"$source_bytes_count",
 					0
 				]

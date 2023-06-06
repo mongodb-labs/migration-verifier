@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	recheckQueue = "recheckQueue"
+	recheckQueue   = "recheckQueue"
+	maxBSONObjSize = 16 * 1024 * 1024
 )
 
 // RecheckPrimaryKey stores the implicit type of recheck to perform
@@ -39,9 +40,14 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 
 func (verifier *Verifier) InsertChangeEventRecheckDoc(ctx context.Context, changeEvent *ParsedEvent) error {
 	documentIDs := []interface{}{changeEvent.DocKey.ID}
-	// We don't know the document sizes for documents for all change events, so just be conservative
-	// and assume they are maximum size.
-	dataSizes := []int{16 * 1024 * 1024}
+
+	// We don't know the document sizes for documents for all change events,
+	// so just be conservative and assume they are maximum size.
+	//
+	// Note that this prevents us from being able to report a meaningful
+	// total data size for noninitial generations in the log.
+	dataSizes := []int{maxBSONObjSize}
+
 	return verifier.insertRecheckDocs(
 		ctx, changeEvent.Ns.DB, changeEvent.Ns.Coll, documentIDs, dataSizes)
 }
