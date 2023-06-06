@@ -63,22 +63,22 @@ To set a port, use `--serverPort <port number>`. The default is 27020.
 
 
 
-1. After launching the verifier (see above), you can send it requests to get it to start verifying. The verification process is started by using the **<code>check</code></strong> command. The verification process will keep running until you tell the verifier to stop. It will keep track of the inconsistencies it has found and will keep checking those inconsistencies hoping that eventually they will resolve.
+1. After launching the verifier (see above), you can send it requests to get it to start verifying. The verification process is started by using the `check`command. The verification process will keep running until you tell the verifier to stop. It will keep track of the inconsistencies it has found and will keep checking those inconsistencies hoping that eventually they will resolve.
 
     ```
     curl -H "Content-Type: application/json" -X POST -d '{}' http://127.0.0.1:27020/api/v1/check
     ```
 
 
-2. Once mongosync has committed the replication, you can tell the verifier that writes have stopped. You can see the state of mongosync’s replication by hitting mongosync’s **<code>progress</code> </strong>endpoint and checking that the state is <strong><code>COMMITTED</code></strong>. See the documentation [here](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/reference/api/progress/#response). \
-The verifier will now check to completion to make sure that there are no inconsistencies. The command you need to send the verifier to tell it that the replication is committed is <strong><code>writesOff</code></strong>. The command doesn’t block. This means that you will have to poll the verifier to see the status of the verification (see <strong><code>progress</code></strong>).
+2. Once mongosync has committed the replication, you can tell the verifier that writes have stopped. You can see the state of mongosync’s replication by hitting mongosync’s `progress` endpoint and checking that the state is `COMMITTED`. See the documentation [here](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/reference/api/progress/#response). \
+The verifier will now check to completion to make sure that there are no inconsistencies. The command you need to send the verifier to tell it that the replication is committed is `writesOff`. The command doesn’t block. This means that you will have to poll the verifier to see the status of the verification (see `progress`).
 
     ```
     curl -H "Content-Type: application/json" -X POST -d '{}' http://127.0.0.1:27020/api/v1/writesOff
     ```
 
 
-3. You can poll the status of the verification by hitting the **<code>progress</code></strong> endpoint. In particular, the <strong><code>phase</code></strong> should reveal whether the verifier is done verifying; once the <strong><code>phase</code></strong> is <strong><code>idle</code></strong> the verification has completed. When the <strong><code>phase</code></strong> has reached <strong><code>idle</code></strong>, the <strong><code>error</code></strong> field should be <strong><code>null</code></strong> and the <strong><code>failedTasks</code></strong> field should be <strong><code>0</code></strong>, if the verification was successful. A non-<strong><code>null</code></strong> <strong><code>error</code></strong> field indicates that the verifier itself ran into an error. <strong><code>failedTasks</code></strong> being non-<strong><code>0</code></strong> indicates that there was an inconsistency. The logs printed by the verifier itself should have more information regarding what the inconsistencies are.
+3. You can poll the status of the verification by hitting the `progress`endpoint. In particular, the `phase`should reveal whether the verifier is done verifying; once the `phase`is `idle`the verification has completed. When the `phase`has reached `idle`, the `error`field should be `null`and the `failedTasks`field should be `0`, if the verification was successful. A non-`null``error`field indicates that the verifier itself ran into an error. `failedTasks`being non-`0`indicates that there was an inconsistency. The logs printed by the verifier itself should have more information regarding what the inconsistencies are.
 
     ```
     curl -H "Content-Type: application/json" -X GET http://127.0.0.1:27020/api/v1/progress
@@ -104,8 +104,6 @@ The verifier’s iterative process can handle data changes while it is running, 
 Ran on m6id.metal + M40 with 3 replica sets
 
 Command run python3 ./test/benchmark.py --way=recheck remote
-
-Ran on code in this PR [https://github.com/10gen/migration-verifier/pull/23](https://github.com/10gen/migration-verifier/pull/23)
 
 When running with 1TB of random data on 3 collections
 
