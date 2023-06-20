@@ -68,13 +68,22 @@ func (verifier *Verifier) insertRecheckDocs(
 			CollectionName: collName,
 			DocumentID:     documentID,
 		}
+
+		// The filter must exclude DataSize; otherwise, if a failed comparison
+		// and a change event happen on the same document for the same
+		// generation, the 2nd insert will fail because a) its filter won’t
+		// match anything, and b) it’ll try to insert a new document with the
+		// same _id as the one that the 1st insert already created.
+		filterDoc := bson.D{{"_id", pk}}
+
 		recheckDoc := RecheckDoc{
 			PrimaryKey: pk,
 			DataSize:   dataSizes[i],
 		}
+
 		models = append(models,
 			mongo.NewReplaceOneModel().
-				SetFilter(recheckDoc).SetReplacement(recheckDoc).SetUpsert(true))
+				SetFilter(filterDoc).SetReplacement(recheckDoc).SetUpsert(true))
 	}
 	_, err := verifier.verificationDatabase().Collection(recheckQueue).BulkWrite(ctx, models)
 	verifier.logger.Debug().Msgf("Persisted %d recheck doc(s) for generation %d", len(models), generation)
