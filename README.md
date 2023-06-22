@@ -1,3 +1,5 @@
+# This repo is no longer used, the migration verifier is now in this public repo: https://github.com/mongodb-labs/migration-verifier
+
 # Verify Migrations!
 
 _This Repository is NOT an officially supported MongoDB product._
