@@ -154,3 +154,27 @@ func GetLastOpTimeAndSyncShardClusterTime(
 	t, i := rawOperationTime.Timestamp()
 	return &primitive.Timestamp{T: t, I: i}, nil
 }
+
+func NamespacesContainsDBName(namespaces []string) bool {
+	for _, namespace := range namespaces {
+		if strings.Index(namespace, ".") < 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func ParseDBNamespaces(namespaces []string) ([]string, []string) {
+	databases := []string{}
+	parsedNamespaces := []string{}
+	// strip database names from namespaces - db collections will be appended to the namespaces
+	for _, name := range namespaces {
+		db, coll := SplitNamespace(name)
+		if coll == "" {
+			databases = append(databases, db)
+		} else {
+			parsedNamespaces = append(parsedNamespaces, name)
+		}
+	}
+	return parsedNamespaces, databases
+}
