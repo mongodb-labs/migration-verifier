@@ -151,6 +151,36 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	drop()
 	defer drop()
 
+	expectOneCommonDoc := func(srcMap *documentmap.Map, dstMap *documentmap.Map) {
+		onlySrc, onlyDst, both := srcMap.CompareToMap(dstMap)
+		suite.Assert().Empty(onlySrc, "no source-only docs")
+		suite.Assert().Empty(onlyDst, "no destination-only docs")
+		suite.Assert().Equal(1, len(both), "common docs")
+		suite.Assert().NotPanics(
+			func() {
+				doc := srcMap.Fetch(both[0])
+				val := doc.Lookup("num")
+				suite.Assert().Less(val.AsInt32(), int32(100))
+			},
+			"doc is fetched",
+		)
+	}
+
+	expectTwoCommonDocs := func(srcMap *documentmap.Map, dstMap *documentmap.Map) {
+		onlySrc, onlyDst, both := srcMap.CompareToMap(dstMap)
+		suite.Assert().Empty(onlySrc, "no source-only docs")
+		suite.Assert().Empty(onlyDst, "no destination-only docs")
+		suite.Assert().Equal(2, len(both), "common docs")
+		suite.Assert().NotPanics(
+			func() { srcMap.Fetch(both[0]) },
+			"doc is fetched",
+		)
+		suite.Assert().NotPanics(
+			func() { dstMap.Fetch(both[1]) },
+			"doc is fetched",
+		)
+	}
+
 	// create a basicQueryFilter that sets (source) Namespace and To
 	// to the same thing
 	basicQueryFilter := func(namespace string) QueryFilter {
@@ -161,22 +191,39 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	}
 
 	id := rand.Intn(1000)
-	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.D{{"_id", id}, {"num", 123}, {"name", "srcTest"}})
+	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []interface{}{
+		bson.D{{"_id", id}, {"num", 99}, {"name", "srcTest"}},
+		bson.D{{"_id", id + 1}, {"num", 101}, {"name", "srcTest"}},
+	})
 	suite.Require().NoError(err)
-	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertOne(ctx, bson.D{{"_id", id}, {"num", 123}, {"name", "dstTest"}})
+	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []interface{}{
+		bson.D{{"_id", id}, {"num", 99}, {"name", "dstTest"}},
+		bson.D{{"_id", id + 1}, {"num", 101}, {"name", "dstTest"}},
+	})
 	suite.Require().NoError(err)
-	task := &VerificationTask{ID: id, QueryFilter: basicQueryFilter("keyhole.dealers")}
+	task := &VerificationTask{Ids: []interface{}{id, id + 1}, QueryFilter: basicQueryFilter("keyhole.dealers")}
+
+	// Test fetchDocuments without global filter.
+	verifier.globalFilter = nil
 	srcDocumentMap, dstDocumentMap, err := verifier.fetchDocuments(task)
 	suite.Require().NoError(err)
+	expectTwoCommonDocs(srcDocumentMap, dstDocumentMap)
 
-	onlySrc, onlyDst, both := srcDocumentMap.CompareToMap(dstDocumentMap)
-	suite.Assert().Empty(onlySrc, "no source-only docs")
-	suite.Assert().Empty(onlyDst, "no destination-only docs")
-	suite.Assert().Equal(1, len(both), "common docs")
-	suite.Assert().NotPanics(
-		func() { srcDocumentMap.Fetch(both[0]) },
-		"doc is fetched",
-	)
+	// Test fetchDocuments for ids with a global filter.
+	verifier.globalFilter = bson.D{{"num", bson.D{{"$lt", 100}}}}
+	srcDocumentMap, dstDocumentMap, err = verifier.fetchDocuments(task)
+	suite.Require().NoError(err)
+	expectOneCommonDoc(srcDocumentMap, dstDocumentMap)
+
+	// Test fetchDocuments for a partition with a global filter.
+	task.QueryFilter.Partition = &partitions.Partition{
+		Ns:       &partitions.Namespace{DB: "keyhole", Coll: "dealers"},
+		IsCapped: false,
+	}
+	verifier.globalFilter = bson.D{{"num", bson.D{{"$lt", 100}}}}
+	srcDocumentMap, dstDocumentMap, err = verifier.fetchDocuments(task)
+	suite.Require().NoError(err)
+	expectOneCommonDoc(srcDocumentMap, dstDocumentMap)
 }
 
 func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Recheck() {
@@ -1304,7 +1351,7 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 	checkDoneChan := make(chan struct{})
 	checkContinueChan := make(chan struct{})
 	go func() {
-		err := verifier.CheckDriver(ctx, checkDoneChan, checkContinueChan)
+		err := verifier.CheckDriver(ctx, nil, checkDoneChan, checkContinueChan)
 		suite.Require().NoError(err)
 	}()
 

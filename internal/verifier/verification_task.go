@@ -55,14 +55,15 @@ const (
 
 // VerificationTask stores source cluster info
 type VerificationTask struct {
-	PrimaryKey  interface{}            `bson:"_id"`
-	Type        verificationTaskType   `bson:"type"`
-	Status      verificationTaskStatus `bson:"status"`
-	Generation  int                    `bson:"generation"`
-	Ids         []interface{}          `bson:"_ids"`
-	ID          int                    `bson:"id"`
-	FailedDocs  []VerificationResult   `bson:"failed_docs,omitempty"`
-	QueryFilter QueryFilter            `bson:"query_filter"          json:"query_filter"`
+	PrimaryKey interface{}            `bson:"_id"`
+	Type       verificationTaskType   `bson:"type"`
+	Status     verificationTaskStatus `bson:"status"`
+	Generation int                    `bson:"generation"`
+	Ids        []interface{}          `bson:"_ids"`
+	// Deprecated: VerificationTask ID field is ignored by the verifier.
+	ID          int                  `bson:"id"`
+	FailedDocs  []VerificationResult `bson:"failed_docs,omitempty"`
+	QueryFilter QueryFilter          `bson:"query_filter"          json:"query_filter"`
 
 	// DocumentCount is set when the verifier is done with the task
 	// (whether we found mismatches or not).

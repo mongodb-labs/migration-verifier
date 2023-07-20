@@ -35,7 +35,7 @@ var verificationStatusCheckInterval time.Duration = 15 * time.Second
 // testChan[1] is a channel signalled when Check should continue with the next generation.
 func (verifier *Verifier) Check(ctx context.Context) {
 	go func() {
-		err := verifier.CheckDriver(ctx)
+		err := verifier.CheckDriver(ctx, nil)
 		if err != nil {
 			verifier.logger.Fatal().Err(err).Msgf("Fatal error in generation %d", verifier.generation)
 		}
@@ -122,7 +122,7 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 	return nil
 }
 
-func (verifier *Verifier) CheckDriver(ctx context.Context, testChan ...chan struct{}) error {
+func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testChan ...chan struct{}) error {
 	verifier.mux.Lock()
 	if verifier.running {
 		verifier.mux.Unlock()
@@ -130,10 +130,12 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, testChan ...chan stru
 		return nil
 	}
 	verifier.running = true
+	verifier.globalFilter = filter
 	verifier.mux.Unlock()
 	defer func() {
 		verifier.mux.Lock()
 		verifier.running = false
+		verifier.globalFilter = nil
 		verifier.mux.Unlock()
 	}()
 	var err error

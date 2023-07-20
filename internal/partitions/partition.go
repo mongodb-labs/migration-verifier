@@ -126,7 +126,7 @@ func (p *Partition) FindCmd(
 	if len(batchSize) > 0 {
 		findCmd = append(findCmd, bson.E{"batchSize", batchSize[0]})
 	}
-	findOptions := p.GetFindOptions(nil)
+	findOptions := p.GetFindOptions(nil, nil)
 	findCmd = append(findCmd, findOptions...)
 
 	return findCmd
@@ -136,7 +136,7 @@ func (p *Partition) FindCmd(
 // partition. It is intended to allow the same partitioning to be used on different collections
 // (e.g. use the partitions on the source to read the destination for verification)
 // If the passed-in buildinfo indicates a mongodb version < 5.0, type bracketing is not used.
-func (p *Partition) GetFindOptions(buildInfo *bson.M) bson.D {
+func (p *Partition) GetFindOptions(buildInfo *bson.M, filterAndPredicates bson.A) bson.D {
 	if p == nil {
 		return bson.D{}
 	}
@@ -164,17 +164,18 @@ func (p *Partition) GetFindOptions(buildInfo *bson.M) bson.D {
 				}
 			}
 		}
-		var filter bson.D
 		if !allowTypeBracketing {
-			filter = p.filterWithNoTypeBracketing()
+			filterAndPredicates = append(filterAndPredicates, p.filterWithNoTypeBracketing())
 		} else {
-			filter = p.filterWithTypeBracketing()
+			filterAndPredicates = append(filterAndPredicates, p.filterWithTypeBracketing())
 		}
-		boundedQueryFilter := bson.E{"filter", filter}
-		findOptions = append(findOptions, boundedQueryFilter)
 
 		hint := bson.E{"hint", bson.D{{"_id", 1}}}
 		findOptions = append(findOptions, hint)
+	}
+
+	if len(filterAndPredicates) > 0 {
+		findOptions = append(findOptions, bson.E{"filter", bson.D{{"$and", filterAndPredicates}}})
 	}
 	return findOptions
 }
