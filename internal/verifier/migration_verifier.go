@@ -397,7 +397,7 @@ func (verifier *Verifier) getGenerationWhileLocked() (int, bool) {
 	return verifier.generation, verifier.lastGeneration
 }
 
-func (verifier *Verifier) maybeAppendGlobalFilter(predicates bson.A) bson.A {
+func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A) bson.A {
 	if verifier.globalFilter == nil {
 		return predicates
 	}
@@ -412,12 +412,12 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 
 	if len(task.Ids) > 0 {
 		andPredicates = append(andPredicates, bson.D{{"_id", bson.M{"$in": task.Ids}}})
-		andPredicates = verifier.maybeAppendGlobalFilter(andPredicates)
+		andPredicates = verifier.maybeAppendGlobalFilterToPredicates(andPredicates)
 		findOptions = bson.D{
 			bson.E{"filter", bson.D{{"$and", andPredicates}}},
 		}
 	} else {
-		findOptions = task.QueryFilter.Partition.GetFindOptions(buildInfo, verifier.maybeAppendGlobalFilter(andPredicates))
+		findOptions = task.QueryFilter.Partition.GetFindOptions(buildInfo, verifier.maybeAppendGlobalFilterToPredicates(andPredicates))
 	}
 	if verifier.readPreference.Mode() != readpref.PrimaryMode {
 		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
