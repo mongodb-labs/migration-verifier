@@ -397,7 +397,7 @@ func (verifier *Verifier) getGenerationWhileLocked() (int, bool) {
 	return verifier.generation, verifier.lastGeneration
 }
 
-func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A) bson.A {
+func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates []bson.D) []bson.D {
 	if verifier.globalFilter == nil {
 		return predicates
 	}
@@ -408,7 +408,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 	startAtTs *primitive.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
-	var andPredicates bson.A
+	var andPredicates []bson.D
 
 	if len(task.Ids) > 0 {
 		andPredicates = append(andPredicates, bson.D{{"_id", bson.M{"$in": task.Ids}}})

@@ -191,17 +191,17 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	}
 
 	id := rand.Intn(1000)
-	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []interface{}{
+	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", id}, {"num", 99}, {"name", "srcTest"}},
 		bson.D{{"_id", id + 1}, {"num", 101}, {"name", "srcTest"}},
 	})
 	suite.Require().NoError(err)
-	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []interface{}{
+	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", id}, {"num", 99}, {"name", "dstTest"}},
 		bson.D{{"_id", id + 1}, {"num", 101}, {"name", "dstTest"}},
 	})
 	suite.Require().NoError(err)
-	task := &VerificationTask{Ids: []interface{}{id, id + 1}, QueryFilter: basicQueryFilter("keyhole.dealers")}
+	task := &VerificationTask{Ids: []any{id, id + 1}, QueryFilter: basicQueryFilter("keyhole.dealers")}
 
 	// Test fetchDocuments without global filter.
 	verifier.globalFilter = nil

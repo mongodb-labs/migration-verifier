@@ -132,7 +132,7 @@ func makeTestPartition() (Partition, bson.D) {
 
 func makeExpectedFilter(lower, upper interface{}) bson.D {
 	return bson.D{{"$and", bson.A{
-		bson.D{{"$and", bson.A{
+		bson.D{{"$and", []bson.D{
 			// All _id values >= lower bound.
 			bson.D{{"$expr", bson.D{
 				{"$gte", bson.A{
@@ -153,7 +153,7 @@ func makeExpectedFilter(lower, upper interface{}) bson.D {
 
 func makeExpectedFilterWithTypeBracketing(lower, upper interface{}) bson.D {
 	return bson.D{{"$and", bson.A{
-		bson.D{{"$and", bson.A{
+		bson.D{{"$and", []bson.D{
 			// All _id values >= lower bound.
 			bson.D{{"_id", bson.D{{"$gte", lower}}}},
 			// All _id values <= upper bound.

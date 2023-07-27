@@ -136,7 +136,8 @@ func (p *Partition) FindCmd(
 // partition. It is intended to allow the same partitioning to be used on different collections
 // (e.g. use the partitions on the source to read the destination for verification)
 // If the passed-in buildinfo indicates a mongodb version < 5.0, type bracketing is not used.
-func (p *Partition) GetFindOptions(buildInfo *bson.M, filterAndPredicates bson.A) bson.D {
+// filterAndPredicates is a slice of filter criteria that's used to construct the "filter" field in the find option.
+func (p *Partition) GetFindOptions(buildInfo *bson.M, filterAndPredicates []bson.D) bson.D {
 	if p == nil {
 		if len(filterAndPredicates) > 0 {
 			return bson.D{{"filter", bson.D{{"$and", filterAndPredicates}}}}
