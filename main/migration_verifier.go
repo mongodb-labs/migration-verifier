@@ -159,7 +159,7 @@ func main() {
 			}
 			if cCtx.Bool(checkOnly) {
 				verifier.WritesOff(ctx)
-				return verifier.CheckDriver(ctx)
+				return verifier.CheckDriver(ctx, nil)
 			} else {
 				return verifier.StartServer()
 			}
