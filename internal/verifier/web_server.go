@@ -7,12 +7,14 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"text/template"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"go.mongodb.org/mongo-driver/bson"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -21,7 +23,7 @@ const RequestInProgressErrorDescription = "Another request is currently in progr
 
 // MigrationVerifierAPI represents the interaction webserver with mongosync
 type MigrationVerifierAPI interface {
-	Check(ctx context.Context)
+	Check(ctx context.Context, filter bson.D)
 	WritesOff(ctx context.Context)
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
@@ -177,15 +179,48 @@ func (server *WebServer) Run(ctx context.Context) error {
 // EmptyRequest is for request with empty body
 type EmptyRequest struct{}
 
-func (server *WebServer) checkEndPoint(c *gin.Context) {
-	var json EmptyRequest
+// CheckRequest is for requests to the /check endpoint.
+type CheckRequest struct {
+	Filter string `json:"queryFilter"`
+}
 
-	if err := c.ShouldBindJSON(&json); err != nil {
+func unmarshalJsonStringToDocument(json string) (bson.D, error) {
+	if json == "" {
+		return nil, nil
+	}
+
+	var doc bson.D
+	tmpl, err := template.New("").Parse(json)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonBytes := bytes.Buffer{}
+	if err := tmpl.Execute(&jsonBytes, nil); err != nil {
+		return nil, err
+	}
+
+	if err := bson.UnmarshalExtJSON(jsonBytes.Bytes(), true, &doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+func (server *WebServer) checkEndPoint(c *gin.Context) {
+	var req CheckRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	server.Mapi.Check(context.Background())
+	filter, err := unmarshalJsonStringToDocument(req.Filter)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	server.Mapi.Check(context.Background(), filter)
 	//if err != nil {
 	//	server.operationalErrorResponse(c, err)
 	//	return
