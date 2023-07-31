@@ -135,7 +135,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	defer func() {
 		verifier.mux.Lock()
 		verifier.running = false
-		verifier.globalFilter = nil
 		verifier.mux.Unlock()
 	}()
 	var err error
