@@ -190,16 +190,16 @@ func (p *Partition) GetFindOptions(buildInfo *bson.M, filterAndPredicates []bson
 func (p *Partition) filterWithNoTypeBracketing() bson.D {
 	// We use $expr to avoid type bracketing and allow comparison of different _id types,
 	// and $literal to avoid MQL injection from an _id's value.
-	return bson.D{{"$and", bson.A{
+	return bson.D{{"$and", []bson.D{
 		// All _id values >= lower bound.
-		bson.D{{"$expr", bson.D{
+		{{"$expr", bson.D{
 			{"$gte", bson.A{
 				"$_id",
 				bson.D{{"$literal", p.Key.Lower}},
 			}},
 		}}},
 		// All _id values <= upper bound.
-		bson.D{{"$expr", bson.D{
+		{{"$expr", bson.D{
 			{"$lte", bson.A{
 				"$_id",
 				bson.D{{"$literal", p.Upper}},
@@ -212,10 +212,10 @@ func (p *Partition) filterWithNoTypeBracketing() bson.D {
 // partition.  This filter will not properly handle mixed-type _ids -- if the upper and lower
 // bounds are of different types (except minkey/maxkey), nothing will be returned.
 func (p *Partition) filterWithTypeBracketing() bson.D {
-	return bson.D{{"$and", bson.A{
+	return bson.D{{"$and", []bson.D{
 		// All _id values >= lower bound.
-		bson.D{{"_id", bson.D{{"$gte", p.Key.Lower}}}},
+		{{"_id", bson.D{{"$gte", p.Key.Lower}}}},
 		// All _id values <= upper bound.
-		bson.D{{"_id", bson.D{{"$lte", p.Upper}}}},
+		{{"_id", bson.D{{"$lte", p.Upper}}}},
 	}}}
 }
