@@ -399,8 +399,10 @@ func (verifier *Verifier) getGenerationWhileLocked() (int, bool) {
 
 func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates []bson.D) []bson.D {
 	if verifier.globalFilter == nil {
+		verifier.logger.Debug().Str("filter", fmt.Sprintf("%v", verifier.globalFilter)).Msg("No filter to append")
 		return predicates
 	}
+	verifier.logger.Debug().Str("filter", fmt.Sprintf("%v", verifier.globalFilter)).Msg("Appending filter to find query")
 	return append(predicates, verifier.globalFilter)
 }
 
@@ -642,6 +644,9 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 					ids = append(ids, v.ID)
 					dataSizes = append(dataSizes, v.dataSize)
 				}
+				// Update ids of the failed task so that only ids from mismatches are reported.
+				// Ids of checked documents are discarded and hidden from report if they passed verification.
+				task.Ids = ids
 				err := verifier.InsertFailedCompareRecheckDocs(task.QueryFilter.Namespace, ids, dataSizes)
 				if err != nil {
 					verifier.logger.Error().Msgf("[Worker %d] Error inserting document mismatch into Recheck queue: %+v", workerNum, err)
