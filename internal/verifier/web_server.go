@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"text/template"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/logger"
@@ -123,10 +122,12 @@ func (server *WebServer) RequestAndResponseLogger() gin.HandlerFunc {
 	}
 }
 
-// Run checks the web server. This is a blocking call.
-// This function should only be called once during each Webserver's life time.
-func (server *WebServer) Run(ctx context.Context) error {
+func (server *WebServer) setupRouter() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
+	// This is set so that gin does not decode JSON numbers into float64.
+	// The actual BSON type conversion for JSON numbers is deferred to go-driver.
+	gin.EnableJsonDecoderUseNumber()
+
 	router := gin.New()
 	router.Use(server.RequestAndResponseLogger(), gin.Recovery())
 
@@ -141,10 +142,15 @@ func (server *WebServer) Run(ctx context.Context) error {
 	}
 
 	router.HandleMethodNotAllowed = true
+	return router
+}
 
+// Run checks the web server. This is a blocking call.
+// This function should only be called once during each Webserver's life time.
+func (server *WebServer) Run(ctx context.Context) error {
 	server.srv = &http.Server{
 		Addr:    "0.0.0.0:" + strconv.Itoa(server.port),
-		Handler: router,
+		Handler: server.setupRouter(),
 	}
 
 	webServerCtx, shutDownWebServer := context.WithCancel(ctx)
@@ -181,28 +187,25 @@ type EmptyRequest struct{}
 
 // CheckRequest is for requests to the /check endpoint.
 type CheckRequest struct {
-	Filter string `json:"queryFilter"`
+	Filter map[string]any `json:"filter"`
 }
 
-func unmarshalJsonStringToDocument(json string) (bson.D, error) {
-	if json == "" {
+func parseJsonMap(jsonMap map[string]any) (bson.D, error) {
+	if jsonMap == nil {
 		return nil, nil
 	}
 
-	var doc bson.D
-	tmpl, err := template.New("").Parse(json)
+	raw, err := bson.Marshal(jsonMap)
 	if err != nil {
 		return nil, err
 	}
 
-	jsonBytes := bytes.Buffer{}
-	if err := tmpl.Execute(&jsonBytes, nil); err != nil {
+	var doc bson.D
+	err = bson.Unmarshal(raw, &doc)
+	if err != nil {
 		return nil, err
 	}
 
-	if err := bson.UnmarshalExtJSON(jsonBytes.Bytes(), true, &doc); err != nil {
-		return nil, err
-	}
 	return doc, nil
 }
 
@@ -214,7 +217,7 @@ func (server *WebServer) checkEndPoint(c *gin.Context) {
 		return
 	}
 
-	filter, err := unmarshalJsonStringToDocument(req.Filter)
+	filter, err := parseJsonMap(req.Filter)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

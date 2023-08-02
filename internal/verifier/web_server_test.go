@@ -1,43 +1,63 @@
 package verifier
 
 import (
-	"encoding/json"
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
+// WebServerTestSuite uses a mock verifier to test webserver endpoints.
 type WebServerTestSuite struct {
 	suite.Suite
-	webServer *WebServer
+	webServer    *WebServer
+	mockVerifier *MockVerifier
+}
+
+type MockVerifier struct {
+	filter bson.D
+}
+
+func NewMockVerifier() *MockVerifier {
+	return &MockVerifier{}
+}
+
+func (verifier *MockVerifier) Check(ctx context.Context, filter bson.D) {
+	verifier.filter = filter
+}
+func (verifier *MockVerifier) WritesOff(ctx context.Context) {}
+func (verifier *MockVerifier) WritesOn(ctx context.Context)  {}
+func (verifier *MockVerifier) GetProgress(ctx context.Context) (Progress, error) {
+	return Progress{}, nil
 }
 
 func NewWebServerSuite() *WebServerTestSuite {
-	verifier := NewVerifier(VerifierSettings{})
-
+	mv := NewMockVerifier()
 	return &WebServerTestSuite{
-		webServer: NewWebServer(27020, verifier, verifier.logger),
+		mockVerifier: mv,
+		webServer:    NewWebServer(27020, mv, logger.NewDebugLogger()),
 	}
 }
 
 func (suite *WebServerTestSuite) TestCheckEndPoint() {
-	input := `{
-		"queryFilter": "{\"_id\": 0}"
-	}`
-	var checkRequest CheckRequest
-	suite.Require().NoError(json.Unmarshal([]byte(input), &checkRequest), "json should decode")
-	suite.Require().Equal(
-		CheckRequest{
-			Filter: "{\"_id\": 0}",
-		},
-		checkRequest,
-		"queryFilter should unmarshal correctly",
-	)
+	router := suite.webServer.setupRouter()
 
-	filter, err := unmarshalJsonStringToDocument(checkRequest.Filter)
+	input := `{
+		"filter": {"i": {"$gt": 10 } }
+	}`
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest("POST", "/api/v1/check", strings.NewReader(input))
 	suite.Require().NoError(err)
-	suite.Require().Equal(bson.D{{"_id", int32(0)}}, filter)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(200, w.Code)
+	suite.Require().Equal(suite.mockVerifier.filter, bson.D{{"i", bson.D{{"$gt", int64(10)}}}})
 }
 
 func TestWebServer(t *testing.T) {
