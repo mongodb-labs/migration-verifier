@@ -33,9 +33,9 @@ var verificationStatusCheckInterval time.Duration = 15 * time.Second
 // testChan is a pair of channels for coordinating generations in tests.
 // testChan[0] is a channel signalled when when a generation is complete
 // testChan[1] is a channel signalled when Check should continue with the next generation.
-func (verifier *Verifier) Check(ctx context.Context) {
+func (verifier *Verifier) Check(ctx context.Context, filter bson.D) {
 	go func() {
-		err := verifier.CheckDriver(ctx, nil)
+		err := verifier.CheckDriver(ctx, filter)
 		if err != nil {
 			verifier.logger.Fatal().Err(err).Msgf("Fatal error in generation %d", verifier.generation)
 		}
