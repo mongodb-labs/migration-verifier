@@ -645,7 +645,7 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 					dataSizes = append(dataSizes, v.dataSize)
 				}
 				// Update ids of the failed task so that only ids from mismatches are reported.
-				// Ids of checked documents are discarded and hidden from report if they passed verification.
+				// Ids of matching documents are discarded and hidden from the mismatching documents report.
 				task.Ids = ids
 				err := verifier.InsertFailedCompareRecheckDocs(task.QueryFilter.Namespace, ids, dataSizes)
 				if err != nil {
