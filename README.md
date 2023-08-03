@@ -63,7 +63,7 @@ To set a port, use `--serverPort <port number>`. The default is 27020.
 
 
 
-1. After launching the verifier (see above), you can send it requests to get it to start verifying. The verification process is started by using the `check`command. The verification process will keep running until you tell the verifier to stop. It will keep track of the inconsistencies it has found and will keep checking those inconsistencies hoping that eventually they will resolve.
+1. After launching the verifier (see above), you can send it requests to get it to start verifying. The verification process is started by using the `check`command. An [optional `filter` parameter](#document-filtering) can be passed within the `check` request body to only check documents within that filter. The verification process will keep running until you tell the verifier to stop. It will keep track of the inconsistencies it has found and will keep checking those inconsistencies hoping that eventually they will resolve.
 
     ```
     curl -H "Content-Type: application/json" -X POST -d '{}' http://127.0.0.1:27020/api/v1/check
@@ -98,7 +98,6 @@ The verifier will now check to completion to make sure that there are no inconsi
 
 The verifier’s iterative process can handle data changes while it is running, until you hit the writesOff endpoint.  However, it cannot handle DDL commands.  If the verifier receives a DDL change stream event (drop, dropDatabase, rename), the verification will fail.  If an untracked DDL event (create, createIndexes, dropIndexes, modify) occurs, the verifier may miss the change. 
 
-
 # Benchmarking Results
 
 Ran on m6id.metal + M40 with 3 replica sets
@@ -130,6 +129,14 @@ The migration-verifier has two steps:
     4. The verifier runs rounds of checks continuously until it is told that writes are off, fetching the documents stored from the change stream and that were inconsistent in the previous checking rounds, from both the source and destination and rechecking them. Once again, violations are written down for future checking rounds
     5. Every document to check is written with a generation number. A checking round checks documents for a specific generation. When a check round begins, we start writing new documents with a new generation number
     6. The verifier fetches all collection/index/view information on the source and destination and confirms they are identical in every generation. This is duplicated work, but it's fast and convenient for the code.
+
+# Document Filtering
+
+Document filtering can be enabled by passing a `filter` parameter in the `check` request body when starting a check. The filter takes a JSON query. The query syntax is identical to the [read operation query syntax](https://www.mongodb.com/docs/manual/tutorial/query-documents/#std-label-read-operations-query-argument). For example, running the following command makes the verifier check to only check documents within the filter `{"inFilter": {"$ne": false}}` for _all_ namespaces:
+
+```
+curl -H "Content-Type: application/json" -X POST -d '{{"filter": {"inFilter": {"$ne": false}}}}' http://127.0.0.1:27020/api/v1/check
+```
 
 # Checking Failures
 

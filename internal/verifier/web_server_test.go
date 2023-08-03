@@ -58,6 +58,28 @@ func (suite *WebServerTestSuite) TestCheckEndPoint() {
 	router.ServeHTTP(w, req)
 	suite.Require().Equal(200, w.Code)
 	suite.Require().Equal(suite.mockVerifier.filter, bson.D{{"i", bson.D{{"$gt", int64(10)}}}})
+
+	invalidJSONInput1 := `{
+		"filter": "A string, not JSON."
+	}`
+	w = httptest.NewRecorder()
+	req, err = http.NewRequest("POST", "/api/v1/check", strings.NewReader(invalidJSONInput1))
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(400, w.Code)
+	suite.Require().Contains(w.Body.String(), "error")
+
+	invalidJSONInput2 := `{
+		"filter": {
+	}`
+	w = httptest.NewRecorder()
+	req, err = http.NewRequest("POST", "/api/v1/check", strings.NewReader(invalidJSONInput2))
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(400, w.Code)
+	suite.Require().Contains(w.Body.String(), "error")
 }
 
 func TestWebServer(t *testing.T) {

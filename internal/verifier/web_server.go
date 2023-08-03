@@ -197,13 +197,13 @@ func parseJsonMap(jsonMap map[string]any) (bson.D, error) {
 
 	raw, err := bson.Marshal(jsonMap)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to marshal json to bson.Raw")
 	}
 
 	var doc bson.D
 	err = bson.Unmarshal(raw, &doc)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to unmarshal bson.Raw filter to bson.D")
 	}
 
 	return doc, nil
