@@ -137,6 +137,14 @@ Document filtering can be enabled by passing a `filter` parameter in the `check`
 ```
 curl -H "Content-Type: application/json" -X POST -d '{{"filter": {"inFilter": {"$ne": false}}}}' http://127.0.0.1:27020/api/v1/check
 ```
+If a checking is started with the above filter, the table below summarizes the verifier's behavior: 
+
+| Source Document                                   | Destination Document                              | Verifier's Behavior                         |
+|---------------------------------------------------|---------------------------------------------------|---------------------------------------------|
+| `{"_id": <id>, "inFilter": true, "diff": "src"}`  | `{"_id": <id>, "inFilter": true, "diff": "dst"}`  | ❗ (Finds a document with differing content) |
+| `{"_id": <id>, "inFilter": false, "diff": "src"}` | `{"_id": <id>, "inFilter": false, "diff": "dst"}` | ✅ (Skips a document)                        |
+| `{"_id": <id>, "inFilter": true, "diff": "src"}`  | `{"_id": <id>, "inFilter": false, "diff": "dst"}` | ❗ (Finds a document missing on Destination) |
+| `{"_id": <id>, "inFilter": false, "diff": "src"}` | `{"_id": <id>, "inFilter": true, "diff": "dst"}`  | ❗ (Finds a document missing on Source)      |
 
 # Checking Failures
 
