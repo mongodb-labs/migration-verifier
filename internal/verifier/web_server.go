@@ -190,37 +190,30 @@ type CheckRequest struct {
 	Filter map[string]any `json:"filter"`
 }
 
-func parseJsonMap(jsonMap map[string]any) (bson.D, error) {
-	if jsonMap == nil {
-		return nil, nil
-	}
-
-	raw, err := bson.Marshal(jsonMap)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal json to bson.Raw")
-	}
-
-	var doc bson.D
-	err = bson.Unmarshal(raw, &doc)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal bson.Raw filter to bson.D")
-	}
-
-	return doc, nil
-}
-
 func (server *WebServer) checkEndPoint(c *gin.Context) {
 	var req CheckRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
+		err = errors.Wrap(err, "filter is not valid JSON")
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	filter, err := parseJsonMap(req.Filter)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	var filter bson.D
+	if req.Filter != nil {
+		raw, err := bson.Marshal(req.Filter)
+		if err != nil {
+			err = errors.Wrap(err, "failed to marshal json to bson.Raw")
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		err = bson.Unmarshal(raw, &filter)
+		if err != nil {
+			err = errors.Wrap(err, "failed to unmarshal bson.Raw filter to bson.D")
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	server.Mapi.Check(context.Background(), filter)
