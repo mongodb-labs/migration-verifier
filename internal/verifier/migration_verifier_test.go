@@ -210,7 +210,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	expectTwoCommonDocs(srcDocumentMap, dstDocumentMap)
 
 	// Test fetchDocuments for ids with a global filter.
-	verifier.globalFilter = bson.D{{"num", bson.D{{"$lt", 100}}}}
+	verifier.globalFilter = map[string]any{"num": map[string]any{"$lt": 100}}
 	srcDocumentMap, dstDocumentMap, err = verifier.fetchDocuments(task)
 	suite.Require().NoError(err)
 	expectOneCommonDoc(srcDocumentMap, dstDocumentMap)
@@ -220,7 +220,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 		Ns:       &partitions.Namespace{DB: "keyhole", Coll: "dealers"},
 		IsCapped: false,
 	}
-	verifier.globalFilter = bson.D{{"num", bson.D{{"$lt", 100}}}}
+	verifier.globalFilter = map[string]any{"num": map[string]any{"$lt": 100}}
 	srcDocumentMap, dstDocumentMap, err = verifier.fetchDocuments(task)
 	suite.Require().NoError(err)
 	expectOneCommonDoc(srcDocumentMap, dstDocumentMap)
@@ -1432,7 +1432,7 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
-	filter := bson.D{{"inFilter", bson.D{{"$ne", false}}}}
+	filter := map[string]any{"inFilter": map[string]any{"$ne": false}}
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
 	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})

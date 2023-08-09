@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,7 +10,6 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/stretchr/testify/suite"
-	"go.mongodb.org/mongo-driver/bson"
 )
 
 // WebServerTestSuite uses a mock verifier to test webserver endpoints.
@@ -20,14 +20,14 @@ type WebServerTestSuite struct {
 }
 
 type MockVerifier struct {
-	filter bson.D
+	filter map[string]any
 }
 
 func NewMockVerifier() *MockVerifier {
 	return &MockVerifier{}
 }
 
-func (verifier *MockVerifier) Check(ctx context.Context, filter bson.D) {
+func (verifier *MockVerifier) Check(ctx context.Context, filter map[string]any) {
 	verifier.filter = filter
 }
 func (verifier *MockVerifier) WritesOff(ctx context.Context) {}
@@ -57,7 +57,7 @@ func (suite *WebServerTestSuite) TestCheckEndPoint() {
 
 	router.ServeHTTP(w, req)
 	suite.Require().Equal(200, w.Code)
-	suite.Require().Equal(suite.mockVerifier.filter, bson.D{{"i", bson.D{{"$gt", int64(10)}}}})
+	suite.Require().Equal(map[string]any{"i": map[string]any{"$gt": json.Number("10")}}, suite.mockVerifier.filter)
 
 	invalidJSONInput1 := `{
 		"filter": "A string, not JSON."

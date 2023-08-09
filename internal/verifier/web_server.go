@@ -13,7 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -22,7 +21,7 @@ const RequestInProgressErrorDescription = "Another request is currently in progr
 
 // MigrationVerifierAPI represents the interaction webserver with mongosync
 type MigrationVerifierAPI interface {
-	Check(ctx context.Context, filter bson.D)
+	Check(ctx context.Context, filter map[string]any)
 	WritesOff(ctx context.Context)
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
@@ -199,24 +198,7 @@ func (server *WebServer) checkEndPoint(c *gin.Context) {
 		return
 	}
 
-	var filter bson.D
-	if req.Filter != nil {
-		raw, err := bson.Marshal(req.Filter)
-		if err != nil {
-			err = errors.Wrap(err, "failed to marshal json to bson.Raw")
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		err = bson.Unmarshal(raw, &filter)
-		if err != nil {
-			err = errors.Wrap(err, "failed to unmarshal bson.Raw filter to bson.D")
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	server.Mapi.Check(context.Background(), filter)
+	server.Mapi.Check(context.Background(), req.Filter)
 	//if err != nil {
 	//	server.operationalErrorResponse(c, err)
 	//	return
