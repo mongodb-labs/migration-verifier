@@ -21,7 +21,7 @@ const RequestInProgressErrorDescription = "Another request is currently in progr
 
 // MigrationVerifierAPI represents the interaction webserver with mongosync
 type MigrationVerifierAPI interface {
-	Check(ctx context.Context)
+	Check(ctx context.Context, filter map[string]any)
 	WritesOff(ctx context.Context)
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
@@ -121,10 +121,12 @@ func (server *WebServer) RequestAndResponseLogger() gin.HandlerFunc {
 	}
 }
 
-// Run checks the web server. This is a blocking call.
-// This function should only be called once during each Webserver's life time.
-func (server *WebServer) Run(ctx context.Context) error {
+func (server *WebServer) setupRouter() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
+	// This is set so that gin does not decode JSON numbers into float64.
+	// The actual BSON type conversion for JSON numbers is deferred to go-driver.
+	gin.EnableJsonDecoderUseNumber()
+
 	router := gin.New()
 	router.Use(server.RequestAndResponseLogger(), gin.Recovery())
 
@@ -139,10 +141,15 @@ func (server *WebServer) Run(ctx context.Context) error {
 	}
 
 	router.HandleMethodNotAllowed = true
+	return router
+}
 
+// Run checks the web server. This is a blocking call.
+// This function should only be called once during each Webserver's life time.
+func (server *WebServer) Run(ctx context.Context) error {
 	server.srv = &http.Server{
 		Addr:    "0.0.0.0:" + strconv.Itoa(server.port),
-		Handler: router,
+		Handler: server.setupRouter(),
 	}
 
 	webServerCtx, shutDownWebServer := context.WithCancel(ctx)
@@ -177,15 +184,21 @@ func (server *WebServer) Run(ctx context.Context) error {
 // EmptyRequest is for request with empty body
 type EmptyRequest struct{}
 
-func (server *WebServer) checkEndPoint(c *gin.Context) {
-	var json EmptyRequest
+// CheckRequest is for requests to the /check endpoint.
+type CheckRequest struct {
+	Filter map[string]any `json:"filter"`
+}
 
-	if err := c.ShouldBindJSON(&json); err != nil {
+func (server *WebServer) checkEndPoint(c *gin.Context) {
+	var req CheckRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		err = errors.Wrap(err, "filter is not valid JSON")
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	server.Mapi.Check(context.Background())
+	server.Mapi.Check(context.Background(), req.Filter)
 	//if err != nil {
 	//	server.operationalErrorResponse(c, err)
 	//	return

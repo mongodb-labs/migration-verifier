@@ -210,7 +210,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	expectTwoCommonDocs(srcDocumentMap, dstDocumentMap)
 
 	// Test fetchDocuments for ids with a global filter.
-	verifier.globalFilter = bson.D{{"num", bson.D{{"$lt", 100}}}}
+	verifier.globalFilter = map[string]any{"num": map[string]any{"$lt": 100}}
 	srcDocumentMap, dstDocumentMap, err = verifier.fetchDocuments(task)
 	suite.Require().NoError(err)
 	expectOneCommonDoc(srcDocumentMap, dstDocumentMap)
@@ -220,7 +220,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 		Ns:       &partitions.Namespace{DB: "keyhole", Coll: "dealers"},
 		IsCapped: false,
 	}
-	verifier.globalFilter = bson.D{{"num", bson.D{{"$lt", 100}}}}
+	verifier.globalFilter = map[string]any{"num": map[string]any{"$lt": 100}}
 	srcDocumentMap, dstDocumentMap, err = verifier.fetchDocuments(task)
 	suite.Require().NoError(err)
 	expectOneCommonDoc(srcDocumentMap, dstDocumentMap)
@@ -1427,4 +1427,98 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 	// there should be a failure from the src insert
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+}
+
+func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+
+	filter := map[string]any{"inFilter": map[string]any{"$ne": false}}
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
+	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
+	verifier.SetNamespaceMap()
+	verifier.SetIgnoreBSONFieldOrder(true)
+
+	ctx := context.Background()
+
+	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
+	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
+
+	// Documents {_id: 1} should match, {_id: 2} should be ignored because it's not in the filter.
+	_, err := srcColl.InsertOne(ctx, bson.M{"_id": 1, "x": 42, "inFilter": true})
+	suite.Require().NoError(err)
+	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 2, "x": 53, "inFilter": false})
+	suite.Require().NoError(err)
+	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 1, "x": 42, "inFilter": true})
+	suite.Require().NoError(err)
+
+	checkDoneChan := make(chan struct{})
+	checkContinueChan := make(chan struct{})
+	go func() {
+		err := verifier.CheckDriver(ctx, filter, checkDoneChan, checkContinueChan)
+		suite.Require().NoError(err)
+	}()
+
+	waitForTasks := func() *VerificationStatus {
+		status, err := verifier.GetVerificationStatus()
+		suite.Require().NoError(err)
+
+		for status.TotalTasks == 0 && verifier.generation < 10 {
+			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting another generation …", verifier.generation)
+			checkContinueChan <- struct{}{}
+			<-checkDoneChan
+			status, err = verifier.GetVerificationStatus()
+			suite.Require().NoError(err)
+		}
+		return status
+	}
+
+	// Wait for one generation to finish.
+	<-checkDoneChan
+	status := waitForTasks()
+	suite.Require().Equal(VerificationStatus{TotalTasks: 2, FailedTasks: 0, CompletedTasks: 2}, *status)
+
+	// Insert another document that is not in the filter.
+	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 3, "x": 43, "inFilter": false})
+	suite.Require().NoError(err)
+
+	// Tell check to start the next generation.
+	checkContinueChan <- struct{}{}
+
+	// Wait for generation to finish.
+	<-checkDoneChan
+	status = waitForTasks()
+	// There should be no failures, since the inserted document is not in the filter.
+	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+
+	// Now insert in the source, this should come up next generation.
+	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 4, "x": 44, "inFilter": true})
+	suite.Require().NoError(err)
+
+	// Tell check to start the next generation.
+	checkContinueChan <- struct{}{}
+
+	// Wait for one generation to finish.
+	<-checkDoneChan
+	status = waitForTasks()
+
+	// There should be a failure from the src insert of a document in the filter.
+	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+
+	// Now patch up the destination.
+	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 4, "x": 44, "inFilter": true})
+	suite.Require().NoError(err)
+
+	// Continue.
+	checkContinueChan <- struct{}{}
+
+	// Wait for it to finish again, this should be a clean run.
+	<-checkDoneChan
+	status = waitForTasks()
+
+	// There should be no failures now, since they are equivalent at this point in time.
+	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+
+	// Turn writes off.
+	verifier.WritesOff(ctx)
 }

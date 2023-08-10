@@ -135,7 +135,7 @@ type Verifier struct {
 	// A user-defined $match-compatible document-level query filter.
 	// The filter is applied to all namespaces in both initial checking and iterative checking.
 	// The verifier only checks documents within the filter.
-	globalFilter bson.D
+	globalFilter map[string]any
 }
 
 // VerificationStatus holds the Verification Status
@@ -397,10 +397,12 @@ func (verifier *Verifier) getGenerationWhileLocked() (int, bool) {
 	return verifier.generation, verifier.lastGeneration
 }
 
-func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates []bson.D) []bson.D {
+func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A) bson.A {
 	if verifier.globalFilter == nil {
+		verifier.logger.Debug().Msg("No filter to append; globalFilter is nil")
 		return predicates
 	}
+	verifier.logger.Debug().Str("filter", fmt.Sprintf("%v", verifier.globalFilter)).Msg("Appending filter to find query")
 	return append(predicates, verifier.globalFilter)
 }
 
@@ -408,7 +410,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 	startAtTs *primitive.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
-	var andPredicates []bson.D
+	var andPredicates bson.A
 
 	if len(task.Ids) > 0 {
 		andPredicates = append(andPredicates, bson.D{{"_id", bson.M{"$in": task.Ids}}})
@@ -642,6 +644,9 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 					ids = append(ids, v.ID)
 					dataSizes = append(dataSizes, v.dataSize)
 				}
+				// Update ids of the failed task so that only ids from mismatches are reported.
+				// Ids of matching documents are discarded and hidden from the mismatching documents report.
+				task.Ids = ids
 				err := verifier.InsertFailedCompareRecheckDocs(task.QueryFilter.Namespace, ids, dataSizes)
 				if err != nil {
 					verifier.logger.Error().Msgf("[Worker %d] Error inserting document mismatch into Recheck queue: %+v", workerNum, err)
