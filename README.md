@@ -217,9 +217,9 @@ Any collection metadata mismatches will occur in a task with the type '`verifyCo
 
 In this case, '`failed_docs`' contains all the meta data mismatches, in this case an index named '`x_1`'.
 
-# Known Problems
+# Known Issues
 
-- The verifier may report missing documents on the destination that don’t actually appear to be missing (i.e., a nonexistent problem). This has been hard to reproduce.
+- The verifier may report missing documents on the destination that don’t actually appear to be missing (i.e., a nonexistent problem). This has been hard to reproduce. If missing documents are reported, it is good practice to check for false positives.
 
 - The verifier, during its first generation, may report a confusing “Mismatches found” but then report 0 problems. This is a reporting bug in mongosync; if you see it, check the documents in `migration_verification_metadata.verification_tasks` for generation 1 (not generation 0).
 
