@@ -94,10 +94,6 @@ The verifier will now check to completion to make sure that there are no inconsi
     	`{"progress":{"phase":"idle","error":null,"verificationStatus":{"totalTasks":1,"addedTasks":0,"processingTasks":0,"failedTasks":1,"completedTasks":0,"metadataMismatchTasks":0,"recheckTasks":0}}}`
 
 
-# Limitation
-
-The verifier’s iterative process can handle data changes while it is running, until you hit the writesOff endpoint.  However, it cannot handle DDL commands.  If the verifier receives a DDL change stream event (drop, dropDatabase, rename), the verification will fail.  If an untracked DDL event (create, createIndexes, dropIndexes, modify) occurs, the verifier may miss the change. 
-
 # Benchmarking Results
 
 Ran on m6id.metal + M40 with 3 replica sets
@@ -220,3 +216,15 @@ Any collection metadata mismatches will occur in a task with the type '`verifyCo
 
 
 In this case, '`failed_docs`' contains all the meta data mismatches, in this case an index named '`x_1`'.
+
+# Known Issues
+
+- The verifier may report missing documents on the destination that don’t actually appear to be missing (i.e., a nonexistent problem). This has been hard to reproduce. If missing documents are reported, it is good practice to check for false positives.
+
+- The verifier, during its first generation, may report a confusing “Mismatches found” but then report 0 problems. This is a reporting bug in mongosync; if you see it, check the documents in `migration_verification_metadata.verification_tasks` for generation 1 (not generation 0).
+
+# Limitations
+
+- The verifier’s iterative process can handle data changes while it is running, until you hit the writesOff endpoint.  However, it cannot handle DDL commands.  If the verifier receives a DDL change stream event (drop, dropDatabase, rename), the verification will fail.  If an untracked DDL event (create, createIndexes, dropIndexes, modify) occurs, the verifier may miss the change.
+
+- The verifier crashes if it tries to compare time-series collections. The error will include a phrase like “Collection has nil UUID (most probably is a view)” and also mention “timeseries”.
