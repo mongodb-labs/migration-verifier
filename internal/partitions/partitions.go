@@ -490,7 +490,8 @@ func getMidIDBounds(
 
 	// Get a cursor for the $sample and $bucketAuto aggregation.
 	var midIDBounds []interface{}
-	currCollName, err := retryer.RunForUUIDAndTransientErrors(ctx, logger, collName, func(ri *retry.Info, collName string) error {
+	agRetryer := retryer.WithErrorCodes(util.SampleTooManyDuplicates)
+	currCollName, err := agRetryer.RunForUUIDAndTransientErrors(ctx, logger, collName, func(ri *retry.Info, collName string) error {
 		ri.Log(logger.Logger, "aggregate", "source", srcDB.Name(), collName, "Retrieving mid _id partition bounds using $sample.")
 		cursor, cmdErr :=
 			srcDB.RunCommandCursor(ctx, retryer.RequestWithUUID(bson.D{
