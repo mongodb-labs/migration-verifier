@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -1438,18 +1439,30 @@ func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
 	verifier.SetNamespaceMap()
 	verifier.SetIgnoreBSONFieldOrder(true)
+	// Set this value low to test the verifier with multiple partitions.
+	verifier.partitionSizeInBytes = 50
 
 	ctx := context.Background()
 
 	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
 	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
 
-	// Documents {_id: 1} should match, {_id: 2} should be ignored because it's not in the filter.
-	_, err := srcColl.InsertOne(ctx, bson.M{"_id": 1, "x": 42, "inFilter": true})
+	// Documents with _id in [0, 100) should match.
+	var docs []interface{}
+	for i := 0; i < 100; i++ {
+		docs = append(docs, bson.M{"_id": i, "x": i, "inFilter": true})
+	}
+	_, err := srcColl.InsertMany(ctx, docs)
 	suite.Require().NoError(err)
-	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 2, "x": 53, "inFilter": false})
+	_, err = dstColl.InsertMany(ctx, docs)
 	suite.Require().NoError(err)
-	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 1, "x": 42, "inFilter": true})
+
+	// Documents with _id in [100, 200) should be ignored because they're not in the filter.
+	docs = []interface{}{}
+	for i := 100; i < 200; i++ {
+		docs = append(docs, bson.M{"_id": i, "x": i, "inFilter": false})
+	}
+	_, err = srcColl.InsertMany(ctx, docs)
 	suite.Require().NoError(err)
 
 	checkDoneChan := make(chan struct{})
@@ -1476,10 +1489,12 @@ func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 	// Wait for one generation to finish.
 	<-checkDoneChan
 	status := waitForTasks()
-	suite.Require().Equal(VerificationStatus{TotalTasks: 2, FailedTasks: 0, CompletedTasks: 2}, *status)
+	suite.Require().Greater(status.CompletedTasks, 1)
+	suite.Require().Greater(status.TotalTasks, 1)
+	suite.Require().Equal(status.FailedTasks, 0)
 
 	// Insert another document that is not in the filter.
-	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 3, "x": 43, "inFilter": false})
+	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 200, "x": 200, "inFilter": false})
 	suite.Require().NoError(err)
 
 	// Tell check to start the next generation.
@@ -1492,7 +1507,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	// Now insert in the source, this should come up next generation.
-	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 4, "x": 44, "inFilter": true})
+	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 201, "x": 201, "inFilter": true})
 	suite.Require().NoError(err)
 
 	// Tell check to start the next generation.
@@ -1506,7 +1521,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
 
 	// Now patch up the destination.
-	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 4, "x": 44, "inFilter": true})
+	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 201, "x": 201, "inFilter": true})
 	suite.Require().NoError(err)
 
 	// Continue.
@@ -1521,4 +1536,51 @@ func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 
 	// Turn writes off.
 	verifier.WritesOff(ctx)
+}
+
+func (suite *MultiDataVersionTestSuite) TestPartitionWithFilter() {
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+
+	ctx := context.Background()
+
+	// Make a filter that filters on field "n".
+	filter := map[string]any{"$expr": map[string]any{"$and": []map[string]any{
+		{"$gte": []any{"$n", 100}}, {"$lt": []any{"$n", 200}}}}}
+
+	// Set up the verifier for testing.
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
+	verifier.SetNamespaceMap()
+	verifier.globalFilter = filter
+	// Use a small partition size so that we can test creating multiple partitions.
+	verifier.partitionSizeInBytes = 30
+
+	// Insert documents into the source.
+	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
+
+	// 30 documents with _ids [0, 30) are in the filter.
+	for i := 0; i < 30; i++ {
+		_, err := srcColl.InsertOne(ctx, bson.M{"_id": i, "n": rand.Intn(100) + 100})
+		suite.Require().NoError(err)
+	}
+
+	// 100 documents with _ids [30, 130) are out of the filter.
+	for i := 30; i < 130; i++ {
+		_, err := srcColl.InsertOne(ctx, bson.M{"_id": i, "n": rand.Intn(100)})
+		suite.Require().NoError(err)
+	}
+
+	// Create partitions with the filter.
+	partitions, _, _, _, err := verifier.partitionAndInspectNamespace(ctx, "testDb1.testColl1")
+	suite.Require().NoError(err)
+
+	// Check that each partition have bounds in the filter.
+	for _, partition := range partitions {
+		if _, isMinKey := partition.Key.Lower.(primitive.MinKey); !isMinKey {
+			suite.Require().GreaterOrEqual(partition.Key.Lower.(bson.RawValue).AsInt64(), int64(0))
+		}
+		if _, isMaxKey := partition.Upper.(primitive.MaxKey); !isMaxKey {
+			suite.Require().Less(partition.Upper.(bson.RawValue).AsInt64(), int64(30))
+		}
+	}
 }
