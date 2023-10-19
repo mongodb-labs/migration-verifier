@@ -401,9 +401,7 @@ func GetDocumentCountAfterFiltering(ctx context.Context, logger *logger.Logger, 
 	if len(filter) > 0 {
 		pipeline = append(pipeline, bson.D{{"$match", filter}})
 	}
-	pipeline = append(pipeline, []bson.D{
-		{{"$count", "numFilteredDocs"}},
-	}...)
+	pipeline = append(pipeline, bson.D{{"$count", "numFilteredDocs"}})
 
 	currCollName, err := retryer.RunForUUIDAndTransientErrors(ctx, logger, collName, func(ri *retry.Info, collectionName string) error {
 		ri.Log(logger.Logger, "count", "source", srcDB.Name(), collectionName, "Counting filtered documents.")
@@ -421,7 +419,7 @@ func GetDocumentCountAfterFiltering(ctx context.Context, logger *logger.Logger, 
 		defer cursor.Close(ctx)
 		if cursor.Next(ctx) {
 			if err := cursor.Decode(&value); err != nil {
-				return errors.Wrapf(err, "failed to decode $count response for source namespace %s.%s after filter (%+v)", srcDB.Name(), collName, filter)
+				return errors.Wrapf(err, "failed to decode $count response (%+v) for source namespace %s.%s after filter (%+v)", cursor.Current, srcDB.Name(), collName, filter)
 			}
 		}
 		return nil
