@@ -124,6 +124,7 @@ func PartitionCollectionWithSize(
 	replicatorList []Replicator,
 	subLogger *logger.Logger,
 	partitionSizeInBytes int64,
+	globalFilter map[string]any,
 ) ([]*Partition, types.DocumentCount, types.ByteCount, error) {
 	if partitionSizeInBytes < 0 {
 		subLogger.Warn().Msgf("Partition size of %d bytes is not valid; using default %d.",
@@ -133,7 +134,37 @@ func PartitionCollectionWithSize(
 		partitionSizeInBytes = defaultPartitionSizeInBytes
 	}
 
-	return PartitionCollectionWithParameters(ctx, uuidEntry, &retryer, srcClient, replicatorList, defaultSampleRate, defaultSampleMinNumDocs, partitionSizeInBytes, subLogger)
+	partitions, docCount, byteCount, err := PartitionCollectionWithParameters(
+		ctx,
+		uuidEntry,
+		&retryer,
+		srcClient,
+		replicatorList,
+		defaultSampleRate,
+		defaultSampleMinNumDocs,
+		partitionSizeInBytes,
+		subLogger,
+		globalFilter,
+	)
+
+	// Handle timeout errors by partitioning without filtering.
+	if mongo.IsTimeout(err) {
+		subLogger.Debug().Err(err).Msgf("Timed out while partitioning with filter (%+v), continuing by partitioning without the filter.", globalFilter)
+		return PartitionCollectionWithParameters(
+			ctx,
+			uuidEntry,
+			&retryer,
+			srcClient,
+			replicatorList,
+			defaultSampleRate,
+			defaultSampleMinNumDocs,
+			partitionSizeInBytes,
+			subLogger,
+			nil,
+		)
+	}
+
+	return partitions, docCount, byteCount, err
 }
 
 // PartitionCollectionWithParameters is the implementation for
@@ -150,6 +181,7 @@ func PartitionCollectionWithParameters(
 	sampleMinNumDocs int,
 	partitionSizeInBytes int64,
 	subLogger *logger.Logger,
+	globalFilter map[string]any,
 ) ([]*Partition, types.DocumentCount, types.ByteCount, error) {
 	subLogger.Debug().Msgf("Partitioning %s.%s with sampleRate %f, sampleMinNumDocs %d, desired partitionSizeInBytes %d",
 		uuidEntry.DBName, uuidEntry.CollName, sampleRate, sampleMinNumDocs, partitionSizeInBytes)
@@ -165,7 +197,7 @@ func PartitionCollectionWithParameters(
 	}
 
 	// The lower bound for the collection. There is no partitioning to do if the bound is nil.
-	minIDBound, err := getOuterIDBound(ctx, subLogger, retryer, minBound, srcDB, uuidEntry.CollName, uuidEntry.UUID)
+	minIDBound, err := getOuterIDBound(ctx, subLogger, retryer, minBound, srcDB, uuidEntry.CollName, uuidEntry.UUID, globalFilter)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -178,7 +210,7 @@ func PartitionCollectionWithParameters(
 	}
 
 	// The upper bound for the collection. There is no partitioning to do if the bound is nil.
-	maxIDBound, err := getOuterIDBound(ctx, subLogger, retryer, maxBound, srcDB, uuidEntry.CollName, uuidEntry.UUID)
+	maxIDBound, err := getOuterIDBound(ctx, subLogger, retryer, maxBound, srcDB, uuidEntry.CollName, uuidEntry.UUID, globalFilter)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -195,7 +227,18 @@ func PartitionCollectionWithParameters(
 	// appropriate number of partitions.
 	numPartitions := 1
 	if !isCapped {
-		numPartitions = getNumPartitions(collSizeInBytes, partitionSizeInBytes)
+		// By default, number of partitions is calculated without considering the ratio of filtered documents.
+		numPartitions = getNumPartitions(collSizeInBytes, partitionSizeInBytes, 1)
+
+		// If a filter is used for partitioning, number of partitions is calculated with the ratio of filtered documents.
+		if len(globalFilter) > 0 {
+			numFilteredDocs, filteredCntErr := GetDocumentCountAfterFiltering(ctx, subLogger, retryer, srcColl, uuidEntry.UUID, globalFilter)
+			if filteredCntErr == nil {
+				numPartitions = getNumPartitions(collSizeInBytes, partitionSizeInBytes, float64(numFilteredDocs)/float64(collDocCount))
+			} else {
+				return nil, 0, 0, filteredCntErr
+			}
+		}
 	}
 
 	// Prepend the lower bound and append the upper bound to any intermediate bounds.
@@ -205,7 +248,19 @@ func PartitionCollectionWithParameters(
 	// The intermediate bounds for the collection (i.e. all bounds apart from the lower and upper bounds).
 	// It's okay for these bounds to be nil, since we already have the lower and upper bounds from which
 	// to make at least one partition.
-	midIDBounds, collDropped, err := getMidIDBounds(ctx, subLogger, retryer, srcDB, uuidEntry.CollName, uuidEntry.UUID, collDocCount, numPartitions, sampleMinNumDocs, sampleRate)
+	midIDBounds, collDropped, err := getMidIDBounds(
+		ctx,
+		subLogger,
+		retryer,
+		srcDB,
+		uuidEntry.CollName,
+		uuidEntry.UUID,
+		collDocCount,
+		numPartitions,
+		sampleMinNumDocs,
+		sampleRate,
+		globalFilter,
+	)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -274,7 +329,7 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer
 		ri.Log(logger.Logger, "collStats", "source", srcDB.Name(), collectionName, "Retrieving collection size and document count.")
 		request := retryer.RequestWithUUID(bson.D{
 			{"aggregate", collectionName},
-			{"pipeline", bson.A{
+			{"pipeline", mongo.Pipeline{
 				bson.D{{"$collStats", bson.D{
 					{"storageStats", bson.E{"scale", 1}},
 				}}},
@@ -329,13 +384,80 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer
 	return value.Size, value.Count, value.Capped, nil
 }
 
-// getNumPartitions returns the total number of partitions needed for the collection.
+// GetDocumentCountAfterFiltering counts the number of filtered documents in a collection.
+//
+// This function could take a long time, especially if the collection does not have an index
+// on the filtered fields.
+func GetDocumentCountAfterFiltering(ctx context.Context, logger *logger.Logger, retryer *retry.Retryer, srcColl *mongo.Collection, collUUID util.UUID, filter map[string]any) (int64, error) {
+	srcDB := srcColl.Database()
+	collName := srcColl.Name()
+
+	value := struct {
+		Count int64 `bson:"numFilteredDocs"`
+	}{}
+
+	var pipeline mongo.Pipeline
+
+	if len(filter) > 0 {
+		pipeline = append(pipeline, bson.D{{"$match", filter}})
+	}
+	pipeline = append(pipeline, bson.D{{"$count", "numFilteredDocs"}})
+
+	currCollName, err := retryer.RunForUUIDAndTransientErrors(ctx, logger, collName, func(ri *retry.Info, collectionName string) error {
+		ri.Log(logger.Logger, "count", "source", srcDB.Name(), collectionName, "Counting filtered documents.")
+		request := retryer.RequestWithUUID(bson.D{
+			{"aggregate", collectionName},
+			{"pipeline", pipeline},
+			{"cursor", bson.D{}},
+		}, collUUID)
+
+		cursor, driverErr := srcDB.RunCommandCursor(ctx, request)
+		if driverErr != nil {
+			return driverErr
+		}
+
+		defer cursor.Close(ctx)
+		if cursor.Next(ctx) {
+			if err := cursor.Decode(&value); err != nil {
+				return errors.Wrapf(err, "failed to decode $count response (%+v) for source namespace %s.%s after filter (%+v)", cursor.Current, srcDB.Name(), collName, filter)
+			}
+		}
+		return nil
+	})
+
+	// TODO (REP-960): remove this check.
+	// If we get NamespaceNotFoundError then return 0 since we won't do any partitioning with those returns
+	// and the aggregation did not fail so we do not want to return an error. A
+	// NamespaceNotFoundError can happen if the database does not exist.
+	if util.IsNamespaceNotFoundError(err) {
+		return 0, nil
+	}
+
+	if err != nil {
+		return 0, errors.Wrapf(err, "failed to run aggregation $count for source namespace %s.%s after filter (%+v)", srcDB.Name(), collName, filter)
+	}
+
+	// CollectionUUIDMismatch where the collection does not exist will return a nil cursor and nil
+	// error.
+	if currCollName == "" {
+		// Return 0, nil as CollectionUUIDMismatch should not cause an initial sync error.
+		return 0, nil
+	}
+
+	logger.Debug().Msgf("Collection %s.%s filtered document count: %d, filter: %+v",
+		srcDB.Name(), currCollName, value.Count, filter)
+
+	return value.Count, nil
+}
+
+// getNumPartitions returns the total number of partitions needed for the collection,
+// which is proportional to the percentage of filtered documents in the collection.
 //
 // The returned number is always 1 or greater, where 1 indicates that the collection
 // can be represented with 1 partition and no additional splitting is needed.
-func getNumPartitions(collSizeInBytes, partitionSizeInBytes int64) int {
+func getNumPartitions(collSizeInBytes, partitionSizeInBytes int64, filteredRatio float64) int {
 	// Get the number of partitions as a float.
-	numPartitions := float64(collSizeInBytes) / float64(partitionSizeInBytes)
+	numPartitions := float64(collSizeInBytes) * filteredRatio / float64(partitionSizeInBytes)
 
 	// We take the ceiling of the numPartitions needed, in order to honor the defaultPartitionSizeInBytes.
 	//
@@ -347,7 +469,17 @@ func getNumPartitions(collSizeInBytes, partitionSizeInBytes int64) int {
 }
 
 // getOuterIDBound returns either the smallest or largest _id value in a collection. The minOrMaxBound parameter can be set to "min" or "max" to get either, respectively.
-func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer *retry.Retryer, minOrMaxBound minOrMaxBound, srcDB *mongo.Database, collName string, collUUID util.UUID) (interface{}, error) {
+// If a globalFilter is specified, getOuterIDBound returns the smallest or largest _id of documents within the filter.
+func getOuterIDBound(
+	ctx context.Context,
+	subLogger *logger.Logger,
+	retryer *retry.Retryer,
+	minOrMaxBound minOrMaxBound,
+	srcDB *mongo.Database,
+	collName string,
+	collUUID util.UUID,
+	globalFilter map[string]any,
+) (interface{}, error) {
 	// Choose a sort direction based on the minOrMaxBound.
 	var sortDirection int
 	switch minOrMaxBound {
@@ -360,17 +492,24 @@ func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer *ret
 	}
 
 	var docID interface{}
+
+	var pipeline mongo.Pipeline
+	if len(globalFilter) > 0 {
+		pipeline = append(pipeline, bson.D{{"$match", globalFilter}})
+	}
+	pipeline = append(pipeline, []bson.D{
+		{{"$sort", bson.D{{"_id", sortDirection}}}},
+		{{"$project", bson.D{{"_id", 1}}}},
+		{{"$limit", 1}},
+	}...)
+
 	// Get one document containing only the smallest or largest _id value in the collection.
 	currCollName, err := retryer.RunForUUIDAndTransientErrors(ctx, subLogger, collName, func(ri *retry.Info, collName string) error {
 		ri.Log(subLogger.Logger, "aggregate", "source", srcDB.Name(), collName, fmt.Sprintf("getting %s _id partition bound", minOrMaxBound))
 		cursor, cmdErr :=
 			srcDB.RunCommandCursor(ctx, retryer.RequestWithUUID(bson.D{
 				{"aggregate", collName},
-				{"pipeline", bson.A{
-					bson.D{{"$sort", bson.D{{"_id", sortDirection}}}},
-					bson.D{{"$project", bson.D{{"_id", 1}}}},
-					bson.D{{"$limit", 1}},
-				}},
+				{"pipeline", pipeline},
 				{"hint", bson.D{{"_id", 1}}},
 				{"cursor", bson.D{}},
 			}, collUUID))
@@ -407,7 +546,18 @@ func getOuterIDBound(ctx context.Context, subLogger *logger.Logger, retryer *ret
 // The number of bounds returned is: numPartitions - 1.
 //
 // A nil slice is returned if the collDocCount doesn't meet the sampleMinNumDocs, or if the numPartitions is less than 2.
-func getMidIDBounds(ctx context.Context, logger *logger.Logger, retryer *retry.Retryer, srcDB *mongo.Database, collName string, collUUID util.UUID, collDocCount int64, numPartitions, sampleMinNumDocs int, sampleRate float64) ([]interface{}, bool, error) {
+func getMidIDBounds(
+	ctx context.Context,
+	logger *logger.Logger,
+	retryer *retry.Retryer,
+	srcDB *mongo.Database,
+	collName string,
+	collUUID util.UUID,
+	collDocCount int64,
+	numPartitions, sampleMinNumDocs int,
+	sampleRate float64,
+	globalFilter map[string]any,
+) ([]interface{}, bool, error) {
 	// We entirely avoid sampling for mid bounds if we don't meet the criteria for the number of documents or partitions.
 	if collDocCount < int64(sampleMinNumDocs) || numPartitions < 2 {
 		return nil, false, nil
@@ -426,7 +576,25 @@ func getMidIDBounds(ctx context.Context, logger *logger.Logger, retryer *retry.R
 		numDocsToSample = collDocCount
 	}
 
-	logger.Info().Msgf("Sampling %d documents to make %d partitions for collection '%s.%s', UUID %s", numDocsToSample, numPartitions, srcDB.Name(), collName, collUUID.String())
+	var msg string
+	var pipeline mongo.Pipeline
+	if len(globalFilter) > 0 {
+		pipeline = append(pipeline, bson.D{{"$match", globalFilter}})
+		msg = fmt.Sprintf("Sampling documents with filter (%v)", globalFilter)
+	} else {
+		msg = fmt.Sprintf("Sampling %d documents", numDocsToSample)
+	}
+
+	logger.Info().Msgf("%s to make %d partitions for collection '%s.%s', UUID %s", msg, numPartitions, srcDB.Name(), collName, collUUID.String())
+	pipeline = append(pipeline, []bson.D{
+		{{"$sample", bson.D{{"size", numDocsToSample}}}},
+		{{"$project", bson.D{{"_id", 1}}}},
+		{{"$bucketAuto",
+			bson.D{
+				{"groupBy", "$_id"},
+				{"buckets", numPartitions},
+			}}},
+	}...)
 
 	// Get a cursor for the $sample and $bucketAuto aggregation.
 	var midIDBounds []interface{}
@@ -436,15 +604,7 @@ func getMidIDBounds(ctx context.Context, logger *logger.Logger, retryer *retry.R
 		cursor, cmdErr :=
 			srcDB.RunCommandCursor(ctx, retryer.RequestWithUUID(bson.D{
 				{"aggregate", collName},
-				{"pipeline", bson.A{
-					bson.D{{"$sample", bson.D{{"size", numDocsToSample}}}},
-					bson.D{{"$project", bson.D{{"_id", 1}}}},
-					bson.D{{"$bucketAuto",
-						bson.D{
-							{"groupBy", "$_id"},
-							{"buckets", numPartitions},
-						}}},
-				}},
+				{"pipeline", pipeline},
 				{"allowDiskUse", true},
 				{"cursor", bson.D{}},
 			}, collUUID))
