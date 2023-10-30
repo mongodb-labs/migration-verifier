@@ -619,7 +619,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTask) {
 	verifier.logger.Debug().Msgf("[Worker %d] Processing verify task", workerNum)
 
-	mismatches, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(task)
+	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(task)
 
 	if err != nil {
 		task.Status = verificationTaskFailed
@@ -628,7 +628,7 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 		task.SourceDocumentCount = docsCount
 		task.SourceByteCount = bytesCount
 
-		if len(mismatches) == 0 {
+		if len(problems) == 0 {
 			task.Status = verificationTaskCompleted
 		} else {
 			task.Status = verificationTaskFailed
@@ -638,16 +638,35 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 					workerNum, task.PrimaryKey)
 			} else {
 				verifier.logger.Debug().Msgf("[Worker %d] Verification Task %+v failed, may pass next generation", workerNum, task.PrimaryKey)
-				var ids []interface{}
+
+				var mismatches []VerificationResult
+				var missingIds []interface{}
 				var dataSizes []int
-				for _, v := range mismatches {
-					ids = append(ids, v.ID)
-					dataSizes = append(dataSizes, v.dataSize)
+
+				// This stores all IDs for the next generation to check.
+				// Its length should equal len(mismatches) + len(missingIds).
+				var idsToRecheck []interface{}
+
+				for _, mismatch := range problems {
+					idsToRecheck = append(idsToRecheck, mismatch.ID)
+					dataSizes = append(dataSizes, mismatch.dataSize)
+
+					if mismatch.Details == Missing {
+						missingIds = append(missingIds, mismatch.ID)
+					} else {
+						mismatches = append(mismatches, mismatch)
+					}
 				}
-				// Update ids of the failed task so that only ids from mismatches are reported.
-				// Ids of matching documents are discarded and hidden from the mismatching documents report.
-				task.Ids = ids
-				err := verifier.InsertFailedCompareRecheckDocs(task.QueryFilter.Namespace, ids, dataSizes)
+
+				// Update ids of the failed task so that only mismatches and
+				// missing are reported. Matching documents are thus hidden
+				// from the progress report.
+				task.Ids = missingIds
+				task.FailedDocs = mismatches
+
+				// Create a task for the next generation to recheck the
+				// mismatched & missing docs.
+				err := verifier.InsertFailedCompareRecheckDocs(task.QueryFilter.Namespace, idsToRecheck, dataSizes)
 				if err != nil {
 					verifier.logger.Error().Msgf("[Worker %d] Error inserting document mismatch into Recheck queue: %+v", workerNum, err)
 				}

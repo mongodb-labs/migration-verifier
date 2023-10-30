@@ -75,9 +75,9 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	contentMismatch := 0
 	missing := 0
-	for _, v := range failedTasks {
-		contentMismatch += len(v.FailedDocs)
-		missing += len(v.Ids)
+	for _, task := range failedTasks {
+		contentMismatch += len(task.FailedDocs)
+		missing += len(task.Ids)
 	}
 
 	failureTypesTable.Append([]string{"Documents With Differing Content", fmt.Sprintf("%v", contentMismatch)})
@@ -87,12 +87,12 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	mismatchedDocsTable := tablewriter.NewWriter(strBuilder)
 	mismatchedDocsTableRows := types.ToNumericTypeOf(0, verifier.failureDisplaySize)
-	mismatchedDocsTable.SetHeader([]string{"ID", "Cluster", "Type", "Field", "Namespace", "Details"})
+	mismatchedDocsTable.SetHeader([]string{"ID", "Cluster", "Field", "Namespace", "Details"})
 
 	printAll := int64(contentMismatch) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
 OUTA:
-	for _, v := range failedTasks {
-		for _, f := range v.FailedDocs {
+	for _, task := range failedTasks {
+		for _, f := range task.FailedDocs {
 			if !printAll && mismatchedDocsTableRows >= verifier.failureDisplaySize {
 				break OUTA
 			}
@@ -124,8 +124,8 @@ OUTA:
 
 	printAll = int64(missing) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
 OUTB:
-	for _, v := range failedTasks {
-		for _, _id := range v.Ids {
+	for _, task := range failedTasks {
+		for _, _id := range task.Ids {
 			if !printAll && missingDocsTableRows >= verifier.failureDisplaySize {
 				break OUTB
 			}
@@ -133,8 +133,8 @@ OUTB:
 			missingDocsTableRows++
 			missingDocsTable.Append([]string{
 				fmt.Sprintf("%v", _id),
-				fmt.Sprintf("%v", v.QueryFilter.Namespace),
-				fmt.Sprintf("%v", v.QueryFilter.To),
+				fmt.Sprintf("%v", task.QueryFilter.Namespace),
+				fmt.Sprintf("%v", task.QueryFilter.To),
 			})
 		}
 	}

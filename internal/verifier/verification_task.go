@@ -59,11 +59,19 @@ type VerificationTask struct {
 	Type       verificationTaskType   `bson:"type"`
 	Status     verificationTaskStatus `bson:"status"`
 	Generation int                    `bson:"generation"`
-	Ids        []interface{}          `bson:"_ids"`
+
+	// For failed tasks, this stores the document IDs missing on
+	// one cluster or the other.
+	Ids []interface{} `bson:"_ids"`
+
 	// Deprecated: VerificationTask ID field is ignored by the verifier.
-	ID          int                  `bson:"id"`
-	FailedDocs  []VerificationResult `bson:"failed_docs,omitempty"`
-	QueryFilter QueryFilter          `bson:"query_filter"          json:"query_filter"`
+	ID int `bson:"id"`
+
+	// For failed tasks, this stores details on documents that exist on
+	// both clusters but don’t match.
+	FailedDocs []VerificationResult `bson:"failed_docs,omitempty"`
+
+	QueryFilter QueryFilter `bson:"query_filter"          json:"query_filter"`
 
 	// DocumentCount is set when the verifier is done with the task
 	// (whether we found mismatches or not).
@@ -213,6 +221,7 @@ func (verifier *Verifier) UpdateVerificationTask(task *VerificationTask) error {
 			"failed_docs":            task.FailedDocs,
 			"source_documents_count": task.SourceDocumentCount,
 			"source_bytes_count":     task.SourceByteCount,
+			"_ids":                   task.Ids,
 		},
 	}
 	result, err := verifier.verificationTaskCollection().UpdateOne(ctx, bson.M{"_id": task.PrimaryKey}, updateFields)
