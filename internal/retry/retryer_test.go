@@ -285,6 +285,7 @@ func (suite *UnitTestSuite) TestRetryerWithEmptyCollectionName() {
 	suite.Equal("", name)
 }
 
+// Test fix for REP-4197
 func (suite *UnitTestSuite) TestRetryerWithUUIDNotSupportedError() {
 	retryer := New(0)
 
@@ -296,7 +297,11 @@ func (suite *UnitTestSuite) TestRetryerWithUUIDNotSupportedError() {
 	}
 	f := func(ri *Info, _ string) error {
 		attemptNumber = ri.attemptNumber
-		return cmdErr
+		if attemptNumber == 0 {
+			return cmdErr
+		} else {
+			return nil
+		}
 	}
 
 	r := retryer.SetRetryOnUUIDNotSupported()
@@ -304,6 +309,6 @@ func (suite *UnitTestSuite) TestRetryerWithUUIDNotSupportedError() {
 	_, err := r.RunForUUIDAndTransientErrors(suite.Context(), suite.Logger(), "bar", f)
 	// The aggregateDisallowsUUIDs will be set to True in the retry
 	suite.True(r.aggregateDisallowsUUIDs)
-	suite.Equal(cmdErr, err)
+	suite.Nil(err)
 	suite.Equal(1, attemptNumber)
 }
