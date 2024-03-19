@@ -284,3 +284,26 @@ func (suite *UnitTestSuite) TestRetryerWithEmptyCollectionName() {
 	suite.NoError(err)
 	suite.Equal("", name)
 }
+
+func (suite *UnitTestSuite) TestRetryerWithUUIDNotSupportedError() {
+	retryer := New(0)
+
+	attemptNumber := 0
+	cmdErr := mongo.CommandError{
+		Message: "(Location4928902) collectionUUID is not supported on a mongos",
+		Name:    "FailedToParseError",
+		Code:    9,
+	}
+	f := func(ri *Info, _ string) error {
+		attemptNumber = ri.attemptNumber
+		return cmdErr
+	}
+
+	r := retryer.SetRetryOnUUIDNotSupported()
+	r.aggregateDisallowsUUIDs = false
+	_, err := r.RunForUUIDAndTransientErrors(suite.Context(), suite.Logger(), "bar", f)
+	// The aggregateDisallowsUUIDs will be set to True in the retry
+	suite.True(r.aggregateDisallowsUUIDs)
+	suite.Equal(cmdErr, err)
+	suite.Equal(1, attemptNumber)
+}
