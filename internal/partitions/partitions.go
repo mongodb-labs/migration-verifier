@@ -347,6 +347,8 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer
 
 		cursor, driverErr := srcDB.RunCommandCursor(ctx, request)
 		if driverErr != nil {
+			merr := mongo.CommandError{}
+			errors.As(driverErr, &merr)
 			return driverErr
 		}
 
