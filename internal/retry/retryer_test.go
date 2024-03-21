@@ -292,8 +292,6 @@ func (suite *UnitTestSuite) TestV50RetryerWithUUIDNotSupportedError() {
 	attemptNumber := 0
 	cmdErr := mongo.CommandError{
 		Message: "(Location4928902) collectionUUID is not supported on a mongos",
-		Name:    "FailedToParseError",
-		Code:    9,
 	}
 	f := func(ri *Info, _ string) error {
 		attemptNumber = ri.attemptNumber
