@@ -309,6 +309,6 @@ func (suite *UnitTestSuite) TestRetryerWithUUIDNotSupportedError() {
 	_, err := r.RunForUUIDAndTransientErrors(suite.Context(), suite.Logger(), "bar", f)
 	// The aggregateDisallowsUUIDs will be set to True in the retry
 	suite.True(r.aggregateDisallowsUUIDs)
-	suite.Nil(err)
+	suite.NoError(err)
 	suite.Equal(1, attemptNumber)
 }
