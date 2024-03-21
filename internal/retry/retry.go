@@ -181,9 +181,13 @@ func (r *Retryer) runRetryLoop(
 			continue
 		}
 
+		// isPreV50CollectionUUIDNotSupportErr is the helper function to check the error returned from MongoDB pre-V5.0
+		// because of collectionUUID not supported.
 		isPreV50CollectionUUIDNotSupportErr := func(err error) bool {
 			return util.IsFailedToParseError(err) && util.HasServerErrorMessage(err, "collectionUUID")
 		}
+		// isV50CollectionUUIDNotSupportErr is the helper function to check the error returned from MongoDB V5.0
+		// because of collectionUUID not supported.
 		isV50CollectionUUIDNotSupportErr := func(err error) bool {
 			return util.HasServerErrorMessage(err, "collectionUUID is not supported")
 		}
