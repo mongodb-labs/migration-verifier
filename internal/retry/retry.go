@@ -181,11 +181,24 @@ func (r *Retryer) runRetryLoop(
 			continue
 		}
 
+		// isPreV50CollectionUUIDNotSupportErr is the helper function to check the error returned from MongoDB pre-V5.0
+		// because of collectionUUID not supported.
+		isPreV50CollectionUUIDNotSupportErr := func(err error) bool {
+			return util.IsFailedToParseError(err) && util.HasServerErrorMessage(err, "collectionUUID")
+		}
+		// isV50CollectionUUIDNotSupportErr is the helper function to check the error returned from MongoDB V5.0
+		// because of collectionUUID not supported.
+		isV50CollectionUUIDNotSupportErr := func(err error) bool {
+			return util.HasServerErrorMessage(err, "collectionUUID is not supported")
+		}
+
 		// If this is the first time we've come across a failure to parse
 		// collection UUID, try again with the UUID elided (if the caller used
 		// RequestWithUUID).
-		if r.retryOnUUIDNotSupported && !r.aggregateDisallowsUUIDs && util.IsFailedToParseError(err) && util.HasServerErrorMessage(err, "collectionUUID") {
-			logger.Debug().Msg("Server version (< 5.0) does not support UUIDs in 'aggregate'. Will retry without UUID.")
+		if r.retryOnUUIDNotSupported && !r.aggregateDisallowsUUIDs &&
+			(isPreV50CollectionUUIDNotSupportErr(err) || isV50CollectionUUIDNotSupportErr(err)) {
+			logger.Debug().Msg("Server does not support UUIDs in 'aggregate'. Will retry without UUID.")
+			ri.attemptNumber++
 			r.aggregateDisallowsUUIDs = true
 			continue
 		}
