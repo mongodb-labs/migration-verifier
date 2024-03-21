@@ -286,7 +286,7 @@ func (suite *UnitTestSuite) TestRetryerWithEmptyCollectionName() {
 }
 
 // Test fix for REP-4197
-func (suite *UnitTestSuite) TestRetryerWithUUIDNotSupportedError() {
+func (suite *UnitTestSuite) TestV50RetryerWithUUIDNotSupportedError() {
 	retryer := New(0)
 
 	attemptNumber := 0
@@ -309,6 +309,33 @@ func (suite *UnitTestSuite) TestRetryerWithUUIDNotSupportedError() {
 	_, err := r.RunForUUIDAndTransientErrors(suite.Context(), suite.Logger(), "bar", f)
 	// The aggregateDisallowsUUIDs will be set to True in the retry
 	suite.True(r.aggregateDisallowsUUIDs)
-	suite.Nil(err)
+	suite.NoError(err)
+	suite.Equal(1, attemptNumber)
+}
+
+func (suite *UnitTestSuite) TestPreV50RetryerWithUUIDNotSupportedError() {
+	retryer := New(0)
+
+	attemptNumber := 0
+	cmdErr := mongo.CommandError{
+		Message: "(FailedToParse) unrecognized field 'collectionUUID",
+		Name:    "FailedToParseError",
+		Code:    9,
+	}
+	f := func(ri *Info, _ string) error {
+		attemptNumber = ri.attemptNumber
+		if attemptNumber == 0 {
+			return cmdErr
+		} else {
+			return nil
+		}
+	}
+
+	r := retryer.SetRetryOnUUIDNotSupported()
+	r.aggregateDisallowsUUIDs = false
+	_, err := r.RunForUUIDAndTransientErrors(suite.Context(), suite.Logger(), "bar", f)
+	// The aggregateDisallowsUUIDs will be set to True in the retry
+	suite.True(r.aggregateDisallowsUUIDs)
+	suite.NoError(err)
 	suite.Equal(1, attemptNumber)
 }
