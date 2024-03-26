@@ -58,6 +58,18 @@ By default, the verifier will read from all nodes (primary and secondary).  This
 
 To set a port, use `--serverPort <port number>`. The default is 27020.
 
+### Using a configuration file
+
+To load configuration options from a YAML configuration file, use the `--configFile` parameter.
+
+For example, you can specify `srcURI`, `dstURI`, and `metaURI` parameters thus:
+```
+---
+srcURI: mongodb://localhost:28010
+dstURI: mongodb://localhost:28011
+metaURI: mongodb://localhost:28012
+```
+
 
 ## Send the Verifier Process Commands: 
 

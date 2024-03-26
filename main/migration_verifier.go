@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
 	"github.com/urfave/cli"
+	"github.com/urfave/cli/altsrc"
 )
 
 const (
@@ -39,6 +40,7 @@ const (
 	debugFlag             = "debug"
 	failureDisplaySize    = "failureDisplaySize"
 	ignoreReadConcernFlag = "ignoreReadConcern"
+	configFileFlag        = "configFile"
 )
 
 func main() {
@@ -51,104 +53,110 @@ func main() {
 	ctx := context.TODO()
 
 	flags := []cli.Flag{
-		&cli.StringFlag{
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  configFileFlag,
+			Usage: "path to an optional YAML config file",
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  srcURI,
 			Value: "mongodb://localhost:27017",
 			Usage: "source Host `URI` for migration verification",
-		},
-		&cli.StringFlag{
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  dstURI,
 			Value: "mongodb://localhost:27018",
 			Usage: "destination Host `URI` for migration verification",
-		},
-		&cli.StringFlag{
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  metaURI,
 			Value: "mongodb://localhost:27019",
 			Usage: "host `URI` for storing migration verification metadata",
-		},
-		&cli.IntFlag{
+		}),
+		altsrc.NewIntFlag(cli.IntFlag{
 			Name:  serverPort,
 			Value: 27020,
 			Usage: "`port` for the control web server",
-		},
-		&cli.StringFlag{
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  logPath,
 			Value: "stdout",
 			Usage: "logging file `path`",
-		},
-		&cli.IntFlag{
+		}),
+		altsrc.NewIntFlag(cli.IntFlag{
 			Name:  numWorkers,
 			Value: 10,
 			Usage: "`number` of worker threads to use for verification",
-		},
-		&cli.Int64Flag{
+		}),
+		altsrc.NewInt64Flag(cli.Int64Flag{
 			Name:  generationPauseDelay,
 			Value: 1_000,
 			Usage: "`milliseconds` to wait between generations of rechecking, allowing for more time to turn off writes",
-		},
-		&cli.Int64Flag{
+		}),
+		altsrc.NewInt64Flag(cli.Int64Flag{
 			Name:  workerSleepDelay,
 			Value: 1_000,
 			Usage: "`milliseconds` workers sleep while waiting for work",
-		},
-		&cli.StringSliceFlag{
+		}),
+		altsrc.NewStringSliceFlag(cli.StringSliceFlag{
 			Name:  srcNamespace,
 			Usage: "source `namespaces` to check",
-		},
-		&cli.StringSliceFlag{
+		}),
+		altsrc.NewStringSliceFlag(cli.StringSliceFlag{
 			Name:  dstNamespace,
 			Usage: "destination `namespaces` to check",
-		},
-		&cli.StringFlag{
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  metaDBName,
 			Value: "migration_verification_metadata",
 			Usage: "`name` of the database in which to store verification metadata",
-		},
-		&cli.BoolFlag{
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  ignoreFieldOrder,
 			Usage: "Whether or not field order is ignored in documents",
-		},
-		&cli.BoolFlag{
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  verifyAll,
 			Usage: "If set, verify all user namespaces",
-		},
-		&cli.BoolFlag{
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  startClean,
 			Usage: "If set, drop all previous verification metadata before starting",
-		},
-		&cli.StringFlag{
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  readPreference,
 			Value: "nearest",
 			Usage: "Read preference for reading data from clusters. " +
 				"May be 'primary', 'secondary', 'primaryPreferred', 'secondaryPreferred', or 'nearest'",
-		},
-		&cli.Uint64Flag{
+		}),
+		altsrc.NewUint64Flag(cli.Uint64Flag{
 			Name:  partitionSizeMB,
 			Value: 0,
 			Usage: "`Megabytes` to use for a partition.  Change only for debugging. 0 means use partitioner default.",
-		},
-		&cli.BoolFlag{
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  debugFlag,
 			Usage: "Turn on debug logging",
-		},
-		&cli.BoolFlag{
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  checkOnly,
 			Usage: "Do not run the webserver or recheck, just run the check (for debugging)",
-		},
-		&cli.Int64Flag{
+		}),
+		altsrc.NewInt64Flag(cli.Int64Flag{
 			Name:  failureDisplaySize,
 			Value: verifier.DefaultFailureDisplaySize,
 			Usage: "Number of failures to display. Will display all failures if the number doesn’t exceed this limit by 25%",
-		},
-		&cli.BoolFlag{
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  ignoreReadConcernFlag,
 			Usage: "Use connection-default read concerns rather than setting majority read concern. This option may degrade consistency, so only enable it if majority read concern (the default) doesn’t work.",
-		},
+		}),
 	}
+
 	app := &cli.App{
-		Name:  "migration-verifier",
-		Usage: "verify migration correctness",
-		Flags: flags,
+		Name:   "migration-verifier",
+		Usage:  "verify migration correctness",
+		Flags:  flags,
+		Before: altsrc.InitInputSourceWithContext(flags, altsrc.NewYamlSourceFromFlagFunc(configFileFlag)),
 		Action: func(cCtx *cli.Context) error {
 			verifier, err := handleArgs(ctx, cCtx)
 			if err != nil {
