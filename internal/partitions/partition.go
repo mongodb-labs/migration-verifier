@@ -190,22 +190,40 @@ func (p *Partition) GetFindOptions(buildInfo *bson.M, filterAndPredicates bson.A
 func (p *Partition) filterWithNoTypeBracketing() bson.D {
 	// We use $expr to avoid type bracketing and allow comparison of different _id types,
 	// and $literal to avoid MQL injection from an _id's value.
-	return bson.D{{"$and", []bson.D{
-		// All _id values >= lower bound.
-		{{"$expr", bson.D{
-			{"$gte", bson.A{
+
+	conditions := []bson.M{}
+
+	if !isMinKey(p.Key.Lower) {
+		conditions = append(
+			conditions,
+			bson.M{"$gte": bson.A{
 				"$_id",
-				bson.D{{"$literal", p.Key.Lower}},
+				bson.M{"$literal": p.Key.Lower},
 			}},
-		}}},
-		// All _id values <= upper bound.
-		{{"$expr", bson.D{
-			{"$lte", bson.A{
+		)
+	}
+
+	if !isMaxKey(p.Upper) {
+		conditions = append(
+			conditions,
+			bson.M{"$lte": bson.A{
 				"$_id",
-				bson.D{{"$literal", p.Upper}},
+				bson.M{"$literal": p.Upper},
 			}},
-		}}},
-	}}}
+		)
+	}
+
+	return bson.D{{"$expr", bson.M{"$and": conditions}}}
+}
+
+func isMinKey(value any) bool {
+	_, isMinKey := value.(primitive.MinKey)
+	return isMinKey
+}
+
+func isMaxKey(value any) bool {
+	_, isMaxKey := value.(primitive.MaxKey)
+	return isMaxKey
 }
 
 // filterWithTypeBracketing returns a range filter on _id to be used in a Find query for the
