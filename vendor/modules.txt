@@ -1,3 +1,6 @@
+# github.com/BurntSushi/toml v0.3.1
+## explicit
+github.com/BurntSushi/toml
 # github.com/cespare/permute/v2 v2.0.0-beta2
 ## explicit; go 1.18
 github.com/cespare/permute/v2
@@ -118,6 +121,7 @@ github.com/ugorji/go/codec
 # github.com/urfave/cli v1.22.9
 ## explicit; go 1.11
 github.com/urfave/cli
+github.com/urfave/cli/altsrc
 # github.com/xdg-go/pbkdf2 v1.0.0
 ## explicit; go 1.9
 github.com/xdg-go/pbkdf2
