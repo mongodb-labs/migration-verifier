@@ -153,10 +153,19 @@ func main() {
 	}
 
 	app := &cli.App{
-		Name:   "migration-verifier",
-		Usage:  "verify migration correctness",
-		Flags:  flags,
-		Before: altsrc.InitInputSourceWithContext(flags, altsrc.NewYamlSourceFromFlagFunc(configFileFlag)),
+		Name:  "migration-verifier",
+		Usage: "verify migration correctness",
+		Flags: flags,
+		Before: func(cCtx *cli.Context) error {
+			confFile := cCtx.String(configFileFlag)
+
+			if len(confFile) > 0 {
+				readConfFunc := altsrc.InitInputSourceWithContext(flags, altsrc.NewYamlSourceFromFlagFunc(configFileFlag))
+				return readConfFunc(cCtx)
+			}
+
+			return nil
+		},
 		Action: func(cCtx *cli.Context) error {
 			verifier, err := handleArgs(ctx, cCtx)
 			if err != nil {
