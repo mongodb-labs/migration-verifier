@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"strings"
@@ -44,9 +43,6 @@ const (
 )
 
 func main() {
-	go func() {
-		fmt.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
