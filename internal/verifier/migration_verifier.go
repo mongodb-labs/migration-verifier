@@ -912,7 +912,7 @@ func compareIndexSpecifications(srcSpec *mongo.IndexSpecification, dstSpec *mong
 			Cluster:   ClusterTarget,
 			ID:        dstSpec.Name,
 			Field:     "ExpireAfterSeconds",
-			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.ExpireAfterSeconds, dstSpec.ExpireAfterSeconds)})
+			Details:   Mismatch + fmt.Sprintf(" : src: %s, dst: %s", nilableToString(srcSpec.ExpireAfterSeconds), nilableToString(dstSpec.ExpireAfterSeconds))})
 	}
 
 	if !reflect.DeepEqual(srcSpec.Sparse, dstSpec.Sparse) {
@@ -921,7 +921,7 @@ func compareIndexSpecifications(srcSpec *mongo.IndexSpecification, dstSpec *mong
 			Cluster:   ClusterTarget,
 			ID:        dstSpec.Name,
 			Field:     "Sparse",
-			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Sparse, dstSpec.Sparse)})
+			Details:   Mismatch + fmt.Sprintf(" : src: %s, dst: %s", nilableToString(srcSpec.Sparse), nilableToString(dstSpec.Sparse))})
 	}
 
 	if !reflect.DeepEqual(srcSpec.Unique, dstSpec.Unique) {
@@ -930,7 +930,7 @@ func compareIndexSpecifications(srcSpec *mongo.IndexSpecification, dstSpec *mong
 			Cluster:   ClusterTarget,
 			ID:        dstSpec.Name,
 			Field:     "Unique",
-			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Unique, dstSpec.Unique)})
+			Details:   Mismatch + fmt.Sprintf(" : src: %s, dst: %s", nilableToString(srcSpec.Unique), nilableToString(dstSpec.Unique))})
 	}
 
 	if !reflect.DeepEqual(srcSpec.Clustered, dstSpec.Clustered) {
@@ -939,9 +939,17 @@ func compareIndexSpecifications(srcSpec *mongo.IndexSpecification, dstSpec *mong
 			Cluster:   ClusterTarget,
 			ID:        dstSpec.Name,
 			Field:     "Clustered",
-			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Clustered, dstSpec.Clustered)})
+			Details:   Mismatch + fmt.Sprintf(" : src: %s, dst: %s", nilableToString(srcSpec.Clustered), nilableToString(dstSpec.Clustered))})
 	}
 	return results
+}
+
+func nilableToString[T any](ptr *T) string {
+	if ptr == nil {
+		return "(unset)"
+	}
+
+	return fmt.Sprintf("%v", *ptr)
 }
 
 func (verifier *Verifier) ProcessCollectionVerificationTask(ctx context.Context, workerNum int, task *VerificationTask) {
