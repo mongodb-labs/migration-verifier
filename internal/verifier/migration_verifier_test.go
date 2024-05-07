@@ -1106,6 +1106,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 		assert.Equal(t, "testDB.testIndex", result.NameSpace)
 		assert.Equal(t, "KeysDocument", result.Field)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
 	}
 
 	// Shortening the key mattes
@@ -1121,6 +1122,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 		assert.Equal(t, "testDB.testIndex", result.NameSpace)
 		assert.Equal(t, "KeysDocument", result.Field)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
 	}
 
 	var expireAfterSeconds30, expireAfterSeconds0_1, expireAfterSeconds0_2 int32
@@ -1162,6 +1164,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 		assert.Equal(t, "testIndex", result.ID)
 		assert.Equal(t, "testDB.testIndex", result.NameSpace)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
 		diffFields = append(diffFields, result.Field)
 	}
 	assert.ElementsMatch(t, []string{"Sparse", "Unique", "ExpireAfterSeconds", "Clustered"}, diffFields)
@@ -1175,6 +1178,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 		assert.Equal(t, "testDB.testIndex", result.NameSpace)
 		assert.Equal(t, "ExpireAfterSeconds", result.Field)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
 	}
 
 	fullIndexSpec3 = fullIndexSpec2
@@ -1186,6 +1190,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 		assert.Equal(t, "testDB.testIndex", result.NameSpace)
 		assert.Equal(t, "Sparse", result.Field)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
 	}
 
 	fullIndexSpec3 = fullIndexSpec2
@@ -1197,6 +1202,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 		assert.Equal(t, "testDB.testIndex", result.NameSpace)
 		assert.Equal(t, "Unique", result.Field)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
 	}
 
 	fullIndexSpec3 = fullIndexSpec2
@@ -1208,6 +1214,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 		assert.Equal(t, "testDB.testIndex", result.NameSpace)
 		assert.Equal(t, "Clustered", result.Field)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
+		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
 	}
 }
 
