@@ -1,6 +1,6 @@
 # Verify Migrations!
 
-_This Repository is NOT an officially supported MongoDB product._
+_This Repository is NOT an officially supported MongoDB product. This tool reduces the risk of undetected data inconsistencies from migrations, but it doesn’t provide guarantees of correctness._
 
 # To build
 
