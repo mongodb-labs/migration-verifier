@@ -54,7 +54,7 @@ migration-verifier … --srcNamespace foo.bar --srcNamespace foo.baz --dstNamesp
 
 will result in the mapping `foo.bar <-> foo.bar1, foo.baz <-> bar.bar2`
 
-By default, the verifier will read from all nodes (primary and secondary).  This can be changed with option “`--readPreference <preference>`” where `<preference>` can be “`primary`”, “`secondary`”, “`primaryPreferred`”, “`secondaryPreferred`”, or “`nearest`” (same as default).  
+By default, the verifier will read from all nodes (primary and secondary).  This can be changed with option “`--readPreference <preference>`” where `<preference>` can be “`primary`” (same as default), “`secondary`”, “`primaryPreferred`”, “`secondaryPreferred`”, or “`nearest`”.  
 
 To set a port, use `--serverPort <port number>`. The default is 27020.
 
