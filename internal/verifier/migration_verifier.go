@@ -188,7 +188,7 @@ func NewVerifier(settings VerifierSettings) *Verifier {
 	return &Verifier{
 		phase:                 Idle,
 		numWorkers:            NumWorkers,
-		readPreference:        readpref.Nearest(),
+		readPreference:        readpref.Primary(),
 		partitionSizeInBytes:  400 * 1024 * 1024,
 		failureDisplaySize:    DefaultFailureDisplaySize,
 		changeStreamEnderChan: make(chan struct{}),
