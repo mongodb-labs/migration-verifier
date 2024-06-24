@@ -231,7 +231,7 @@ In this case, '`failed_docs`' contains all the meta data mismatches, in this cas
 
 # Performance
 
-- The migration-verifier optimizes for the case where a migration’s initial sync is completed **and** change events are relatively infrequent. If you start verification before initial sync finishes, or if the source cluster is too busy, the verification may freeze.
+The migration-verifier optimizes for the case where a migration’s initial sync is completed **and** change events are relatively infrequent. If you start verification before initial sync finishes, or if the source cluster is too busy, the verification may freeze.
 
 The migration-verifier is also rather resource-hungry. To mitigate this, try limiting its number of workers (i.e., `--numWorkers`), its partition size (`--partitionSizeMB`), and/or its process group’s resource limits (see the `ulimit` command in POSIX OSes).
 
