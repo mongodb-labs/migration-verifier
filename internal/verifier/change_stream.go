@@ -50,7 +50,7 @@ func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEve
 	case "update":
 		return verifier.InsertChangeEventRecheckDoc(ctx, changeEvent)
 	default:
-		return fmt.Errorf(`Not supporting: "` + changeEvent.OpType + `" events`)
+		return errors.New(`Not supporting: "` + changeEvent.OpType + `" events`)
 	}
 }
 

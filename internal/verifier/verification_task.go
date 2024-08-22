@@ -71,7 +71,7 @@ type VerificationTask struct {
 	// both clusters but don’t match.
 	FailedDocs []VerificationResult `bson:"failed_docs,omitempty"`
 
-	QueryFilter QueryFilter `bson:"query_filter"          json:"query_filter"`
+	QueryFilter QueryFilter `bson:"query_filter" json:"query_filter"`
 
 	// DocumentCount is set when the verifier is done with the task
 	// (whether we found mismatches or not).
