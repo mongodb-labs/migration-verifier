@@ -1,4 +1,5 @@
 go.sum
+golangci-lint
 migration_verifier
 internal/verifier/mongodb_exec/
 verifier_expansion.yml
