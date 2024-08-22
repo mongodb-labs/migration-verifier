@@ -1,3 +1,4 @@
+dev-bin/
 go.sum
 golangci-lint
 migration_verifier
