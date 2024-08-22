@@ -10,8 +10,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const (
-	MongosyncMetaDB = "mongosync_reserved_for_internal_use"
+var (
+	MongosyncMetaDBsPattern = `^mongosync_(internal|reserved)_`
 )
 
 var (
@@ -29,9 +29,14 @@ func ListAllUserCollections(ctx context.Context, logger *logger.Logger, client *
 	excludedDBs := []string{}
 	excludedDBs = append(excludedDBs, additionalExcludedDBs...)
 	excludedDBs = append(excludedDBs, ExcludedSystemDBs...)
-	excludedDBs = append(excludedDBs, MongosyncMetaDB)
 
-	dbNames, err := client.ListDatabaseNames(ctx, bson.D{{"name", bson.D{{"$nin", excludedDBs}}}})
+	dbNames, err := client.ListDatabaseNames(
+		ctx,
+		bson.D{
+			{"name", bson.D{{"$nin", excludedDBs}}},
+			{"name", bson.D{{"$nin", []primitive.Regex{{Pattern: MongosyncMetaDBsPattern}}}}},
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
