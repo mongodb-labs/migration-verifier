@@ -1265,6 +1265,8 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb4").CreateCollection(ctx, "testColl6")
 	suite.Require().NoError(err)
+	err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "testColl7")
+	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("mongosync_reserved_for_internal_use").CreateCollection(ctx, "globalState")
 	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("mongosync_reserved_for_verification_src_metadata").CreateCollection(ctx, "auditor")

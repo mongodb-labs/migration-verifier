@@ -30,13 +30,13 @@ func ListAllUserCollections(ctx context.Context, logger *logger.Logger, client *
 	excludedDBs = append(excludedDBs, additionalExcludedDBs...)
 	excludedDBs = append(excludedDBs, ExcludedSystemDBs...)
 
-	dbNames, err := client.ListDatabaseNames(
-		ctx,
-		bson.D{
-			{"name", bson.D{{"$nin", excludedDBs}}},
-			{"name", bson.D{{"$nin", []primitive.Regex{{Pattern: MongosyncMetaDBsPattern}}}}},
-		},
-	)
+	var excluded []any
+	for _, e := range excludedDBs {
+		excluded = append(excluded, e)
+	}
+	excluded = append(excluded, primitive.Regex{Pattern: MongosyncMetaDBsPattern})
+
+	dbNames, err := client.ListDatabaseNames(ctx, bson.D{{"name", bson.D{{"$nin", excluded}}}})
 	if err != nil {
 		return nil, err
 	}
