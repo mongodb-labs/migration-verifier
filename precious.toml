@@ -1,0 +1,15 @@
+# When adding new tidiers, consider what labels it should have. If it's fast, set labels like this:
+#
+#     labels = [ "default", "fast-tidy" ]
+#
+# "Fast" here means anything less than 0.1s. These tidiers are intended to be invoked frequently,
+# for example from editors on save. Slower tidiers should only be invoked manually.
+
+exclude = "vendor/**"
+
+[commands.goimports]
+type = "tidy"
+include = "**/*.go"
+cmd = [ "$PRECIOUS_ROOT/dev-bin/goimports", "-w" ]
+ok-exit-codes = [0]
+labels = [ "default", "fast-tidy" ]
