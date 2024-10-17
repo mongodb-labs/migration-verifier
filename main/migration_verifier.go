@@ -6,7 +6,6 @@ import (
 	"math"
 	_ "net/http/pprof"
 	"os"
-	"runtime/pprof"
 	"strings"
 	"time"
 
@@ -41,6 +40,7 @@ const (
 	failureDisplaySize    = "failureDisplaySize"
 	ignoreReadConcernFlag = "ignoreReadConcern"
 	configFileFlag        = "configFile"
+	pprofInterval         = "pprofInterval"
 )
 
 func main() {
@@ -48,8 +48,6 @@ func main() {
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	ctx := context.TODO()
-
-	startPeriodicHeapProfileCollection(ctx)
 
 	flags := []cli.Flag{
 		altsrc.NewStringFlag(cli.StringFlag{
@@ -149,6 +147,10 @@ func main() {
 			Name:  ignoreReadConcernFlag,
 			Usage: "Use connection-default read concerns rather than setting majority read concern. This option may degrade consistency, so only enable it if majority read concern (the default) doesn’t work.",
 		}),
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  pprofInterval,
+			Usage: "Interval to periodically collect pprof profiles",
+		}),
 	}
 
 	app := &cli.App{
@@ -210,6 +212,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	v.SetNumWorkers(cCtx.Int(numWorkers))
 	v.SetGenerationPauseDelayMillis(time.Duration(cCtx.Int64(generationPauseDelay)))
 	v.SetWorkerSleepDelayMillis(time.Duration(cCtx.Int64(workerSleepDelay)))
+	v.SetPprofInterval(cCtx.String(pprofInterval))
 
 	partitionSizeMB := cCtx.Uint64(partitionSizeMB)
 	if partitionSizeMB != 0 {
@@ -255,36 +258,4 @@ func expandCommaSeparators(in []string) []string {
 		}
 	}
 	return ret
-}
-
-func startPeriodicHeapProfileCollection(ctx context.Context) {
-	go func() {
-		ticker := time.NewTicker(10 * time.Minute)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				collectHeapUsage()
-			}
-		}
-	}()
-
-}
-
-func collectHeapUsage() {
-	heapFileName := fmt.Sprintf("heap-%s.out", time.Now().UTC().Format("20060102T150405Z"))
-	heapFile, err := os.Create(heapFileName)
-	defer heapFile.Close()
-
-	if err != nil {
-		panic(err)
-	}
-
-	err = pprof.Lookup("heap").WriteTo(heapFile, 0)
-	if err != nil {
-		heapFile.WriteString(err.Error())
-	}
 }

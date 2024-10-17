@@ -136,6 +136,8 @@ type Verifier struct {
 	// The filter is applied to all namespaces in both initial checking and iterative checking.
 	// The verifier only checks documents within the filter.
 	globalFilter map[string]any
+
+	pprofInterval time.Duration
 }
 
 // VerificationStatus holds the Verification Status
@@ -358,6 +360,20 @@ func (verifier *Verifier) SetReadPreference(arg string) error {
 	}
 	verifier.readPreference, err = readpref.New(mode)
 	return err
+}
+
+func (verifier *Verifier) SetPprofInterval(arg string) error {
+	if arg == "" {
+		return nil
+	}
+
+	interval, err := time.ParseDuration(arg)
+	if err != nil {
+		return err
+	}
+
+	verifier.pprofInterval = interval
+	return nil
 }
 
 // DocumentStats gets various stats (TODO clarify)

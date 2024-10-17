@@ -40,6 +40,7 @@ func (verifier *Verifier) Check(ctx context.Context, filter map[string]any) {
 			verifier.logger.Fatal().Err(err).Msgf("Fatal error in generation %d", verifier.generation)
 		}
 	}()
+	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
 }
 
 func (verifier *Verifier) waitForChangeStream() error {
