@@ -259,7 +259,7 @@ func expandCommaSeparators(in []string) []string {
 
 func startPeriodicHeapProfileCollection(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(10 * time.Minute)
 		defer ticker.Stop()
 
 		for {
