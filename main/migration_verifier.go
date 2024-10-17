@@ -6,6 +6,7 @@ import (
 	"math"
 	_ "net/http/pprof"
 	"os"
+	"runtime/pprof"
 	"strings"
 	"time"
 
@@ -47,6 +48,8 @@ func main() {
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	ctx := context.TODO()
+
+	startPeriodicHeapProfileCollection(ctx)
 
 	flags := []cli.Flag{
 		altsrc.NewStringFlag(cli.StringFlag{
@@ -252,4 +255,36 @@ func expandCommaSeparators(in []string) []string {
 		}
 	}
 	return ret
+}
+
+func startPeriodicHeapProfileCollection(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				collectHeapUsage()
+			}
+		}
+	}()
+
+}
+
+func collectHeapUsage() {
+	heapFileName := fmt.Sprintf("heap-%s.out", time.Now().UTC().Format("20060102T150405Z"))
+	heapFile, err := os.Create(heapFileName)
+	defer heapFile.Close()
+
+	if err != nil {
+		panic(err)
+	}
+
+	err = pprof.Lookup("heap").WriteTo(heapFile, 0)
+	if err != nil {
+		heapFile.WriteString(err.Error())
+	}
 }
