@@ -40,6 +40,7 @@ const (
 	failureDisplaySize    = "failureDisplaySize"
 	ignoreReadConcernFlag = "ignoreReadConcern"
 	configFileFlag        = "configFile"
+	pprofInterval         = "pprofInterval"
 )
 
 func main() {
@@ -146,6 +147,10 @@ func main() {
 			Name:  ignoreReadConcernFlag,
 			Usage: "Use connection-default read concerns rather than setting majority read concern. This option may degrade consistency, so only enable it if majority read concern (the default) doesn’t work.",
 		}),
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  pprofInterval,
+			Usage: "Interval to periodically collect pprof profiles (e.g. --pprofInterval=\"5m\")",
+		}),
 	}
 
 	app := &cli.App{
@@ -207,6 +212,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	v.SetNumWorkers(cCtx.Int(numWorkers))
 	v.SetGenerationPauseDelayMillis(time.Duration(cCtx.Int64(generationPauseDelay)))
 	v.SetWorkerSleepDelayMillis(time.Duration(cCtx.Int64(workerSleepDelay)))
+	v.SetPprofInterval(cCtx.String(pprofInterval))
 
 	partitionSizeMB := cCtx.Uint64(partitionSizeMB)
 	if partitionSizeMB != 0 {
