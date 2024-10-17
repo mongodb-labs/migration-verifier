@@ -40,6 +40,6 @@ func collectHeapUsage() {
 
 	err = pprof.Lookup("heap").WriteTo(heapFile, 0)
 	if err != nil {
-		heapFile.WriteString(err.Error())
+		panic(err)
 	}
 }

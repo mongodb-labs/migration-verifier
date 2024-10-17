@@ -149,7 +149,7 @@ func main() {
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  pprofInterval,
-			Usage: "Interval to periodically collect pprof profiles",
+			Usage: "Interval to periodically collect pprof profiles (e.g. --pprofInterval=\"5m\")",
 		}),
 	}
 
