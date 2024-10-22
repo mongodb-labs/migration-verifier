@@ -269,7 +269,7 @@ The migration-verifier is also rather resource-hungry. To mitigate this, try lim
 
 - The verifier, during its first generation, may report a confusing “Mismatches found” but then report 0 problems. This is a reporting bug in mongosync; if you see it, check the documents in `migration_verification_metadata.verification_tasks` for generation 1 (not generation 0).
 
-- The verifier conflates “missing” documents with change events: if it finds a document missing and receives a change event for another document, the verifier records those together in its metadata. As a result, the verifier’s reporting can cause confusion: what its log calls “missing or changed” documents aren’t, in fact, necessarily failures; they’re just pending recheck.
+- The verifier conflates “missing” documents with change events: if it finds a document missing and receives a change event for another document, the verifier records those together in its metadata. As a result, the verifier’s reporting can cause confusion: what its log calls “missing or changed” documents aren’t, in fact, necessarily failures; they could all just be change events that are pending a recheck.
 
 # Limitations
 
