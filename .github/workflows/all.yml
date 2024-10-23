@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  build:
+  basics:
     runs-on: ubuntu-latest
 
     strategy:
@@ -22,5 +22,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go_version }}
+
+      - run: python3 ./evergreen/go_lint.py
 
       - run: go build main/migration_verifier.go
