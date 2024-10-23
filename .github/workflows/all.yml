@@ -14,6 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         go_version:
+
+          # This is hard-coded by design in order to catch inadvertent changes
+          # to the minimum-required Go version to build migration-verifier.
           - 1.19
 
     steps:
