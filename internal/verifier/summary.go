@@ -7,6 +7,7 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,8 +16,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/olekukonko/tablewriter"
 	"github.com/samber/lo"
-	"golang.org/x/exp/maps"
-	"golang.org/x/exp/slices"
 )
 
 const changeEventsTableMaxSize = 10
@@ -392,31 +391,23 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 		return
 	}
 
-	sortedNamespaces := maps.Keys(nsTotals)
-	slices.SortFunc(
-		sortedNamespaces,
-		func(ns1, ns2 string) int {
-			if nsTotals[ns1] < nsTotals[ns2] {
-				return 1
-			}
-
-			if nsTotals[ns1] > nsTotals[ns2] {
-				return -1
-			}
-
-			return 0
+	reverseSortedNamespaces := lo.Keys(nsTotals)
+	sort.Slice(
+		reverseSortedNamespaces,
+		func(i, j int) bool {
+			return reverseSortedNamespaces[i] > reverseSortedNamespaces[j]
 		},
 	)
 
 	// Only report the busiest namespaces.
-	if len(sortedNamespaces) > changeEventsTableMaxSize {
-		sortedNamespaces = sortedNamespaces[:changeEventsTableMaxSize]
+	if len(reverseSortedNamespaces) > changeEventsTableMaxSize {
+		reverseSortedNamespaces = reverseSortedNamespaces[:changeEventsTableMaxSize]
 	}
 
 	table := tablewriter.NewWriter(builder)
 	table.SetHeader([]string{"Namespace", "Insert", "Update", "Replace", "Delete", "Total"})
 
-	for _, ns := range sortedNamespaces {
+	for _, ns := range reverseSortedNamespaces {
 		curNsStats := nsStats[ns]
 
 		table.Append(
