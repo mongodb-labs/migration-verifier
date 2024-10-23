@@ -26,6 +26,7 @@ import (
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -33,7 +34,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
-	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -94,6 +94,8 @@ type Verifier struct {
 	dstBuildInfo       *bson.M
 	numWorkers         int
 	failureDisplaySize int64
+
+	generationEventRecorder *EventRecorder
 
 	// Used only with generation 0 to defer the first
 	// progress report until after we’ve finished partitioning
@@ -753,7 +755,7 @@ func (verifier *Verifier) getShardingInfo(ctx context.Context, namespaceAndUUID 
 
 		verifier.logger.Debug().Msgf("Collection %s is sharded with shard key %v", namespace, result.Key)
 
-		shardKeys = maps.Keys(result.Key)
+		shardKeys = lo.Keys(result.Key)
 		sort.Strings(shardKeys)
 	}
 	if err = cursor.Err(); err != nil {
@@ -1399,6 +1401,8 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	if err != nil {
 		verifier.logger.Err(err).Msgf("Failed to report per-namespace statistics")
 	}
+
+	verifier.printChangeEventStatistics(strBuilder)
 
 	var statusLine string
 

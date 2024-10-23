@@ -32,11 +32,12 @@ func (verifier *Verifier) MaybeStartPeriodicHeapProfileCollection(ctx context.Co
 func collectHeapUsage() {
 	heapFileName := fmt.Sprintf("heap-%s.out", time.Now().UTC().Format("20060102T150405Z"))
 	heapFile, err := os.Create(heapFileName)
-	defer heapFile.Close()
 
 	if err != nil {
 		panic(err)
 	}
+
+	defer heapFile.Close()
 
 	err = pprof.Lookup("heap").WriteTo(heapFile, 0)
 	if err != nil {

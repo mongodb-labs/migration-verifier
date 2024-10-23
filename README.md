@@ -78,7 +78,7 @@ metaURI: mongodb://localhost:28012
 1. After launching the verifier (see above), you can send it requests to get it to start verifying. The verification process is started by using the `check`command. An [optional `filter` parameter](#document-filtering) can be passed within the `check` request body to only check documents within that filter. The verification process will keep running until you tell the verifier to stop. It will keep track of the inconsistencies it has found and will keep checking those inconsistencies hoping that eventually they will resolve.
 
     ```
-    curl -H "Content-Type: application/json" -X POST -d '{}' http://127.0.0.1:27020/api/v1/check
+    curl -H "Content-Type: application/json" -d '{}' http://127.0.0.1:27020/api/v1/check
     ```
 
 

@@ -2,11 +2,11 @@ package verifier
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/keystring"
+	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -48,6 +48,10 @@ func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEve
 	case "replace":
 		fallthrough
 	case "update":
+		if err := verifier.generationEventRecorder.AddEvent(changeEvent); err != nil {
+			return errors.Wrapf(err, "failed to augment stats with change event: %+v", *changeEvent)
+		}
+
 		return verifier.InsertChangeEventRecheckDoc(ctx, changeEvent)
 	default:
 		return errors.New(`Not supporting: "` + changeEvent.OpType + `" events`)

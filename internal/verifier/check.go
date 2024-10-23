@@ -190,6 +190,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	// Now enter the multi-generational steady check state
 	for {
 		verifier.generationStartTime = time.Now()
+		verifier.generationEventRecorder = NewEventRecorder()
 
 		err := verifier.CheckWorker(ctx)
 		if err != nil {
@@ -227,6 +228,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			verifier.lastGeneration = true
 		}
 		verifier.generation++
+
 		verifier.phase = Recheck
 		err = verifier.GenerateRecheckTasks(ctx)
 		if err != nil {
@@ -355,8 +357,9 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.Wait
 		default:
 			task, err := verifier.FindNextVerifyTaskAndUpdate()
 			if errors.Is(err, mongo.ErrNoDocuments) {
-				verifier.logger.Debug().Msgf("[Worker %d] No tasks found, sleeping...", workerNum)
-				time.Sleep(verifier.workerSleepDelayMillis * time.Millisecond)
+				delay := verifier.workerSleepDelayMillis * time.Millisecond
+				verifier.logger.Debug().Msgf("[Worker %d] No tasks found, sleeping %s...", workerNum, delay)
+				time.Sleep(delay)
 				continue
 			} else if err != nil {
 				panic(err)
