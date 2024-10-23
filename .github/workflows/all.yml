@@ -17,12 +17,16 @@ jobs:
           - 1.19
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - name: Fetch Go ${{ matrix.go_version }}
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go_version }}
 
-      - run: python3 ./evergreen/go_lint.py
+      - name: Lint
+        run: python3 ./evergreen/go_lint.py
 
-      - run: go build main/migration_verifier.go
+      - name: Build
+        run: go build main/migration_verifier.go
