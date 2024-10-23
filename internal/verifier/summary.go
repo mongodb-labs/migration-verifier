@@ -386,7 +386,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 		"0",
 		fmt.Sprintf("%d total, across %d namespace(s)", totalEvents, activeNamespacesCount),
 	)
-	builder.WriteString(fmt.Sprintf("Change events this generation: %s\n", eventsDescr))
+	builder.WriteString(fmt.Sprintf("\nChange events this generation: %s\n", eventsDescr))
 
 	if totalEvents == 0 {
 		return
