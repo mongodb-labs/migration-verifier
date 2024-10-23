@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
-        go-version: ${{ matrix.go_version }}
+        with:
+          go-version: ${{ matrix.go_version }}
 
       - run: go build main/migration_verifier.go
