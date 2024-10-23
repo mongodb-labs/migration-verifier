@@ -73,15 +73,15 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	failureTypesTable := tablewriter.NewWriter(strBuilder)
 	failureTypesTable.SetHeader([]string{"Failure Type", "Count"})
 
-	contentMismatch := 0
-	missing := 0
+	contentMismatchCount := 0
+	missingOrChangedCount := 0
 	for _, task := range failedTasks {
-		contentMismatch += len(task.FailedDocs)
-		missing += len(task.Ids)
+		contentMismatchCount += len(task.FailedDocs)
+		missingOrChangedCount += len(task.Ids)
 	}
 
-	failureTypesTable.Append([]string{"Documents With Differing Content", fmt.Sprintf("%v", contentMismatch)})
-	failureTypesTable.Append([]string{"Documents Missing On Source or Dest", fmt.Sprintf("%v", missing)})
+	failureTypesTable.Append([]string{"Documents With Differing Content", fmt.Sprintf("%v", contentMismatchCount)})
+	failureTypesTable.Append([]string{"Missing or Changed Documents", fmt.Sprintf("%v", missingOrChangedCount)})
 	strBuilder.WriteString("Failure summary:\n")
 	failureTypesTable.Render()
 
@@ -89,7 +89,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	mismatchedDocsTableRows := types.ToNumericTypeOf(0, verifier.failureDisplaySize)
 	mismatchedDocsTable.SetHeader([]string{"ID", "Cluster", "Field", "Namespace", "Details"})
 
-	printAll := int64(contentMismatch) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
+	printAll := int64(contentMismatchCount) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
 OUTA:
 	for _, task := range failedTasks {
 		for _, f := range task.FailedDocs {
@@ -118,20 +118,20 @@ OUTA:
 		mismatchedDocsTable.Render()
 	}
 
-	missingDocsTable := tablewriter.NewWriter(strBuilder)
-	missingDocsTableRows := types.ToNumericTypeOf(0, verifier.failureDisplaySize)
-	missingDocsTable.SetHeader([]string{"Document ID", "Source NameSpace", "Destination Namespace"})
+	missingOrChangedDocsTable := tablewriter.NewWriter(strBuilder)
+	missingOrChangedDocsTableRows := types.ToNumericTypeOf(0, verifier.failureDisplaySize)
+	missingOrChangedDocsTable.SetHeader([]string{"Document ID", "Source Namespace", "Destination Namespace"})
 
-	printAll = int64(missing) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
+	printAll = int64(missingOrChangedCount) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
 OUTB:
 	for _, task := range failedTasks {
 		for _, _id := range task.Ids {
-			if !printAll && missingDocsTableRows >= verifier.failureDisplaySize {
+			if !printAll && missingOrChangedDocsTableRows >= verifier.failureDisplaySize {
 				break OUTB
 			}
 
-			missingDocsTableRows++
-			missingDocsTable.Append([]string{
+			missingOrChangedDocsTableRows++
+			missingOrChangedDocsTable.Append([]string{
 				fmt.Sprintf("%v", _id),
 				fmt.Sprintf("%v", task.QueryFilter.Namespace),
 				fmt.Sprintf("%v", task.QueryFilter.To),
@@ -139,14 +139,14 @@ OUTB:
 		}
 	}
 
-	if missingDocsTableRows > 0 {
+	if missingOrChangedDocsTableRows > 0 {
 		strBuilder.WriteString("\n")
 		if printAll {
-			strBuilder.WriteString("All documents present in source/destination missing in destination/source:\n")
+			strBuilder.WriteString("All documents marked missing or changed:\n")
 		} else {
-			strBuilder.WriteString(fmt.Sprintf("First %d documents present in source/destination missing in destination/source:\n", verifier.failureDisplaySize))
+			strBuilder.WriteString(fmt.Sprintf("First %d documents marked missing or changed:\n", verifier.failureDisplaySize))
 		}
-		missingDocsTable.Render()
+		missingOrChangedDocsTable.Render()
 	}
 
 	return true, anyAreIncomplete, nil
