@@ -14,13 +14,13 @@ jobs:
       fail-fast: false
       matrix:
         go_version:
-          - 1.18
+          - 1.19
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ matrix.go_version }}
 
       - run: go build main/migration_verifier.go
