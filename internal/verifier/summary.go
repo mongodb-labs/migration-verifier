@@ -7,7 +7,6 @@ package verifier
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/olekukonko/tablewriter"
 	"github.com/samber/lo"
 	"golang.org/x/exp/maps"
+	"golang.org/x/exp/slices"
 )
 
 const changeEventsTableMaxSize = 10
