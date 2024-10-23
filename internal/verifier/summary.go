@@ -19,6 +19,8 @@ import (
 	"golang.org/x/exp/maps"
 )
 
+const changeEventsTableMaxSize = 10
+
 // NOTE: Each of the following should print one trailing and one final
 // newline.
 
@@ -407,7 +409,9 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 	)
 
 	// Only report the busiest namespaces.
-	sortedNamespaces = sortedNamespaces[:10]
+	if len(sortedNamespaces) > changeEventsTableMaxSize {
+		sortedNamespaces = sortedNamespaces[:changeEventsTableMaxSize]
+	}
 
 	table := tablewriter.NewWriter(builder)
 	table.SetHeader([]string{"Namespace", "Insert", "Update", "Replace", "Delete", "Total"})
