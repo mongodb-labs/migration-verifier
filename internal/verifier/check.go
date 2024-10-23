@@ -190,6 +190,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	// Now enter the multi-generational steady check state
 	for {
 		verifier.generationStartTime = time.Now()
+		verifier.generationEventRecorder = NewEventRecorder()
 
 		err := verifier.CheckWorker(ctx)
 		if err != nil {
@@ -227,6 +228,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			verifier.lastGeneration = true
 		}
 		verifier.generation++
+
 		verifier.phase = Recheck
 		err = verifier.GenerateRecheckTasks(ctx)
 		if err != nil {

@@ -95,6 +95,8 @@ type Verifier struct {
 	numWorkers         int
 	failureDisplaySize int64
 
+	generationEventRecorder *EventRecorder
+
 	// Used only with generation 0 to defer the first
 	// progress report until after we’ve finished partitioning
 	// every collection.
@@ -1399,6 +1401,8 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	if err != nil {
 		verifier.logger.Err(err).Msgf("Failed to report per-namespace statistics")
 	}
+
+	verifier.printChangeEventStatistics(strBuilder)
 
 	var statusLine string
 

@@ -7,12 +7,16 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/olekukonko/tablewriter"
+	"github.com/samber/lo"
+	"golang.org/x/exp/maps"
 )
 
 // NOTE: Each of the following should print one trailing and one final
@@ -361,4 +365,68 @@ func (verifier *Verifier) printMismatchInvestigationNotes(strBuilder *strings.Bu
 	for _, line := range lines {
 		strBuilder.WriteString(line + "\n")
 	}
+}
+
+func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
+	nsStats := verifier.generationEventRecorder.Read()
+
+	activeNamespacesCount := len(nsStats)
+
+	totalEvents := 0
+	nsTotals := map[string]int{}
+	for ns, events := range nsStats {
+		nsTotals[ns] = events.Total()
+		totalEvents += nsTotals[ns]
+	}
+
+	eventsDescr := lo.Ternary(
+		totalEvents == 0,
+		"0",
+		fmt.Sprintf("%d total, across %d namespace(s)", totalEvents, activeNamespacesCount),
+	)
+	builder.WriteString(fmt.Sprintf("Change events this generation: %s\n", eventsDescr))
+
+	if totalEvents == 0 {
+		return
+	}
+
+	sortedNamespaces := maps.Keys(nsTotals)
+	slices.SortFunc(
+		sortedNamespaces,
+		func(ns1, ns2 string) int {
+			if nsTotals[ns1] < nsTotals[ns2] {
+				return 1
+			}
+
+			if nsTotals[ns1] > nsTotals[ns2] {
+				return -1
+			}
+
+			return 0
+		},
+	)
+
+	// Only report the busiest namespaces.
+	sortedNamespaces = sortedNamespaces[:10]
+
+	table := tablewriter.NewWriter(builder)
+	table.SetHeader([]string{"Namespace", "Insert", "Update", "Replace", "Delete", "Total"})
+
+	for _, ns := range sortedNamespaces {
+		curNsStats := nsStats[ns]
+
+		table.Append(
+			append(
+				[]string{ns},
+				strconv.Itoa(curNsStats.Insert),
+				strconv.Itoa(curNsStats.Update),
+				strconv.Itoa(curNsStats.Replace),
+				strconv.Itoa(curNsStats.Delete),
+				strconv.Itoa(curNsStats.Total()),
+			),
+		)
+	}
+
+	builder.WriteString("\nMost frequently-changing namespaces:\n")
+	table.Render()
 }
