@@ -122,12 +122,6 @@ func (m *Map) ImportFromCursor(ctx context.Context, cursor *mongo.Cursor) error 
 	return nil
 }
 
-func (m *Map) addDocument(rawDoc bson.Raw) {
-	rawDocCopy := make(bson.Raw, len(rawDoc))
-	copy(rawDocCopy, rawDoc)
-
-}
-
 // CompareToMap compares the receiver with another Map.
 // This method returns three arrays:
 //
