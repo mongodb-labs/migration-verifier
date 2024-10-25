@@ -110,16 +110,12 @@ func (m *Map) ImportFromCursor(ctx context.Context, cursor *mongo.Cursor) error 
 			return err
 		}
 
+		rawDoc := cursor.Current
 		nDocumentsReturned++
 
-		var rawDoc bson.Raw
-		err = cursor.Decode(&rawDoc)
-		if err != nil {
-			return err
-		}
 		bytesReturned += (int64)(len(rawDoc))
 
-		m.addDocument(rawDoc)
+		m.internalMap[m.getMapKey(&rawDoc)] = rawDoc
 	}
 	m.logger.Debug().Msgf("Find returned %d documents containing %d bytes", nDocumentsReturned, bytesReturned)
 
@@ -130,7 +126,6 @@ func (m *Map) addDocument(rawDoc bson.Raw) {
 	rawDocCopy := make(bson.Raw, len(rawDoc))
 	copy(rawDocCopy, rawDoc)
 
-	m.internalMap[m.getMapKey(&rawDocCopy)] = rawDocCopy
 }
 
 // CompareToMap compares the receiver with another Map.
