@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -34,7 +35,11 @@ type RecheckDoc struct {
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	namespace string, documentIDs []interface{}, dataSizes []int) error {
 	dbName, collName := SplitNamespace(namespace)
-	return verifier.insertRecheckDocs(context.Background(),
+
+	verifier.mux.Lock()
+	defer verifier.mux.Unlock()
+
+	return verifier.insertRecheckDocsUnderLock(context.Background(),
 		dbName, collName, documentIDs, dataSizes)
 }
 
@@ -48,15 +53,20 @@ func (verifier *Verifier) InsertChangeEventRecheckDoc(ctx context.Context, chang
 	// total data size for noninitial generations in the log.
 	dataSizes := []int{maxBSONObjSize}
 
-	return verifier.insertRecheckDocs(
+	verifier.mux.Lock()
+	defer verifier.mux.Unlock()
+
+	if err := verifier.generationEventRecorder.AddEvent(changeEvent); err != nil {
+		return errors.Wrapf(err, "failed to augment stats with change event: %+v", *changeEvent)
+	}
+
+	return verifier.insertRecheckDocsUnderLock(
 		ctx, changeEvent.Ns.DB, changeEvent.Ns.Coll, documentIDs, dataSizes)
 }
 
-func (verifier *Verifier) insertRecheckDocs(
+func (verifier *Verifier) insertRecheckDocsUnderLock(
 	ctx context.Context,
 	dbName, collName string, documentIDs []interface{}, dataSizes []int) error {
-	verifier.mux.Lock()
-	defer verifier.mux.Unlock()
 
 	generation, _ := verifier.getGenerationWhileLocked()
 

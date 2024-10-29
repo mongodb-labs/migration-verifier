@@ -157,6 +157,10 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		verifier.phase = Idle
 	}()
 
+	// A “throwaway” EventRecorder so that any change events that arrive
+	// right away will have somewhere to be recorded.
+	verifier.generationEventRecorder = NewEventRecorder()
+
 	verifier.mux.RLock()
 	csRunning := verifier.changeStreamRunning
 	verifier.mux.RUnlock()

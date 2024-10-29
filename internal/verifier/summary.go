@@ -395,7 +395,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 	sort.Slice(
 		reverseSortedNamespaces,
 		func(i, j int) bool {
-			return reverseSortedNamespaces[i] > reverseSortedNamespaces[j]
+			return nsTotals[reverseSortedNamespaces[i]] > nsTotals[reverseSortedNamespaces[j]]
 		},
 	)
 
