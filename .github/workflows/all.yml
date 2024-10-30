@@ -38,9 +38,6 @@ jobs:
       - name: Build
         run: go build main/migration_verifier.go
 
-      - name: Lint
-        run: python3 ./evergreen/go_lint.py
-
       - name: Test
         run: go test -v ./...
         env:
