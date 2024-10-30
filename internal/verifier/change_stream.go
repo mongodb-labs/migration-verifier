@@ -85,7 +85,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		}
 
 		err := verifier.persistChangeStreamResumeToken(ctx, cs)
-		if err != nil {
+		if err == nil {
 			lastPersistedTime = time.Now()
 		}
 
