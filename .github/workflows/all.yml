@@ -40,5 +40,5 @@ jobs:
 
       - name: Test
         run: go test -v ./...
-          env:
-            MONGODB_DISTRO: ${matrix.os.mongodb_distro}
+        env:
+          MONGODB_DISTRO: ${matrix.os.mongodb_distro}
