@@ -259,7 +259,7 @@ In this case, '`failed_docs`' contains all the meta data mismatches, in this cas
 
 # Resumability
 
-The migration-verifier persists its change stream’s resume token periodically so that, in the event of a catastrophic failure (e.g., memory exhaustion), when restarted the verifier will receive any change events that happened while the verifier was down.
+The migration-verifier periodically persists its change stream’s resume token so that, in the event of a catastrophic failure (e.g., memory exhaustion), when restarted the verifier will receive any change events that happened while the verifier was down.
 
 **CAVEAT:** This doesn’t work properly during partitionining. If the verifier ends prior to partitioning, you should restart the verification.
 
