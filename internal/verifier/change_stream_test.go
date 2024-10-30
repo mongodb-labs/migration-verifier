@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -25,6 +26,42 @@ func TestChangeStreamFilter(t *testing.T) {
 			}},
 		}}},
 	}, verifier.GetChangeStreamFilter())
+}
+
+func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
+	var startTs primitive.Timestamp
+	func() {
+		verifier1 := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := verifier1.StartChangeStream(ctx)
+		suite.Require().NoError(err)
+
+		suite.Require().NotNil(verifier1.srcStartAtTs)
+		startTs = *verifier1.srcStartAtTs
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, err := suite.srcMongoClient.
+		Database("testDb").
+		Collection("testColl").
+		InsertOne(
+			ctx,
+			bson.D{{"_id", 0}},
+		)
+	suite.Require().NoError(err)
+
+	verifier2 := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	err = verifier2.StartChangeStream(ctx)
+	suite.Require().NoError(err)
+
+	suite.Require().NotNil(verifier2.srcStartAtTs)
+	suite.Assert().Equal(
+		startTs,
+		*verifier2.srcStartAtTs,
+	)
 }
 
 func (suite *MultiSourceVersionTestSuite) TestStartAtTimeNoChanges() {
