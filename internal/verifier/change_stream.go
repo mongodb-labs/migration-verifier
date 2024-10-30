@@ -84,7 +84,12 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			return nil
 		}
 
-		return verifier.persistChangeStreamResumeToken(ctx, cs)
+		err := verifier.persistChangeStreamResumeToken(ctx, cs)
+		if err != nil {
+			lastPersistedTime = time.Now()
+		}
+
+		return err
 	}
 
 	for {
@@ -198,13 +203,8 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 		return errors.Wrap(err, "failed to read cluster time from session")
 	}
 
-	csTimestampNewerThanCluster := csTimestamp.T > clusterTime.T
-	if !csTimestampNewerThanCluster && csTimestamp.T == clusterTime.T {
-		csTimestampNewerThanCluster = csTimestamp.I > clusterTime.I
-	}
-
 	verifier.srcStartAtTs = &csTimestamp
-	if csTimestampNewerThanCluster {
+	if csTimestamp.After(clusterTime) {
 		verifier.srcStartAtTs = &clusterTime
 	}
 
@@ -259,21 +259,24 @@ func (verifier *Verifier) persistChangeStreamResumeToken(ctx context.Context, cs
 }
 
 func extractTimestampFromResumeToken(resumeToken bson.Raw) (primitive.Timestamp, error) {
+	tokenStruct := struct {
+		Data string `bson:"_data"`
+	}{}
+
 	// Change stream token is always a V1 keystring in the _data field
-	resumeTokenDataValue := resumeToken.Lookup("_data")
-	resumeTokenData, ok := resumeTokenDataValue.StringValueOK()
-	if !ok {
-		return primitive.Timestamp{}, fmt.Errorf("Resume token _data is missing or the wrong type: %v",
-			resumeTokenDataValue.Type)
+	err := bson.Unmarshal(resumeToken, &tokenStruct)
+	if err != nil {
+		return primitive.Timestamp{}, errors.Wrapf(err, "failed to extract %#q from resume token (%v)", "_data", resumeToken)
 	}
-	resumeTokenBson, err := keystring.KeystringToBson(keystring.V1, resumeTokenData)
+
+	resumeTokenBson, err := keystring.KeystringToBson(keystring.V1, tokenStruct.Data)
 	if err != nil {
 		return primitive.Timestamp{}, err
 	}
 	// First element is the cluster time we want
 	resumeTokenTime, ok := resumeTokenBson[0].Value.(primitive.Timestamp)
 	if !ok {
-		return primitive.Timestamp{}, errors.New("Resume token lacks a cluster time")
+		return primitive.Timestamp{}, errors.Errorf("resume token data's (%+v) first element is of type %T, not a timestamp", resumeTokenBson, resumeTokenBson[0].Value)
 	}
 
 	return resumeTokenTime, nil
