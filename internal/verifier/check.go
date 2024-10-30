@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/10gen/migration-verifier/internal/retry"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
@@ -163,21 +162,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	if !csRunning {
 		verifier.logger.Debug().Msg("Change stream not running; starting change stream")
 
-		retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
-
-		srcClusterTime, err := GetLastOpTimeAndSyncShardClusterTime(ctx,
-			verifier.logger,
-			retryer,
-			verifier.srcClient,
-			true)
-
-		if err != nil {
-			return errors.Wrap(err, "failed to fetch the source's cluster time")
-		}
-
-		verifier.srcStartAtTs = &srcClusterTime
-
-		err = verifier.StartChangeStream(ctx, srcClusterTime)
+		err = verifier.StartChangeStream(ctx)
 		if err != nil {
 			return errors.Wrap(err, "failed to start change stream on source")
 		}

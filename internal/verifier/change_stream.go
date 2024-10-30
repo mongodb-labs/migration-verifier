@@ -142,7 +142,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 }
 
 // StartChangeStream starts the change stream.
-func (verifier *Verifier) StartChangeStream(ctx context.Context, srcClusterTime primitive.Timestamp) error {
+func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 	pipeline := verifier.GetChangeStreamFilter()
 	opts := options.ChangeStream().SetMaxAwaitTime(1 * time.Second)
 
@@ -170,15 +170,15 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, srcClusterTime 
 
 		opts = opts.SetStartAfter(savedResumeToken)
 	} else {
-		addUnixTimeToLogEvent(
-			srcClusterTime.T,
-			csStartLogEvent.Interface("clusterTime", srcClusterTime),
-		).Msg("Starting change stream from last-observed source cluster time.")
-
-		opts = opts.SetStartAtOperationTime(&srcClusterTime)
+		csStartLogEvent.Msg("Starting change stream from current source cluster time.")
 	}
 
-	srcChangeStream, err := verifier.srcClient.Watch(ctx, pipeline, opts)
+	sess, err := verifier.srcClient.StartSession()
+	if err != nil {
+		return errors.Wrap(err, "failed to start session")
+	}
+	sctx := mongo.NewSessionContext(ctx, sess)
+	srcChangeStream, err := verifier.srcClient.Watch(sctx, pipeline, opts)
 	if err != nil {
 		return errors.Wrap(err, "failed to open change stream")
 	}
@@ -188,10 +188,32 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, srcClusterTime 
 		return errors.Wrap(err, "failed to persist change stream resume token")
 	}
 
+	csTimestamp, err := extractTimestampFromResumeToken(srcChangeStream.ResumeToken())
+	if err != nil {
+		return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
+	}
+
+	clusterTime, err := getClusterTimeFromSession(sess)
+	if err != nil {
+		return errors.Wrap(err, "failed to read cluster time from session")
+	}
+
+	csTimestampNewerThanCluster := csTimestamp.T > clusterTime.T
+	if !csTimestampNewerThanCluster && csTimestamp.T == clusterTime.T {
+		csTimestampNewerThanCluster = csTimestamp.I > clusterTime.I
+	}
+
+	verifier.srcStartAtTs = &csTimestamp
+	if csTimestampNewerThanCluster {
+		verifier.srcStartAtTs = &clusterTime
+	}
+
 	verifier.mux.Lock()
 	verifier.changeStreamRunning = true
 	verifier.mux.Unlock()
+
 	go verifier.iterateChangeStream(ctx, srcChangeStream)
+
 	return nil
 }
 
@@ -255,4 +277,20 @@ func extractTimestampFromResumeToken(resumeToken bson.Raw) (primitive.Timestamp,
 	}
 
 	return resumeTokenTime, nil
+}
+
+func getClusterTimeFromSession(sess mongo.Session) (primitive.Timestamp, error) {
+	ctStruct := struct {
+		ClusterTime struct {
+			ClusterTime primitive.Timestamp `bson:"clusterTime"`
+		} `bson:"$clusterTime"`
+	}{}
+
+	clusterTimeRaw := sess.ClusterTime()
+	err := bson.Unmarshal(sess.ClusterTime(), &ctStruct)
+	if err != nil {
+		return primitive.Timestamp{}, errors.Wrapf(err, "failed to find clusterTime in session cluster time document (%v)", clusterTimeRaw)
+	}
+
+	return ctStruct.ClusterTime.ClusterTime, nil
 }
