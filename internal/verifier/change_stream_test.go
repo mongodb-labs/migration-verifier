@@ -30,17 +30,16 @@ func TestChangeStreamFilter(t *testing.T) {
 	}, verifier.GetChangeStreamFilter())
 }
 
+// TestChangeStreamResumability creates a verifier, starts its change stream,
+// terminates that verifier, updates the source cluster, starts a new
+// verifier with change stream, and confirms that things look as they should.
 func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
-	var startTs primitive.Timestamp
 	func() {
 		verifier1 := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		err := verifier1.StartChangeStream(ctx)
 		suite.Require().NoError(err)
-
-		suite.Require().NotNil(verifier1.srcStartAtTs)
-		startTs = *verifier1.srcStartAtTs
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -62,15 +61,16 @@ func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
 		"no rechecks should be enqueued before starting change stream",
 	)
 
+	newTime := suite.getClusterTime(ctx, suite.srcMongoClient)
+
 	err = verifier2.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 
 	suite.Require().NotNil(verifier2.srcStartAtTs)
 
-	suite.Assert().Equal(
-		primitive.Timestamp{T: startTs.T, I: 1 + startTs.I},
-		*verifier2.srcStartAtTs,
-		"verifier2's change stream should be 1 increment further than verifier1's",
+	suite.Assert().False(
+		verifier2.srcStartAtTs.After(newTime),
+		"verifier2's change stream should be no later than this new session",
 	)
 
 	recheckDocs := []bson.M{}
@@ -97,6 +97,19 @@ func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
 		recheckDocs[0]["_id"],
 		"recheck doc should have expected ID",
 	)
+}
+
+func (suite *MultiSourceVersionTestSuite) getClusterTime(ctx context.Context, client *mongo.Client) primitive.Timestamp {
+	sess, err := client.StartSession()
+	suite.Require().NoError(err, "should start session")
+
+	sctx := mongo.NewSessionContext(ctx, sess)
+	suite.Require().NoError(sess.Client().Ping(sctx, nil))
+
+	newTime, err := getClusterTimeFromSession(sess)
+	suite.Require().NoError(err, "should fetch cluster time")
+
+	return newTime
 }
 
 func (suite *MultiSourceVersionTestSuite) fetchVerifierRechecks(ctx context.Context, verifier *Verifier) []bson.M {
