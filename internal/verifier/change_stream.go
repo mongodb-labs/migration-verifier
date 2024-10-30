@@ -44,7 +44,7 @@ const (
 func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEvent *ParsedEvent) error {
 	if changeEvent.ClusterTime != nil &&
 		(verifier.lastChangeEventTime == nil ||
-			primitive.CompareTimestamp(*verifier.lastChangeEventTime, *changeEvent.ClusterTime) < 0) {
+			verifier.lastChangeEventTime.Compare(*changeEvent.ClusterTime) < 0) {
 		verifier.lastChangeEventTime = changeEvent.ClusterTime
 	}
 	switch changeEvent.OpType {
@@ -126,13 +126,20 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		// the default case is that we are still in the Check phase, in the check phase we still
 		// use TryNext, but we do not exit if TryNext returns false.
 		default:
-			if next := cs.TryNext(ctx); !next {
-				continue
+			var err error
+
+			if next := cs.TryNext(ctx); next {
+				if err = cs.Decode(&changeEvent); err != nil {
+					err = errors.Wrapf(err, "failed to decode change event (%v)", cs.Current)
+				}
+
+				if err == nil {
+					err = verifier.HandleChangeStreamEvent(ctx, &changeEvent)
+					if err != nil {
+						err = errors.Wrapf(err, "failed to handle change event (%+v)", changeEvent)
+					}
+				}
 			}
-			if err := cs.Decode(&changeEvent); err != nil {
-				verifier.logger.Fatal().Err(err).Msg("")
-			}
-			err := verifier.HandleChangeStreamEvent(ctx, &changeEvent)
 
 			if err == nil {
 				err = persistResumeTokenIfNeeded()
@@ -231,7 +238,7 @@ func (verifier *Verifier) loadChangeStreamResumeToken(ctx context.Context) (bson
 	token, err := coll.FindOne(
 		ctx,
 		bson.D{{"_id", "resumeToken"}},
-	).DecodeBytes()
+	).Raw()
 
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, nil
