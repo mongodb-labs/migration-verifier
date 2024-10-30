@@ -22,7 +22,7 @@ jobs:
 
           # This is hard-coded by design in order to catch inadvertent changes
           # to the minimum-required Go version to build migration-verifier.
-          - 1.20
+          - '1.20'
           - stable
 
     runs-on: ${{matrix.os.runsOn}}
