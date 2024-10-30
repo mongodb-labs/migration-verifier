@@ -10,8 +10,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.mongodb.org/mongo-driver/event"
+	"go.mongodb.org/mongo-driver/internal/driverutil"
 	"go.mongodb.org/mongo-driver/mongo/description"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
@@ -21,17 +23,19 @@ import (
 
 // DropCollection performs a drop operation.
 type DropCollection struct {
-	session      *session.Client
-	clock        *session.ClusterClock
-	collection   string
-	monitor      *event.CommandMonitor
-	crypt        driver.Crypt
-	database     string
-	deployment   driver.Deployment
-	selector     description.ServerSelector
-	writeConcern *writeconcern.WriteConcern
-	result       DropCollectionResult
-	serverAPI    *driver.ServerAPIOptions
+	authenticator driver.Authenticator
+	session       *session.Client
+	clock         *session.ClusterClock
+	collection    string
+	monitor       *event.CommandMonitor
+	crypt         driver.Crypt
+	database      string
+	deployment    driver.Deployment
+	selector      description.ServerSelector
+	writeConcern  *writeconcern.WriteConcern
+	result        DropCollectionResult
+	serverAPI     *driver.ServerAPIOptions
+	timeout       *time.Duration
 }
 
 // DropCollectionResult represents a dropCollection result returned by the server.
@@ -99,11 +103,14 @@ func (dc *DropCollection) Execute(ctx context.Context) error {
 		Selector:          dc.selector,
 		WriteConcern:      dc.writeConcern,
 		ServerAPI:         dc.serverAPI,
-	}.Execute(ctx, nil)
+		Timeout:           dc.timeout,
+		Name:              driverutil.DropOp,
+		Authenticator:     dc.authenticator,
+	}.Execute(ctx)
 
 }
 
-func (dc *DropCollection) command(dst []byte, desc description.SelectedServer) ([]byte, error) {
+func (dc *DropCollection) command(dst []byte, _ description.SelectedServer) ([]byte, error) {
 	dst = bsoncore.AppendStringElement(dst, "drop", dc.collection)
 	return dst, nil
 }
@@ -205,5 +212,25 @@ func (dc *DropCollection) ServerAPI(serverAPI *driver.ServerAPIOptions) *DropCol
 	}
 
 	dc.serverAPI = serverAPI
+	return dc
+}
+
+// Timeout sets the timeout for this operation.
+func (dc *DropCollection) Timeout(timeout *time.Duration) *DropCollection {
+	if dc == nil {
+		dc = new(DropCollection)
+	}
+
+	dc.timeout = timeout
+	return dc
+}
+
+// Authenticator sets the authenticator to use for this operation.
+func (dc *DropCollection) Authenticator(authenticator driver.Authenticator) *DropCollection {
+	if dc == nil {
+		dc = new(DropCollection)
+	}
+
+	dc.authenticator = authenticator
 	return dc
 }
