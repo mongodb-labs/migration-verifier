@@ -28,7 +28,9 @@ package documentmap
 // to try to duplicate that here.)
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/logger"
@@ -103,7 +105,7 @@ func (m *Map) ImportFromCursor(ctx context.Context, cursor *mongo.Cursor) error 
 	for cursor.Next(ctx) {
 		err := cursor.Err()
 		if err != nil {
-			if err == mongo.ErrNoDocuments {
+			if errors.Is(err, mongo.ErrNoDocuments) {
 				break
 			}
 
@@ -111,22 +113,16 @@ func (m *Map) ImportFromCursor(ctx context.Context, cursor *mongo.Cursor) error 
 		}
 
 		nDocumentsReturned++
+		bytesReturned += (int64)(len(cursor.Current))
 
-		var rawDoc bson.Raw
-		err = cursor.Decode(&rawDoc)
-		if err != nil {
-			return err
-		}
-		bytesReturned += (int64)(len(rawDoc))
-
-		m.addDocument(rawDoc)
+		m.copyAndAddDocument(cursor.Current)
 	}
 	m.logger.Debug().Msgf("Find returned %d documents containing %d bytes", nDocumentsReturned, bytesReturned)
 
 	return nil
 }
 
-func (m *Map) addDocument(rawDoc bson.Raw) {
+func (m *Map) copyAndAddDocument(rawDoc bson.Raw) {
 	rawDocCopy := make(bson.Raw, len(rawDoc))
 	copy(rawDocCopy, rawDoc)
 
@@ -200,11 +196,13 @@ func (m *Map) TotalDocsBytes() types.ByteCount {
 
 // called in tests as well as internally
 func (m *Map) getMapKey(doc *bson.Raw) MapKey {
-	key := MapKey("")
+	var keyBuffer bytes.Buffer
 	for _, keyName := range m.fieldNames {
 		value := doc.Lookup(keyName)
-		key += MapKey(value.Type) + MapKey(value.Value)
+		keyBuffer.Grow(1 + len(value.Value))
+		keyBuffer.WriteByte(byte(value.Type))
+		keyBuffer.Write(value.Value)
 	}
 
-	return key
+	return MapKey(keyBuffer.String())
 }
