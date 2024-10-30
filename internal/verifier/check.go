@@ -162,17 +162,24 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	verifier.mux.RUnlock()
 	if !csRunning {
 		verifier.logger.Debug().Msg("Change stream not running; starting change stream")
+
 		retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
-		// Ignore the error from this call -- if it fails, we use an alternate method
-		// where we use the change stream's initial resume token.
-		startAtTs, _ := GetLastOpTimeAndSyncShardClusterTime(ctx,
+
+		srcClusterTime, err := GetLastOpTimeAndSyncShardClusterTime(ctx,
 			verifier.logger,
 			retryer,
 			verifier.srcClient,
 			true)
-		err = verifier.StartChangeStream(ctx, startAtTs)
+
 		if err != nil {
-			return err
+			return errors.Wrap(err, "failed to fetch the source's cluster time")
+		}
+
+		verifier.srcStartAtTs = &srcClusterTime
+
+		err = verifier.StartChangeStream(ctx, srcClusterTime)
+		if err != nil {
+			return errors.Wrap(err, "failed to start change stream on source")
 		}
 	}
 	// Log out the verification status when initially booting up so it's easy to see the current state

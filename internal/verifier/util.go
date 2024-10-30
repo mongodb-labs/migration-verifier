@@ -97,25 +97,22 @@ type QueryFilter struct {
 	To        string `bson:"to,omitempty" json:"to,omitempty"`
 }
 
-// GetLastOpTimeAndSyncShardClusterTime retrieves the last operation time on the source. If maxClusterTime is provided,
-// the `AppendOplogNote` will only be performed on the shards that has a $clusterTime lower than the provided value.
-// This function is exposed for testing purposes.
-// This is slightly modified from the code in mongosync to use *mongo.Client instead of the
-// mongosync util.Client.
+// GetLastOpTimeAndSyncShardClusterTime retrieves the last operation time on the source.
 func GetLastOpTimeAndSyncShardClusterTime(
 	ctx context.Context,
 	logger *logger.Logger,
 	retryer retry.Retryer,
 	client *mongo.Client,
 	retryOnLockFailed bool,
-) (*primitive.Timestamp, error) {
-	// 'AppendOplogNote' will perform a no-op write on the source cluster. When run against
+) (primitive.Timestamp, error) {
+	// 'appendOplogNote' will perform a no-op write on the source cluster. When run against
 	// sharded clusters, this command will perform the no-op write on all shards. In receiving
 	// the shard responses, the driver notes the highest $clusterTime amongst all of them.
-	var response bson.Raw
+	var response *mongo.SingleResult
 	appendOplogNoteCmd := bson.D{
-		primitive.E{Key: "appendOplogNote", Value: 1},
-		primitive.E{Key: "data", Value: primitive.E{Key: "migration-verifier", Value: "last op fetching"}}}
+		{"appendOplogNote", 1},
+		{"data", bson.D{{"migration-verifier", "last op fetching"}}},
+	}
 
 	if retryOnLockFailed {
 		retryer = retryer.WithErrorCodes(util.LockFailed)
@@ -127,30 +124,24 @@ func GetLastOpTimeAndSyncShardClusterTime(
 			"",
 			"",
 			fmt.Sprintf("Running appendOplogNote command. %v", appendOplogNoteCmd))
-		ret := client.Database("admin").RunCommand(ctx, appendOplogNoteCmd)
-		var err error
-		if response, err = ret.DecodeBytes(); err != nil {
+		response = client.Database("admin").RunCommand(ctx, appendOplogNoteCmd)
+		if err := response.Err(); err != nil {
 			return err
 		}
 
 		return nil
 	})
 
-	// When we issue a maxClusterTime lower than any shard's current $cluster_time, we will receive an StaleClusterTime error.
-	// The command will essentially be a noop on that particular shard.
-	// Since mongos will broadcast the command to all the shards, this error doesn't affect correctness.
-	if err != nil && !util.IsStaleClusterTimeError(err) {
-		return nil, errors.Wrap(err,
-			"failed to issue appendOplogNote command on source cluster")
-	}
-
 	// Get the `operationTime` from the response and return it.
-	rawOperationTime, err := response.LookupErr("operationTime")
+	respStruct := struct {
+		OperationTime primitive.Timestamp `bson:"operationTime"`
+	}{}
+
+	err = response.Decode(&respStruct)
 	if err != nil {
-		return nil, errors.Wrap(err,
-			"failed to get operationTime from source cluster's appendOplogNote response")
+		return primitive.Timestamp{}, errors.Wrap(err,
+			"failed to parse source cluster's appendOplogNote response")
 	}
 
-	t, i := rawOperationTime.Timestamp()
-	return &primitive.Timestamp{T: t, I: i}, nil
+	return respStruct.OperationTime, nil
 }
