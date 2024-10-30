@@ -1,0 +1,45 @@
+on:
+  push:
+    branches:
+      - '*'
+    tags-ignore:
+      - '*'
+  pull_request:
+
+jobs:
+  basics:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - runsOn: macos-latest
+            mongodb_distro: mongodb-macos-arm64
+
+          - runsOn: ubuntu-latest
+            mongodb_distro: mongodb-linux-x86_64-ubuntu1804
+
+        go_version:
+
+          # This is hard-coded by design in order to catch inadvertent changes
+          # to the minimum-required Go version to build migration-verifier.
+          - 1.19
+          - stable
+
+    runs-on: ${{matrix.os.runsOn}}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Fetch Go ${{ matrix.go_version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go_version }}
+
+      - name: Build
+        run: go build main/migration_verifier.go
+
+      - name: Test
+        run: go test -v ./...
+        env:
+          MONGODB_DISTRO: ${{matrix.os.mongodb_distro}}
