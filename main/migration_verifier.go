@@ -212,7 +212,11 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	v.SetNumWorkers(cCtx.Int(numWorkers))
 	v.SetGenerationPauseDelayMillis(time.Duration(cCtx.Int64(generationPauseDelay)))
 	v.SetWorkerSleepDelayMillis(time.Duration(cCtx.Int64(workerSleepDelay)))
-	v.SetPprofInterval(cCtx.String(pprofInterval))
+
+	err = v.SetPprofInterval(cCtx.String(pprofInterval))
+	if err != nil {
+		return nil, err
+	}
 
 	partitionSizeMB := cCtx.Uint64(partitionSizeMB)
 	if partitionSizeMB != 0 {
@@ -226,9 +230,6 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	v.SetStartClean(cCtx.Bool(startClean))
 	logPath := cCtx.String(logPath)
 	v.SetLogger(logPath)
-	if err != nil {
-		return nil, err
-	}
 	if cCtx.Bool(verifyAll) {
 		if len(cCtx.StringSlice(srcNamespace)) > 0 || len(cCtx.StringSlice(dstNamespace)) > 0 {
 			return nil, errors.Errorf("Setting both verifyAll and explicit namespaces is not supported")
