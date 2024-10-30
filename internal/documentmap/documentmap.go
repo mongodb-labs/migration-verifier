@@ -199,6 +199,7 @@ func (m *Map) getMapKey(doc *bson.Raw) MapKey {
 	var keyBuffer bytes.Buffer
 	for _, keyName := range m.fieldNames {
 		value := doc.Lookup(keyName)
+		keyBuffer.Grow(1 + len(value.Value))
 		keyBuffer.WriteByte(byte(value.Type))
 		keyBuffer.Write(value.Value)
 	}
