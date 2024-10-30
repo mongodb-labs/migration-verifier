@@ -39,6 +39,14 @@ const (
 	metadataChangeStreamCollectionName = "changeStream"
 )
 
+type UnknownEventError struct {
+	Event *ParsedEvent
+}
+
+func (uee UnknownEventError) Error() string {
+	return fmt.Sprintf("Unknown event type: %#q", uee.Event.OpType)
+}
+
 // HandleChangeStreamEvent performs the necessary work for change stream events that occur during
 // operation.
 func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEvent *ParsedEvent) error {
@@ -57,7 +65,7 @@ func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEve
 	case "update":
 		return verifier.InsertChangeEventRecheckDoc(ctx, changeEvent)
 	default:
-		return errors.New(`Not supporting: "` + changeEvent.OpType + `" events`)
+		return UnknownEventError{Event: changeEvent}
 	}
 }
 
