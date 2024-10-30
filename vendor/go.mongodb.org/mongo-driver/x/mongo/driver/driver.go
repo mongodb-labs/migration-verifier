@@ -4,17 +4,82 @@
 // not use this file except in compliance with the License. You may obtain
 // a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 
+// Package driver is intended for internal use only. It is made available to
+// facilitate use cases that require access to internal MongoDB driver
+// functionality and state. The API of this package is not stable and there is
+// no backward compatibility guarantee.
+//
+// WARNING: THIS PACKAGE IS EXPERIMENTAL AND MAY BE MODIFIED OR REMOVED WITHOUT
+// NOTICE! USE WITH EXTREME CAUTION!
 package driver // import "go.mongodb.org/mongo-driver/x/mongo/driver"
 
 import (
 	"context"
 	"time"
 
+	"go.mongodb.org/mongo-driver/internal/csot"
 	"go.mongodb.org/mongo-driver/mongo/address"
 	"go.mongodb.org/mongo-driver/mongo/description"
 	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
 	"go.mongodb.org/mongo-driver/x/mongo/driver/session"
 )
+
+// AuthConfig holds the information necessary to perform an authentication attempt.
+// this was moved from the auth package to avoid a circular dependency. The auth package
+// reexports this under the old name to avoid breaking the public api.
+type AuthConfig struct {
+	Description   description.Server
+	Connection    Connection
+	ClusterClock  *session.ClusterClock
+	HandshakeInfo HandshakeInformation
+	ServerAPI     *ServerAPIOptions
+}
+
+// OIDCCallback is the type for both Human and Machine Callback flows. RefreshToken will always be
+// nil in the OIDCArgs for the Machine flow.
+type OIDCCallback func(context.Context, *OIDCArgs) (*OIDCCredential, error)
+
+// OIDCArgs contains the arguments for the OIDC callback.
+type OIDCArgs struct {
+	Version      int
+	IDPInfo      *IDPInfo
+	RefreshToken *string
+}
+
+// OIDCCredential contains the access token and refresh token.
+type OIDCCredential struct {
+	AccessToken  string
+	ExpiresAt    *time.Time
+	RefreshToken *string
+}
+
+// IDPInfo contains the information needed to perform OIDC authentication with an Identity Provider.
+type IDPInfo struct {
+	Issuer        string   `bson:"issuer"`
+	ClientID      string   `bson:"clientId"`
+	RequestScopes []string `bson:"requestScopes"`
+}
+
+// Authenticator handles authenticating a connection. The implementers of this interface
+// are all in the auth package. Most authentication mechanisms do not allow for Reauth,
+// but this is included in the interface so that whenever a new mechanism is added, it
+// must be explicitly considered.
+type Authenticator interface {
+	// Auth authenticates the connection.
+	Auth(context.Context, *AuthConfig) error
+	Reauth(context.Context, *AuthConfig) error
+}
+
+// Cred is a user's credential.
+type Cred struct {
+	Source              string
+	Username            string
+	Password            string
+	PasswordSet         bool
+	Props               map[string]string
+	OIDCMachineCallback OIDCCallback
+	OIDCHumanCallback   OIDCCallback
+}
 
 // Deployment is implemented by types that can select a server from a deployment.
 type Deployment interface {
@@ -51,17 +116,14 @@ type Subscriber interface {
 type Server interface {
 	Connection(context.Context) (Connection, error)
 
-	// MinRTT returns the minimum round-trip time to the server observed over the window period.
-	MinRTT() time.Duration
-
-	// RTT90 returns the 90th percentile round-trip time to the server observed over the window period.
-	RTT90() time.Duration
+	// RTTMonitor returns the round-trip time monitor associated with this server.
+	RTTMonitor() RTTMonitor
 }
 
 // Connection represents a connection to a MongoDB server.
 type Connection interface {
 	WriteWireMessage(context.Context, []byte) error
-	ReadWireMessage(ctx context.Context, dst []byte) ([]byte, error)
+	ReadWireMessage(ctx context.Context) ([]byte, error)
 	Description() description.Server
 
 	// Close closes any underlying connection and returns or frees any resources held by the
@@ -70,10 +132,30 @@ type Connection interface {
 	Close() error
 
 	ID() string
-	ServerConnectionID() *int32
+	ServerConnectionID() *int64
+	DriverConnectionID() uint64 // TODO(GODRIVER-2824): change type to int64.
 	Address() address.Address
 	Stale() bool
+	OIDCTokenGenID() uint64
+	SetOIDCTokenGenID(uint64)
 }
+
+// RTTMonitor represents a round-trip-time monitor.
+type RTTMonitor interface {
+	// EWMA returns the exponentially weighted moving average observed round-trip time.
+	EWMA() time.Duration
+
+	// Min returns the minimum observed round-trip time over the window period.
+	Min() time.Duration
+
+	// P90 returns the 90th percentile observed round-trip time over the window period.
+	P90() time.Duration
+
+	// Stats returns stringified stats of the current state of the monitor.
+	Stats() string
+}
+
+var _ RTTMonitor = &csot.ZeroRTTMonitor{}
 
 // PinnedConnection represents a Connection that can be pinned by one or more cursors or transactions. Implementations
 // of this interface should maintain the following invariants:
@@ -142,12 +224,6 @@ const (
 	ConnectionPoolCleared
 )
 
-// ServerChanged returns true if the ProcessErrorResult indicates that the server changed from an SDAM perspective
-// during a ProcessError() call.
-func (p ProcessErrorResult) ServerChanged() bool {
-	return p != NoChange
-}
-
 // ErrorProcessor implementations can handle processing errors, which may modify their internal state.
 // If this type is implemented by a Server, then Operation.Execute will call it's ProcessError
 // method after it decodes a wire message.
@@ -163,7 +239,7 @@ type ErrorProcessor interface {
 type HandshakeInformation struct {
 	Description             description.Server
 	SpeculativeAuthenticate bsoncore.Document
-	ServerConnectionID      *int32
+	ServerConnectionID      *int64
 	SaslSupportedMechs      []string
 }
 
@@ -200,26 +276,21 @@ var _ Server = SingleConnectionDeployment{}
 // SelectServer implements the Deployment interface. This method does not use the
 // description.SelectedServer provided and instead returns itself. The Connections returned from the
 // Connection method have a no-op Close method.
-func (ssd SingleConnectionDeployment) SelectServer(context.Context, description.ServerSelector) (Server, error) {
-	return ssd, nil
+func (scd SingleConnectionDeployment) SelectServer(context.Context, description.ServerSelector) (Server, error) {
+	return scd, nil
 }
 
 // Kind implements the Deployment interface. It always returns description.Single.
-func (ssd SingleConnectionDeployment) Kind() description.TopologyKind { return description.Single }
+func (SingleConnectionDeployment) Kind() description.TopologyKind { return description.Single }
 
 // Connection implements the Server interface. It always returns the embedded connection.
-func (ssd SingleConnectionDeployment) Connection(context.Context) (Connection, error) {
-	return ssd.C, nil
+func (scd SingleConnectionDeployment) Connection(context.Context) (Connection, error) {
+	return scd.C, nil
 }
 
-// MinRTT always returns 0. It implements the driver.Server interface.
-func (ssd SingleConnectionDeployment) MinRTT() time.Duration {
-	return 0
-}
-
-// RTT90 always returns 0. It implements the driver.Server interface.
-func (ssd SingleConnectionDeployment) RTT90() time.Duration {
-	return 0
+// RTTMonitor implements the driver.Server interface.
+func (scd SingleConnectionDeployment) RTTMonitor() RTTMonitor {
+	return &csot.ZeroRTTMonitor{}
 }
 
 // TODO(GODRIVER-617): We can likely use 1 type for both the Type and the RetryMode by using 2 bits for the mode and 1
@@ -241,15 +312,17 @@ const (
 // RetryMode specifies the way that retries are handled for retryable operations.
 type RetryMode uint
 
-// These are the modes available for retrying.
+// These are the modes available for retrying. Note that if Timeout is specified on the Client, the
+// operation will automatically retry as many times as possible within the context's deadline
+// unless RetryNone is used.
 const (
 	// RetryNone disables retrying.
 	RetryNone RetryMode = iota
-	// RetryOnce will enable retrying the entire operation once.
+	// RetryOnce will enable retrying the entire operation once if Timeout is not specified.
 	RetryOnce
-	// RetryOncePerCommand will enable retrying each command associated with an operation. For
-	// example, if an insert is batch split into 4 commands then each of those commands is eligible
-	// for one retry.
+	// RetryOncePerCommand will enable retrying each command associated with an operation if Timeout
+	// is not specified. For example, if an insert is batch split into 4 commands then each of
+	// those commands is eligible for one retry.
 	RetryOncePerCommand
 	// RetryContext will enable retrying until the context.Context's deadline is exceeded or it is
 	// cancelled.
