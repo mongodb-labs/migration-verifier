@@ -115,14 +115,14 @@ func (m *Map) ImportFromCursor(ctx context.Context, cursor *mongo.Cursor) error 
 		nDocumentsReturned++
 		bytesReturned += (int64)(len(cursor.Current))
 
-		m.addDocument(cursor.Current)
+		m.copyAndAddDocument(cursor.Current)
 	}
 	m.logger.Debug().Msgf("Find returned %d documents containing %d bytes", nDocumentsReturned, bytesReturned)
 
 	return nil
 }
 
-func (m *Map) addDocument(rawDoc bson.Raw) {
+func (m *Map) copyAndAddDocument(rawDoc bson.Raw) {
 	rawDocCopy := make(bson.Raw, len(rawDoc))
 	copy(rawDocCopy, rawDoc)
 
