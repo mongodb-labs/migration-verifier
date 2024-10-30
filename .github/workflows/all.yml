@@ -16,7 +16,7 @@ jobs:
             mongodb_distro: mongodb-macos-arm64
 
           - runsOn: ubuntu-latest
-            mongodb_distro: mongodb-linux-x86_64-ubuntu2404
+            mongodb_distro: mongodb-linux-x86_64-ubuntu1804
 
         go_version:
 
