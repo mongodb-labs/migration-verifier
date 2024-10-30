@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -77,7 +76,7 @@ func (suite *MultiSourceVersionTestSuite) TestStartAtTimeWithChanges() {
 	suite.Require().NoError(err)
 	newStartTs := sess.OperationTime()
 	suite.Require().NotNil(newStartTs)
-	suite.Require().Less(primitive.CompareTimestamp(*origStartTs, *newStartTs), 0)
+	suite.Require().Negative(origStartTs.Compare(*newStartTs))
 	verifier.changeStreamEnderChan <- struct{}{}
 	<-verifier.changeStreamDoneChan
 	suite.Require().Equal(verifier.srcStartAtTs, newStartTs)

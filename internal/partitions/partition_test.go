@@ -73,48 +73,58 @@ func (suite *UnitTestSuite) TestVersioning() {
 	expectedFilterWithTypeBracketing := makeExpectedFilterWithTypeBracketing(partition.Key.Lower, partition.Upper)
 	// No version given, default to no bracketing
 	findOptions := partition.GetFindOptions(nil, nil)
-	filter := findOptions.Map()["filter"]
+	filter := getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedFilter, filter)
 
 	// 6.0 (int64)
 	findOptions = partition.GetFindOptions(&bson.M{"versionArray": bson.A{int64(6), int64(0), int64(0), int64(0)}}, nil)
-	filter = findOptions.Map()["filter"]
+	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedFilter, filter)
 
 	// 6.0
 	findOptions = partition.GetFindOptions(&bson.M{"versionArray": bson.A{int32(6), int32(0), int32(0), int32(0)}}, nil)
-	filter = findOptions.Map()["filter"]
+	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedFilter, filter)
 
 	// 5.3.0.9
 	findOptions = partition.GetFindOptions(&bson.M{"versionArray": bson.A{int32(5), int32(3), int32(0), int32(9)}}, nil)
-	filter = findOptions.Map()["filter"]
+	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedFilter, filter)
 
 	// 7.1.3.5
 	findOptions = partition.GetFindOptions(&bson.M{"versionArray": bson.A{int32(7), int32(1), int32(3), int32(5)}}, nil)
-	filter = findOptions.Map()["filter"]
+	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedFilter, filter)
 
 	// 4.4 (int64)
 	findOptions = partition.GetFindOptions(&bson.M{"versionArray": bson.A{int64(4), int64(4), int64(0), int64(0)}}, nil)
-	filter = findOptions.Map()["filter"]
+	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedFilterWithTypeBracketing, filter)
 
 	// 4.4
 	findOptions = partition.GetFindOptions(&bson.M{"versionArray": bson.A{int32(4), int32(4), int32(0), int32(0)}}, nil)
-	filter = findOptions.Map()["filter"]
+	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedFilterWithTypeBracketing, filter)
 
 	// 4.2
 	findOptions = partition.GetFindOptions(&bson.M{"versionArray": bson.A{int32(4), int32(2), int32(0), int32(0)}}, nil)
-	filter = findOptions.Map()["filter"]
+	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedFilterWithTypeBracketing, filter)
 
 	// No version array -- assume old, require type bracketing.
 	findOptions = partition.GetFindOptions(&bson.M{"notVersionArray": bson.A{6, int32(0), int32(0), int32(0)}}, nil)
-	filter = findOptions.Map()["filter"]
+	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedFilterWithTypeBracketing, filter)
+}
+
+func getFilterFromFindOptions(opts bson.D) any {
+	for _, el := range opts {
+		if el.Key == "filter" {
+			return el.Value
+		}
+	}
+
+	return nil
 }
 
 func makeTestPartition() (Partition, bson.D) {

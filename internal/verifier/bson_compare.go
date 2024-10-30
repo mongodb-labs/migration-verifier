@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
 )
 
 type MismatchDetails struct {
@@ -109,9 +108,9 @@ func bsonUnorderedCompareRawValue(srcValue, dstValue bson.RawValue) (bool, error
 	}
 
 	switch srcValue.Type {
-	case bsontype.Array:
+	case bson.TypeArray:
 		return bsonUnorderedCompareRawArray(srcValue.Array(), dstValue.Array())
-	case bsontype.EmbeddedDocument:
+	case bson.TypeEmbeddedDocument:
 		return BsonUnorderedCompareRawDocument(srcValue.Document(), dstValue.Document())
 	default:
 		return srcValue.Equal(dstValue), nil
