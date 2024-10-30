@@ -209,7 +209,7 @@ func (verifier *Verifier) loadChangeStreamResumeToken(ctx context.Context) (bson
 	token, err := coll.FindOne(
 		ctx,
 		bson.D{{"_id", "resumeToken"}},
-	).Raw()
+	).DecodeBytes()
 
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, nil
