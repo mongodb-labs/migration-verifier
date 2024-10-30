@@ -3,7 +3,9 @@ package verifier
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -49,11 +51,17 @@ func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
 		Collection("testColl").
 		InsertOne(
 			ctx,
-			bson.D{{"_id", 0}},
+			bson.D{{"_id", "heyhey"}},
 		)
 	suite.Require().NoError(err)
 
 	verifier2 := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+
+	suite.Require().Empty(
+		suite.fetchVerifierRechecks(ctx, verifier2),
+		"no rechecks should be enqueued before starting change stream",
+	)
+
 	err = verifier2.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 
@@ -64,6 +72,45 @@ func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
 		*verifier2.srcStartAtTs,
 		"verifier2's change stream should be 1 increment further than verifier1's",
 	)
+
+	recheckDocs := []bson.M{}
+
+	require.Eventually(
+		suite.T(),
+		func() bool {
+			recheckDocs = suite.fetchVerifierRechecks(ctx, verifier2)
+
+			return len(recheckDocs) > 0
+		},
+		time.Minute,
+		500*time.Millisecond,
+		"the verifier should enqueue a recheck",
+	)
+
+	suite.Assert().Equal(
+		bson.M{
+			"db":         "testDb",
+			"coll":       "testColl",
+			"generation": int32(0),
+			"docID":      "heyhey",
+		},
+		recheckDocs[0]["_id"],
+		"recheck doc should have expected ID",
+	)
+}
+
+func (suite *MultiSourceVersionTestSuite) fetchVerifierRechecks(ctx context.Context, verifier *Verifier) []bson.M {
+	recheckDocs := []bson.M{}
+
+	recheckColl := verifier.verificationDatabase().Collection(recheckQueue)
+	cursor, err := recheckColl.Find(ctx, bson.D{})
+
+	if !errors.Is(err, mongo.ErrNoDocuments) {
+		suite.Require().NoError(err)
+		suite.Require().NoError(cursor.All(ctx, &recheckDocs))
+	}
+
+	return recheckDocs
 }
 
 func (suite *MultiSourceVersionTestSuite) TestStartAtTimeNoChanges() {
