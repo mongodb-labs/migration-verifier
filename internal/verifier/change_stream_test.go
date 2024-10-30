@@ -58,9 +58,11 @@ func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
 	suite.Require().NoError(err)
 
 	suite.Require().NotNil(verifier2.srcStartAtTs)
+
 	suite.Assert().Equal(
-		startTs,
+		primitive.Timestamp{T: startTs.T, I: 1 + startTs.I},
 		*verifier2.srcStartAtTs,
+		"verifier2's change stream should be 1 increment further than verifier1's",
 	)
 }
 

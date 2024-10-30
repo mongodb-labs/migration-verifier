@@ -178,7 +178,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 				Msg("Failed to extract timestamp from persisted resume token.")
 		}
 
-		logEvent.Msg("Starting change stream with persisted resume token.")
+		logEvent.Msg("Starting change stream from persisted resume token.")
 
 		opts = opts.SetStartAfter(savedResumeToken)
 	} else {
