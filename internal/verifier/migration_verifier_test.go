@@ -161,7 +161,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 			func() {
 				doc := srcMap.Fetch(both[0])
 				val := doc.Lookup("num")
-				suite.Assert().Less(val.AsInt32(), int32(100))
+				suite.Assert().Less(val.AsInt64(), int64(100))
 			},
 			"doc is fetched",
 		)

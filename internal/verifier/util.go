@@ -129,7 +129,7 @@ func GetLastOpTimeAndSyncShardClusterTime(
 			fmt.Sprintf("Running appendOplogNote command. %v", appendOplogNoteCmd))
 		ret := client.Database("admin").RunCommand(ctx, appendOplogNoteCmd)
 		var err error
-		if response, err = ret.DecodeBytes(); err != nil {
+		if response, err = ret.Raw(); err != nil {
 			return err
 		}
 

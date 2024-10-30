@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/bsoncodec"
 	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -21,10 +22,10 @@ const (
 type UUID uuid.UUID
 
 var (
-	_ bsoncodec.ValueMarshaler   = UUID{}
-	_ bsoncodec.ValueUnmarshaler = (*UUID)(nil)
-	_ bsoncodec.KeyMarshaler     = UUID{}
-	_ bsoncodec.KeyUnmarshaler   = (*UUID)(nil)
+	_ bson.ValueMarshaler      = UUID{}
+	_ bson.ValueUnmarshaler    = (*UUID)(nil)
+	_ bsoncodec.KeyMarshaler   = UUID{}
+	_ bsoncodec.KeyUnmarshaler = (*UUID)(nil)
 )
 
 // NewUUID constructs a new, randomly-generated UUID.
@@ -36,13 +37,13 @@ func NewUUID() UUID {
 // ValueMarshaler interface.
 func (u UUID) MarshalBSONValue() (bsontype.Type, []byte, error) {
 	val := bsoncore.AppendBinary(nil, uuidBinarySubtype, u[:])
-	return bsontype.Binary, val, nil
+	return bson.TypeBinary, val, nil
 }
 
 // UnmarshalBSONValue is used to unmarshal BSON into UUID objects. This implements the
 // ValueUnmarshaler interface.
 func (u *UUID) UnmarshalBSONValue(bsonType bsontype.Type, data []byte) error {
-	if bsonType != bsontype.Binary {
+	if bsonType != bson.TypeBinary {
 		return fmt.Errorf("cannot decoded BSON value of type %s as a UUID", bsonType)
 	}
 

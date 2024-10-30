@@ -37,7 +37,7 @@ type DocKey struct {
 func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEvent *ParsedEvent) error {
 	if changeEvent.ClusterTime != nil &&
 		(verifier.lastChangeEventTime == nil ||
-			primitive.CompareTimestamp(*verifier.lastChangeEventTime, *changeEvent.ClusterTime) < 0) {
+			verifier.lastChangeEventTime.Compare(*changeEvent.ClusterTime) < 0) {
 		verifier.lastChangeEventTime = changeEvent.ClusterTime
 	}
 	switch changeEvent.OpType {
@@ -175,7 +175,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context, startTime *prim
 		}
 
 		verifier.logger.Debug().Msgf("Initial cluster time is %+v", clusterTimeTs)
-		if primitive.CompareTimestamp(clusterTimeTs, resumeTokenTime) < 0 {
+		if clusterTimeTs.Compare(resumeTokenTime) < 0 {
 			verifier.srcStartAtTs = &clusterTimeTs
 		}
 	}
