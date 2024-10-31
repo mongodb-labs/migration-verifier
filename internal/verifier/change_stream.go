@@ -270,7 +270,7 @@ func (verifier *Verifier) persistChangeStreamResumeToken(ctx context.Context, cs
 		Stringer("resumeToken", token).
 		Msg("Persisted change stream resume token.")
 
-	return errors.Wrapf(err, "failed to persist change stream resume token (%v)", cs.ResumeToken())
+	return errors.Wrapf(err, "failed to persist change stream resume token (%v)", token)
 }
 
 func extractTimestampFromResumeToken(resumeToken bson.Raw) (primitive.Timestamp, error) {
