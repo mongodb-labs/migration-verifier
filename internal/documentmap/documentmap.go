@@ -58,6 +58,7 @@ type mapKeyToDocMap map[MapKey]bson.Raw
 // Map is the main struct for this package.
 type Map struct {
 	internalMap mapKeyToDocMap
+	bytesSize   types.ByteCount
 	logger      *logger.Logger
 
 	// This always includes idFieldName
@@ -101,7 +102,7 @@ func (m *Map) ImportFromCursor(ctx context.Context, cursor *mongo.Cursor, tracke
 
 	m.imported = true
 
-	var bytesReturned uint64
+	var bytesReturned types.ByteCount
 	bytesReturned, nDocumentsReturned := 0, 0
 
 	for cursor.Next(ctx) {
@@ -115,13 +116,16 @@ func (m *Map) ImportFromCursor(ctx context.Context, cursor *mongo.Cursor, tracke
 		}
 
 		nDocumentsReturned++
-		bytesReturned += (uint64)(len(cursor.Current))
+		bytesReturned += (types.ByteCount)(len(cursor.Current))
 
 		// This will block if needs be to prevent OOMs.
 		trackerWriter <- memorytracker.Unit(bytesReturned)
 
 		m.copyAndAddDocument(cursor.Current)
 	}
+
+	m.bytesSize = bytesReturned
+
 	m.logger.Debug().
 		Int("documentedReturned", nDocumentsReturned).
 		Str("totalSize", reportutils.BytesToUnit(bytesReturned, reportutils.FindBestUnit(bytesReturned))).
@@ -192,12 +196,7 @@ func (m *Map) Count() types.DocumentCount {
 
 // TotalDocsBytes returns the combined byte size of the Map’s documents.
 func (m *Map) TotalDocsBytes() types.ByteCount {
-	var size types.ByteCount
-	for _, doc := range m.internalMap {
-		size += types.ByteCount(len(doc))
-	}
-
-	return size
+	return m.bytesSize
 }
 
 // ----------------------------------------------------------------------

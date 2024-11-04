@@ -15,10 +15,9 @@ import (
 
 const decimalPrecision = 2
 
-// This could include signed ints, but we have no need for now.
-// The bigger requirement is that it exclude uint8.
+// This must exclude uint8.
 type num16Plus interface {
-	constraints.Float | ~uint | ~uint16 | ~uint32 | ~uint64
+	constraints.Float | ~uint | ~uint16 | ~uint32 | ~uint64 | ~int64
 }
 
 type realNum interface {

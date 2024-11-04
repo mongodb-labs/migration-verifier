@@ -426,7 +426,7 @@ func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A)
 }
 
 func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, buildInfo *bson.M,
-	startAtTs *primitive.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
+	startAtTs *primitive.Timestamp, task *VerificationTask) (bson.D, *mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
 	var andPredicates bson.A
@@ -457,11 +457,19 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
 	verifier.logger.Debug().Msgf("getDocuments findCmd: %s opts: %v", findCmd, *runCommandOptions)
 
-	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
+	cursor, err := collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
+
+	return findCmd, cursor, err
 }
 
 func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask, trackerWriter memorytracker.Writer) ([]VerificationResult, types.DocumentCount, types.ByteCount, error) {
 	srcClientMap, dstClientMap, err := verifier.fetchDocuments(task, trackerWriter)
+	defer func() {
+		for _, clientMap := range []*documentmap.Map{srcClientMap, dstClientMap} {
+			trackerWriter <- -memorytracker.Unit(clientMap.TotalDocsBytes())
+		}
+	}()
+
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -477,8 +485,6 @@ func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask, track
 // This is split out to allow unit testing of fetching separate from comparison.
 func (verifier *Verifier) fetchDocuments(task *VerificationTask, trackerWriter memorytracker.Writer) (*documentmap.Map, *documentmap.Map, error) {
 
-	var srcErr, dstErr error
-
 	errGroup, ctx := errgroup.WithContext(context.Background())
 
 	shardFieldNames := task.QueryFilter.ShardKeys
@@ -486,28 +492,36 @@ func (verifier *Verifier) fetchDocuments(task *VerificationTask, trackerWriter m
 	srcClientMap := documentmap.New(verifier.GetLogger(), shardFieldNames...)
 	dstClientMap := srcClientMap.CloneEmpty()
 
+	warnThreshold := 10 * verifier.partitionSizeInBytes
+
 	errGroup.Go(func() error {
-		var cursor *mongo.Cursor
-		cursor, srcErr = verifier.getDocumentsCursor(ctx, verifier.srcClientCollection(task), verifier.srcBuildInfo,
+		findCmd, cursor, err := verifier.getDocumentsCursor(ctx, verifier.srcClientCollection(task), verifier.srcBuildInfo,
 			verifier.srcStartAtTs, task)
 
-		if srcErr == nil {
-			srcErr = srcClientMap.ImportFromCursor(ctx, cursor, trackerWriter)
+		if err == nil {
+			err = srcClientMap.ImportFromCursor(ctx, cursor, trackerWriter)
 		}
 
-		return srcErr
+		if err == nil && int64(srcClientMap.TotalDocsBytes()) > warnThreshold {
+			verifier.logger.Warn().
+				Str("totalSize", reportutils.BytesToUnit(srcClientMap.TotalDocsBytes(), reportutils.FindBestUnit(srcClientMap.TotalDocsBytes()))).
+				Str("intendedPartitionSize", reportutils.BytesToUnit(verifier.partitionSizeInBytes, reportutils.FindBestUnit(verifier.partitionSizeInBytes))).
+				Str("filter", fmt.Sprintf("%v", findCmd)).
+				Msg("Partition greatly exceeds desired size. This may cause excess memory usage.")
+		}
+
+		return err
 	})
 
 	errGroup.Go(func() error {
-		var cursor *mongo.Cursor
-		cursor, dstErr = verifier.getDocumentsCursor(ctx, verifier.dstClientCollection(task), verifier.dstBuildInfo,
+		_, cursor, err := verifier.getDocumentsCursor(ctx, verifier.dstClientCollection(task), verifier.dstBuildInfo,
 			nil /*startAtTs*/, task)
 
-		if dstErr == nil {
-			dstErr = dstClientMap.ImportFromCursor(ctx, cursor, trackerWriter)
+		if err == nil {
+			err = dstClientMap.ImportFromCursor(ctx, cursor, trackerWriter)
 		}
 
-		return dstErr
+		return err
 	})
 
 	err := errGroup.Wait()

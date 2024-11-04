@@ -1,6 +1,7 @@
 package memorytracker
 
 import (
+	"context"
 	"reflect"
 	"slices"
 	"sync"
@@ -10,7 +11,7 @@ import (
 
 type Unit = int64
 type reader = <-chan Unit
-type writer = chan<- Unit
+type Writer = chan<- Unit
 
 type Tracker struct {
 	logger      *logger.Logger
@@ -20,15 +21,15 @@ type Tracker struct {
 	mux         sync.RWMutex
 }
 
-func Start(logger *logger.Logger, max Unit) *Tracker {
+func Start(ctx context.Context, logger *logger.Logger, max Unit) *Tracker {
 	tracker := Tracker{max: max}
 
-	go tracker.track()
+	go tracker.track(ctx)
 
 	return &tracker
 }
 
-func (mt *Tracker) AddWriter() writer {
+func (mt *Tracker) AddWriter() Writer {
 	mt.mux.RLock()
 	defer mt.mux.RUnlock()
 
@@ -42,11 +43,21 @@ func (mt *Tracker) AddWriter() writer {
 	return newChan
 }
 
-func (mt *Tracker) getSelectCases() []reflect.SelectCase {
+func (mt *Tracker) getSelectCases(ctx context.Context) []reflect.SelectCase {
 	mt.mux.RLock()
 	defer mt.mux.RUnlock()
 
-	return slices.Clone(mt.selectCases)
+	cases := make([]reflect.SelectCase, 1+len(mt.selectCases))
+	cases[0] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ctx.Done()),
+	}
+
+	for i := range mt.selectCases {
+		cases[1+i] = mt.selectCases[i]
+	}
+
+	return cases
 }
 
 func (mt *Tracker) removeSelectCase(i int) {
@@ -56,7 +67,7 @@ func (mt *Tracker) removeSelectCase(i int) {
 	mt.selectCases = slices.Delete(mt.selectCases, i, 1+i)
 }
 
-func (mt *Tracker) track() {
+func (mt *Tracker) track(ctx context.Context) {
 	for {
 		if mt.cur <= mt.max {
 			mt.logger.Panic().
@@ -65,9 +76,17 @@ func (mt *Tracker) track() {
 				Msg("track() loop should never be in memory excess!")
 		}
 
-		selectCases := mt.getSelectCases()
+		selectCases := mt.getSelectCases(ctx)
 
 		chosen, gotVal, alive := reflect.Select(selectCases)
+
+		if chosen == 0 {
+			mt.logger.Debug().
+				AnErr("contextErr", context.Cause(ctx)).
+				Msg("Stopping memory tracker.")
+
+			return
+		}
 
 		got := (gotVal.Interface()).(Unit)
 		mt.cur += got
@@ -83,7 +102,10 @@ func (mt *Tracker) track() {
 					Msg("Got nonzero track value but channel is closed.")
 			}
 
+			// Closure of a channel indicates that the worker thread is
+			// finished.
 			mt.removeSelectCase(chosen)
+
 			continue
 		}
 
