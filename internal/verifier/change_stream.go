@@ -136,16 +136,23 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		default:
 			var err error
 
-			if next := cs.TryNext(ctx); next {
-				if err = cs.Decode(&changeEvent); err != nil {
-					err = errors.Wrapf(err, "failed to decode change event (%v)", cs.Current)
-				}
+			for err == nil {
+				next := cs.TryNext(ctx)
 
-				if err == nil {
-					err = verifier.HandleChangeStreamEvent(ctx, &changeEvent)
-					if err != nil {
-						err = errors.Wrapf(err, "failed to handle change event (%+v)", changeEvent)
+				if next {
+					if err = cs.Decode(&changeEvent); err != nil {
+						err = errors.Wrapf(err, "failed to decode change event (%v)", cs.Current)
 					}
+
+					if err == nil {
+						err = verifier.HandleChangeStreamEvent(ctx, &changeEvent)
+						if err != nil {
+							err = errors.Wrapf(err, "failed to handle change event (%+v)", changeEvent)
+						}
+					}
+				} else {
+					err = errors.Wrap(cs.Err(), "change stream iteration failed")
+					break
 				}
 			}
 
@@ -266,9 +273,22 @@ func (verifier *Verifier) persistChangeStreamResumeToken(ctx context.Context, cs
 		options.Replace().SetUpsert(true),
 	)
 
-	verifier.logger.Debug().
-		Stringer("resumeToken", token).
-		Msg("Persisted change stream resume token.")
+	if err == nil {
+		ts, err := extractTimestampFromResumeToken(token)
+
+		logEvent := verifier.logger.Debug()
+
+		if err == nil {
+			logEvent = addUnixTimeToLogEvent(ts.T, logEvent)
+		} else {
+			verifier.logger.Warn().Err(err).
+				Msg("failed to extract resume token timestamp")
+		}
+
+		logEvent.Msg("Persisted change stream resume token.")
+
+		return nil
+	}
 
 	return errors.Wrapf(err, "failed to persist change stream resume token (%v)", token)
 }
