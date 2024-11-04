@@ -198,7 +198,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 
 	err = verifier.persistChangeStreamResumeToken(ctx, srcChangeStream)
 	if err != nil {
-		return errors.Wrap(err, "failed to persist change stream resume token")
+		return err
 	}
 
 	csTimestamp, err := extractTimestampFromResumeToken(srcChangeStream.ResumeToken())
