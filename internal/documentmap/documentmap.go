@@ -115,11 +115,13 @@ func (m *Map) ImportFromCursor(ctx context.Context, cursor *mongo.Cursor, tracke
 			return err
 		}
 
-		nDocumentsReturned++
-		bytesReturned += (types.ByteCount)(len(cursor.Current))
+		docSize := (types.ByteCount)(len(cursor.Current))
 
 		// This will block if needs be to prevent OOMs.
-		trackerWriter <- memorytracker.Unit(bytesReturned)
+		trackerWriter <- memorytracker.Unit(docSize)
+
+		bytesReturned += docSize
+		nDocumentsReturned++
 
 		m.copyAndAddDocument(cursor.Current)
 	}

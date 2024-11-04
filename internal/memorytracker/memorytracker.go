@@ -16,16 +16,16 @@ type Writer = chan<- Unit
 
 type Tracker struct {
 	logger      *logger.Logger
-	max         Unit
-	cur         Unit
+	softLimit   Unit
+	curUsage    Unit
 	selectCases []reflect.SelectCase
 	mux         sync.RWMutex
 }
 
 func Start(ctx context.Context, logger *logger.Logger, max Unit) *Tracker {
 	tracker := Tracker{
-		max:    max,
-		logger: logger,
+		softLimit: max,
+		logger:    logger,
 	}
 
 	go tracker.track(ctx)
@@ -68,15 +68,15 @@ func (mt *Tracker) removeSelectCase(i int) {
 	mt.mux.Lock()
 	defer mt.mux.Unlock()
 
-	mt.selectCases = slices.Delete(mt.selectCases, i, 1+i)
+	mt.selectCases = slices.Delete(mt.selectCases, 1+i, 2+i)
 }
 
 func (mt *Tracker) track(ctx context.Context) {
 	for {
-		if mt.cur > mt.max {
+		if mt.curUsage > mt.softLimit {
 			mt.logger.Panic().
-				Int64("usage", mt.cur).
-				Int64("softLimit", mt.max).
+				Int64("usage", mt.curUsage).
+				Int64("softLimit", mt.softLimit).
 				Msg("track() loop should never be in memory excess!")
 		}
 
@@ -93,11 +93,12 @@ func (mt *Tracker) track(ctx context.Context) {
 		}
 
 		got := (gotVal.Interface()).(Unit)
-		mt.cur += got
+		mt.curUsage += got
 
 		if got < 0 {
-			mt.logger.Debug().
+			mt.logger.Info().
 				Str("reclaimed", reportutils.FmtBytes(-got)).
+				Str("tracked", reportutils.FmtBytes(mt.curUsage)).
 				Msg("Reclaimed tracked memory.")
 		}
 
@@ -117,20 +118,20 @@ func (mt *Tracker) track(ctx context.Context) {
 
 		didSingleThread := false
 
-		for mt.cur > mt.max {
+		for mt.curUsage > mt.softLimit {
 			reader := (selectCases[chosen].Chan.Interface()).(reader)
 
 			if !didSingleThread {
 				mt.logger.Warn().
-					Str("usage", reportutils.FmtBytes(mt.cur)).
-					Str("softLimit", reportutils.FmtBytes(mt.max)).
+					Str("usage", reportutils.FmtBytes(mt.curUsage)).
+					Str("softLimit", reportutils.FmtBytes(mt.softLimit)).
 					Msg("Tracked memory usage now exceeds soft limit. Suspending concurrent reads until tracked usage falls.")
 
 				didSingleThread = true
 			}
 
 			got, alive := <-reader
-			mt.cur += got
+			mt.curUsage += got
 
 			if !alive {
 				mt.removeSelectCase(chosen)
@@ -139,8 +140,8 @@ func (mt *Tracker) track(ctx context.Context) {
 
 		if didSingleThread {
 			mt.logger.Info().
-				Str("usage", reportutils.FmtBytes(mt.cur)).
-				Str("softLimit", reportutils.FmtBytes(mt.max)).
+				Str("usage", reportutils.FmtBytes(mt.curUsage)).
+				Str("softLimit", reportutils.FmtBytes(mt.softLimit)).
 				Msg("Tracked memory usage is now below soft limit. Resuming concurrent reads.")
 		}
 	}
