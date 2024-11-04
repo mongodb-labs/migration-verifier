@@ -184,6 +184,49 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	return results, docCount, byteCount, err
 }
 
+func (verifier *Verifier) getFetcherChannels(
+	ctx context.Context,
+	errGroup *errgroup.Group,
+	task *VerificationTask,
+) (<-chan bson.Raw, <-chan bson.Raw) {
+	srcChannel := make(chan bson.Raw)
+	dstChannel := make(chan bson.Raw)
+
+	errGroup.Go(func() error {
+		cursor, err := verifier.getDocumentsCursor(
+			ctx,
+			verifier.srcClientCollection(task),
+			verifier.srcBuildInfo,
+			verifier.srcStartAtTs,
+			task,
+		)
+
+		if err == nil {
+			err = iterateCursorToChannel(ctx, cursor, srcChannel)
+		}
+
+		return err
+	})
+
+	errGroup.Go(func() error {
+		cursor, err := verifier.getDocumentsCursor(
+			ctx,
+			verifier.dstClientCollection(task),
+			verifier.dstBuildInfo,
+			nil, //startAtTs
+			task,
+		)
+
+		if err == nil {
+			err = iterateCursorToChannel(ctx, cursor, dstChannel)
+		}
+
+		return err
+	})
+
+	return srcChannel, dstChannel
+}
+
 func iterateCursorToChannel(ctx context.Context, cursor *mongo.Cursor, writer chan<- bson.Raw) error {
 	for cursor.Next(ctx) {
 		writer <- slices.Clone(cursor.Current)
