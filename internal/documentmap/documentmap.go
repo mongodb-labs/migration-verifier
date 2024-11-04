@@ -34,6 +34,8 @@ import (
 	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/memorytracker"
+	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -92,14 +94,14 @@ func (m *Map) CloneEmpty() *Map {
 // own goroutine.
 //
 // As a safeguard, this panics if called more than once.
-func (m *Map) ImportFromCursor(ctx context.Context, cursor *mongo.Cursor) error {
+func (m *Map) ImportFromCursor(ctx context.Context, cursor *mongo.Cursor, trackerWriter memorytracker.Writer) error {
 	if m.imported {
 		panic("Refuse duplicate call!")
 	}
 
 	m.imported = true
 
-	var bytesReturned int64
+	var bytesReturned uint64
 	bytesReturned, nDocumentsReturned := 0, 0
 
 	for cursor.Next(ctx) {
@@ -113,11 +115,17 @@ func (m *Map) ImportFromCursor(ctx context.Context, cursor *mongo.Cursor) error 
 		}
 
 		nDocumentsReturned++
-		bytesReturned += (int64)(len(cursor.Current))
+		bytesReturned += (uint64)(len(cursor.Current))
+
+		// This will block if needs be to prevent OOMs.
+		trackerWriter <- memorytracker.Unit(bytesReturned)
 
 		m.copyAndAddDocument(cursor.Current)
 	}
-	m.logger.Debug().Msgf("Find returned %d documents containing %d bytes", nDocumentsReturned, bytesReturned)
+	m.logger.Debug().
+		Int("documentedReturned", nDocumentsReturned).
+		Str("totalSize", reportutils.BytesToUnit(bytesReturned, reportutils.FindBestUnit(bytesReturned))).
+		Msgf("Finished reading %#q query.", "find")
 
 	return nil
 }

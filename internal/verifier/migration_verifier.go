@@ -18,6 +18,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/documentmap"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/memorytracker"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
@@ -136,6 +137,8 @@ type Verifier struct {
 	// The filter is applied to all namespaces in both initial checking and iterative checking.
 	// The verifier only checks documents within the filter.
 	globalFilter map[string]any
+
+	memoryTracker *memorytracker.Tracker
 
 	pprofInterval time.Duration
 }
@@ -457,8 +460,8 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
 }
 
-func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]VerificationResult, types.DocumentCount, types.ByteCount, error) {
-	srcClientMap, dstClientMap, err := verifier.fetchDocuments(task)
+func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask, trackerWriter memorytracker.Writer) ([]VerificationResult, types.DocumentCount, types.ByteCount, error) {
+	srcClientMap, dstClientMap, err := verifier.fetchDocuments(task, trackerWriter)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -472,7 +475,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]Ve
 }
 
 // This is split out to allow unit testing of fetching separate from comparison.
-func (verifier *Verifier) fetchDocuments(task *VerificationTask) (*documentmap.Map, *documentmap.Map, error) {
+func (verifier *Verifier) fetchDocuments(task *VerificationTask, trackerWriter memorytracker.Writer) (*documentmap.Map, *documentmap.Map, error) {
 
 	var srcErr, dstErr error
 
@@ -489,7 +492,7 @@ func (verifier *Verifier) fetchDocuments(task *VerificationTask) (*documentmap.M
 			verifier.srcStartAtTs, task)
 
 		if srcErr == nil {
-			srcErr = srcClientMap.ImportFromCursor(ctx, cursor)
+			srcErr = srcClientMap.ImportFromCursor(ctx, cursor, trackerWriter)
 		}
 
 		return srcErr
@@ -501,7 +504,7 @@ func (verifier *Verifier) fetchDocuments(task *VerificationTask) (*documentmap.M
 			nil /*startAtTs*/, task)
 
 		if dstErr == nil {
-			dstErr = dstClientMap.ImportFromCursor(ctx, cursor)
+			dstErr = dstClientMap.ImportFromCursor(ctx, cursor, trackerWriter)
 		}
 
 		return dstErr
@@ -632,10 +635,10 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 	}}, nil
 }
 
-func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTask) {
+func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTask, trackerWriter memorytracker.Writer) {
 	verifier.logger.Debug().Msgf("[Worker %d] Processing verify task", workerNum)
 
-	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(task)
+	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(task, trackerWriter)
 
 	if err != nil {
 		task.Status = verificationTaskFailed

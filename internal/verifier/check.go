@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/memorytracker"
 	"github.com/10gen/migration-verifier/internal/retry"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
@@ -62,11 +63,13 @@ func (verifier *Verifier) waitForChangeStream() error {
 
 func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 	verifier.logger.Debug().Msgf("Starting %d verification workers", verifier.numWorkers)
+	memTracker := memorytracker.Start(verifier.logger, 40_000_000) // TODO
 	ctx, cancel := context.WithCancel(ctx)
 	wg := sync.WaitGroup{}
 	for i := 0; i < verifier.numWorkers; i++ {
 		wg.Add(1)
-		go verifier.Work(ctx, i, &wg)
+		trackerWriter := memTracker.AddWriter()
+		go verifier.Work(ctx, i, &wg, trackerWriter)
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -345,7 +348,7 @@ func FetchFailedAndIncompleteTasks(ctx context.Context, coll *mongo.Collection, 
 	return FailedTasks, IncompleteTasks, nil
 }
 
-func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.WaitGroup) {
+func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.WaitGroup, trackerWriter memorytracker.Writer) {
 	defer wg.Done()
 	verifier.logger.Debug().Msgf("[Worker %d] Started", workerNum)
 	for {
@@ -371,7 +374,7 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.Wait
 					}
 				}
 			} else {
-				verifier.ProcessVerifyTask(workerNum, task)
+				verifier.ProcessVerifyTask(workerNum, task, trackerWriter)
 			}
 		}
 	}
