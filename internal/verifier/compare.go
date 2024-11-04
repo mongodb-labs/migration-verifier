@@ -24,42 +24,12 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 ) {
 	errGroup, ctx := errgroup.WithContext(givenCtx)
 
-	shardFieldNames := task.QueryFilter.ShardKeys
+	srcChannel, dstChannel := verifier.getFetcherChannels(ctx, errGroup, task)
 
-	srcChannel := make(chan bson.Raw)
-	dstChannel := make(chan bson.Raw)
-
-	errGroup.Go(func() error {
-		cursor, err := verifier.getDocumentsCursor(
-			ctx,
-			verifier.srcClientCollection(task),
-			verifier.srcBuildInfo,
-			verifier.srcStartAtTs,
-			task,
-		)
-
-		if err == nil {
-			err = iterateCursorToChannel(ctx, cursor, srcChannel)
-		}
-
-		return err
-	})
-
-	errGroup.Go(func() error {
-		cursor, err := verifier.getDocumentsCursor(
-			ctx,
-			verifier.dstClientCollection(task),
-			verifier.dstBuildInfo,
-			nil, //startAtTs
-			task,
-		)
-
-		if err == nil {
-			err = iterateCursorToChannel(ctx, cursor, dstChannel)
-		}
-
-		return err
-	})
+	mapKeyFieldNames := append(
+		[]string{"_id"},
+		task.QueryFilter.ShardKeys...,
+	)
 
 	results := []VerificationResult{}
 	var docCount types.DocumentCount
@@ -125,7 +95,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 				byteCount += types.ByteCount(len(doc))
 			}
 
-			mapKey := getMapKey(doc, shardFieldNames)
+			mapKey := getMapKey(doc, mapKeyFieldNames)
 
 			if theirDoc, exists := (*details.TheirMap)[mapKey]; exists {
 				var srcDoc, dstDoc bson.Raw
@@ -137,20 +107,23 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 					dstDoc = doc
 				}
 
-				misMatches, err := verifier.compareOneDocument(srcDoc, dstDoc, namespace)
+				delete(*details.TheirMap, mapKey)
+
+				mismatches, err := verifier.compareOneDocument(srcDoc, dstDoc, namespace)
 				if err != nil {
 					return errors.Wrap(err, "failed to compare documents")
 				}
 
-				if len(misMatches) > 0 {
-					results = append(results, misMatches...)
+				if len(mismatches) > 0 {
+					results = append(results, mismatches...)
 				}
+			} else {
+				(*details.OurMap)[mapKey] = doc
 			}
 		}
 
-		resultsIndex := len(results)
-		srcOnlyLen := len(srcCache)
-		results = slices.Grow(results, srcOnlyLen+len(dstCache))
+		resultsIndex := len(results) - 1
+		results = slices.Grow(results, len(srcCache)+len(dstCache))
 
 		for _, doc := range srcCache {
 			results[resultsIndex] = VerificationResult{
