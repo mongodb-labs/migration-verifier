@@ -101,24 +101,42 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 	}
 
 	for {
-		select {
-		// if the context is cancelled return immmediately
-		case <-ctx.Done():
-			return
-		// if the changeStreamEnderChan has a message, we have moved to the Recheck phase, obtain
-		// the remaining changes, but when TryNext returns false, we will exit, since there should
-		// be no message until the user has guaranteed writes to the source have ended.
-		case <-verifier.changeStreamEnderChan:
-			for cs.TryNext(ctx) {
-				if err := cs.Decode(&changeEvent); err != nil {
-					verifier.logger.Fatal().Err(err).Msg("Failed to decode change event")
-				}
-				err := verifier.HandleChangeStreamEvent(ctx, &changeEvent)
-				if err != nil {
-					verifier.changeStreamErrChan <- err
-					verifier.logger.Fatal().Err(err).Msg("Error handling change event")
-				}
+		var err error
+
+		for cs.TryNext(ctx) {
+			if err = cs.Decode(&changeEvent); err != nil {
+				err = errors.Wrap(err, "failed to decode change event")
+				break
 			}
+			err = verifier.HandleChangeStreamEvent(ctx, &changeEvent)
+			if err != nil {
+				err = errors.Wrap(err, "failed to handle change event")
+				break
+			}
+		}
+
+		if cs.Err() != nil {
+			err = errors.Wrap(
+				cs.Err(),
+				"change stream iteration failed",
+			)
+		}
+
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				verifier.changeStreamErrChan <- err
+			}
+
+			return
+		}
+
+		persistResumeTokenIfNeeded()
+
+		select {
+		// If the changeStreamEnderChan has a message, the user has indicated that
+		// source writes are ended. This means we should exit rather than continue
+		// reading the change stream since there should be no more events.
+		case <-verifier.changeStreamEnderChan:
 			verifier.mux.Lock()
 			verifier.changeStreamRunning = false
 			if verifier.lastChangeEventTime != nil {
@@ -131,39 +149,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			// since the changeStream is exhausted, we now return
 			verifier.logger.Debug().Msg("Change stream is done")
 			return
-		// the default case is that we are still in the Check phase, in the check phase we still
-		// use TryNext, but we do not exit if TryNext returns false.
 		default:
-			var err error
-
-			for err == nil {
-				next := cs.TryNext(ctx)
-
-				if next {
-					if err = cs.Decode(&changeEvent); err != nil {
-						err = errors.Wrapf(err, "failed to decode change event (%v)", cs.Current)
-					}
-
-					if err == nil {
-						err = verifier.HandleChangeStreamEvent(ctx, &changeEvent)
-						if err != nil {
-							err = errors.Wrapf(err, "failed to handle change event (%+v)", changeEvent)
-						}
-					}
-				} else {
-					err = errors.Wrap(cs.Err(), "change stream iteration failed")
-					break
-				}
-			}
-
-			if err == nil {
-				err = persistResumeTokenIfNeeded()
-			}
-
-			if err != nil {
-				verifier.changeStreamErrChan <- err
-				return
-			}
 		}
 	}
 }
