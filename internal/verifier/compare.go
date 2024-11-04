@@ -57,19 +57,19 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 		}
 
 		sDetails := []struct {
-			OurMap   *map[string]bson.Raw
-			TheirMap *map[string]bson.Raw
+			OurMap   map[string]bson.Raw
+			TheirMap map[string]bson.Raw
 			IsSrc    bool
 		}{
 			{}, // ctx.Done()
 			{
 				IsSrc:    true,
-				OurMap:   &srcCache,
-				TheirMap: &dstCache,
+				OurMap:   srcCache,
+				TheirMap: dstCache,
 			},
 			{
-				OurMap:   &dstCache,
-				TheirMap: &srcCache,
+				OurMap:   dstCache,
+				TheirMap: srcCache,
 			},
 		}
 
@@ -97,7 +97,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 
 			mapKey := getMapKey(doc, mapKeyFieldNames)
 
-			if theirDoc, exists := (*details.TheirMap)[mapKey]; exists {
+			if theirDoc, exists := details.TheirMap[mapKey]; exists {
 				var srcDoc, dstDoc bson.Raw
 				if details.IsSrc {
 					srcDoc = doc
@@ -107,7 +107,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 					dstDoc = doc
 				}
 
-				delete(*details.TheirMap, mapKey)
+				delete(details.TheirMap, mapKey)
 
 				mismatches, err := verifier.compareOneDocument(srcDoc, dstDoc, namespace)
 				if err != nil {
@@ -118,7 +118,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 					results = append(results, mismatches...)
 				}
 			} else {
-				(*details.OurMap)[mapKey] = doc
+				details.OurMap[mapKey] = doc
 			}
 		}
 
