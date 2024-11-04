@@ -34,7 +34,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 	"golang.org/x/exp/maps"
-	"golang.org/x/sync/errgroup"
 )
 
 // ReadConcernSetting describes the verifier’s handling of read
@@ -457,6 +456,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
 }
 
+/*
 func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]VerificationResult, types.DocumentCount, types.ByteCount, error) {
 	srcClientMap, dstClientMap, err := verifier.fetchDocuments(task)
 	if err != nil {
@@ -470,8 +470,10 @@ func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]Ve
 
 	return mismatches, docsCount, bytesCount, err
 }
+*/
 
 // This is split out to allow unit testing of fetching separate from comparison.
+/*
 func (verifier *Verifier) fetchDocuments(task *VerificationTask) (*documentmap.Map, *documentmap.Map, error) {
 
 	var srcErr, dstErr error
@@ -498,7 +500,8 @@ func (verifier *Verifier) fetchDocuments(task *VerificationTask) (*documentmap.M
 	errGroup.Go(func() error {
 		var cursor *mongo.Cursor
 		cursor, dstErr = verifier.getDocumentsCursor(ctx, verifier.dstClientCollection(task), verifier.dstBuildInfo,
-			nil /*startAtTs*/, task)
+			nil //
+			, task)
 
 		if dstErr == nil {
 			dstErr = dstClientMap.ImportFromCursor(ctx, cursor)
@@ -511,6 +514,7 @@ func (verifier *Verifier) fetchDocuments(task *VerificationTask) (*documentmap.M
 
 	return srcClientMap, dstClientMap, err
 }
+*/
 
 // This returns an array of VerificationResult instances that
 // describe mismatches.
@@ -635,7 +639,10 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTask) {
 	verifier.logger.Debug().Msgf("[Worker %d] Processing verify task", workerNum)
 
-	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(task)
+	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(
+		context.Background(),
+		task,
+	)
 
 	if err != nil {
 		task.Status = verificationTaskFailed
