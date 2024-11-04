@@ -68,7 +68,7 @@ func (mt *Tracker) removeSelectCase(i int) {
 	mt.mux.Lock()
 	defer mt.mux.Unlock()
 
-	mt.selectCases = slices.Delete(mt.selectCases, 1+i, 2+i)
+	mt.selectCases = slices.Delete(mt.selectCases, i-1, i)
 }
 
 func (mt *Tracker) track(ctx context.Context) {
