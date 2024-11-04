@@ -126,9 +126,9 @@ func (m *Map) ImportFromCursor(ctx context.Context, cursor *mongo.Cursor, tracke
 
 	m.bytesSize = bytesReturned
 
-	m.logger.Debug().
+	m.logger.Info().
 		Int("documentedReturned", nDocumentsReturned).
-		Str("totalSize", reportutils.BytesToUnit(bytesReturned, reportutils.FindBestUnit(bytesReturned))).
+		Str("totalSize", reportutils.FmtBytes(bytesReturned)).
 		Msgf("Finished reading %#q query.", "find")
 
 	return nil

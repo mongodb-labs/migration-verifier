@@ -504,8 +504,8 @@ func (verifier *Verifier) fetchDocuments(task *VerificationTask, trackerWriter m
 
 		if err == nil && int64(srcClientMap.TotalDocsBytes()) > warnThreshold {
 			verifier.logger.Warn().
-				Str("totalSize", reportutils.BytesToUnit(srcClientMap.TotalDocsBytes(), reportutils.FindBestUnit(srcClientMap.TotalDocsBytes()))).
-				Str("intendedPartitionSize", reportutils.BytesToUnit(verifier.partitionSizeInBytes, reportutils.FindBestUnit(verifier.partitionSizeInBytes))).
+				Str("totalSize", reportutils.FmtBytes(srcClientMap.TotalDocsBytes())).
+				Str("intendedPartitionSize", reportutils.FmtBytes(verifier.partitionSizeInBytes)).
 				Str("filter", fmt.Sprintf("%v", findCmd)).
 				Msg("Partition greatly exceeds desired size. This may cause excess memory usage.")
 		}

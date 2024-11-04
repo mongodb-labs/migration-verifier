@@ -63,7 +63,7 @@ func (verifier *Verifier) waitForChangeStream() error {
 
 func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 	verifier.logger.Debug().Msgf("Starting %d verification workers", verifier.numWorkers)
-	memTracker := memorytracker.Start(ctx, verifier.logger, 40_000_000) // TODO
+	memTracker := memorytracker.Start(ctx, verifier.logger, 40_000_000_000) // TODO
 	ctx, cancel := context.WithCancel(ctx)
 	wg := sync.WaitGroup{}
 	for i := 0; i < verifier.numWorkers; i++ {

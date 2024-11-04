@@ -23,7 +23,10 @@ type Tracker struct {
 }
 
 func Start(ctx context.Context, logger *logger.Logger, max Unit) *Tracker {
-	tracker := Tracker{max: max}
+	tracker := Tracker{
+		max:    max,
+		logger: logger,
+	}
 
 	go tracker.track(ctx)
 
@@ -38,7 +41,7 @@ func (mt *Tracker) AddWriter() Writer {
 
 	mt.selectCases = append(mt.selectCases, reflect.SelectCase{
 		Dir:  reflect.SelectRecv,
-		Chan: reflect.ValueOf(newChan),
+		Chan: reflect.ValueOf(reader(newChan)),
 	})
 
 	return newChan
@@ -70,7 +73,7 @@ func (mt *Tracker) removeSelectCase(i int) {
 
 func (mt *Tracker) track(ctx context.Context) {
 	for {
-		if mt.cur <= mt.max {
+		if mt.cur > mt.max {
 			mt.logger.Panic().
 				Int64("usage", mt.cur).
 				Int64("softLimit", mt.max).
@@ -98,11 +101,7 @@ func (mt *Tracker) track(ctx context.Context) {
 				Msg("Reclaimed tracked memory.")
 		}
 
-		if alive {
-			if got == 0 {
-				mt.logger.Panic().Msg("Got zero track value but channel is not closed.")
-			}
-		} else {
+		if !alive {
 			if got != 0 {
 				mt.logger.Panic().
 					Int64("receivedValue", got).
