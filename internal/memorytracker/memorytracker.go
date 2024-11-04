@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/reportutils"
 )
 
 type Unit = int64
@@ -91,6 +92,12 @@ func (mt *Tracker) track(ctx context.Context) {
 		got := (gotVal.Interface()).(Unit)
 		mt.cur += got
 
+		if got < 0 {
+			mt.logger.Debug().
+				Str("reclaimed", reportutils.FmtBytes(-got)).
+				Msg("Reclaimed tracked memory.")
+		}
+
 		if alive {
 			if got == 0 {
 				mt.logger.Panic().Msg("Got zero track value but channel is not closed.")
@@ -116,8 +123,8 @@ func (mt *Tracker) track(ctx context.Context) {
 
 			if !didSingleThread {
 				mt.logger.Warn().
-					Int64("usage", mt.cur).
-					Int64("softLimit", mt.max).
+					Str("usage", reportutils.FmtBytes(mt.cur)).
+					Str("softLimit", reportutils.FmtBytes(mt.max)).
 					Msg("Tracked memory usage now exceeds soft limit. Suspending concurrent reads until tracked usage falls.")
 
 				didSingleThread = true
@@ -133,8 +140,8 @@ func (mt *Tracker) track(ctx context.Context) {
 
 		if didSingleThread {
 			mt.logger.Info().
-				Int64("usage", mt.cur).
-				Int64("softLimit", mt.max).
+				Str("usage", reportutils.FmtBytes(mt.cur)).
+				Str("softLimit", reportutils.FmtBytes(mt.max)).
 				Msg("Tracked memory usage is now below soft limit. Resuming concurrent reads.")
 		}
 	}

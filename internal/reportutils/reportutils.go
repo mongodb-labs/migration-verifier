@@ -67,6 +67,12 @@ func DurationToHMS(duration time.Duration) string {
 	return str
 }
 
+// FmtBytes is a convenience that combines BytesToUnit with FindBestUnit.
+// Use it to format a single count of bytes.
+func FmtBytes[T num16Plus](count T) string {
+	return BytesToUnit(count, FindBestUnit(count))
+}
+
 // BytesToUnit returns a stringified number that represents `count`
 // in the given `unit`. For example, count=1024 and unit=KiB would
 // return "1".
