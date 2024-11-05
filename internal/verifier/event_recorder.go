@@ -33,7 +33,7 @@ func NewEventRecorder() *EventRecorder {
 }
 
 // AddEvent adds a ParsedEvent to the EventRecorder’s statistics.
-func (et EventRecorder) AddEvent(changeEvent *ParsedEvent) error {
+func (er EventRecorder) AddEvent(changeEvent *ParsedEvent) error {
 	// This shouldn’t happen, but just in case:
 	if changeEvent.Ns == nil {
 		return errors.Errorf("Change event lacks a namespace: %+v", changeEvent)
@@ -43,7 +43,7 @@ func (et EventRecorder) AddEvent(changeEvent *ParsedEvent) error {
 
 	var err error
 
-	et.guard.Store(func(m eventRecorderMap) eventRecorderMap {
+	er.guard.Store(func(m eventRecorderMap) eventRecorderMap {
 		if _, exists := m[nsStr]; !exists {
 			m[nsStr] = PerNamespaceStats{}
 		}
@@ -74,10 +74,10 @@ func (et EventRecorder) AddEvent(changeEvent *ParsedEvent) error {
 // Read returns a map of the tracked change events. The map
 // indexes on namespace then event optype. Each namespace will
 // have `insert`, `update`
-func (et EventRecorder) Read() eventRecorderMap {
+func (er EventRecorder) Read() eventRecorderMap {
 	var theCopy eventRecorderMap
 
-	et.guard.Load(func(m eventRecorderMap) {
+	er.guard.Load(func(m eventRecorderMap) {
 		theCopy = maps.Clone(m)
 	})
 
