@@ -22,6 +22,10 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	types.ByteCount,
 	error,
 ) {
+	// This function spawns three threads: one to read from the source,
+	// another to read from the destination, and a third one to receive the
+	// docs from the other 2 threads and compare them. It’s done this way,
+	// rather than fetch-everything-then-compare, to minimize memory usage.
 	errGroup, ctx := errgroup.WithContext(givenCtx)
 
 	srcChannel, dstChannel := verifier.getFetcherChannels(ctx, errGroup, task)
@@ -85,6 +89,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 		},
 	}
 
+	// Additional data points to parallel the sCases.
+	// These must be kept in the same order.
 	sDetails := []struct {
 		OurMap   map[string]bson.Raw
 		TheirMap map[string]bson.Raw
@@ -102,6 +108,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 		},
 	}
 
+	// sCases always includes ctx.Done() as its first element.
+	// If no other channels are left, then we’re done.
 	for len(sCases) > 1 {
 		chosen, recv, alive := reflect.Select(sCases)
 
@@ -126,31 +134,52 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 		mapKey := getMapKey(doc, mapKeyFieldNames)
 
-		if theirDoc, exists := details.TheirMap[mapKey]; exists {
-			var srcDoc, dstDoc bson.Raw
-			if details.IsSrc {
-				srcDoc = doc
-				dstDoc = theirDoc
-			} else {
-				srcDoc = theirDoc
-				dstDoc = doc
-			}
+		// See if we've already cached a document with this
+		// mapKey from the other channel.
+		theirDoc, exists := details.TheirMap[mapKey]
 
-			delete(details.TheirMap, mapKey)
-
-			mismatches, err := verifier.compareOneDocument(srcDoc, dstDoc, namespace)
-			if err != nil {
-				return nil, 0, 0, errors.Wrap(err, "failed to compare documents")
-			}
-
-			if len(mismatches) > 0 {
-				results = append(results, mismatches...)
-			}
-		} else {
+		// If there is no such cached document, then cache the newly-received
+		// document in our map then proceed to the next document.
+		//
+		// (We'll remove the cache entry when/if the other channel yields a
+		// document with the same mapKey.)
+		if !exists {
 			details.OurMap[mapKey] = doc
+			continue
 		}
+
+		// We have two documents! First we remove the cache entry. This saves
+		// memory, but more importantly, it lets us know, once we exhaust the
+		// channels, which documents were missing on one side or the other.
+		delete(details.TheirMap, mapKey)
+
+		// Now we determine which document came from whom.
+		var srcDoc, dstDoc bson.Raw
+		if details.IsSrc {
+			srcDoc = doc
+			dstDoc = theirDoc
+		} else {
+			srcDoc = theirDoc
+			dstDoc = doc
+		}
+
+		// Finally we compare the documents and save any mismatch report(s).
+		mismatches, err := verifier.compareOneDocument(srcDoc, dstDoc, namespace)
+		if err != nil {
+			return nil, 0, 0, errors.Wrap(err, "failed to compare documents")
+		}
+
+		results = append(results, mismatches...)
 	}
 
+	// We got here because both srcChannel and dstChannel are closed,
+	// which means we have processed all documents with the same mapKey
+	// between source & destination.
+	//
+	// At this point, any documents left in the cache maps are simply
+	// missing on the other side. We add results for those.
+
+	// We might as well pre-grow the slice:
 	results = slices.Grow(results, len(srcCache)+len(dstCache))
 
 	for _, doc := range srcCache {
