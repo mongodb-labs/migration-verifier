@@ -14,8 +14,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/10gen/migration-verifier/internal/documentmap"
-	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/cespare/permute/v2"
@@ -537,16 +535,6 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 	suite.Require().False(cur.Next(ctx))
 }
 
-func makeDocMap(t *testing.T, docs []bson.D, indexFields ...string) *documentmap.Map {
-	cursor := testutil.DocsToCursor(docs)
-
-	dmap := documentmap.New(logger.NewDebugLogger(), indexFields...)
-	err := dmap.ImportFromCursor(context.Background(), cursor)
-	require.NoError(t, err)
-
-	return dmap
-}
-
 func TestVerifierCompareDocs(t *testing.T) {
 	id := rand.Intn(1000)
 	verifier := NewVerifier(VerifierSettings{})
@@ -674,6 +662,20 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	namespace := "testdb.testns"
 
+	ctx := context.Background()
+
+	makeDocChannel := func(docs []bson.D) <-chan bson.Raw {
+		theChan := make(chan bson.Raw, len(docs))
+
+		for _, doc := range docs {
+			theChan <- testutil.MustMarshal(doc)
+		}
+
+		close(theChan)
+
+		return theChan
+	}
+
 	for _, curTest := range compareTests {
 		verifier.SetIgnoreBSONFieldOrder(!curTest.checkOrder)
 
@@ -690,12 +692,27 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 		srcPermute := permute.Slice(srcDocs)
 		for srcPermute.Permute() {
-			srcMap := makeDocMap(t, srcDocs, indexFields...)
 
 			dstPermute := permute.Slice(dstDocs)
 			for dstPermute.Permute() {
-				dstMap := makeDocMap(t, dstDocs, indexFields...)
-				mismatchedIds, err := verifier.compareDocuments(srcMap, dstMap, namespace)
+				srcChannel := makeDocChannel(srcDocs)
+				dstChannel := makeDocChannel(dstDocs)
+
+				fauxTask := VerificationTask{
+					QueryFilter: QueryFilter{
+						Namespace: namespace,
+						ShardKeys: indexFields,
+					},
+				}
+				results, docCount, byteCount, err := verifier.compareDocsFromChannels(
+					ctx,
+					&fauxTask,
+					srcChannel,
+					dstChannel,
+				)
+
+				assert.EqualValues(t, len(srcDocs), docCount)
+				assert.Equal(t, len(srcDocs) > 0, byteCount > 0, "byte count should match docs")
 
 				label := curTest.label
 				if permuted {
@@ -707,16 +724,16 @@ func TestVerifierCompareDocs(t *testing.T) {
 					label,
 					func(t *testing.T) {
 						require.NoError(t, err)
-						curTest.compareFn(t, mismatchedIds)
+						curTest.compareFn(t, results)
 					},
 				)
 
 				if !ok {
 					if len(curTest.srcDocs) > 0 {
-						t.Logf("src: %v", curTest.srcDocs)
+						t.Logf("%#q src: %+v", label, curTest.srcDocs)
 					}
 					if len(curTest.dstDocs) > 0 {
-						t.Logf("dst: %v", curTest.dstDocs)
+						t.Logf("%#q dst: %+v", label, curTest.dstDocs)
 					}
 				}
 			}

@@ -16,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/10gen/migration-verifier/internal/documentmap"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/reportutils"
@@ -454,111 +453,6 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 	verifier.logger.Debug().Msgf("getDocuments findCmd: %s opts: %v", findCmd, *runCommandOptions)
 
 	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
-}
-
-/*
-func (verifier *Verifier) FetchAndCompareDocuments(task *VerificationTask) ([]VerificationResult, types.DocumentCount, types.ByteCount, error) {
-	srcClientMap, dstClientMap, err := verifier.fetchDocuments(task)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-
-	docsCount := srcClientMap.Count()
-	bytesCount := srcClientMap.TotalDocsBytes()
-
-	mismatches, err := verifier.compareDocuments(srcClientMap, dstClientMap, task.QueryFilter.Namespace)
-
-	return mismatches, docsCount, bytesCount, err
-}
-*/
-
-// This is split out to allow unit testing of fetching separate from comparison.
-/*
-func (verifier *Verifier) fetchDocuments(task *VerificationTask) (*documentmap.Map, *documentmap.Map, error) {
-
-	var srcErr, dstErr error
-
-	errGroup, ctx := errgroup.WithContext(context.Background())
-
-	shardFieldNames := task.QueryFilter.ShardKeys
-
-	srcClientMap := documentmap.New(verifier.GetLogger(), shardFieldNames...)
-	dstClientMap := srcClientMap.CloneEmpty()
-
-	errGroup.Go(func() error {
-		var cursor *mongo.Cursor
-		cursor, srcErr = verifier.getDocumentsCursor(ctx, verifier.srcClientCollection(task), verifier.srcBuildInfo,
-			verifier.srcStartAtTs, task)
-
-		if srcErr == nil {
-			srcErr = srcClientMap.ImportFromCursor(ctx, cursor)
-		}
-
-		return srcErr
-	})
-
-	errGroup.Go(func() error {
-		var cursor *mongo.Cursor
-		cursor, dstErr = verifier.getDocumentsCursor(ctx, verifier.dstClientCollection(task), verifier.dstBuildInfo,
-			nil //
-			, task)
-
-		if dstErr == nil {
-			dstErr = dstClientMap.ImportFromCursor(ctx, cursor)
-		}
-
-		return dstErr
-	})
-
-	err := errGroup.Wait()
-
-	return srcClientMap, dstClientMap, err
-}
-*/
-
-// This returns an array of VerificationResult instances that
-// describe mismatches.
-func (verifier *Verifier) compareDocuments(srcClientMap, dstClientMap *documentmap.Map, namespace string) ([]VerificationResult, error) {
-	srcOnly, dstOnly, common := srcClientMap.CompareToMap(dstClientMap)
-
-	srcOnlyLen := len(srcOnly)
-	mismatchResults := make([]VerificationResult, srcOnlyLen+len(dstOnly))
-
-	for i, mapKey := range srcOnly {
-		mismatchResults[i] = VerificationResult{
-			ID:        srcClientMap.Fetch(mapKey).Lookup("_id"),
-			Details:   Missing,
-			Cluster:   ClusterTarget,
-			NameSpace: namespace,
-			dataSize:  len(srcClientMap.Fetch(mapKey)),
-		}
-	}
-
-	for i, mapKey := range dstOnly {
-		mismatchResults[srcOnlyLen+i] = VerificationResult{
-			ID:        dstClientMap.Fetch(mapKey).Lookup("_id"),
-			Details:   Missing,
-			Cluster:   ClusterSource,
-			NameSpace: namespace,
-			dataSize:  len(dstClientMap.Fetch(mapKey)),
-		}
-	}
-
-	for _, mapKey := range common {
-		srcDoc := srcClientMap.Fetch(mapKey)
-		dstDoc := dstClientMap.Fetch(mapKey)
-
-		misMatches, err := verifier.compareOneDocument(srcDoc, dstDoc, namespace)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(misMatches) > 0 {
-			mismatchResults = append(mismatchResults, misMatches...)
-		}
-	}
-
-	return mismatchResults, nil
 }
 
 func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, id interface{}, fieldPrefix string) (results []VerificationResult) {
