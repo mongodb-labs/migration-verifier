@@ -3,7 +3,6 @@ package verifier
 import (
 	"bytes"
 	"context"
-	"reflect"
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/pkg/errors"
@@ -74,69 +73,26 @@ func (verifier *Verifier) compareDocsFromChannels(
 	srcCache := map[string]bson.Raw{}
 	dstCache := map[string]bson.Raw{}
 
-	sCases := []reflect.SelectCase{
-		{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(ctx.Done()),
-		},
-		{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(srcChannel),
-		},
-		{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(dstChannel),
-		},
-	}
-
-	// Additional data points to parallel the sCases.
-	// These must be kept in the same order.
-	sDetails := []struct {
-		OurMap   map[string]bson.Raw
-		TheirMap map[string]bson.Raw
-		IsSrc    bool
-	}{
-		{}, // ctx.Done()
-		{
-			IsSrc:    true,
-			OurMap:   srcCache,
-			TheirMap: dstCache,
-		},
-		{
-			OurMap:   dstCache,
-			TheirMap: srcCache,
-		},
-	}
-
-	// sCases always includes ctx.Done() as its first element.
-	// If no other channels are left, then we’re done.
-	for len(sCases) > 1 {
-		chosen, recv, alive := reflect.Select(sCases)
-
-		if chosen == 0 {
-			return nil, 0, 0, ctx.Err()
-		}
-
-		if !alive {
-			sCases = slices.Delete(sCases, chosen, 1+chosen)
-			sDetails = slices.Delete(sDetails, chosen, 1+chosen)
-			continue
-		}
-
-		doc := (recv.Interface()).(bson.Raw)
-
-		details := sDetails[chosen]
-
-		if details.IsSrc {
-			docCount++
-			byteCount += types.ByteCount(len(doc))
-		}
-
+	// This is the core document-handling logic. It either:
+	//
+	// a) caches the new document if its mapKey is unseen, or
+	// b) compares the new doc against its previously-received, cached
+	//    counterpart and records any mismatch.
+	handleNewDoc := func(doc bson.Raw, isSrc bool) error {
 		mapKey := getMapKey(doc, mapKeyFieldNames)
 
+		var ourMap, theirMap map[string]bson.Raw
+
+		if isSrc {
+			ourMap = srcCache
+			theirMap = dstCache
+		} else {
+			ourMap = dstCache
+			theirMap = srcCache
+		}
 		// See if we've already cached a document with this
 		// mapKey from the other channel.
-		theirDoc, exists := details.TheirMap[mapKey]
+		theirDoc, exists := theirMap[mapKey]
 
 		// If there is no such cached document, then cache the newly-received
 		// document in our map then proceed to the next document.
@@ -144,18 +100,18 @@ func (verifier *Verifier) compareDocsFromChannels(
 		// (We'll remove the cache entry when/if the other channel yields a
 		// document with the same mapKey.)
 		if !exists {
-			details.OurMap[mapKey] = doc
-			continue
+			ourMap[mapKey] = doc
+			return nil
 		}
 
 		// We have two documents! First we remove the cache entry. This saves
 		// memory, but more importantly, it lets us know, once we exhaust the
 		// channels, which documents were missing on one side or the other.
-		delete(details.TheirMap, mapKey)
+		delete(theirMap, mapKey)
 
 		// Now we determine which document came from whom.
 		var srcDoc, dstDoc bson.Raw
-		if details.IsSrc {
+		if isSrc {
 			srcDoc = doc
 			dstDoc = theirDoc
 		} else {
@@ -166,10 +122,50 @@ func (verifier *Verifier) compareDocsFromChannels(
 		// Finally we compare the documents and save any mismatch report(s).
 		mismatches, err := verifier.compareOneDocument(srcDoc, dstDoc, namespace)
 		if err != nil {
-			return nil, 0, 0, errors.Wrap(err, "failed to compare documents")
+			return errors.Wrap(err, "failed to compare documents")
 		}
 
 		results = append(results, mismatches...)
+
+		return nil
+	}
+
+	var srcClosed, dstClosed bool
+	var err error
+
+	// We always read src & dst back & forth. This ensures that, if one side
+	// lags the other significantly, we won’t keep caching the faster side’s
+	// documents and thus consume more & more memory.
+	for err == nil && (!srcClosed || !dstClosed) {
+		if !srcClosed {
+			select {
+			case <-ctx.Done():
+				return nil, 0, 0, ctx.Err()
+			case doc, alive := <-srcChannel:
+				if !alive {
+					srcClosed = true
+					break
+				}
+				docCount++
+				byteCount += types.ByteCount(len(doc))
+
+				err = handleNewDoc(doc, true)
+			}
+		}
+
+		if !dstClosed {
+			select {
+			case <-ctx.Done():
+				return nil, 0, 0, ctx.Err()
+			case doc, alive := <-dstChannel:
+				if !alive {
+					dstClosed = true
+					break
+				}
+
+				err = handleNewDoc(doc, false)
+			}
+		}
 	}
 
 	// We got here because both srcChannel and dstChannel are closed,
