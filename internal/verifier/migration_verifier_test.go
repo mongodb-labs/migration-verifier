@@ -510,7 +510,9 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 	suite.Require().NoError(err)
 	event.OpType = "flibbity"
 	err = verifier.HandleChangeStreamEvent(ctx, &event)
-	suite.Require().Equal(fmt.Errorf(`Not supporting: "flibbity" events`), err)
+	badEventErr := UnknownEventError{}
+	suite.Require().ErrorAs(err, &badEventErr)
+	suite.Assert().Equal("flibbity", badEventErr.Event.OpType)
 
 	verifier.generation++
 	func() {
