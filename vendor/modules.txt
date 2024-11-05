@@ -110,6 +110,11 @@ github.com/rs/zerolog/pkgerrors
 # github.com/russross/blackfriday/v2 v2.1.0
 ## explicit
 github.com/russross/blackfriday/v2
+# github.com/samber/lo v1.47.0
+## explicit; go 1.18
+github.com/samber/lo
+github.com/samber/lo/internal/constraints
+github.com/samber/lo/internal/rand
 # github.com/stretchr/testify v1.8.0
 ## explicit; go 1.13
 github.com/stretchr/testify/assert
@@ -211,6 +216,8 @@ golang.org/x/sys/cpu
 golang.org/x/sys/unix
 # golang.org/x/text v0.17.0
 ## explicit; go 1.18
+golang.org/x/text/cases
+golang.org/x/text/internal
 golang.org/x/text/internal/language
 golang.org/x/text/internal/language/compact
 golang.org/x/text/internal/tag

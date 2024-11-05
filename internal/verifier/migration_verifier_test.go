@@ -20,6 +20,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -152,36 +153,6 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	drop()
 	defer drop()
 
-	expectOneCommonDoc := func(srcMap *documentmap.Map, dstMap *documentmap.Map) {
-		onlySrc, onlyDst, both := srcMap.CompareToMap(dstMap)
-		suite.Assert().Empty(onlySrc, "no source-only docs")
-		suite.Assert().Empty(onlyDst, "no destination-only docs")
-		suite.Assert().Equal(1, len(both), "common docs")
-		suite.Assert().NotPanics(
-			func() {
-				doc := srcMap.Fetch(both[0])
-				val := doc.Lookup("num")
-				suite.Assert().Less(val.AsInt64(), int64(100))
-			},
-			"doc is fetched",
-		)
-	}
-
-	expectTwoCommonDocs := func(srcMap *documentmap.Map, dstMap *documentmap.Map) {
-		onlySrc, onlyDst, both := srcMap.CompareToMap(dstMap)
-		suite.Assert().Empty(onlySrc, "no source-only docs")
-		suite.Assert().Empty(onlyDst, "no destination-only docs")
-		suite.Assert().Equal(2, len(both), "common docs")
-		suite.Assert().NotPanics(
-			func() { srcMap.Fetch(both[0]) },
-			"doc is fetched",
-		)
-		suite.Assert().NotPanics(
-			func() { dstMap.Fetch(both[1]) },
-			"doc is fetched",
-		)
-	}
-
 	// create a basicQueryFilter that sets (source) Namespace and To
 	// to the same thing
 	basicQueryFilter := func(namespace string) QueryFilter {
@@ -206,25 +177,53 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 
 	// Test fetchDocuments without global filter.
 	verifier.globalFilter = nil
-	srcDocumentMap, dstDocumentMap, err := verifier.fetchDocuments(task)
+	results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, task)
 	suite.Require().NoError(err)
-	expectTwoCommonDocs(srcDocumentMap, dstDocumentMap)
+	suite.Assert().EqualValues(2, docCount, "should find source docs")
+	suite.Assert().NotZero(byteCount, "should tally docs’ size")
+	suite.Assert().Len(results, 2)
+	suite.Assert().Equal(
+		[]any{Mismatch, Mismatch},
+		lo.Map(
+			results,
+			func(result VerificationResult, _ int) any {
+				return result.Details
+			},
+		),
+		"details as expected",
+	)
 
 	// Test fetchDocuments for ids with a global filter.
+
 	verifier.globalFilter = map[string]any{"num": map[string]any{"$lt": 100}}
-	srcDocumentMap, dstDocumentMap, err = verifier.fetchDocuments(task)
+	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, task)
 	suite.Require().NoError(err)
-	expectOneCommonDoc(srcDocumentMap, dstDocumentMap)
+	suite.Assert().EqualValues(1, docCount, "should find source docs")
+	suite.Assert().NotZero(byteCount, "should tally docs’ size")
+	suite.Require().Len(results, 1)
+	suite.Assert().Equal(Mismatch, results[0].Details)
+	suite.Assert().EqualValues(
+		any(id),
+		results[0].ID.(bson.RawValue).AsInt64(),
+		"mismatch recorded as expeceted",
+	)
 
 	// Test fetchDocuments for a partition with a global filter.
 	task.QueryFilter.Partition = &partitions.Partition{
-		Ns:       &partitions.Namespace{DB: "keyhole", Coll: "dealers"},
-		IsCapped: false,
+		Ns: &partitions.Namespace{DB: "keyhole", Coll: "dealers"},
 	}
 	verifier.globalFilter = map[string]any{"num": map[string]any{"$lt": 100}}
-	srcDocumentMap, dstDocumentMap, err = verifier.fetchDocuments(task)
+	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, task)
 	suite.Require().NoError(err)
-	expectOneCommonDoc(srcDocumentMap, dstDocumentMap)
+	suite.Assert().EqualValues(1, docCount, "should find source docs")
+	suite.Assert().NotZero(byteCount, "should tally docs’ size")
+	suite.Require().Len(results, 1)
+	suite.Assert().Equal(Mismatch, results[0].Details)
+	suite.Assert().EqualValues(
+		any(id),
+		results[0].ID.(bson.RawValue).AsInt64(),
+		"mismatch recorded as expeceted",
+	)
 }
 
 func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Recheck() {
