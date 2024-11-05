@@ -15,6 +15,12 @@ import (
 	"golang.org/x/exp/constraints"
 )
 
+// ChangeEventRecheckBuffer contains rechecks from change events as a map namespace -> document _ids, and
+type ChangeEventRecheckBuffer struct {
+	buf     map[string][]interface{}
+	bufSize map[string]uint64
+}
+
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
 type ParsedEvent struct {
 	ID          interface{}          `bson:"_id"`
@@ -35,7 +41,7 @@ type DocKey struct {
 }
 
 const (
-	minChangeStreamPersistInterval     = time.Second * 10
+	minChangeStreamCheckpointInterval  = time.Second * 10
 	metadataChangeStreamCollectionName = "changeStream"
 )
 
@@ -63,7 +69,7 @@ func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEve
 	case "replace":
 		fallthrough
 	case "update":
-		return verifier.InsertChangeEventRecheckDoc(ctx, changeEvent)
+		return verifier.AddAndMaybeFlushChangeEventRecheckDoc(ctx, changeEvent)
 	default:
 		return UnknownEventError{Event: changeEvent}
 	}
@@ -85,19 +91,25 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.ChangeStream) {
 	var changeEvent ParsedEvent
 
-	var lastPersistedTime time.Time
+	var lastCheckpointTime time.Time
 
-	persistResumeTokenIfNeeded := func() error {
-		if time.Since(lastPersistedTime) <= minChangeStreamPersistInterval {
+	doChangeStreamCheckpoint := func() error {
+		if time.Since(lastCheckpointTime) <= minChangeStreamCheckpointInterval {
 			return nil
 		}
 
-		err := verifier.persistChangeStreamResumeToken(ctx, cs)
-		if err == nil {
-			lastPersistedTime = time.Now()
+		err := verifier.flushAllBufferedChangeEventRechecks(ctx)
+		if err != nil {
+			return err
 		}
 
-		return err
+		err = verifier.persistChangeStreamResumeToken(ctx, cs)
+		if err != nil {
+			return err
+		}
+
+		lastCheckpointTime = time.Now()
+		return nil
 	}
 
 	for {
@@ -123,7 +135,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		}
 
 		if err == nil {
-			err = persistResumeTokenIfNeeded()
+			err = doChangeStreamCheckpoint()
 		}
 
 		if err != nil {

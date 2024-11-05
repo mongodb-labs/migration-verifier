@@ -38,18 +38,26 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		dbName, collName, documentIDs, dataSizes)
 }
 
-func (verifier *Verifier) InsertChangeEventRecheckDoc(ctx context.Context, changeEvent *ParsedEvent) error {
-	documentIDs := []interface{}{changeEvent.DocKey.ID}
+// AddAndMaybeFlushChangeEventRecheckDoc adds a recheck document to the verifier's in-memory recheck buffer.
+// It may flush the buffer for that namespace if it reaches
+func (verifier *Verifier) AddAndMaybeFlushChangeEventRecheckDoc(ctx context.Context, changeEvent *ParsedEvent) error {
+	namespace := changeEvent.Ns.String()
+	verifier.changeEventRecheckBuf.buf[namespace] = append(verifier.changeEventRecheckBuf.buf[namespace], changeEvent.DocKey.ID)
 
-	// We don't know the document sizes for documents for all change events,
-	// so just be conservative and assume they are maximum size.
-	//
-	// Note that this prevents us from being able to report a meaningful
-	// total data size for noninitial generations in the log.
-	dataSizes := []int{maxBSONObjSize}
+	bsonID, err := bson.Marshal(changeEvent.DocKey.ID)
+	if err != nil {
+		return err
+	}
+	verifier.changeEventRecheckBuf.bufSize[namespace] += uint64(len(namespace) + len(bsonID))
 
-	return verifier.insertRecheckDocs(
-		ctx, changeEvent.Ns.DB, changeEvent.Ns.Coll, documentIDs, dataSizes)
+	// Flush all recheck documents once a buffer reaches 5 MB.
+	if verifier.changeEventRecheckBuf.bufSize[changeEvent.Ns.String()] > 5*1024*1024 {
+		if err := verifier.flushChangeEventRechecksForNamespace(ctx, namespace); err != nil {
+			return err
+		}
+		verifier.changeEventRecheckBuf.bufSize[namespace] = 0
+	}
+	return nil
 }
 
 func (verifier *Verifier) insertRecheckDocs(
@@ -89,6 +97,11 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	if err == nil {
 		verifier.logger.Debug().Msgf("Persisted %d recheck doc(s) for generation %d", len(models), generation)
+	}
+
+	// Silence any duplicate key errors as recheck docs should have existed.
+	if mongo.IsDuplicateKeyError(err) {
+		err = nil
 	}
 
 	return err
@@ -197,4 +210,35 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			namespace, len(idAccum), idLenAccum, dataSizeAccum)
 	}
 	return nil
+}
+
+func (verifier *Verifier) flushAllBufferedChangeEventRechecks(ctx context.Context) error {
+	for namespace, _ := range verifier.changeEventRecheckBuf.buf {
+		if err := verifier.flushChangeEventRechecksForNamespace(ctx, namespace); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (verifier *Verifier) flushChangeEventRechecksForNamespace(ctx context.Context, namespace string) error {
+	ids := verifier.changeEventRecheckBuf.buf[namespace]
+
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// We don't know the document sizes for documents for all change events,
+	// so just be conservative and assume they are maximum size.
+	//
+	// Note that this prevents us from being able to report a meaningful
+	// total data size for noninitial generations in the log.
+	dataSizes := make([]int, len(ids))
+	for i, _ := range ids {
+		dataSizes[i] = maxBSONObjSize
+	}
+
+	dbName, collName := SplitNamespace(namespace)
+	return verifier.insertRecheckDocs(ctx, dbName, collName, ids, dataSizes)
 }

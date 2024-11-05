@@ -138,6 +138,8 @@ type Verifier struct {
 	globalFilter map[string]any
 
 	pprofInterval time.Duration
+
+	changeEventRecheckBuf ChangeEventRecheckBuffer
 }
 
 // VerificationStatus holds the Verification Status
