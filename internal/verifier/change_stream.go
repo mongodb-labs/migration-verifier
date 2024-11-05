@@ -122,6 +122,10 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			)
 		}
 
+		if err == nil {
+			err = persistResumeTokenIfNeeded()
+		}
+
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				verifier.changeStreamErrChan <- err
@@ -129,8 +133,6 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 			return
 		}
-
-		persistResumeTokenIfNeeded()
 
 		select {
 		// If the changeStreamEnderChan has a message, the user has indicated that
