@@ -26,7 +26,6 @@ import (
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -34,6 +33,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
+	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -754,7 +754,7 @@ func (verifier *Verifier) getShardingInfo(ctx context.Context, namespaceAndUUID 
 
 		verifier.logger.Debug().Msgf("Collection %s is sharded with shard key %v", namespace, result.Key)
 
-		shardKeys = lo.Keys(result.Key)
+		shardKeys = maps.Keys(result.Key)
 		sort.Strings(shardKeys)
 	}
 	if err = cursor.Err(); err != nil {

@@ -362,7 +362,10 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.Wait
 			task, err := verifier.FindNextVerifyTaskAndUpdate()
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				delay := verifier.workerSleepDelayMillis * time.Millisecond
-				verifier.logger.Debug().Msgf("[Worker %d] No tasks found, sleeping %s...", workerNum, delay)
+				verifier.logger.Debug().
+					Stringer("duration", delay).
+					Msgf("[Worker %d] No tasks found, sleeping ...", workerNum)
+
 				time.Sleep(delay)
 				continue
 			} else if err != nil {

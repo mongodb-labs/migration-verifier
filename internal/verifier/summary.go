@@ -16,6 +16,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/olekukonko/tablewriter"
 	"github.com/samber/lo"
+	"golang.org/x/exp/maps"
 )
 
 const changeEventsTableMaxSize = 10
@@ -391,7 +392,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 		return
 	}
 
-	reverseSortedNamespaces := lo.Keys(nsTotals)
+	reverseSortedNamespaces := maps.Keys(nsTotals)
 	sort.Slice(
 		reverseSortedNamespaces,
 		func(i, j int) bool {
