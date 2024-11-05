@@ -213,7 +213,7 @@ func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
 		AppName: &appName,
 	}
 	opts.ApplyURI(uri)
-	opts.SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
+	opts.SetWriteConcern(writeconcern.Majority())
 
 	verifier.doIfForceReadConcernMajority(func() {
 		opts.SetReadConcern(readconcern.Majority())
@@ -716,12 +716,11 @@ func (verifier *Verifier) logChunkInfo(ctx context.Context, namespaceAndUUID *uu
 	}
 	defer cursor.Close(ctx)
 	for cursor.Next(ctx) {
-		var result bson.D
-		if err = cursor.Decode(&result); err != nil {
+		var resultMap bson.M
+		if err = cursor.Decode(&resultMap); err != nil {
 			verifier.logger.Error().Msgf("Error decoding chunk info for %s: %v", namespace, err)
 			return
 		}
-		resultMap := result.Map()
 		verifier.logger.Debug().Msgf(" Chunk of %s on %v, range %v to %v", namespace, resultMap["shard"],
 			resultMap["min"], resultMap["max"])
 	}
@@ -988,7 +987,7 @@ func (verifier *Verifier) markCollectionFailed(workerNum int, task *Verification
 		Details:   Failed + fmt.Sprintf(" %v", err)})
 }
 
-func verifyIndexes(ctx context.Context, workerNum int, task *VerificationTask, srcColl, dstColl *mongo.Collection,
+func verifyIndexes(ctx context.Context, _ int, _ *VerificationTask, srcColl, dstColl *mongo.Collection,
 	srcIdIndexSpec, dstIdIndexSpec *mongo.IndexSpecification) ([]VerificationResult, error) {
 	srcSpecs, err := srcColl.Indexes().ListSpecifications(ctx)
 	if err != nil {
@@ -1211,12 +1210,12 @@ func (verifier *Verifier) doIfForceReadConcernMajority(f func()) {
 
 func (verifier *Verifier) verificationDatabase() *mongo.Database {
 	db := verifier.metaClient.Database(verifier.metaDBName)
-	if db.WriteConcern().GetW() != "majority" {
+	if db.WriteConcern().W != "majority" {
 		verifier.logger.Fatal().Msgf("Verification metadata is not using write concern majority: %+v", db.WriteConcern())
 	}
 
 	verifier.doIfForceReadConcernMajority(func() {
-		if db.ReadConcern().GetLevel() != "majority" {
+		if db.ReadConcern().Level != "majority" {
 			verifier.logger.Fatal().Msgf("Verification metadata is not using read concern majority: %+v", db.ReadConcern())
 		}
 	})
@@ -1236,7 +1235,7 @@ func (verifier *Verifier) srcClientDatabase(dbName string) *mongo.Database {
 	db := verifier.srcClient.Database(dbName)
 	// No need to check the write concern because we do not write to the source database.
 	verifier.doIfForceReadConcernMajority(func() {
-		if db.ReadConcern().GetLevel() != "majority" {
+		if db.ReadConcern().Level != "majority" {
 			verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
 		}
 	})
@@ -1247,7 +1246,7 @@ func (verifier *Verifier) dstClientDatabase(dbName string) *mongo.Database {
 	db := verifier.dstClient.Database(dbName)
 	// No need to check the write concern because we do not write to the target database.
 	verifier.doIfForceReadConcernMajority(func() {
-		if db.ReadConcern().GetLevel() != "majority" {
+		if db.ReadConcern().Level != "majority" {
 			verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
 		}
 	})
@@ -1464,11 +1463,10 @@ func getBuildInfo(ctx context.Context, client *mongo.Client) (*bson.M, error) {
 	if commandResult.Err() != nil {
 		return nil, commandResult.Err()
 	}
-	var buildInfo bson.D
-	err := commandResult.Decode(&buildInfo)
+	var buildInfoMap bson.M
+	err := commandResult.Decode(&buildInfoMap)
 	if err != nil {
 		return nil, err
 	}
-	buildInfoMap := buildInfo.Map()
 	return &buildInfoMap, nil
 }

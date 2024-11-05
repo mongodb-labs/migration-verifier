@@ -14,6 +14,8 @@ import (
 const (
 	// DefaultLogLevel is the default log level
 	DefaultLogLevel = zerolog.InfoLevel
+
+	LogFileName = "migration-verifier.log"
 )
 
 // DefaultLogWriter is the default log io.Writer implementor
@@ -90,7 +92,7 @@ func NewRotatingWriter(dirPath string) (io.Writer, error) {
 	}
 
 	return &lumberjack.Logger{
-		Filename: path.Join(dirPath, "mongosync.log"),
+		Filename: path.Join(dirPath, LogFileName),
 	}, nil
 }
 
