@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"reflect"
-	"slices"
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 )
 
