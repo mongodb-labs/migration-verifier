@@ -15,7 +15,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/olekukonko/tablewriter"
-	"github.com/samber/lo"
 	"golang.org/x/exp/maps"
 )
 
@@ -381,11 +380,11 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 		totalEvents += nsTotals[ns]
 	}
 
-	eventsDescr := lo.Ternary(
-		totalEvents == 0,
-		"0",
-		fmt.Sprintf("%d total, across %d namespace(s)", totalEvents, activeNamespacesCount),
-	)
+	eventsDescr := "none"
+	if totalEvents > 0 {
+		eventsDescr = fmt.Sprintf("%d total, across %d namespace(s)", totalEvents, activeNamespacesCount)
+	}
+
 	builder.WriteString(fmt.Sprintf("\nChange events this generation: %s\n", eventsDescr))
 
 	if totalEvents == 0 {
