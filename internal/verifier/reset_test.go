@@ -4,11 +4,10 @@ import (
 	"context"
 	"strings"
 
+	"github.com/10gen/migration-verifier/internal/partitions"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-
-	"github.com/10gen/migration-verifier/internal/partitions"
 )
 
 func (suite *MultiDataVersionTestSuite) TestResetPrimaryTask() {
