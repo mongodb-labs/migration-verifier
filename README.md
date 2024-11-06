@@ -257,6 +257,10 @@ Any collection metadata mismatches will occur in a task with the type '`verifyCo
 
 In this case, '`failed_docs`' contains all the meta data mismatches, in this case an index named '`x_1`'.
 
+# Resumability
+
+The migration-verifier periodically persists its change stream’s resume token so that, in the event of a catastrophic failure (e.g., memory exhaustion), when restarted the verifier will receive any change events that happened while the verifier was down.
+
 # Performance
 
 The migration-verifier optimizes for the case where a migration’s initial sync is completed **and** change events are relatively infrequent. If you start verification before initial sync finishes, or if the source cluster is too busy, the verification may freeze.
