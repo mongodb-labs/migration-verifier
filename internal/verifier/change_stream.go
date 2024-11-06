@@ -95,14 +95,6 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 	var lastCheckpointTime time.Time
 
-	// Do a final flush of the buffered change event rechecks before the function returns.
-	defer func() {
-		err := verifier.flushAllBufferedChangeEventRechecks(ctx)
-		if err != nil {
-			verifier.changeStreamErrChan <- err
-		}
-	}()
-
 	doChangeStreamCheckpoint := func() error {
 		if time.Since(lastCheckpointTime) <= minChangeStreamCheckpointInterval {
 			return nil
@@ -136,6 +128,14 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 		return gotEvent, errors.Wrap(cs.Err(), "change stream iteration failed")
 	}
+	
+	// Do a final flush of the buffered change event rechecks before the function returns.
+	defer func() {
+		err := verifier.flushAllBufferedChangeEventRechecks(ctx)
+		if err != nil {
+			verifier.changeStreamErrChan <- err
+		}
+	}()
 
 	for {
 		var err error
