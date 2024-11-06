@@ -120,7 +120,8 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		var changeStreamEnded bool
 
 		select {
-		// if the context is cancelled return immmediately
+
+		// If the context is canceled, return immmediately.
 		case <-ctx.Done():
 			return
 
