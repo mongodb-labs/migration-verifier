@@ -3,9 +3,12 @@ package verifier
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -27,6 +30,102 @@ func TestChangeStreamFilter(t *testing.T) {
 	}, verifier.GetChangeStreamFilter())
 }
 
+// TestChangeStreamResumability creates a verifier, starts its change stream,
+// terminates that verifier, updates the source cluster, starts a new
+// verifier with change stream, and confirms that things look as they should.
+func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
+	func() {
+		verifier1 := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := verifier1.StartChangeStream(ctx)
+		suite.Require().NoError(err)
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, err := suite.srcMongoClient.
+		Database("testDb").
+		Collection("testColl").
+		InsertOne(
+			ctx,
+			bson.D{{"_id", "heyhey"}},
+		)
+	suite.Require().NoError(err)
+
+	verifier2 := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+
+	suite.Require().Empty(
+		suite.fetchVerifierRechecks(ctx, verifier2),
+		"no rechecks should be enqueued before starting change stream",
+	)
+
+	newTime := suite.getClusterTime(ctx, suite.srcMongoClient)
+
+	err = verifier2.StartChangeStream(ctx)
+	suite.Require().NoError(err)
+
+	suite.Require().NotNil(verifier2.srcStartAtTs)
+
+	suite.Assert().False(
+		verifier2.srcStartAtTs.After(newTime),
+		"verifier2's change stream should be no later than this new session",
+	)
+
+	recheckDocs := []bson.M{}
+
+	require.Eventually(
+		suite.T(),
+		func() bool {
+			recheckDocs = suite.fetchVerifierRechecks(ctx, verifier2)
+
+			return len(recheckDocs) > 0
+		},
+		time.Minute,
+		500*time.Millisecond,
+		"the verifier should enqueue a recheck",
+	)
+
+	suite.Assert().Equal(
+		bson.M{
+			"db":         "testDb",
+			"coll":       "testColl",
+			"generation": int32(0),
+			"docID":      "heyhey",
+		},
+		recheckDocs[0]["_id"],
+		"recheck doc should have expected ID",
+	)
+}
+
+func (suite *MultiSourceVersionTestSuite) getClusterTime(ctx context.Context, client *mongo.Client) primitive.Timestamp {
+	sess, err := client.StartSession()
+	suite.Require().NoError(err, "should start session")
+
+	sctx := mongo.NewSessionContext(ctx, sess)
+	suite.Require().NoError(sess.Client().Ping(sctx, nil))
+
+	newTime, err := getClusterTimeFromSession(sess)
+	suite.Require().NoError(err, "should fetch cluster time")
+
+	return newTime
+}
+
+func (suite *MultiSourceVersionTestSuite) fetchVerifierRechecks(ctx context.Context, verifier *Verifier) []bson.M {
+	recheckDocs := []bson.M{}
+
+	recheckColl := verifier.verificationDatabase().Collection(recheckQueue)
+	cursor, err := recheckColl.Find(ctx, bson.D{})
+
+	if !errors.Is(err, mongo.ErrNoDocuments) {
+		suite.Require().NoError(err)
+		suite.Require().NoError(cursor.All(ctx, &recheckDocs))
+	}
+
+	return recheckDocs
+}
+
 func (suite *MultiSourceVersionTestSuite) TestStartAtTimeNoChanges() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -39,7 +138,7 @@ func (suite *MultiSourceVersionTestSuite) TestStartAtTimeNoChanges() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	err = verifier.StartChangeStream(ctx, origStartTs)
+	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
 	verifier.changeStreamEnderChan <- struct{}{}
@@ -59,7 +158,7 @@ func (suite *MultiSourceVersionTestSuite) TestStartAtTimeWithChanges() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	err = verifier.StartChangeStream(ctx, origStartTs)
+	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
 	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
@@ -94,7 +193,7 @@ func (suite *MultiSourceVersionTestSuite) TestNoStartAtTime() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	err = verifier.StartChangeStream(ctx, nil)
+	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().NotNil(verifier.srcStartAtTs)
 	suite.Require().LessOrEqual(origStartTs.Compare(*verifier.srcStartAtTs), 0)

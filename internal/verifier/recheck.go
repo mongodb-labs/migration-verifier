@@ -86,7 +86,10 @@ func (verifier *Verifier) insertRecheckDocs(
 				SetFilter(filterDoc).SetReplacement(recheckDoc).SetUpsert(true))
 	}
 	_, err := verifier.verificationDatabase().Collection(recheckQueue).BulkWrite(ctx, models)
-	verifier.logger.Debug().Msgf("Persisted %d recheck doc(s) for generation %d", len(models), generation)
+
+	if err == nil {
+		verifier.logger.Debug().Msgf("Persisted %d recheck doc(s) for generation %d", len(models), generation)
+	}
 
 	return err
 }
