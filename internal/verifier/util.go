@@ -102,7 +102,7 @@ func (verifier *Verifier) doInMetaTransaction(
 
 	session, err := verifier.metaClient.StartSession()
 	if err != nil {
-		verifier.logger.Fatal().Err(err).Msg("failed to start session")
+		return errors.Wrap(err, "failed to start metadata session")
 	}
 
 	defer session.EndSession(ctx)

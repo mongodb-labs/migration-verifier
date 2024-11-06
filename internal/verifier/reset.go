@@ -6,42 +6,64 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-func (verifier *Verifier) ResetInProgressTasks(ctx mongo.SessionContext) error {
-	err := verifier.resetPrimaryTaskIfNeeded(ctx)
+var defaultTaskUpdate = bson.M{
+	"$set":   bson.M{"status": verificationTaskAdded},
+	"$unset": bson.M{"begin_time": 1},
+}
 
-	if err != nil {
+func (verifier *Verifier) ResetInProgressTasks(ctx mongo.SessionContext) error {
+	didReset, err := verifier.handleIncompletePrimary(ctx)
+
+	if err == nil {
+		if didReset {
+			return nil
+		}
+
 		err = verifier.resetCollectionTasksIfNeeded(ctx)
 	}
 
-	if err != nil {
+	if err == nil {
 		err = verifier.resetPartitionTasksIfNeeded(ctx)
 	}
 
 	return err
 }
 
-func (verifier *Verifier) resetPrimaryTaskIfNeeded(ctx mongo.SessionContext) error {
+func (verifier *Verifier) handleIncompletePrimary(ctx mongo.SessionContext) (bool, error) {
 	taskColl := verifier.verificationTaskCollection()
 
-	incompletePrimary, err := taskColl.CountDocuments(
+	cursor, err := taskColl.Find(
 		ctx,
 		bson.M{
 			"type":   verificationTaskPrimary,
-			"status": verificationTaskProcessing,
+			"status": bson.M{"$ne": verificationTaskCompleted},
 		},
 	)
 	if err != nil {
-		return errors.Wrapf(err, "failed to count incomplete %#q tasks", verificationTaskPrimary)
+		return false, errors.Wrapf(err, "failed to fetch incomplete %#q task", verificationTaskPrimary)
 	}
 
-	switch incompletePrimary {
+	var incompletePrimaries []VerificationTask
+	err = cursor.All(ctx, &incompletePrimaries)
+	if err != nil {
+		return false, errors.Wrapf(err, "failed to read incomplete %#q task", verificationTaskPrimary)
+	}
+
+	switch len(incompletePrimaries) {
 	case 0:
 		// Nothing to do.
 	case 1:
-		verifier.logger.Info().
-			Msg("Previous verifier run left primary task incomplete. Resetting.")
+		// Invariant: task status should be “added”.
+		if incompletePrimaries[0].Status != verificationTaskAdded {
+			verifier.logger.Panic().
+				Interface("task", incompletePrimaries[0]).
+				Msg("Primary task status has invalid state.")
+		}
 
-		_, err := taskColl.DeleteMany(
+		verifier.logger.Info().
+			Msg("Previous verifier run left primary task incomplete. Deleting non-primary tasks.")
+
+		deleted, err := taskColl.DeleteMany(
 			ctx,
 			bson.M{
 				"type": bson.M{
@@ -50,30 +72,21 @@ func (verifier *Verifier) resetPrimaryTaskIfNeeded(ctx mongo.SessionContext) err
 			},
 		)
 		if err != nil {
-			return errors.Wrapf(err, "failed to delete non-%#q tasks", verificationTaskPrimary)
+			return false, errors.Wrapf(err, "failed to delete non-%#q tasks", verificationTaskPrimary)
 		}
 
-		_, err = taskColl.UpdateOne(
-			ctx,
-			bson.M{
-				"type": verificationTaskPrimary,
-			},
-			bson.M{
-				"$set": bson.M{"status": verificationTaskAdded},
-			},
-		)
-		if err != nil {
-			return errors.Wrapf(err, "failed to reset %#q task", verificationTaskPrimary)
-		}
+		verifier.logger.Info().
+			Int64("deletedTasksCount", deleted.DeletedCount).
+			Msg("Found and deleted non-primary tasks.")
 
-		return nil
+		return true, nil
 	default:
 		verifier.logger.Panic().
-			Int64("incompletePrimary", incompletePrimary).
+			Interface("tasks", incompletePrimaries).
 			Msg("Found multiple incomplete primary tasks; there should only be 1.")
 	}
 
-	return nil
+	return false, nil
 }
 
 func (verifier *Verifier) resetCollectionTasksIfNeeded(ctx mongo.SessionContext) error {
@@ -95,12 +108,18 @@ func (verifier *Verifier) resetCollectionTasksIfNeeded(ctx mongo.SessionContext)
 		return errors.Wrapf(err, "failed to read incomplete %#q tasks", verificationTaskVerifyCollection)
 	}
 
+	if len(incompleteCollTasks) > 0 {
+		verifier.logger.Info().
+			Int("count", len(incompleteCollTasks)).
+			Msg("Previous verifier run left collection-level verification task(s) pending. Resetting.")
+	}
+
 	for _, task := range incompleteCollTasks {
 		_, err := taskColl.DeleteMany(
 			ctx,
 			bson.M{
-				"type":                             verificationTaskVerifyDocuments,
-				"query_filter.partition.namespace": task.QueryFilter.Namespace,
+				"type":                   verificationTaskVerifyDocuments,
+				"query_filter.namespace": task.QueryFilter.Namespace,
 			},
 		)
 		if err != nil {
@@ -113,10 +132,7 @@ func (verifier *Verifier) resetCollectionTasksIfNeeded(ctx mongo.SessionContext)
 				"type":                   verificationTaskVerifyCollection,
 				"query_filter.namespace": task.QueryFilter.Namespace,
 			},
-			bson.M{
-				"$set": bson.M{"status": verificationTaskAdded},
-				// TODO unset
-			},
+			defaultTaskUpdate,
 		)
 		if err != nil {
 			return errors.Wrapf(err, "failed to reset namespace %#q's %#q task", task.QueryFilter.Namespace, verificationTaskVerifyCollection)
@@ -135,10 +151,7 @@ func (verifier *Verifier) resetPartitionTasksIfNeeded(ctx mongo.SessionContext) 
 			"type":   verificationTaskVerifyDocuments,
 			"status": verificationTaskProcessing,
 		},
-		bson.M{
-			"$set": bson.M{"status": verificationTaskAdded},
-			// TODO unset
-		},
+		defaultTaskUpdate,
 	)
 	if err != nil {
 		return errors.Wrapf(err, "failed to reset in-progress %#q tasks", verificationTaskVerifyDocuments)
