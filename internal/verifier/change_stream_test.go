@@ -2,6 +2,8 @@ package verifier
 
 import (
 	"context"
+	"github.com/rs/zerolog"
+	"strings"
 	"testing"
 	"time"
 
@@ -197,4 +199,70 @@ func (suite *MultiSourceVersionTestSuite) TestNoStartAtTime() {
 	suite.Require().NoError(err)
 	suite.Require().NotNil(verifier.srcStartAtTs)
 	suite.Require().LessOrEqual(origStartTs.Compare(*verifier.srcStartAtTs), 0)
+}
+
+func (suite *MultiSourceVersionTestSuite) TestBatchInsertChangeEventRecheckDocs() {
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+
+	ctx := context.Background()
+	vCtx, cancel := context.WithCancel(ctx)
+
+	// Don't do a checkpoint for this test.
+	origInterval := minChangeStreamCheckpointInterval
+	minChangeStreamCheckpointInterval = 10 * time.Hour
+	defer func() {
+		minChangeStreamCheckpointInterval = origInterval
+	}()
+
+	err := verifier.StartChangeStream(vCtx)
+	suite.Require().NoError(err)
+
+	// A large recheck document should be flushed immediately.
+	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
+		ctx,
+		bson.D{{"_id", strings.Repeat("a", 4*1024*1024)}},
+	)
+	suite.Require().NoError(err)
+	require.Eventually(
+		suite.T(),
+		func() bool {
+			return len(suite.fetchVerifierRechecks(ctx, verifier)) == 1
+		},
+		time.Minute,
+		500*time.Millisecond,
+		"the verifier should flush a recheck",
+	)
+	suite.Require().Empty(verifier.changeEventRecheckBuf.buf["testDB.testColl"])
+
+	// A small recheck document should be buffered in-memory.
+	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
+		ctx,
+		bson.D{{"_id", 0}},
+	)
+	suite.Require().NoError(err)
+	require.Eventually(
+		suite.T(),
+		func() bool {
+			suite.Require().Len(suite.fetchVerifierRechecks(ctx, verifier), 1)
+			return len(verifier.changeEventRecheckBuf.buf["testDB.testColl"]) == 1
+		},
+		time.Minute,
+		500*time.Millisecond,
+		"the verifier should buffer a recheck",
+	)
+
+	// Any recheck docs remaining in the buffer should be flushed before the change stream reader exits.
+	cancel()
+	require.Eventually(
+		suite.T(),
+		func() bool {
+			return len(suite.fetchVerifierRechecks(ctx, verifier)) == 2
+		},
+		time.Minute,
+		500*time.Millisecond,
+		"the verifier should have flushed all recheck docs",
+	)
+	suite.Require().Empty(verifier.changeEventRecheckBuf.buf["testDB.testColl"])
 }

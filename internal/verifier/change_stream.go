@@ -15,12 +15,6 @@ import (
 	"golang.org/x/exp/constraints"
 )
 
-// ChangeEventRecheckBuffer contains rechecks from change events as a map namespace -> document _ids, and
-type ChangeEventRecheckBuffer struct {
-	buf     map[string][]interface{}
-	bufSize map[string]uint64
-}
-
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
 type ParsedEvent struct {
 	ID          interface{}          `bson:"_id"`
@@ -40,8 +34,16 @@ type DocKey struct {
 	ID interface{} `bson:"_id"`
 }
 
+// ChangeEventRecheckBuffer contains rechecks from change events as a map namespace -> document _ids, and
+type ChangeEventRecheckBuffer struct {
+	buf     map[string][]interface{}
+	bufSize map[string]uint64
+}
+
+// minChangeStreamCheckpointInterval is a var instead of a const for tests to overwrite.
+var minChangeStreamCheckpointInterval = time.Second * 10
+
 const (
-	minChangeStreamCheckpointInterval  = time.Second * 10
 	metadataChangeStreamCollectionName = "changeStream"
 )
 
@@ -111,6 +113,14 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		lastCheckpointTime = time.Now()
 		return nil
 	}
+
+	// Do a final flush of the buffered change event rechecks before the function returns.
+	defer func() {
+		err := verifier.flushAllBufferedChangeEventRechecks(ctx)
+		if err != nil {
+			verifier.changeStreamErrChan <- err
+		}
+	}()
 
 	for {
 		var err error

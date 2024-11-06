@@ -232,7 +232,7 @@ func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Recheck() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 
 	suite.Require().NoError(
-		verifier.InsertChangeEventRecheckDoc(
+		verifier.AddAndMaybeFlushChangeEventRecheckDoc(
 			ctx,
 			&ParsedEvent{
 				OpType: "insert",
@@ -245,7 +245,7 @@ func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Recheck() {
 	)
 
 	suite.Require().NoError(
-		verifier.InsertChangeEventRecheckDoc(
+		verifier.AddAndMaybeFlushChangeEventRecheckDoc(
 			ctx,
 			&ParsedEvent{
 				ID: bson.M{
@@ -259,6 +259,8 @@ func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Recheck() {
 			},
 		),
 	)
+
+	suite.Require().NoError(verifier.flushAllBufferedChangeEventRechecks(ctx))
 
 	verifier.generation++
 

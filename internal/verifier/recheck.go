@@ -50,8 +50,9 @@ func (verifier *Verifier) AddAndMaybeFlushChangeEventRecheckDoc(ctx context.Cont
 	}
 	verifier.changeEventRecheckBuf.bufSize[namespace] += uint64(len(namespace) + len(bsonID))
 
-	// Flush all recheck documents once a buffer reaches 5 MB.
-	if verifier.changeEventRecheckBuf.bufSize[changeEvent.Ns.String()] > 5*1024*1024 {
+	// Flush all recheck documents once a buffer reaches 4 MB. It is a conservative threshold
+	// to prevent a recheck task document exceeding 16MB size limit.
+	if verifier.changeEventRecheckBuf.bufSize[namespace] > 4*1024*1024 {
 		if err := verifier.flushChangeEventRechecksForNamespace(ctx, namespace); err != nil {
 			return err
 		}
