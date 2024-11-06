@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -88,4 +89,27 @@ type QueryFilter struct {
 	ShardKeys []string
 	Namespace string `bson:"namespace"    json:"namespace"`
 	To        string `bson:"to,omitempty" json:"to,omitempty"`
+}
+
+func (verifier *Verifier) doInMetaTransaction(
+	ctx context.Context,
+	todo func(context.Context, mongo.SessionContext) error,
+) error {
+	if mongo.SessionFromContext(ctx) != nil {
+		verifier.logger.Panic().
+			Msg("Context indicates an active session when it should not.")
+	}
+
+	session, err := verifier.metaClient.StartSession()
+	if err != nil {
+		verifier.logger.Fatal().Err(err).Msg("failed to start session")
+	}
+
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, func(sctx mongo.SessionContext) (any, error) {
+		return nil, todo(ctx, sctx)
+	})
+
+	return err
 }
