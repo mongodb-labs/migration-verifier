@@ -40,6 +40,7 @@ func (suite *MultiMetaVersionTestSuite) TestFailedCompareThenReplace() {
 	)
 
 	event := ParsedEvent{
+		OpType: "insert",
 		DocKey: DocKey{
 			ID: "theDocID",
 		},
