@@ -44,7 +44,7 @@ type UnknownEventError struct {
 }
 
 func (uee UnknownEventError) Error() string {
-	return fmt.Sprintf("Unknown event type: %#q", uee.Event.OpType)
+	return fmt.Sprintf("Received event with unknown optype: %+v", uee.Event)
 }
 
 // HandleChangeStreamEvent performs the necessary work for change stream events that occur during
