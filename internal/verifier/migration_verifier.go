@@ -138,6 +138,8 @@ type Verifier struct {
 	globalFilter map[string]any
 
 	pprofInterval time.Duration
+
+	changeEventRecheckBuf ChangeEventRecheckBuffer
 }
 
 // VerificationStatus holds the Verification Status
@@ -197,6 +199,7 @@ func NewVerifier(settings VerifierSettings) *Verifier {
 		changeStreamErrChan:   make(chan error),
 		changeStreamDoneChan:  make(chan struct{}),
 		readConcernSetting:    readConcern,
+		changeEventRecheckBuf: make(ChangeEventRecheckBuffer),
 	}
 }
 

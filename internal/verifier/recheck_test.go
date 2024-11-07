@@ -49,10 +49,7 @@ func (suite *MultiMetaVersionTestSuite) TestFailedCompareThenReplace() {
 		},
 	}
 
-	suite.Require().NoError(
-		verifier.InsertChangeEventRecheckDoc(ctx, &event),
-		"insert change event recheck",
-	)
+	suite.handleAndFlushChangeEvent(ctx, verifier, event)
 
 	recheckDocs = suite.fetchRecheckDocs(ctx, verifier)
 	suite.Assert().Equal(

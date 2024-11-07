@@ -231,33 +231,31 @@ func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Recheck() {
 	ctx := context.Background()
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 
-	suite.Require().NoError(
-		verifier.InsertChangeEventRecheckDoc(
-			ctx,
-			&ParsedEvent{
-				OpType: "insert",
-				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
-				DocKey: DocKey{
-					ID: "heyhey",
-				},
+	suite.handleAndFlushChangeEvent(
+		ctx,
+		verifier,
+		ParsedEvent{
+			OpType: "insert",
+			Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
+			DocKey: DocKey{
+				ID: "heyhey",
 			},
-		),
+		},
 	)
 
-	suite.Require().NoError(
-		verifier.InsertChangeEventRecheckDoc(
-			ctx,
-			&ParsedEvent{
-				ID: bson.M{
-					"docID": "ID/docID",
-				},
-				OpType: "insert",
-				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
-				DocKey: DocKey{
-					ID: "hoohoo",
-				},
+	suite.handleAndFlushChangeEvent(
+		ctx,
+		verifier,
+		ParsedEvent{
+			ID: bson.M{
+				"docID": "ID/docID",
 			},
-		),
+			OpType: "insert",
+			Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
+			DocKey: DocKey{
+				ID: "hoohoo",
+			},
+		},
 	)
 
 	verifier.generation++
@@ -480,6 +478,14 @@ func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Gen0() {
 	)
 }
 
+func (suite *MultiMetaVersionTestSuite) handleAndFlushChangeEvent(ctx context.Context, verifier *Verifier, event ParsedEvent) {
+	err := verifier.HandleChangeStreamEvent(&event)
+	suite.Require().NoError(err)
+
+	err = verifier.flushAllBufferedChangeEventRechecks(ctx)
+	suite.Require().NoError(err)
+}
+
 func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 	ctx := context.Background()
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
@@ -497,19 +503,16 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 			Coll: "bar2",
 		},
 	}
-	err = verifier.HandleChangeStreamEvent(ctx, &event)
-	suite.Require().NoError(err)
+
+	suite.handleAndFlushChangeEvent(ctx, verifier, event)
 	event.OpType = "insert"
-	err = verifier.HandleChangeStreamEvent(ctx, &event)
-	suite.Require().NoError(err)
+	suite.handleAndFlushChangeEvent(ctx, verifier, event)
 	event.OpType = "replace"
-	err = verifier.HandleChangeStreamEvent(ctx, &event)
-	suite.Require().NoError(err)
+	suite.handleAndFlushChangeEvent(ctx, verifier, event)
 	event.OpType = "update"
-	err = verifier.HandleChangeStreamEvent(ctx, &event)
-	suite.Require().NoError(err)
+	suite.handleAndFlushChangeEvent(ctx, verifier, event)
 	event.OpType = "flibbity"
-	err = verifier.HandleChangeStreamEvent(ctx, &event)
+	err = verifier.HandleChangeStreamEvent(&event)
 	badEventErr := UnknownEventError{}
 	suite.Require().ErrorAs(err, &badEventErr)
 	suite.Assert().Equal("flibbity", badEventErr.Event.OpType)

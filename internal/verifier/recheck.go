@@ -38,20 +38,6 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		dbName, collName, documentIDs, dataSizes)
 }
 
-func (verifier *Verifier) InsertChangeEventRecheckDoc(ctx context.Context, changeEvent *ParsedEvent) error {
-	documentIDs := []interface{}{changeEvent.DocKey.ID}
-
-	// We don't know the document sizes for documents for all change events,
-	// so just be conservative and assume they are maximum size.
-	//
-	// Note that this prevents us from being able to report a meaningful
-	// total data size for noninitial generations in the log.
-	dataSizes := []int{maxBSONObjSize}
-
-	return verifier.insertRecheckDocs(
-		ctx, changeEvent.Ns.DB, changeEvent.Ns.Coll, documentIDs, dataSizes)
-}
-
 func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
 	dbName, collName string, documentIDs []interface{}, dataSizes []int) error {
@@ -89,6 +75,11 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	if err == nil {
 		verifier.logger.Debug().Msgf("Persisted %d recheck doc(s) for generation %d", len(models), generation)
+	}
+
+	// Silence any duplicate key errors as recheck docs should have existed.
+	if mongo.IsDuplicateKeyError(err) {
+		err = nil
 	}
 
 	return err

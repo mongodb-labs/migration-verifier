@@ -162,7 +162,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	if !csRunning {
 		verifier.logger.Debug().Msg("Change stream not running; starting change stream")
 
-		err = verifier.StartChangeStream(ctx)
+		err = verifier.StartChangeStream(ctx, nil)
 		if err != nil {
 			return errors.Wrap(err, "failed to start change stream on source")
 		}

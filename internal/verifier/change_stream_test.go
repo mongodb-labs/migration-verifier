@@ -38,7 +38,7 @@ func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
 		verifier1 := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := verifier1.StartChangeStream(ctx)
+		err := verifier1.StartChangeStream(ctx, nil)
 		suite.Require().NoError(err)
 	}()
 
@@ -63,7 +63,7 @@ func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
 
 	newTime := suite.getClusterTime(ctx, suite.srcMongoClient)
 
-	err = verifier2.StartChangeStream(ctx)
+	err = verifier2.StartChangeStream(ctx, nil)
 	suite.Require().NoError(err)
 
 	suite.Require().NotNil(verifier2.srcStartAtTs)
@@ -138,7 +138,7 @@ func (suite *MultiSourceVersionTestSuite) TestStartAtTimeNoChanges() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	err = verifier.StartChangeStream(ctx)
+	err = verifier.StartChangeStream(ctx, nil)
 	suite.Require().NoError(err)
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
 	verifier.changeStreamEnderChan <- struct{}{}
@@ -158,7 +158,7 @@ func (suite *MultiSourceVersionTestSuite) TestStartAtTimeWithChanges() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	err = verifier.StartChangeStream(ctx)
+	err = verifier.StartChangeStream(ctx, nil)
 	suite.Require().NoError(err)
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
 	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
@@ -193,7 +193,7 @@ func (suite *MultiSourceVersionTestSuite) TestNoStartAtTime() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	err = verifier.StartChangeStream(ctx)
+	err = verifier.StartChangeStream(ctx, nil)
 	suite.Require().NoError(err)
 	suite.Require().NotNil(verifier.srcStartAtTs)
 	suite.Require().LessOrEqual(origStartTs.Compare(*verifier.srcStartAtTs), 0)
