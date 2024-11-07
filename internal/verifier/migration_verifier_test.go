@@ -9,8 +9,6 @@ package verifier
 import (
 	"context"
 	"fmt"
-	"github.com/rs/zerolog/log"
-	"golang.org/x/sync/errgroup"
 	"math/rand"
 	"regexp"
 	"sort"
@@ -22,6 +20,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -29,6 +28,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/sync/errgroup"
 )
 
 var macArmMongoVersions []string = []string{
