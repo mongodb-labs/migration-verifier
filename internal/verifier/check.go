@@ -182,7 +182,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	// Now enter the multi-generational steady check state
 	for {
 		verifier.generationStartTime = time.Now()
-		verifier.generationEventRecorder.Reset()
 
 		err := verifier.CheckWorker(ctx)
 		if err != nil {
@@ -192,12 +191,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		// * Channel 0 signals a generation is done
 		// * Channel 1 signals to check to continue the next generation
 		if len(testChan) == 2 {
-			verifier.logger.Debug().
-				Msg("Sync point: verifier awaiting signal from test to proceed.")
 			testChan[0] <- struct{}{}
-
-			verifier.logger.Debug().
-				Msg("Sync point: verifier sending acknowledgement to test.")
 			<-testChan[1]
 		}
 		time.Sleep(verifier.generationPauseDelayMillis * time.Millisecond)
@@ -353,15 +347,8 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.Wait
 		default:
 			task, err := verifier.FindNextVerifyTaskAndUpdate()
 			if errors.Is(err, mongo.ErrNoDocuments) {
-				delay := verifier.workerSleepDelayMillis * time.Millisecond
-
-				verifier.logger.Debug().
-					Int("workerNum", workerNum).
-					Stringer("duration", delay).
-					Msg("No tasks found. Worker sleeping ...")
-
-				time.Sleep(delay)
-
+				verifier.logger.Debug().Msgf("[Worker %d] No tasks found, sleeping...", workerNum)
+				time.Sleep(verifier.workerSleepDelayMillis * time.Millisecond)
 				continue
 			} else if err != nil {
 				panic(err)
