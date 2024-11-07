@@ -47,6 +47,7 @@ func (suite *MultiMetaVersionTestSuite) TestFailedCompareThenReplace() {
 			DB:   "the",
 			Coll: "namespace",
 		},
+		OpType: "update",
 	}
 
 	suite.handleAndFlushChangeEvent(ctx, verifier, event)
