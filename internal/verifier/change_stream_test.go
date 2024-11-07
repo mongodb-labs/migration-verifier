@@ -205,7 +205,7 @@ func (suite *MultiSourceVersionTestSuite) TestWithChangeEventsBatching() {
 	defer cancel()
 
 	batchSize := int32(3)
-	verifier.StartChangeStream(ctx, &batchSize)
+	suite.Require().NoError(verifier.StartChangeStream(ctx, &batchSize))
 
 	_, err := suite.srcMongoClient.Database("testDb").Collection("testColl1").InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
