@@ -151,6 +151,10 @@ func (p *Partition) GetFindOptions(buildInfo *bson.M, filterAndPredicates bson.A
 		sort := bson.E{"sort", bson.D{{"$natural", 1}}}
 		findOptions = append(findOptions, sort)
 	} else {
+		// For non-capped collections, sort by _id to minimize the amount of time
+		// that a given document spends cached in memory.
+		findOptions = append(findOptions, bson.E{"sort", bson.D{{"_id", 1}}})
+
 		// For non-capped collections, the cursor should use the ID filter and the _id index.
 		// Get the bounded query filter from the partition to be used in the Find command.
 		allowTypeBracketing := false

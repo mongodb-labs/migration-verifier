@@ -110,6 +110,11 @@ github.com/rs/zerolog/pkgerrors
 # github.com/russross/blackfriday/v2 v2.1.0
 ## explicit
 github.com/russross/blackfriday/v2
+# github.com/samber/lo v1.47.0
+## explicit; go 1.18
+github.com/samber/lo
+github.com/samber/lo/internal/constraints
+github.com/samber/lo/internal/rand
 # github.com/stretchr/testify v1.8.0
 ## explicit; go 1.13
 github.com/stretchr/testify/assert
@@ -189,10 +194,11 @@ golang.org/x/crypto/ocsp
 golang.org/x/crypto/pbkdf2
 golang.org/x/crypto/scrypt
 golang.org/x/crypto/sha3
-# golang.org/x/exp v0.0.0-20230321023759-10a507213a29
-## explicit; go 1.18
+# golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
+## explicit; go 1.20
 golang.org/x/exp/constraints
 golang.org/x/exp/maps
+golang.org/x/exp/slices
 # golang.org/x/net v0.21.0
 ## explicit; go 1.18
 golang.org/x/net/http/httpguts
@@ -211,6 +217,8 @@ golang.org/x/sys/cpu
 golang.org/x/sys/unix
 # golang.org/x/text v0.17.0
 ## explicit; go 1.18
+golang.org/x/text/cases
+golang.org/x/text/internal
 golang.org/x/text/internal/language
 golang.org/x/text/internal/language/compact
 golang.org/x/text/internal/tag
@@ -219,8 +227,6 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
-## explicit; go 1.11
 # google.golang.org/protobuf v1.28.0
 ## explicit; go 1.11
 google.golang.org/protobuf/encoding/protowire
