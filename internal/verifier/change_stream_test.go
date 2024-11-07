@@ -199,38 +199,32 @@ func (suite *MultiSourceVersionTestSuite) TestNoStartAtTime() {
 	suite.Require().LessOrEqual(origStartTs.Compare(*verifier.srcStartAtTs), 0)
 }
 
-func (suite *MultiSourceVersionTestSuite) TestWithChangeStreamBatching() {
+func (suite *MultiSourceVersionTestSuite) TestWithChangeEventsBatching() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	batchSize := int32(2)
+	batchSize := int32(3)
 	verifier.StartChangeStream(ctx, &batchSize)
 
-	_, err := suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(ctx, bson.D{{"_id", 1}})
+	_, err := suite.srcMongoClient.Database("testDb").Collection("testColl1").InsertOne(ctx, bson.D{{"_id", 1}})
+	suite.Require().NoError(err)
+	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl1").InsertOne(ctx, bson.D{{"_id", 2}})
+	suite.Require().NoError(err)
+
+	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl2").InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			return len(verifier.changeEventRecheckBuf["testDB.testColl"]) == 1
-		},
-		time.Minute,
-		500*time.Millisecond,
-		"the verifier should buffer a recheck doc",
-	)
-	suite.Require().Empty(suite.fetchVerifierRechecks(ctx, verifier))
-
-	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(ctx, bson.D{{"_id", 2}})
-	suite.Require().NoError(err)
-
-	require.Eventually(
-		suite.T(),
-		func() bool {
+			// There should be 2 recheck docs due to batching, one for each namespace.
 			return len(suite.fetchVerifierRechecks(ctx, verifier)) == 2
 		},
 		time.Minute,
 		500*time.Millisecond,
 		"the verifier should flush a recheck doc after a batch",
 	)
+	suite.Require().Empty(verifier.changeEventRecheckBuf["testDB.testColl1"])
+	suite.Require().Empty(verifier.changeEventRecheckBuf["testDB.testColl2"])
 }
