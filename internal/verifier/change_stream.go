@@ -160,7 +160,14 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		}
 
 		if err != nil && !errors.Is(err, context.Canceled) {
-			verifier.changeStreamErrChan <- err
+			if changeStreamEnded {
+				// Avoid potentially blocking if the change stream is done.
+				verifier.logger.Fatal().
+					Err(err).
+					Msg("Failed to finish reading change stream.")
+			} else {
+				verifier.changeStreamErrChan <- err
+			}
 		}
 
 		if changeStreamEnded {
