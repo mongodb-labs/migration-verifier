@@ -199,6 +199,10 @@ func NewVerifier(settings VerifierSettings) *Verifier {
 		changeStreamErrChan:   make(chan error),
 		changeStreamDoneChan:  make(chan struct{}),
 		readConcernSetting:    readConcern,
+
+		// This will get recreated once gen0 starts, but we want it
+		// here in case the change streams gets an event before then.
+		generationEventRecorder: NewEventRecorder(),
 	}
 }
 

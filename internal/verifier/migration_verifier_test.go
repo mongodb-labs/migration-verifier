@@ -58,7 +58,7 @@ func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstanc
 	//verifier.SetStartClean(true)
 	verifier.SetNumWorkers(3)
 	verifier.SetGenerationPauseDelayMillis(0)
-	//verifier.SetWorkerSleepDelayMillis(0)
+	verifier.SetWorkerSleepDelayMillis(1000)
 	require.Nil(t, verifier.SetMetaURI(context.Background(), "mongodb://localhost:"+metaMongoInstance.port))
 	require.Nil(t, verifier.SetSrcURI(context.Background(), "mongodb://localhost:"+srcMongoInstance.port))
 	require.Nil(t, verifier.SetDstURI(context.Background(), "mongodb://localhost:"+dstMongoInstance.port))
