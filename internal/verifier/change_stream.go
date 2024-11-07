@@ -66,7 +66,8 @@ func (verifier *Verifier) HandleChangeStreamEvent(changeEvent *ParsedEvent) erro
 	case "replace":
 		fallthrough
 	case "update":
-		verifier.changeEventRecheckBuf[changeEvent.Ns.String()] = append(verifier.changeEventRecheckBuf[changeEvent.Ns.String()], changeEvent.DocKey.ID)
+		namespace := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
+		verifier.changeEventRecheckBuf[namespace] = append(verifier.changeEventRecheckBuf[changeEvent.Ns.String()], changeEvent.DocKey.ID)
 		return nil
 	default:
 		return UnknownEventError{Event: changeEvent}
@@ -122,6 +123,8 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 			eventsRead++
 		}
+
+		verifier.logger.Debug().Msgf("Received a batch of %d events", eventsRead)
 
 		if err := verifier.flushAllBufferedChangeEventRechecks(ctx); err != nil {
 			return false, errors.Wrap(err, "failed to flush buffered change event rechecks")
@@ -372,7 +375,7 @@ func (verifier *Verifier) flushAllBufferedChangeEventRechecks(ctx context.Contex
 		// Note that this prevents us from being able to report a meaningful
 		// total data size for noninitial generations in the log.
 		dataSizes := make([]int, len(ids))
-		for i, _ := range ids {
+		for i := 0; i < len(ids); i++ {
 			dataSizes[i] = maxBSONObjSize
 		}
 

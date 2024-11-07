@@ -9,6 +9,8 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 	"math/rand"
 	"regexp"
 	"sort"
@@ -1350,7 +1352,7 @@ func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
 }
 
 func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
-	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
 	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
@@ -1369,10 +1371,16 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 
 	checkDoneChan := make(chan struct{})
 	checkContinueChan := make(chan struct{})
-	go func() {
-		err := verifier.CheckDriver(ctx, nil, checkDoneChan, checkContinueChan)
-		suite.Require().NoError(err)
-	}()
+
+	errGroup, errGrpCtx := errgroup.WithContext(context.Background())
+	errGroup.Go(func() error {
+		checkDriverErr := verifier.CheckDriver(errGrpCtx, nil, checkDoneChan, checkContinueChan)
+		// Log this as fatal error so that the test doesn't hang.
+		if checkDriverErr != nil {
+			log.Fatal().Err(checkDriverErr).Msg("check driver error")
+		}
+		return checkDriverErr
+	})
 
 	waitForTasks := func() *VerificationStatus {
 		status, err := verifier.GetVerificationStatus()
@@ -1446,6 +1454,9 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 	// there should be a failure from the src insert
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+
+	checkContinueChan <- struct{}{}
+	require.NoError(suite.T(), errGroup.Wait())
 }
 
 func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
