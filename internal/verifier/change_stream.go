@@ -25,7 +25,7 @@ type ParsedEvent struct {
 }
 
 func (pe *ParsedEvent) String() string {
-	return fmt.Sprintf("{ OpType: %s, namespace: %s, docID: %v}", pe.OpType, pe.Ns, pe.DocKey.ID)
+	return fmt.Sprintf("{OpType: %s, namespace: %s, docID: %v, clusterTime: %v}", pe.OpType, pe.Ns, pe.DocKey.ID, pe.ClusterTime)
 }
 
 // DocKey is a deserialized form for the ChangeEvent documentKey field. We currently only care about
@@ -44,7 +44,7 @@ type UnknownEventError struct {
 }
 
 func (uee UnknownEventError) Error() string {
-	return fmt.Sprintf("Unknown event type: %#q", uee.Event.OpType)
+	return fmt.Sprintf("Received event with unknown optype: %+v", uee.Event)
 }
 
 // HandleChangeStreamEvent performs the necessary work for change stream events that occur during
@@ -63,6 +63,12 @@ func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEve
 	case "replace":
 		fallthrough
 	case "update":
+		/*
+			if err := verifier.generationEventRecorder.AddEvent(changeEvent); err != nil {
+				return errors.Wrapf(err, "failed to augment stats with change event: %+v", *changeEvent)
+			}
+		*/
+
 		return verifier.InsertChangeEventRecheckDoc(ctx, changeEvent)
 	default:
 		return UnknownEventError{Event: changeEvent}
@@ -129,22 +135,17 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		// source writes are ended. This means we should exit rather than continue
 		// reading the change stream since there should be no more events.
 		case <-verifier.changeStreamEnderChan:
-			var gotEvent bool
-
 			changeStreamEnded = true
 
 			// Read all change events until the source reports no events.
 			// (i.e., the `getMore` call returns empty)
 			for {
+				var gotEvent bool
 				gotEvent, err = readOneChangeEvent()
 
 				if !gotEvent || err != nil {
 					break
 				}
-			}
-
-			if err != nil {
-				break
 			}
 
 		default:
@@ -156,7 +157,22 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		}
 
 		if err != nil && !errors.Is(err, context.Canceled) {
-			verifier.changeStreamErrChan <- err
+			timeout := time.Minute
+			timer := time.NewTimer(timeout)
+			defer timer.Stop()
+
+			select {
+			case <-timer.C:
+				verifier.logger.Fatal().
+					Err(err).
+					Stringer("timeout", timeout).
+					Msg("Failed to send change stream err within timeout.")
+			case verifier.changeStreamErrChan <- err:
+			}
+
+			if !changeStreamEnded {
+				return
+			}
 		}
 
 		if changeStreamEnded {
