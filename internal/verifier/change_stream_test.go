@@ -2,7 +2,6 @@ package verifier
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
