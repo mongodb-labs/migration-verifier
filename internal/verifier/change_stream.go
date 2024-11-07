@@ -148,6 +148,14 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 				}
 			}
 
+			if err != nil {
+				verifier.logger.Warn().
+					Err(err).
+					Msg("Change stream exiting due to error.")
+
+				break
+			}
+
 		default:
 			_, err = readOneChangeEvent()
 		}
