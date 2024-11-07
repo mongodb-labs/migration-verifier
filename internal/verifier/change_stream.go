@@ -155,10 +155,6 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		}
 
 		if err != nil && !errors.Is(err, context.Canceled) {
-			verifier.logger.Warn().
-				Err(err).
-				Msg("An error occurred during change stream processing.")
-
 			verifier.changeStreamErrChan <- err
 
 			if !changeStreamEnded {
