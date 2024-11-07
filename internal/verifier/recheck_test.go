@@ -95,7 +95,7 @@ func (suite *MultiMetaVersionTestSuite) TestLargeIDInsertions() {
 	id3 := strings.Repeat("c", overlyLarge)
 	ids := []interface{}{id1, id2, id3}
 	dataSizes := []int{overlyLarge, overlyLarge, overlyLarge}
-	err := verifier.insertRecheckDocsUnderLock(ctx, "testDB", "testColl", ids, dataSizes)
+	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
 	d1 := RecheckDoc{
