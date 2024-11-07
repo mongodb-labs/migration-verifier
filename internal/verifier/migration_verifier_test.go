@@ -1586,9 +1586,6 @@ func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 
 	// Turn writes off.
 	verifier.WritesOff(ctx)
-
-	checkContinueChan <- struct{}{}
-	<-checkDoneChan
 }
 
 func (suite *MultiDataVersionTestSuite) TestPartitionWithFilter() {
