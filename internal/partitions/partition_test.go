@@ -23,6 +23,7 @@ func (suite *UnitTestSuite) TestPartitionFindCmd() {
 				{"afterClusterTime", startAt},
 			}},
 			{"noCursorTimeout", true},
+			{"sort", bson.D{{"_id", 1}}},
 			{"hint", bson.D{{"_id", 1}}},
 			{"filter", expectedFilter},
 		}
