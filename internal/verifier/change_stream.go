@@ -39,7 +39,7 @@ const (
 	metadataChangeStreamCollectionName = "changeStream"
 )
 
-// ChangeEventRecheckBuffer buffers change events recheck docs in memory as a map of namespace -> _ids.
+// ChangeEventRecheckBuffer buffers change events recheck docs in memory as a map of namespace -> doc keys.
 type ChangeEventRecheckBuffer map[string][]interface{}
 
 type UnknownEventError struct {
