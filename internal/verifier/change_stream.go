@@ -166,6 +166,10 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 					Err(err).
 					Msg("Failed to finish reading change stream.")
 			} else {
+				verifier.logger.Warn().
+					Err(err).
+					Msg("An error occurred during change stream processing.")
+
 				verifier.changeStreamErrChan <- err
 			}
 		}
