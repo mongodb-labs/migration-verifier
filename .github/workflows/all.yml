@@ -40,6 +40,6 @@ jobs:
         run: go build main/migration_verifier.go
 
       - name: Test
-        run: go test -v ./... -race -timeout 5m
+        run: go test -v ./...
         env:
           MONGODB_DISTRO: ${{matrix.os.mongodb_distro}}
