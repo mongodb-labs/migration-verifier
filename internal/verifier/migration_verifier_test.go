@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"regexp"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/10gen/migration-verifier/internal/documentmap"
@@ -675,7 +676,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 		},
 	}
 
-	namespace := "testdb.testns"
+	namespace := getDBName(t) + ".testns"
 
 	for _, curTest := range compareTests {
 		verifier.SetIgnoreBSONFieldOrder(!curTest.checkOrder)
@@ -731,53 +732,55 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareViews() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
 
-	err := suite.srcMongoClient.Database("testDb").CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	db := getDBName(suite.T())
+
+	err := suite.srcMongoClient.Database(db).CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	err = suite.dstMongoClient.Database(db).CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
 	task := &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.sameView",
-			To:        "testDb.sameView"}}
+			Namespace: db + ".sameView",
+			To:        db + ".sameView"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskCompleted, task.Status)
 	suite.Nil(task.FailedDocs)
 
 	// Views must have the same underlying collection
-	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "wrongColl", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	err = suite.srcMongoClient.Database(db).CreateView(ctx, "wrongColl", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "wrongColl", "testColl2", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	err = suite.dstMongoClient.Database(db).CreateView(ctx, "wrongColl", "testColl2", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.wrongColl",
-			To:        "testDb.wrongColl"}}
+			Namespace: db + ".wrongColl",
+			To:        db + ".wrongColl"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskFailed, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(task.FailedDocs[0].Field, "Options.viewOn")
 		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.wrongColl")
+		suite.Equal(task.FailedDocs[0].NameSpace, db+".wrongColl")
 	}
 
 	// Views must have the same underlying pipeline
-	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "wrongPipeline", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	err = suite.srcMongoClient.Database(db).CreateView(ctx, "wrongPipeline", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "wrongPipeline", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}, {"a", 0}}}}})
+	err = suite.dstMongoClient.Database(db).CreateView(ctx, "wrongPipeline", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}, {"a", 0}}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.wrongPipeline",
-			To:        "testDb.wrongPipeline"}}
+			Namespace: db + ".wrongPipeline",
+			To:        db + ".wrongPipeline"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskFailed, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(task.FailedDocs[0].Field, "Options.pipeline")
 		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.wrongPipeline")
+		suite.Equal(task.FailedDocs[0].NameSpace, db+".wrongPipeline")
 	}
 
 	// Views must have the same underlying options
@@ -786,57 +789,57 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareViews() {
 	collation1.CaseLevel = true
 	collation2.Locale = "fr"
 	collation2.Backwards = true
-	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "missingOptionsSrc", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	err = suite.srcMongoClient.Database(db).CreateView(ctx, "missingOptionsSrc", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "missingOptionsSrc", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
+	err = suite.dstMongoClient.Database(db).CreateView(ctx, "missingOptionsSrc", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
 	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.missingOptionsSrc",
-			To:        "testDb.missingOptionsSrc"}}
+			Namespace: db + ".missingOptionsSrc",
+			To:        db + ".missingOptionsSrc"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskFailed, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
 		suite.Equal(task.FailedDocs[0].Cluster, ClusterSource)
 		suite.Equal(task.FailedDocs[0].Details, "Missing")
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.missingOptionsSrc")
+		suite.Equal(task.FailedDocs[0].NameSpace, db+".missingOptionsSrc")
 	}
 
-	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation1))
+	err = suite.srcMongoClient.Database(db).CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation1))
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	err = suite.dstMongoClient.Database(db).CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.missingOptionsDst",
-			To:        "testDb.missingOptionsDst"}}
+			Namespace: db + ".missingOptionsDst",
+			To:        db + ".missingOptionsDst"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskFailed, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
 		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
 		suite.Equal(task.FailedDocs[0].Details, "Missing")
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.missingOptionsDst")
+		suite.Equal(task.FailedDocs[0].NameSpace, db+".missingOptionsDst")
 	}
 
-	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation1))
+	err = suite.srcMongoClient.Database(db).CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation1))
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
+	err = suite.dstMongoClient.Database(db).CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
 	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.differentOptions",
-			To:        "testDb.differentOptions"}}
+			Namespace: db + ".differentOptions",
+			To:        db + ".differentOptions"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskFailed, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
 		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.differentOptions")
+		suite.Equal(task.FailedDocs[0].NameSpace, db+".differentOptions")
 	}
 }
 
@@ -844,78 +847,80 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareMetadata() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
 
+	db := getDBName(suite.T())
+
 	// Collection exists only on source.
-	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
+	err := suite.srcMongoClient.Database(db).CreateCollection(ctx, "testColl")
 	suite.Require().NoError(err)
 	task := &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.testColl",
-			To:        "testDb.testColl"}}
+			Namespace: db + ".testColl",
+			To:        db + ".testColl"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskFailed, task.Status)
 	suite.Equal(1, len(task.FailedDocs))
 	suite.Equal(task.FailedDocs[0].Details, Missing)
 	suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.testColl")
+	suite.Equal(task.FailedDocs[0].NameSpace, db+".testColl")
 
 	// Make sure "To" is respected.
-	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
+	err = suite.dstMongoClient.Database(db).CreateCollection(ctx, "testColl")
 	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.testColl",
-			To:        "testDb.testCollTo"}}
+			Namespace: db + ".testColl",
+			To:        db + ".testCollTo"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskFailed, task.Status)
 	suite.Equal(1, len(task.FailedDocs))
 	suite.Equal(task.FailedDocs[0].Details, Missing)
 	suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.testCollTo")
+	suite.Equal(task.FailedDocs[0].NameSpace, db+".testCollTo")
 
 	// Collection exists only on dest.
-	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "destOnlyColl")
+	err = suite.dstMongoClient.Database(db).CreateCollection(ctx, "destOnlyColl")
 	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.destOnlyColl",
-			To:        "testDb.destOnlyColl"}}
+			Namespace: db + ".destOnlyColl",
+			To:        db + ".destOnlyColl"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskFailed, task.Status)
 	suite.Equal(1, len(task.FailedDocs))
 	suite.Equal(task.FailedDocs[0].Details, Missing)
 	suite.Equal(task.FailedDocs[0].Cluster, ClusterSource)
-	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.destOnlyColl")
+	suite.Equal(task.FailedDocs[0].NameSpace, db+".destOnlyColl")
 
 	// A view and a collection are different.
-	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "viewOnSrc", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
+	err = suite.srcMongoClient.Database(db).CreateView(ctx, "viewOnSrc", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "viewOnSrc")
+	err = suite.dstMongoClient.Database(db).CreateCollection(ctx, "viewOnSrc")
 	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.viewOnSrc",
-			To:        "testDb.viewOnSrc"}}
+			Namespace: db + ".viewOnSrc",
+			To:        db + ".viewOnSrc"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskFailed, task.Status)
 	suite.Equal(1, len(task.FailedDocs))
 	suite.Equal(task.FailedDocs[0].Field, "Type")
 	suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.viewOnSrc")
+	suite.Equal(task.FailedDocs[0].NameSpace, db+".viewOnSrc")
 
 	// Capped should not match uncapped
-	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "cappedOnDst")
+	err = suite.srcMongoClient.Database(db).CreateCollection(ctx, "cappedOnDst")
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "cappedOnDst", options.CreateCollection().SetCapped(true).SetSizeInBytes(1024*1024*100))
+	err = suite.dstMongoClient.Database(db).CreateCollection(ctx, "cappedOnDst", options.CreateCollection().SetCapped(true).SetSizeInBytes(1024*1024*100))
 	suite.Require().NoError(err)
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.cappedOnDst",
-			To:        "testDb.cappedOnDst"}}
+			Namespace: db + ".cappedOnDst",
+			To:        db + ".cappedOnDst"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskFailed, task.Status)
 	// Capped and size should differ
@@ -931,8 +936,8 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareMetadata() {
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.testColl",
-			To:        "testDb.testColl"}}
+			Namespace: db + ".testColl",
+			To:        db + ".testColl"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskCompleted, task.Status)
 
@@ -940,8 +945,8 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareMetadata() {
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.testCollDNE",
-			To:        "testDb.testCollDNE"}}
+			Namespace: db + ".testCollDNE",
+			To:        db + ".testCollDNE"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskCompleted, task.Status)
 }
@@ -950,13 +955,15 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
 
+	db := getDBName(suite.T())
+
 	// Missing index on destination.
-	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl1")
-	srcColl := suite.srcMongoClient.Database("testDb").Collection("testColl1")
+	err := suite.srcMongoClient.Database(db).CreateCollection(ctx, "testColl1")
+	srcColl := suite.srcMongoClient.Database(db).Collection("testColl1")
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl1")
+	err = suite.dstMongoClient.Database(db).CreateCollection(ctx, "testColl1")
 	suite.Require().NoError(err)
-	dstColl := suite.dstMongoClient.Database("testDb").Collection("testColl1")
+	dstColl := suite.dstMongoClient.Database(db).Collection("testColl1")
 	suite.Require().NoError(err)
 	srcIndexNames, err := srcColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
 	suite.Require().NoError(err)
@@ -965,8 +972,8 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 	task := &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.testColl1",
-			To:        "testDb.testColl1",
+			Namespace: db + ".testColl1",
+			To:        db + ".testColl1",
 		},
 	}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
@@ -975,16 +982,16 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 		suite.Equal(srcIndexNames[1], task.FailedDocs[0].ID)
 		suite.Equal(Missing, task.FailedDocs[0].Details)
 		suite.Equal(ClusterTarget, task.FailedDocs[0].Cluster)
-		suite.Equal("testDb.testColl1", task.FailedDocs[0].NameSpace)
+		suite.Equal(db+".testColl1", task.FailedDocs[0].NameSpace)
 	}
 
 	// Missing index on source
-	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl2")
-	srcColl = suite.srcMongoClient.Database("testDb").Collection("testColl2")
+	err = suite.srcMongoClient.Database(db).CreateCollection(ctx, "testColl2")
+	srcColl = suite.srcMongoClient.Database(db).Collection("testColl2")
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl2")
+	err = suite.dstMongoClient.Database(db).CreateCollection(ctx, "testColl2")
 	suite.Require().NoError(err)
-	dstColl = suite.dstMongoClient.Database("testDb").Collection("testColl2")
+	dstColl = suite.dstMongoClient.Database(db).Collection("testColl2")
 	suite.Require().NoError(err)
 	_, err = srcColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}})
 	suite.Require().NoError(err)
@@ -993,24 +1000,24 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.testColl2",
-			To:        "testDb.testColl2"}}
+			Namespace: db + ".testColl2",
+			To:        db + ".testColl2"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(dstIndexNames[1], task.FailedDocs[0].ID)
 		suite.Equal(Missing, task.FailedDocs[0].Details)
 		suite.Equal(ClusterSource, task.FailedDocs[0].Cluster)
-		suite.Equal("testDb.testColl2", task.FailedDocs[0].NameSpace)
+		suite.Equal(db+".testColl2", task.FailedDocs[0].NameSpace)
 	}
 
 	// Different indexes on each
-	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl3")
-	srcColl = suite.srcMongoClient.Database("testDb").Collection("testColl3")
+	err = suite.srcMongoClient.Database(db).CreateCollection(ctx, "testColl3")
+	srcColl = suite.srcMongoClient.Database(db).Collection("testColl3")
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl3")
+	err = suite.dstMongoClient.Database(db).CreateCollection(ctx, "testColl3")
 	suite.Require().NoError(err)
-	dstColl = suite.dstMongoClient.Database("testDb").Collection("testColl3")
+	dstColl = suite.dstMongoClient.Database(db).Collection("testColl3")
 	suite.Require().NoError(err)
 	srcIndexNames, err = srcColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"z", 1}, {"q", -1}}}, {Keys: bson.D{{"a", 1}, {"b", -1}}}})
 	suite.Require().NoError(err)
@@ -1019,8 +1026,8 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.testColl3",
-			To:        "testDb.testColl3"}}
+			Namespace: db + ".testColl3",
+			To:        db + ".testColl3"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
 	if suite.Equal(2, len(task.FailedDocs)) {
@@ -1030,20 +1037,20 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 		suite.Equal(dstIndexNames[1], task.FailedDocs[0].ID)
 		suite.Equal(Missing, task.FailedDocs[0].Details)
 		suite.Equal(ClusterSource, task.FailedDocs[0].Cluster)
-		suite.Equal("testDb.testColl3", task.FailedDocs[0].NameSpace)
+		suite.Equal(db+".testColl3", task.FailedDocs[0].NameSpace)
 		suite.Equal(srcIndexNames[0], task.FailedDocs[1].ID)
 		suite.Equal(Missing, task.FailedDocs[1].Details)
 		suite.Equal(ClusterTarget, task.FailedDocs[1].Cluster)
-		suite.Equal("testDb.testColl3", task.FailedDocs[1].NameSpace)
+		suite.Equal(db+".testColl3", task.FailedDocs[1].NameSpace)
 	}
 
 	// Indexes with same names are different
-	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl4")
-	srcColl = suite.srcMongoClient.Database("testDb").Collection("testColl4")
+	err = suite.srcMongoClient.Database(db).CreateCollection(ctx, "testColl4")
+	srcColl = suite.srcMongoClient.Database(db).Collection("testColl4")
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl4")
+	err = suite.dstMongoClient.Database(db).CreateCollection(ctx, "testColl4")
 	suite.Require().NoError(err)
-	dstColl = suite.dstMongoClient.Database("testDb").Collection("testColl4")
+	dstColl = suite.dstMongoClient.Database(db).Collection("testColl4")
 	suite.Require().NoError(err)
 	srcIndexNames, err = srcColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"z", 1}, {"q", -1}}, Options: options.Index().SetName("wrong")}, {Keys: bson.D{{"a", 1}, {"b", -1}}}})
 	suite.Require().NoError(err)
@@ -1054,19 +1061,21 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
 	task = &VerificationTask{
 		Status: verificationTaskProcessing,
 		QueryFilter: QueryFilter{
-			Namespace: "testDb.testColl4",
-			To:        "testDb.testColl4"}}
+			Namespace: db + ".testColl4",
+			To:        db + ".testColl4"}}
 	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal("wrong", task.FailedDocs[0].ID)
 		suite.Regexp(regexp.MustCompile("^"+Mismatch), task.FailedDocs[0].Details)
 		suite.Equal(ClusterTarget, task.FailedDocs[0].Cluster)
-		suite.Equal("testDb.testColl4", task.FailedDocs[0].NameSpace)
+		suite.Equal(db+".testColl4", task.FailedDocs[0].NameSpace)
 	}
 }
 
 func TestVerifierCompareIndexSpecs(t *testing.T) {
+	db := getDBName(t)
+
 	// Index specification
 	keysDoc1 := bson.D{{"a", 1}, {"b", -1}}
 	// We marshal the key document twice so they are physically separate memory.
@@ -1076,13 +1085,13 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	require.NoError(t, err)
 	simpleIndexSpec1 := mongo.IndexSpecification{
 		Name:         "testIndex",
-		Namespace:    "testDB.testIndex",
+		Namespace:    db + ".testIndex",
 		KeysDocument: keysRaw1,
 		Version:      1}
 
 	simpleIndexSpec2 := mongo.IndexSpecification{
 		Name:         "testIndex",
-		Namespace:    "testDB.testIndex",
+		Namespace:    db + ".testIndex",
 		KeysDocument: keysRaw2,
 		Version:      2}
 
@@ -1105,7 +1114,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
 		result := results[0]
 		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, db+".testIndex", result.NameSpace)
 		assert.Equal(t, "KeysDocument", result.Field)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
 		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
@@ -1121,7 +1130,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
 		result := results[0]
 		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, db+".testIndex", result.NameSpace)
 		assert.Equal(t, "KeysDocument", result.Field)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
 		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
@@ -1138,7 +1147,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	clusteredFalse_1, clusteredFalse_2 := false, false
 	fullIndexSpec1 := mongo.IndexSpecification{
 		Name:               "testIndex",
-		Namespace:          "testDB.testIndex",
+		Namespace:          db + ".testIndex",
 		KeysDocument:       keysRaw1,
 		Version:            1,
 		ExpireAfterSeconds: &expireAfterSeconds0_1,
@@ -1148,7 +1157,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 
 	fullIndexSpec2 := mongo.IndexSpecification{
 		Name:               "testIndex",
-		Namespace:          "testDB.testIndex",
+		Namespace:          db + ".testIndex",
 		KeysDocument:       keysRaw2,
 		Version:            2,
 		ExpireAfterSeconds: &expireAfterSeconds0_2,
@@ -1164,7 +1173,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	var diffFields []interface{}
 	for _, result := range results {
 		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, db+".testIndex", result.NameSpace)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
 		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
 		diffFields = append(diffFields, result.Field)
@@ -1177,7 +1186,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
 		result := results[0]
 		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, db+".testIndex", result.NameSpace)
 		assert.Equal(t, "ExpireAfterSeconds", result.Field)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
 		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
@@ -1189,7 +1198,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
 		result := results[0]
 		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, db+".testIndex", result.NameSpace)
 		assert.Equal(t, "Sparse", result.Field)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
 		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
@@ -1201,7 +1210,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
 		result := results[0]
 		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, db+".testIndex", result.NameSpace)
 		assert.Equal(t, "Unique", result.Field)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
 		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
@@ -1213,7 +1222,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
 		result := results[0]
 		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
+		assert.Equal(t, db+".testIndex", result.NameSpace)
 		assert.Equal(t, "Clustered", result.Field)
 		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
 		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
@@ -1224,48 +1233,54 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	ctx := context.Background()
 
+	db1 := getDBName(suite.T(), "1")
+	db2 := getDBName(suite.T(), "2")
+
 	// Collections on source only
-	err := suite.srcMongoClient.Database("testDb1").CreateCollection(ctx, "testColl1")
+	err := suite.srcMongoClient.Database(db1).CreateCollection(ctx, "testColl1")
 	suite.Require().NoError(err)
-	err = suite.srcMongoClient.Database("testDb1").CreateCollection(ctx, "testColl2")
+	err = suite.srcMongoClient.Database(db1).CreateCollection(ctx, "testColl2")
 	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
 	suite.Require().NoError(err)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.srcNamespaces)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2"}, verifier.dstNamespaces)
+	suite.ElementsMatch([]string{db1 + ".testColl1", db1 + ".testColl2"}, verifier.srcNamespaces)
+	suite.ElementsMatch([]string{db1 + ".testColl1", db1 + ".testColl2"}, verifier.dstNamespaces)
 
 	// Multiple DBs on source
-	err = suite.srcMongoClient.Database("testDb2").CreateCollection(ctx, "testColl3")
+	err = suite.srcMongoClient.Database(db2).CreateCollection(ctx, "testColl3")
 	suite.Require().NoError(err)
-	err = suite.srcMongoClient.Database("testDb2").CreateCollection(ctx, "testColl4")
+	err = suite.srcMongoClient.Database(db2).CreateCollection(ctx, "testColl4")
 	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
 	suite.Require().NoError(err)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4"},
+	suite.ElementsMatch([]string{db1 + ".testColl1", db1 + ".testColl2", db2 + ".testColl3", db2 + ".testColl4"},
 		verifier.srcNamespaces)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4"},
+	suite.ElementsMatch([]string{db1 + ".testColl1", db1 + ".testColl2", db2 + ".testColl3", db2 + ".testColl4"},
 		verifier.dstNamespaces)
 
 	// Same namespaces on dest
-	err = suite.dstMongoClient.Database("testDb1").CreateCollection(ctx, "testColl1")
+	err = suite.dstMongoClient.Database(db1).CreateCollection(ctx, "testColl1")
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb1").CreateCollection(ctx, "testColl2")
+	err = suite.dstMongoClient.Database(db1).CreateCollection(ctx, "testColl2")
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb2").CreateCollection(ctx, "testColl3")
+	err = suite.dstMongoClient.Database(db2).CreateCollection(ctx, "testColl3")
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb2").CreateCollection(ctx, "testColl4")
+	err = suite.dstMongoClient.Database(db2).CreateCollection(ctx, "testColl4")
 	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
 	suite.Require().NoError(err)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4"},
+	suite.ElementsMatch([]string{db1 + ".testColl1", db1 + ".testColl2", db2 + ".testColl3", db2 + ".testColl4"},
 		verifier.srcNamespaces)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4"},
+	suite.ElementsMatch([]string{db1 + ".testColl1", db1 + ".testColl2", db2 + ".testColl3", db2 + ".testColl4"},
 		verifier.dstNamespaces)
 
+	db3 := getDBName(suite.T(), "3")
+	db4 := getDBName(suite.T(), "4")
+
 	// Additional namespaces on dest
-	err = suite.dstMongoClient.Database("testDb3").CreateCollection(ctx, "testColl5")
+	err = suite.dstMongoClient.Database(db3).CreateCollection(ctx, "testColl5")
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb4").CreateCollection(ctx, "testColl6")
+	err = suite.dstMongoClient.Database(db4).CreateCollection(ctx, "testColl6")
 	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "testColl7")
 	suite.Require().NoError(err)
@@ -1277,32 +1292,32 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
 	suite.Require().NoError(err)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
-		"testDb3.testColl5", "testDb4.testColl6"},
+	suite.ElementsMatch([]string{db1 + ".testColl1", db1 + ".testColl2", db2 + ".testColl3", db2 + ".testColl4",
+		db3 + ".testColl5", db4 + ".testColl6"},
 		verifier.srcNamespaces)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
-		"testDb3.testColl5", "testDb4.testColl6"},
+	suite.ElementsMatch([]string{db1 + ".testColl1", db1 + ".testColl2", db2 + ".testColl3", db2 + ".testColl4",
+		db3 + ".testColl5", db4 + ".testColl6"},
 		verifier.dstNamespaces)
 
-	err = suite.srcMongoClient.Database("testDb2").Drop(ctx)
+	err = suite.srcMongoClient.Database(db2).Drop(ctx)
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb2").Drop(ctx)
+	err = suite.dstMongoClient.Database(db2).Drop(ctx)
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb3").Drop(ctx)
+	err = suite.dstMongoClient.Database(db3).Drop(ctx)
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb4").Drop(ctx)
+	err = suite.dstMongoClient.Database(db4).Drop(ctx)
 	suite.Require().NoError(err)
 
 	// Views should be found
 	pipeline := bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}
-	err = suite.srcMongoClient.Database("testDb1").CreateView(ctx, "testView1", "testColl1", pipeline)
+	err = suite.srcMongoClient.Database(db1).CreateView(ctx, "testView1", "testColl1", pipeline)
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("testDb1").CreateView(ctx, "testView1", "testColl1", pipeline)
+	err = suite.dstMongoClient.Database(db1).CreateView(ctx, "testView1", "testColl1", pipeline)
 	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
 	suite.Require().NoError(err)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.srcNamespaces)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.dstNamespaces)
+	suite.ElementsMatch([]string{db1 + ".testColl1", db1 + ".testColl2", db1 + ".testView1"}, verifier.srcNamespaces)
+	suite.ElementsMatch([]string{db1 + ".testColl1", db1 + ".testColl2", db1 + ".testView1"}, verifier.dstNamespaces)
 
 	// Collections in admin, config, and local should not be found
 	err = suite.srcMongoClient.Database("local").CreateCollection(ctx, "islocalSrc")
@@ -1319,8 +1334,8 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
 	suite.Require().NoError(err)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.srcNamespaces)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.dstNamespaces)
+	suite.ElementsMatch([]string{db1 + ".testColl1", db1 + ".testColl2", db1 + ".testView1"}, verifier.srcNamespaces)
+	suite.ElementsMatch([]string{db1 + ".testColl1", db1 + ".testColl2", db1 + ".testView1"}, verifier.dstNamespaces)
 }
 
 func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
@@ -1346,17 +1361,34 @@ func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
 	suite.Equal(1, status.CompletedTasks, "completed tasks not equal")
 }
 
+func getDBName(t *testing.T, suffixes ...string) string {
+	testNameSplit := strings.Split(t.Name(), "/")
+	return strings.Join(
+		append(
+			[]string{
+				testNameSplit[len(testNameSplit)-1],
+				"testDB",
+			},
+			suffixes...,
+		),
+		"-",
+	)
+}
+
 func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
+	db1 := getDBName(suite.T(), "1")
+	db2 := getDBName(suite.T(), "2")
+
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
-	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
-	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
+	verifier.SetSrcNamespaces([]string{db1 + ".testColl1"})
+	verifier.SetDstNamespaces([]string{db2 + ".testColl3"})
 	verifier.SetNamespaceMap()
 
 	ctx := context.Background()
 
-	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
-	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
+	srcColl := suite.srcMongoClient.Database(db1).Collection("testColl1")
+	dstColl := suite.dstMongoClient.Database(db2).Collection("testColl3")
 	_, err := srcColl.InsertOne(ctx, bson.M{"_id": 1, "x": 42})
 	suite.Require().NoError(err)
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 2, "x": 43})
@@ -1448,10 +1480,13 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
+	db1 := getDBName(suite.T(), "1")
+	db2 := getDBName(suite.T(), "2")
+
 	filter := map[string]any{"inFilter": map[string]any{"$ne": false}}
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
-	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
-	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
+	verifier.SetSrcNamespaces([]string{db1 + ".testColl1"})
+	verifier.SetDstNamespaces([]string{db2 + ".testColl3"})
 	verifier.SetNamespaceMap()
 	verifier.SetIgnoreBSONFieldOrder(true)
 	// Set this value low to test the verifier with multiple partitions.
@@ -1459,8 +1494,8 @@ func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 
 	ctx := context.Background()
 
-	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
-	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
+	srcColl := suite.srcMongoClient.Database(db1).Collection("testColl1")
+	dstColl := suite.dstMongoClient.Database(db2).Collection("testColl3")
 
 	// Documents with _id in [0, 100) should match.
 	var docs []interface{}
@@ -1562,16 +1597,18 @@ func (suite *MultiDataVersionTestSuite) TestPartitionWithFilter() {
 	filter := map[string]any{"$expr": map[string]any{"$and": []map[string]any{
 		{"$gte": []any{"$n", 100}}, {"$lt": []any{"$n", 200}}}}}
 
+	db1 := getDBName(suite.T(), "1")
+
 	// Set up the verifier for testing.
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
-	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
+	verifier.SetSrcNamespaces([]string{db1 + ".testColl1"})
 	verifier.SetNamespaceMap()
 	verifier.globalFilter = filter
 	// Use a small partition size so that we can test creating multiple partitions.
 	verifier.partitionSizeInBytes = 30
 
 	// Insert documents into the source.
-	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
+	srcColl := suite.srcMongoClient.Database(db1).Collection("testColl1")
 
 	// 30 documents with _ids [0, 30) are in the filter.
 	for i := 0; i < 30; i++ {
@@ -1586,7 +1623,7 @@ func (suite *MultiDataVersionTestSuite) TestPartitionWithFilter() {
 	}
 
 	// Create partitions with the filter.
-	partitions, _, _, _, err := verifier.partitionAndInspectNamespace(ctx, "testDb1.testColl1")
+	partitions, _, _, _, err := verifier.partitionAndInspectNamespace(ctx, db1+".testColl1")
 	suite.Require().NoError(err)
 
 	// Check that each partition have bounds in the filter.

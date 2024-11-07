@@ -25,7 +25,7 @@ type ParsedEvent struct {
 }
 
 func (pe *ParsedEvent) String() string {
-	return fmt.Sprintf("{ OpType: %s, namespace: %s, docID: %v}", pe.OpType, pe.Ns, pe.DocKey.ID)
+	return fmt.Sprintf("{OpType: %s, namespace: %s, docID: %v, clusterTime: %v}", pe.OpType, pe.Ns, pe.DocKey.ID, pe.ClusterTime)
 }
 
 // DocKey is a deserialized form for the ChangeEvent documentKey field. We currently only care about
