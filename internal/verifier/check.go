@@ -192,7 +192,12 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		// * Channel 0 signals a generation is done
 		// * Channel 1 signals to check to continue the next generation
 		if len(testChan) == 2 {
+			verifier.logger.Debug().
+				Msg("Sync point: verifier awaiting signal from test to proceed.")
 			testChan[0] <- struct{}{}
+
+			verifier.logger.Debug().
+				Msg("Sync point: verifier sending acknowledgement to test.")
 			<-testChan[1]
 		}
 		time.Sleep(verifier.generationPauseDelayMillis * time.Millisecond)
