@@ -133,22 +133,17 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		// source writes are ended. This means we should exit rather than continue
 		// reading the change stream since there should be no more events.
 		case <-verifier.changeStreamEnderChan:
-			var gotEvent bool
-
 			changeStreamEnded = true
 
 			// Read all change events until the source reports no events.
 			// (i.e., the `getMore` call returns empty)
 			for {
+				var gotEvent bool
 				gotEvent, err = readOneChangeEvent()
 
 				if !gotEvent || err != nil {
 					break
 				}
-			}
-
-			if err != nil {
-				break
 			}
 
 		default:
@@ -160,17 +155,14 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		}
 
 		if err != nil && !errors.Is(err, context.Canceled) {
-			if changeStreamEnded {
-				// Avoid potentially blocking if the change stream is done.
-				verifier.logger.Fatal().
-					Err(err).
-					Msg("Failed to finish reading change stream.")
-			} else {
-				verifier.logger.Warn().
-					Err(err).
-					Msg("An error occurred during change stream processing.")
+			verifier.logger.Warn().
+				Err(err).
+				Msg("An error occurred during change stream processing.")
 
-				verifier.changeStreamErrChan <- err
+			verifier.changeStreamErrChan <- err
+
+			if !changeStreamEnded {
+				return
 			}
 		}
 
