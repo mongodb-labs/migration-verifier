@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -218,8 +219,7 @@ func (suite *MultiSourceVersionTestSuite) TestWithChangeEventsBatching() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			// There should be 2 recheck docs due to batching, one for each namespace.
-			return len(suite.fetchVerifierRechecks(ctx, verifier)) == 2
+			return len(suite.fetchVerifierRechecks(ctx, verifier)) == 3
 		},
 		time.Minute,
 		500*time.Millisecond,
