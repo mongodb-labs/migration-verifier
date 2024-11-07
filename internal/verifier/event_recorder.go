@@ -32,6 +32,12 @@ func NewEventRecorder() *EventRecorder {
 	}
 }
 
+func (er EventRecorder) Reset() {
+	er.guard.Store(func(m eventRecorderMap) eventRecorderMap {
+		return eventRecorderMap{}
+	})
+}
+
 // AddEvent adds a ParsedEvent to the EventRecorder’s statistics.
 func (er EventRecorder) AddEvent(changeEvent *ParsedEvent) error {
 	// This shouldn’t happen, but just in case:
