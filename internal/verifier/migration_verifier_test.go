@@ -12,7 +12,6 @@ import (
 	"math/rand"
 	"regexp"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/10gen/migration-verifier/internal/documentmap"
@@ -1359,20 +1358,6 @@ func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
 	suite.Equal(1, status.FailedTasks, "failed tasks not equal")
 	suite.Equal(1, status.MetadataMismatchTasks, "metadata mismatch tasks not equal")
 	suite.Equal(1, status.CompletedTasks, "completed tasks not equal")
-}
-
-func getDBName(t *testing.T, suffixes ...string) string {
-	testNameSplit := strings.Split(t.Name(), "/")
-	return strings.Join(
-		append(
-			[]string{
-				testNameSplit[len(testNameSplit)-1],
-				"testDB",
-			},
-			suffixes...,
-		),
-		"-",
-	)
 }
 
 func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {

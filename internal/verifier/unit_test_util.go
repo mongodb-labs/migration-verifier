@@ -76,6 +76,39 @@ func (suite *WithMongodsTestSuite) SetMetaInstance(instance MongoInstance) {
 	suite.metaMongoInstance = instance
 }
 
+func getDBName(t *testing.T, suffixes ...string) string {
+	testNameSplit := strings.Split(t.Name(), "/")
+	return strings.Join(
+		append(
+			[]string{
+				testNameSplit[len(testNameSplit)-1],
+				"testDB",
+			},
+			suffixes...,
+		),
+		"-",
+	)
+}
+
+func (suite *WithMongodsTestSuite) AfterTest(suiteName, testName string) {
+	ctx := context.Background()
+
+	dbNames, err := suite.metaMongoClient.ListDatabaseNames(ctx, bson.M{})
+	suite.Require().NoError(err, "should fetch db names")
+
+	dbNameBaseForTest := getDBName(suite.T())
+
+	for _, dbName := range dbNames {
+		if strings.Index(dbName, dbNameBaseForTest) != 0 {
+			continue
+		}
+
+		suite.T().Logf("Dropping database %#q", dbName)
+		err := suite.metaMongoClient.Database(dbName).Drop(ctx)
+		suite.Require().NoError(err, "should drop database %#q", dbName)
+	}
+}
+
 func (suite *WithMongodsTestSuite) SetupSuite() {
 	if testing.Short() {
 		suite.T().Skip("Skipping mongod-requiring tests in short mode")
