@@ -76,20 +76,6 @@ func (suite *WithMongodsTestSuite) SetMetaInstance(instance MongoInstance) {
 	suite.metaMongoInstance = instance
 }
 
-func getDBName(t *testing.T, suffixes ...string) string {
-	testNameSplit := strings.Split(t.Name(), "/")
-	return strings.Join(
-		append(
-			[]string{
-				testNameSplit[len(testNameSplit)-1],
-				"testDB",
-			},
-			suffixes...,
-		),
-		"-",
-	)
-}
-
 func (suite *WithMongodsTestSuite) SetupSuite() {
 	if testing.Short() {
 		suite.T().Skip("Skipping mongod-requiring tests in short mode")
