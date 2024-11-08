@@ -1364,7 +1364,6 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 	db1 := getDBName(suite.T(), "1")
 	db2 := getDBName(suite.T(), "2")
 
-	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	verifier.SetSrcNamespaces([]string{db1 + ".testColl1"})
 	verifier.SetDstNamespaces([]string{db2 + ".testColl3"})
