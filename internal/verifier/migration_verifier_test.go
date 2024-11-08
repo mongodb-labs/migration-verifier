@@ -1567,6 +1567,10 @@ func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 
 	// Turn writes off.
 	verifier.WritesOff(ctx)
+
+	// Tell CheckDriver to do one more pass. This should terminate the change stream.
+	checkContinueChan <- struct{}{}
+	<-checkDoneChan
 }
 
 func (suite *MultiDataVersionTestSuite) TestPartitionWithFilter() {
