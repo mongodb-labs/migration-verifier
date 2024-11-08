@@ -161,18 +161,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 				Err(err).
 				Msg("Sending change stream error.")
 
-			timeout := time.Minute
-			timer := time.NewTimer(timeout)
-			defer timer.Stop()
-
-			select {
-			case <-timer.C:
-				verifier.logger.Fatal().
-					Err(err).
-					Stringer("timeout", timeout).
-					Msg("Failed to send change stream error within timeout.")
-			case verifier.changeStreamErrChan <- err:
-			}
+			verifier.changeStreamErrChan <- err
 
 			if !changeStreamEnded {
 				break
@@ -189,11 +178,18 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			// since we have started Recheck, we must signal that we have
 			// finished the change stream changes so that Recheck can continue.
 			verifier.changeStreamDoneChan <- struct{}{}
-			// since the changeStream is exhausted, we now return
-			verifier.logger.Debug().Msg("Change stream is done.")
 			break
 		}
 	}
+
+	infoLog := verifier.logger.Info()
+	if verifier.lastChangeEventTime == nil {
+		infoLog = infoLog.Str("changeStreamStopTime", "none")
+	} else {
+		infoLog = infoLog.Interface("changeStreamStopTime", *verifier.lastChangeEventTime)
+	}
+
+	infoLog.Msg("Change stream is done.")
 }
 
 // StartChangeStream starts the change stream.

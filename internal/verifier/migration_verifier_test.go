@@ -14,12 +14,11 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/10gen/migration-verifier/internal/documentmap"
-	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -152,36 +151,6 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	drop()
 	defer drop()
 
-	expectOneCommonDoc := func(srcMap *documentmap.Map, dstMap *documentmap.Map) {
-		onlySrc, onlyDst, both := srcMap.CompareToMap(dstMap)
-		suite.Assert().Empty(onlySrc, "no source-only docs")
-		suite.Assert().Empty(onlyDst, "no destination-only docs")
-		suite.Assert().Equal(1, len(both), "common docs")
-		suite.Assert().NotPanics(
-			func() {
-				doc := srcMap.Fetch(both[0])
-				val := doc.Lookup("num")
-				suite.Assert().Less(val.AsInt64(), int64(100))
-			},
-			"doc is fetched",
-		)
-	}
-
-	expectTwoCommonDocs := func(srcMap *documentmap.Map, dstMap *documentmap.Map) {
-		onlySrc, onlyDst, both := srcMap.CompareToMap(dstMap)
-		suite.Assert().Empty(onlySrc, "no source-only docs")
-		suite.Assert().Empty(onlyDst, "no destination-only docs")
-		suite.Assert().Equal(2, len(both), "common docs")
-		suite.Assert().NotPanics(
-			func() { srcMap.Fetch(both[0]) },
-			"doc is fetched",
-		)
-		suite.Assert().NotPanics(
-			func() { dstMap.Fetch(both[1]) },
-			"doc is fetched",
-		)
-	}
-
 	// create a basicQueryFilter that sets (source) Namespace and To
 	// to the same thing
 	basicQueryFilter := func(namespace string) QueryFilter {
@@ -206,25 +175,53 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 
 	// Test fetchDocuments without global filter.
 	verifier.globalFilter = nil
-	srcDocumentMap, dstDocumentMap, err := verifier.fetchDocuments(task)
+	results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, task)
 	suite.Require().NoError(err)
-	expectTwoCommonDocs(srcDocumentMap, dstDocumentMap)
+	suite.Assert().EqualValues(2, docCount, "should find source docs")
+	suite.Assert().NotZero(byteCount, "should tally docs’ size")
+	suite.Assert().Len(results, 2)
+	suite.Assert().Equal(
+		[]any{Mismatch, Mismatch},
+		lo.Map(
+			results,
+			func(result VerificationResult, _ int) any {
+				return result.Details
+			},
+		),
+		"details as expected",
+	)
 
 	// Test fetchDocuments for ids with a global filter.
+
 	verifier.globalFilter = map[string]any{"num": map[string]any{"$lt": 100}}
-	srcDocumentMap, dstDocumentMap, err = verifier.fetchDocuments(task)
+	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, task)
 	suite.Require().NoError(err)
-	expectOneCommonDoc(srcDocumentMap, dstDocumentMap)
+	suite.Assert().EqualValues(1, docCount, "should find source docs")
+	suite.Assert().NotZero(byteCount, "should tally docs’ size")
+	suite.Require().Len(results, 1)
+	suite.Assert().Equal(Mismatch, results[0].Details)
+	suite.Assert().EqualValues(
+		any(id),
+		results[0].ID.(bson.RawValue).AsInt64(),
+		"mismatch recorded as expeceted",
+	)
 
 	// Test fetchDocuments for a partition with a global filter.
 	task.QueryFilter.Partition = &partitions.Partition{
-		Ns:       &partitions.Namespace{DB: "keyhole", Coll: "dealers"},
-		IsCapped: false,
+		Ns: &partitions.Namespace{DB: "keyhole", Coll: "dealers"},
 	}
 	verifier.globalFilter = map[string]any{"num": map[string]any{"$lt": 100}}
-	srcDocumentMap, dstDocumentMap, err = verifier.fetchDocuments(task)
+	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, task)
 	suite.Require().NoError(err)
-	expectOneCommonDoc(srcDocumentMap, dstDocumentMap)
+	suite.Assert().EqualValues(1, docCount, "should find source docs")
+	suite.Assert().NotZero(byteCount, "should tally docs’ size")
+	suite.Require().Len(results, 1)
+	suite.Assert().Equal(Mismatch, results[0].Details)
+	suite.Assert().EqualValues(
+		any(id),
+		results[0].ID.(bson.RawValue).AsInt64(),
+		"mismatch recorded as expeceted",
+	)
 }
 
 func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Recheck() {
@@ -540,16 +537,6 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 	suite.Require().False(cur.Next(ctx))
 }
 
-func makeDocMap(t *testing.T, docs []bson.D, indexFields ...string) *documentmap.Map {
-	cursor := testutil.DocsToCursor(docs)
-
-	dmap := documentmap.New(logger.NewDebugLogger(), indexFields...)
-	err := dmap.ImportFromCursor(context.Background(), cursor)
-	require.NoError(t, err)
-
-	return dmap
-}
-
 func TestVerifierCompareDocs(t *testing.T) {
 	id := rand.Intn(1000)
 	verifier := NewVerifier(VerifierSettings{})
@@ -677,6 +664,20 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	namespace := getDBName(t) + ".testns"
 
+	ctx := context.Background()
+
+	makeDocChannel := func(docs []bson.D) <-chan bson.Raw {
+		theChan := make(chan bson.Raw, len(docs))
+
+		for _, doc := range docs {
+			theChan <- testutil.MustMarshal(doc)
+		}
+
+		close(theChan)
+
+		return theChan
+	}
+
 	for _, curTest := range compareTests {
 		verifier.SetIgnoreBSONFieldOrder(!curTest.checkOrder)
 
@@ -693,12 +694,27 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 		srcPermute := permute.Slice(srcDocs)
 		for srcPermute.Permute() {
-			srcMap := makeDocMap(t, srcDocs, indexFields...)
 
 			dstPermute := permute.Slice(dstDocs)
 			for dstPermute.Permute() {
-				dstMap := makeDocMap(t, dstDocs, indexFields...)
-				mismatchedIds, err := verifier.compareDocuments(srcMap, dstMap, namespace)
+				srcChannel := makeDocChannel(srcDocs)
+				dstChannel := makeDocChannel(dstDocs)
+
+				fauxTask := VerificationTask{
+					QueryFilter: QueryFilter{
+						Namespace: namespace,
+						ShardKeys: indexFields,
+					},
+				}
+				results, docCount, byteCount, err := verifier.compareDocsFromChannels(
+					ctx,
+					&fauxTask,
+					srcChannel,
+					dstChannel,
+				)
+
+				assert.EqualValues(t, len(srcDocs), docCount)
+				assert.Equal(t, len(srcDocs) > 0, byteCount > 0, "byte count should match docs")
 
 				label := curTest.label
 				if permuted {
@@ -710,16 +726,16 @@ func TestVerifierCompareDocs(t *testing.T) {
 					label,
 					func(t *testing.T) {
 						require.NoError(t, err)
-						curTest.compareFn(t, mismatchedIds)
+						curTest.compareFn(t, results)
 					},
 				)
 
 				if !ok {
 					if len(curTest.srcDocs) > 0 {
-						t.Logf("src: %v", curTest.srcDocs)
+						t.Logf("%#q src: %+v", label, curTest.srcDocs)
 					}
 					if len(curTest.dstDocs) > 0 {
-						t.Logf("dst: %v", curTest.dstDocs)
+						t.Logf("%#q dst: %+v", label, curTest.dstDocs)
 					}
 				}
 			}
