@@ -51,8 +51,12 @@ func (verifier *Verifier) waitForChangeStream() error {
 		verifier.changeStreamEnderChan <- struct{}{}
 		select {
 		case err := <-verifier.changeStreamErrChan:
+			verifier.logger.Warn().Err(err).
+				Msg("Received error from change stream.")
 			return err
 		case <-verifier.changeStreamDoneChan:
+			verifier.logger.Debug().
+				Msg("Received completion signal from change stream.")
 			break
 		}
 	}
@@ -188,16 +192,31 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			return err
 		}
 		// we will only coordinate when the number of channels is exactly 2.
-		// * Channel 0 signals a generation is done
-		// * Channel 1 signals to check to continue the next generation
+		// * Channel 0 informs the test of a generation bounary.
+		// * Block until the test (via channel 1) tells us to do the
+		//   next generation.
 		if len(testChan) == 2 {
+
+			verifier.logger.Debug().
+				Msg("Telling test about generation boundary.")
 			testChan[0] <- struct{}{}
+
+			verifier.logger.Debug().
+				Msg("Awaiting test's signal to continue.")
 			<-testChan[1]
+
+			verifier.logger.Debug().
+				Msg("Received test's signal. Continuing.")
 		}
 		time.Sleep(verifier.generationPauseDelayMillis * time.Millisecond)
 		verifier.mux.Lock()
 		if verifier.lastGeneration {
 			verifier.mux.Unlock()
+
+			verifier.logger.Debug().
+				Int("generation", verifier.generation).
+				Msg("Final generation done.")
+
 			return nil
 		}
 		// TODO: wait here until writesOff is hit or enough time has passed, so we don't spin
