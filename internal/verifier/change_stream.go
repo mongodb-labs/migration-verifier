@@ -25,7 +25,7 @@ type ParsedEvent struct {
 }
 
 func (pe *ParsedEvent) String() string {
-	return fmt.Sprintf("{ OpType: %s, namespace: %s, docID: %v}", pe.OpType, pe.Ns, pe.DocKey.ID)
+	return fmt.Sprintf("{OpType: %s, namespace: %s, docID: %v, clusterTime: %v}", pe.OpType, pe.Ns, pe.DocKey.ID, pe.ClusterTime)
 }
 
 // DocKey is a deserialized form for the ChangeEvent documentKey field. We currently only care about
@@ -44,7 +44,7 @@ type UnknownEventError struct {
 }
 
 func (uee UnknownEventError) Error() string {
-	return fmt.Sprintf("Unknown event type: %#q", uee.Event.OpType)
+	return fmt.Sprintf("Received event with unknown optype: %+v", uee.Event)
 }
 
 // HandleChangeStreamEvent performs the necessary work for change stream events that occur during
@@ -83,8 +83,6 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 }
 
 func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.ChangeStream) {
-	var changeEvent ParsedEvent
-
 	var lastPersistedTime time.Time
 
 	persistResumeTokenIfNeeded := func() error {
@@ -103,6 +101,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 	readOneChangeEvent := func() (bool, error) {
 		gotEvent := cs.TryNext(ctx)
 		if gotEvent {
+			var changeEvent ParsedEvent
 			if err := cs.Decode(&changeEvent); err != nil {
 				return false, errors.Wrap(err, "failed to decode change event")
 			}
@@ -129,13 +128,15 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		// source writes are ended. This means we should exit rather than continue
 		// reading the change stream since there should be no more events.
 		case <-verifier.changeStreamEnderChan:
-			var gotEvent bool
+			verifier.logger.Debug().
+				Msg("Change stream thread received shutdown request.")
 
 			changeStreamEnded = true
 
 			// Read all change events until the source reports no events.
 			// (i.e., the `getMore` call returns empty)
 			for {
+				var gotEvent bool
 				gotEvent, err = readOneChangeEvent()
 
 				if !gotEvent || err != nil {
@@ -152,6 +153,10 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		}
 
 		if err != nil && !errors.Is(err, context.Canceled) {
+			verifier.logger.Debug().
+				Err(err).
+				Msg("Sending change stream error.")
+
 			verifier.changeStreamErrChan <- err
 
 			if !changeStreamEnded {
