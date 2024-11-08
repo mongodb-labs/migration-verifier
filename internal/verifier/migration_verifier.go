@@ -1405,7 +1405,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		verifier.logger.Err(err).Msgf("Failed to report per-namespace statistics")
 	}
 
-	// verifier.printChangeEventStatistics(strBuilder)
+	verifier.printChangeEventStatistics(strBuilder)
 
 	var statusLine string
 
