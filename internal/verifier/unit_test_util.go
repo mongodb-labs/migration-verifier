@@ -153,12 +153,16 @@ func (suite *WithMongodsTestSuite) TearDownSuite() {
 }
 
 func (suite *WithMongodsTestSuite) TearDownTest() {
+	suite.T().Logf("Tearing down test %#q", suite.T().Name())
+
 	ctx := context.Background()
 	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient, suite.metaMongoClient} {
 		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
 		suite.Require().NoError(err)
 		for _, dbName := range dbNames {
 			if !suite.initialDbNames[dbName] {
+				suite.T().Logf("Dropping database %#q, which seems to have been created during test %#q.", dbName, suite.T().Name())
+
 				err = client.Database(dbName).Drop(ctx)
 				suite.Require().NoError(err)
 			}

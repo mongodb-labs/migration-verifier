@@ -40,6 +40,7 @@ func (suite *MultiMetaVersionTestSuite) TestFailedCompareThenReplace() {
 	)
 
 	event := ParsedEvent{
+		OpType: "insert",
 		DocKey: DocKey{
 			ID: "theDocID",
 		},
@@ -93,7 +94,7 @@ func (suite *MultiMetaVersionTestSuite) TestLargeIDInsertions() {
 	id3 := strings.Repeat("c", overlyLarge)
 	ids := []interface{}{id1, id2, id3}
 	dataSizes := []int{overlyLarge, overlyLarge, overlyLarge}
-	err := verifier.insertRecheckDocs(ctx, "testDB", "testColl", ids, dataSizes)
+	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
 	d1 := RecheckDoc{
@@ -154,7 +155,7 @@ func (suite *MultiMetaVersionTestSuite) TestLargeDataInsertions() {
 	id3 := "c"
 	ids := []interface{}{id1, id2, id3}
 	dataSizes := []int{400 * 1024, 700 * 1024, 1024}
-	err := verifier.insertRecheckDocs(ctx, "testDB", "testColl", ids, dataSizes)
+	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 	d1 := RecheckDoc{
 		PrimaryKey: RecheckPrimaryKey{
@@ -215,13 +216,13 @@ func (suite *MultiMetaVersionTestSuite) TestMultipleNamespaces() {
 	id3 := "c"
 	ids := []interface{}{id1, id2, id3}
 	dataSizes := []int{1000, 1000, 1000}
-	err := verifier.insertRecheckDocs(ctx, "testDB1", "testColl1", ids, dataSizes)
+	err := insertRecheckDocs(ctx, verifier, "testDB1", "testColl1", ids, dataSizes)
 	suite.Require().NoError(err)
-	err = verifier.insertRecheckDocs(ctx, "testDB1", "testColl2", ids, dataSizes)
+	err = insertRecheckDocs(ctx, verifier, "testDB1", "testColl2", ids, dataSizes)
 	suite.Require().NoError(err)
-	err = verifier.insertRecheckDocs(ctx, "testDB2", "testColl1", ids, dataSizes)
+	err = insertRecheckDocs(ctx, verifier, "testDB2", "testColl1", ids, dataSizes)
 	suite.Require().NoError(err)
-	err = verifier.insertRecheckDocs(ctx, "testDB2", "testColl2", ids, dataSizes)
+	err = insertRecheckDocs(ctx, verifier, "testDB2", "testColl2", ids, dataSizes)
 	suite.Require().NoError(err)
 
 	verifier.generation++
@@ -265,17 +266,17 @@ func (suite *MultiMetaVersionTestSuite) TestGenerationalClear() {
 	id2 := "b"
 	ids := []interface{}{id1, id2}
 	dataSizes := []int{1000, 1000}
-	err := verifier.insertRecheckDocs(ctx, "testDB", "testColl", ids, dataSizes)
+	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
 	verifier.generation++
 
-	err = verifier.insertRecheckDocs(ctx, "testDB", "testColl", ids, dataSizes)
+	err = insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
 	verifier.generation++
 
-	err = verifier.insertRecheckDocs(ctx, "testDB", "testColl", ids, dataSizes)
+	err = insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
 	d1 := RecheckDoc{
@@ -323,4 +324,17 @@ func (suite *MultiMetaVersionTestSuite) TestGenerationalClear() {
 
 	results = suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]interface{}{}, results)
+}
+
+func insertRecheckDocs(
+	ctx context.Context,
+	verifier *Verifier,
+	dbName, collName string,
+	documentIDs []any,
+	dataSizes []int,
+) error {
+	verifier.mux.Lock()
+	defer verifier.mux.Unlock()
+
+	return verifier.insertRecheckDocsUnderLock(ctx, dbName, collName, documentIDs, dataSizes)
 }

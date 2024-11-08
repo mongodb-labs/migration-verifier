@@ -66,6 +66,9 @@ func (verifier *Verifier) HandleChangeStreamEvent(changeEvent *ParsedEvent) erro
 	case "replace":
 		fallthrough
 	case "update":
+		if err := verifier.eventRecorder.AddEvent(changeEvent); err != nil {
+			return errors.Wrapf(err, "failed to augment stats with change event: %+v", *changeEvent)
+		}
 		namespace := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
 		verifier.changeEventRecheckBuf[namespace] = append(verifier.changeEventRecheckBuf[changeEvent.Ns.String()], changeEvent.DocKey.ID)
 		return nil

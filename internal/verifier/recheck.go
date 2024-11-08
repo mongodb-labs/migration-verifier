@@ -34,15 +34,17 @@ type RecheckDoc struct {
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	namespace string, documentIDs []interface{}, dataSizes []int) error {
 	dbName, collName := SplitNamespace(namespace)
-	return verifier.insertRecheckDocs(context.Background(),
+
+	verifier.mux.Lock()
+	defer verifier.mux.Unlock()
+
+	return verifier.insertRecheckDocsUnderLock(context.Background(),
 		dbName, collName, documentIDs, dataSizes)
 }
 
-func (verifier *Verifier) insertRecheckDocs(
+func (verifier *Verifier) insertRecheckDocsUnderLock(
 	ctx context.Context,
 	dbName, collName string, documentIDs []interface{}, dataSizes []int) error {
-	verifier.mux.Lock()
-	defer verifier.mux.Unlock()
 
 	generation, _ := verifier.getGenerationWhileLocked()
 

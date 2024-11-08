@@ -7,13 +7,18 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/olekukonko/tablewriter"
+	"golang.org/x/exp/maps"
 )
+
+const changeEventsTableMaxSize = 10
 
 // NOTE: Each of the following should print one trailing and one final
 // newline.
@@ -361,4 +366,62 @@ func (verifier *Verifier) printMismatchInvestigationNotes(strBuilder *strings.Bu
 	for _, line := range lines {
 		strBuilder.WriteString(line + "\n")
 	}
+}
+
+func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
+	nsStats := verifier.eventRecorder.Read()
+
+	activeNamespacesCount := len(nsStats)
+
+	totalEvents := 0
+	nsTotals := map[string]int{}
+	for ns, events := range nsStats {
+		nsTotals[ns] = events.Total()
+		totalEvents += nsTotals[ns]
+	}
+
+	eventsDescr := "none"
+	if totalEvents > 0 {
+		eventsDescr = fmt.Sprintf("%d total, across %d namespace(s)", totalEvents, activeNamespacesCount)
+	}
+
+	builder.WriteString(fmt.Sprintf("\nChange events this generation: %s\n", eventsDescr))
+
+	if totalEvents == 0 {
+		return
+	}
+
+	reverseSortedNamespaces := maps.Keys(nsTotals)
+	sort.Slice(
+		reverseSortedNamespaces,
+		func(i, j int) bool {
+			return nsTotals[reverseSortedNamespaces[i]] > nsTotals[reverseSortedNamespaces[j]]
+		},
+	)
+
+	// Only report the busiest namespaces.
+	if len(reverseSortedNamespaces) > changeEventsTableMaxSize {
+		reverseSortedNamespaces = reverseSortedNamespaces[:changeEventsTableMaxSize]
+	}
+
+	table := tablewriter.NewWriter(builder)
+	table.SetHeader([]string{"Namespace", "Insert", "Update", "Replace", "Delete", "Total"})
+
+	for _, ns := range reverseSortedNamespaces {
+		curNsStats := nsStats[ns]
+
+		table.Append(
+			append(
+				[]string{ns},
+				strconv.Itoa(curNsStats.Insert),
+				strconv.Itoa(curNsStats.Update),
+				strconv.Itoa(curNsStats.Replace),
+				strconv.Itoa(curNsStats.Delete),
+				strconv.Itoa(curNsStats.Total()),
+			),
+		)
+	}
+
+	builder.WriteString("\nMost frequently-changing namespaces:\n")
+	table.Render()
 }

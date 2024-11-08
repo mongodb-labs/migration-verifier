@@ -93,6 +93,8 @@ type Verifier struct {
 	numWorkers         int
 	failureDisplaySize int64
 
+	eventRecorder *EventRecorder
+
 	// Used only with generation 0 to defer the first
 	// progress report until after we’ve finished partitioning
 	// every collection.
@@ -198,6 +200,10 @@ func NewVerifier(settings VerifierSettings) *Verifier {
 		changeStreamDoneChan:  make(chan struct{}),
 		readConcernSetting:    readConcern,
 		changeEventRecheckBuf: make(ChangeEventRecheckBuffer),
+
+		// This will get recreated once gen0 starts, but we want it
+		// here in case the change streams gets an event before then.
+		eventRecorder: NewEventRecorder(),
 	}
 }
 
@@ -226,6 +232,9 @@ func (verifier *Verifier) SetFailureDisplaySize(size int64) {
 }
 
 func (verifier *Verifier) WritesOff(ctx context.Context) {
+	verifier.logger.Debug().
+		Msg("WritesOff called.")
+
 	verifier.mux.Lock()
 	verifier.writesOff = true
 	verifier.mux.Unlock()
@@ -1302,6 +1311,8 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	if err != nil {
 		verifier.logger.Err(err).Msgf("Failed to report per-namespace statistics")
 	}
+
+	verifier.printChangeEventStatistics(strBuilder)
 
 	var statusLine string
 
