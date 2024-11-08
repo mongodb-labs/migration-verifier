@@ -148,14 +148,6 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 				}
 			}
 
-			if err != nil {
-				verifier.logger.Warn().
-					Err(err).
-					Msg("Change stream exiting due to error.")
-
-				break
-			}
-
 		default:
 			_, err = readOneChangeEvent()
 		}
@@ -165,26 +157,22 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		}
 
 		if err != nil && !errors.Is(err, context.Canceled) {
-			/*
-				timeout := time.Minute
-				timer := time.NewTimer(timeout)
-				defer timer.Stop()
-
-				select {
-				case <-timer.C:
-					verifier.logger.Fatal().
-						Err(err).
-						Stringer("timeout", timeout).
-						Msg("Failed to send change stream err within timeout.")
-				case verifier.changeStreamErrChan <- err:
-				}
-			*/
-
-			verifier.logger.Warn().
+			verifier.logger.Debug().
 				Err(err).
 				Msg("Sending change stream error.")
 
-			verifier.changeStreamErrChan <- err
+			timeout := time.Minute
+			timer := time.NewTimer(timeout)
+			defer timer.Stop()
+
+			select {
+			case <-timer.C:
+				verifier.logger.Fatal().
+					Err(err).
+					Stringer("timeout", timeout).
+					Msg("Failed to send change stream err within timeout.")
+			case verifier.changeStreamErrChan <- err:
+			}
 
 			if !changeStreamEnded {
 				return
