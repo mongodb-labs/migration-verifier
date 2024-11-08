@@ -143,10 +143,6 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 				}
 			}
 
-			if err != nil {
-				break
-			}
-
 		default:
 			_, err = readOneChangeEvent()
 		}
@@ -157,6 +153,10 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 		if err != nil && !errors.Is(err, context.Canceled) {
 			verifier.changeStreamErrChan <- err
+
+			if !changeStreamEnded {
+				break
+			}
 		}
 
 		if changeStreamEnded {
