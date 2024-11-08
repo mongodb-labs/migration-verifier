@@ -109,7 +109,6 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			if err := cs.Decode(&changeEvent); err != nil {
 				return false, errors.Wrap(err, "failed to decode change event")
 			}
-			fmt.Printf("\n========= got event: %+v\n\n", changeEvent)
 			err := verifier.HandleChangeStreamEvent(ctx, &changeEvent)
 			if err != nil {
 				return false, errors.Wrap(err, "failed to handle change event")
