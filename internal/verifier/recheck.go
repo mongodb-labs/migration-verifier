@@ -42,16 +42,24 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		collNames[i] = collName
 	}
 
-	verifier.mux.Lock()
-	defer verifier.mux.Unlock()
-
-	return verifier.insertRecheckDocsWhileLocked(context.Background(),
-		dbNames, collNames, documentIDs, dataSizes)
+	return verifier.insertRecheckDocs(
+		context.Background(),
+		dbNames,
+		collNames,
+		documentIDs,
+		dataSizes,
+	)
 }
 
-func (verifier *Verifier) insertRecheckDocsWhileLocked(
+func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
-	dbNames []string, collNames []string, documentIDs []interface{}, dataSizes []int) error {
+	dbNames []string,
+	collNames []string,
+	documentIDs []interface{},
+	dataSizes []int,
+) error {
+	verifier.mux.Lock()
+	defer verifier.mux.Unlock()
 
 	generation, _ := verifier.getGenerationWhileLocked()
 

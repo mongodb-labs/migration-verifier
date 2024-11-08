@@ -333,9 +333,6 @@ func insertRecheckDocs(
 	documentIDs []any,
 	dataSizes []int,
 ) error {
-	verifier.mux.Lock()
-	defer verifier.mux.Unlock()
-
 	dbNames := make([]string, len(documentIDs))
 	collNames := make([]string, len(documentIDs))
 
@@ -344,5 +341,5 @@ func insertRecheckDocs(
 		collNames[i] = collName
 	}
 
-	return verifier.insertRecheckDocsWhileLocked(ctx, dbNames, collNames, documentIDs, dataSizes)
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes)
 }

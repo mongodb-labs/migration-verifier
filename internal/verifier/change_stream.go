@@ -90,10 +90,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 		}
 	}
 
-	verifier.mux.Lock()
-	defer verifier.mux.Unlock()
-
-	return verifier.insertRecheckDocsWhileLocked(ctx, dbNames, collNames, docIDs, dataSizes)
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes)
 }
 
 func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
