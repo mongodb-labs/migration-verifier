@@ -63,11 +63,9 @@ func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEve
 	case "replace":
 		fallthrough
 	case "update":
-		/*
-			if err := verifier.generationEventRecorder.AddEvent(changeEvent); err != nil {
-				return errors.Wrapf(err, "failed to augment stats with change event: %+v", *changeEvent)
-			}
-		*/
+		if err := verifier.generationEventRecorder.AddEvent(changeEvent); err != nil {
+			return errors.Wrapf(err, "failed to augment stats with change event: %+v", *changeEvent)
+		}
 
 		return verifier.InsertChangeEventRecheckDoc(ctx, changeEvent)
 	default:
