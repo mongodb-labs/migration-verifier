@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
