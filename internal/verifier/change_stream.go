@@ -39,9 +39,6 @@ const (
 	metadataChangeStreamCollectionName = "changeStream"
 )
 
-// ChangeEventRecheckBuffer buffers change events recheck docs in memory as a map of namespace -> doc keys.
-type ChangeEventRecheckBuffer map[string][]interface{}
-
 type UnknownEventError struct {
 	Event *ParsedEvent
 }
@@ -50,31 +47,53 @@ func (uee UnknownEventError) Error() string {
 	return fmt.Sprintf("Received event with unknown optype: %+v", uee.Event)
 }
 
-// HandleChangeStreamEvent performs the necessary work for change stream events that occur during
-// operation.
-func (verifier *Verifier) HandleChangeStreamEvent(changeEvent *ParsedEvent) error {
-	if changeEvent.ClusterTime != nil &&
-		(verifier.lastChangeEventTime == nil ||
-			verifier.lastChangeEventTime.Compare(*changeEvent.ClusterTime) < 0) {
-		verifier.lastChangeEventTime = changeEvent.ClusterTime
-	}
-	switch changeEvent.OpType {
-	case "delete":
-		fallthrough
-	case "insert":
-		fallthrough
-	case "replace":
-		fallthrough
-	case "update":
-		if err := verifier.eventRecorder.AddEvent(changeEvent); err != nil {
-			return errors.Wrapf(err, "failed to augment stats with change event: %+v", *changeEvent)
-		}
-		namespace := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
-		verifier.changeEventRecheckBuf[namespace] = append(verifier.changeEventRecheckBuf[changeEvent.Ns.String()], changeEvent.DocKey.ID)
+// HandleChangeStreamEvents performs the necessary work for change stream events after receiving a batch.
+func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []ParsedEvent) error {
+	if len(batch) == 0 {
 		return nil
-	default:
-		return UnknownEventError{Event: changeEvent}
 	}
+
+	dbNames := make([]string, len(batch))
+	collNames := make([]string, len(batch))
+	docIDs := make([]interface{}, len(batch))
+	dataSizes := make([]int, len(batch))
+
+	for i, changeEvent := range batch {
+		if changeEvent.ClusterTime != nil &&
+			(verifier.lastChangeEventTime == nil ||
+				verifier.lastChangeEventTime.Compare(*changeEvent.ClusterTime) < 0) {
+			verifier.lastChangeEventTime = changeEvent.ClusterTime
+		}
+		switch changeEvent.OpType {
+		case "delete":
+			fallthrough
+		case "insert":
+			fallthrough
+		case "replace":
+			fallthrough
+		case "update":
+			if err := verifier.eventRecorder.AddEvent(&changeEvent); err != nil {
+				return errors.Wrapf(err, "failed to augment stats with change event: %+v", changeEvent)
+			}
+			dbNames[i] = changeEvent.Ns.DB
+			collNames[i] = changeEvent.Ns.Coll
+			docIDs[i] = changeEvent.DocKey.ID
+
+			// We don't know the document sizes for documents for all change events,
+			// so just be conservative and assume they are maximum size.
+			//
+			// Note that this prevents us from being able to report a meaningful
+			// total data size for noninitial generations in the log.
+			dataSizes[i] = maxBSONObjSize
+		default:
+			return UnknownEventError{Event: &changeEvent}
+		}
+	}
+
+	verifier.mux.Lock()
+	defer verifier.mux.Unlock()
+
+	return verifier.insertRecheckDocsWhileLocked(ctx, dbNames, collNames, docIDs, dataSizes)
 }
 
 func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
@@ -108,30 +127,33 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 	readAndHandleOneChangeEventBatch := func() (bool, error) {
 		eventsRead := 0
+		var changeEventBatch []ParsedEvent
+
 		for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
 			gotEvent := cs.TryNext(ctx)
 
-			if !gotEvent {
+			if !gotEvent || cs.Err() != nil {
 				break
 			}
 
-			var changeEvent ParsedEvent
-
-			if err := cs.Decode(&changeEvent); err != nil {
-				return false, errors.Wrap(err, "failed to decode change event")
+			if changeEventBatch == nil {
+				changeEventBatch = make([]ParsedEvent, cs.RemainingBatchLength()+1)
 			}
-			err := verifier.HandleChangeStreamEvent(&changeEvent)
-			if err != nil {
-				return false, errors.Wrap(err, "failed to handle change event")
+
+			if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
+				return false, errors.Wrap(err, "failed to decode change event")
 			}
 
 			eventsRead++
 		}
 
-		verifier.logger.Debug().Msgf("Received a batch of %d events", eventsRead)
+		if eventsRead > 0 {
+			verifier.logger.Debug().Msgf("Received a batch of %d events", eventsRead)
+		}
 
-		if err := verifier.flushAllBufferedChangeEventRechecks(ctx); err != nil {
-			return false, errors.Wrap(err, "failed to flush buffered change event rechecks")
+		err := verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
+		if err != nil {
+			return false, errors.Wrap(err, "failed to handle change events")
 		}
 
 		return eventsRead > 0, errors.Wrap(cs.Err(), "change stream iteration failed")
@@ -212,13 +234,9 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 }
 
 // StartChangeStream starts the change stream.
-func (verifier *Verifier) StartChangeStream(ctx context.Context, batchSize *int32) error {
+func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 	pipeline := verifier.GetChangeStreamFilter()
 	opts := options.ChangeStream().SetMaxAwaitTime(1 * time.Second)
-
-	if batchSize != nil {
-		opts = opts.SetBatchSize(*batchSize)
-	}
 
 	savedResumeToken, err := verifier.loadChangeStreamResumeToken(ctx)
 	if err != nil {
@@ -378,31 +396,4 @@ func getClusterTimeFromSession(sess mongo.Session) (primitive.Timestamp, error) 
 	}
 
 	return ctStruct.ClusterTime.ClusterTime, nil
-}
-
-func (verifier *Verifier) flushAllBufferedChangeEventRechecks(ctx context.Context) error {
-	for namespace, ids := range verifier.changeEventRecheckBuf {
-		if len(ids) == 0 {
-			return nil
-		}
-
-		// We don't know the document sizes for documents for all change events,
-		// so just be conservative and assume they are maximum size.
-		//
-		// Note that this prevents us from being able to report a meaningful
-		// total data size for noninitial generations in the log.
-		dataSizes := make([]int, len(ids))
-		for i := 0; i < len(ids); i++ {
-			dataSizes[i] = maxBSONObjSize
-		}
-
-		dbName, collName := SplitNamespace(namespace)
-		if err := verifier.insertRecheckDocs(ctx, dbName, collName, ids, dataSizes); err != nil {
-			return errors.Wrapf(err, "failed to insert recheck docs for namespace %s", namespace)
-		}
-
-		delete(verifier.changeEventRecheckBuf, namespace)
-	}
-
-	return nil
 }

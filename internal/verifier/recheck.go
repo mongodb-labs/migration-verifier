@@ -35,16 +35,23 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	namespace string, documentIDs []interface{}, dataSizes []int) error {
 	dbName, collName := SplitNamespace(namespace)
 
+	dbNames := make([]string, len(documentIDs))
+	collNames := make([]string, len(documentIDs))
+	for i := range documentIDs {
+		dbNames[i] = dbName
+		collNames[i] = collName
+	}
+
 	verifier.mux.Lock()
 	defer verifier.mux.Unlock()
 
-	return verifier.insertRecheckDocsUnderLock(context.Background(),
-		dbName, collName, documentIDs, dataSizes)
+	return verifier.insertRecheckDocsWhileLocked(context.Background(),
+		dbNames, collNames, documentIDs, dataSizes)
 }
 
-func (verifier *Verifier) insertRecheckDocsUnderLock(
+func (verifier *Verifier) insertRecheckDocsWhileLocked(
 	ctx context.Context,
-	dbName, collName string, documentIDs []interface{}, dataSizes []int) error {
+	dbNames []string, collNames []string, documentIDs []interface{}, dataSizes []int) error {
 
 	generation, _ := verifier.getGenerationWhileLocked()
 
@@ -52,8 +59,8 @@ func (verifier *Verifier) insertRecheckDocsUnderLock(
 	for i, documentID := range documentIDs {
 		pk := RecheckPrimaryKey{
 			Generation:     generation,
-			DatabaseName:   dbName,
-			CollectionName: collName,
+			DatabaseName:   dbNames[i],
+			CollectionName: collNames[i],
 			DocumentID:     documentID,
 		}
 
@@ -77,11 +84,6 @@ func (verifier *Verifier) insertRecheckDocsUnderLock(
 
 	if err == nil {
 		verifier.logger.Debug().Msgf("Persisted %d recheck doc(s) for generation %d", len(models), generation)
-	}
-
-	// Silence any duplicate key errors as recheck docs should have existed.
-	if mongo.IsDuplicateKeyError(err) {
-		err = nil
 	}
 
 	return err

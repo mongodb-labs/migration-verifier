@@ -38,7 +38,7 @@ func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
 		verifier1 := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := verifier1.StartChangeStream(ctx, nil)
+		err := verifier1.StartChangeStream(ctx)
 		suite.Require().NoError(err)
 	}()
 
@@ -63,7 +63,7 @@ func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
 
 	newTime := suite.getClusterTime(ctx, suite.srcMongoClient)
 
-	err = verifier2.StartChangeStream(ctx, nil)
+	err = verifier2.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 
 	suite.Require().NotNil(verifier2.srcStartAtTs)
@@ -138,7 +138,7 @@ func (suite *MultiSourceVersionTestSuite) TestStartAtTimeNoChanges() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	err = verifier.StartChangeStream(ctx, nil)
+	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
 	verifier.changeStreamEnderChan <- struct{}{}
@@ -158,7 +158,7 @@ func (suite *MultiSourceVersionTestSuite) TestStartAtTimeWithChanges() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	err = verifier.StartChangeStream(ctx, nil)
+	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
 	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
@@ -193,7 +193,7 @@ func (suite *MultiSourceVersionTestSuite) TestNoStartAtTime() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	err = verifier.StartChangeStream(ctx, nil)
+	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().NotNil(verifier.srcStartAtTs)
 	suite.Require().LessOrEqual(origStartTs.Compare(*verifier.srcStartAtTs), 0)
@@ -204,8 +204,7 @@ func (suite *MultiSourceVersionTestSuite) TestWithChangeEventsBatching() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	batchSize := int32(3)
-	suite.Require().NoError(verifier.StartChangeStream(ctx, &batchSize))
+	suite.Require().NoError(verifier.StartChangeStream(ctx))
 
 	_, err := suite.srcMongoClient.Database("testDb").Collection("testColl1").InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
@@ -215,15 +214,15 @@ func (suite *MultiSourceVersionTestSuite) TestWithChangeEventsBatching() {
 	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl2").InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 
+	var rechecks []bson.M
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			return len(suite.fetchVerifierRechecks(ctx, verifier)) == 3
+			rechecks = suite.fetchVerifierRechecks(ctx, verifier)
+			return len(rechecks) == 3
 		},
 		time.Minute,
 		500*time.Millisecond,
 		"the verifier should flush a recheck doc after a batch",
 	)
-	suite.Require().Empty(verifier.changeEventRecheckBuf["testDB.testColl1"])
-	suite.Require().Empty(verifier.changeEventRecheckBuf["testDB.testColl2"])
 }
