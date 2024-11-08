@@ -51,8 +51,10 @@ func (verifier *Verifier) waitForChangeStream() error {
 		verifier.changeStreamEnderChan <- struct{}{}
 		select {
 		case err := <-verifier.changeStreamErrChan:
+			verifier.logger.Warn().Err(err).Msg("Received error from change stream.")
 			return err
 		case <-verifier.changeStreamDoneChan:
+			verifier.logger.Debug().Msg("Received completion signal from change stream.")
 			break
 		}
 	}
@@ -182,16 +184,23 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	// Now enter the multi-generational steady check state
 	for {
 		verifier.generationStartTime = time.Now()
+		verifier.eventRecorder.Reset()
 
 		err := verifier.CheckWorker(ctx)
 		if err != nil {
 			return err
 		}
 		// we will only coordinate when the number of channels is exactly 2.
-		// * Channel 0 signals a generation is done
+		// * Channel 0 signals a generation boundary
 		// * Channel 1 signals to check to continue the next generation
 		if len(testChan) == 2 {
+
+			verifier.logger.Debug().
+				Msg("Telling test about generation boundary.")
 			testChan[0] <- struct{}{}
+
+			verifier.logger.Debug().
+				Msg("Awaiting test's signal to continue.")
 			<-testChan[1]
 		}
 		time.Sleep(verifier.generationPauseDelayMillis * time.Millisecond)

@@ -56,7 +56,7 @@ func (verifier *Verifier) InsertChangeEventRecheckDoc(ctx context.Context, chang
 	verifier.mux.Lock()
 	defer verifier.mux.Unlock()
 
-	if err := verifier.generationEventRecorder.AddEvent(changeEvent); err != nil {
+	if err := verifier.eventRecorder.AddEvent(changeEvent); err != nil {
 		return errors.Wrapf(err, "failed to augment stats with change event: %+v", *changeEvent)
 	}
 

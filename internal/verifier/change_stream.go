@@ -63,7 +63,7 @@ func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEve
 	case "replace":
 		fallthrough
 	case "update":
-		if err := verifier.generationEventRecorder.AddEvent(changeEvent); err != nil {
+		if err := verifier.eventRecorder.AddEvent(changeEvent); err != nil {
 			return errors.Wrapf(err, "failed to augment stats with change event: %+v", *changeEvent)
 		}
 
@@ -171,12 +171,12 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 				verifier.logger.Fatal().
 					Err(err).
 					Stringer("timeout", timeout).
-					Msg("Failed to send change stream err within timeout.")
+					Msg("Failed to send change stream error within timeout.")
 			case verifier.changeStreamErrChan <- err:
 			}
 
 			if !changeStreamEnded {
-				return
+				break
 			}
 		}
 
@@ -191,8 +191,8 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			// finished the change stream changes so that Recheck can continue.
 			verifier.changeStreamDoneChan <- struct{}{}
 			// since the changeStream is exhausted, we now return
-			verifier.logger.Debug().Msg("Change stream is done")
-			return
+			verifier.logger.Debug().Msg("Change stream is done.")
+			break
 		}
 	}
 }

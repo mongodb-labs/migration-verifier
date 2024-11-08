@@ -369,7 +369,7 @@ func (verifier *Verifier) printMismatchInvestigationNotes(strBuilder *strings.Bu
 }
 
 func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
-	nsStats := verifier.generationEventRecorder.Read()
+	nsStats := verifier.eventRecorder.Read()
 
 	activeNamespacesCount := len(nsStats)
 
