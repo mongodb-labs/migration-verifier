@@ -87,8 +87,6 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 }
 
 func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.ChangeStream) {
-	var changeEvent ParsedEvent
-
 	var lastPersistedTime time.Time
 
 	persistResumeTokenIfNeeded := func() error {
@@ -107,9 +105,11 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 	readOneChangeEvent := func() (bool, error) {
 		gotEvent := cs.TryNext(ctx)
 		if gotEvent {
+			var changeEvent ParsedEvent
 			if err := cs.Decode(&changeEvent); err != nil {
 				return false, errors.Wrap(err, "failed to decode change event")
 			}
+			fmt.Printf("\n========= got event: %+v\n\n", changeEvent)
 			err := verifier.HandleChangeStreamEvent(ctx, &changeEvent)
 			if err != nil {
 				return false, errors.Wrap(err, "failed to handle change event")
@@ -133,6 +133,9 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		// source writes are ended. This means we should exit rather than continue
 		// reading the change stream since there should be no more events.
 		case <-verifier.changeStreamEnderChan:
+			verifier.logger.Debug().
+				Msg("Change stream thread received shutdown request.")
+
 			changeStreamEnded = true
 
 			// Read all change events until the source reports no events.
