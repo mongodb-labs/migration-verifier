@@ -202,11 +202,17 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			verifier.logger.Debug().
 				Msg("Awaiting test's signal to continue.")
 			<-testChan[1]
+
+			verifier.logger.Debug().
+				Msg("Received test's signal. Continuing.")
 		}
 		time.Sleep(verifier.generationPauseDelayMillis * time.Millisecond)
 		verifier.mux.Lock()
 		if verifier.lastGeneration {
 			verifier.mux.Unlock()
+
+			verifier.logger.Debug().
+				Msg("Ending generation loop.")
 			return nil
 		}
 		// TODO: wait here until writesOff is hit or enough time has passed, so we don't spin
