@@ -91,7 +91,7 @@ func (suite *WithMongodsTestSuite) SetupSuite() {
 	suite.Require().NoError(err)
 	clientOpts = options.Client().ApplyURI("mongodb://localhost:" + suite.metaMongoInstance.port).SetAppName("Verifier Test Suite")
 	suite.metaMongoClient, err = mongo.Connect(ctx, clientOpts)
-	suite.startReplSet()
+	suite.startReplSets()
 	suite.Require().NoError(err)
 	suite.initialDbNames = map[string]bool{}
 	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient, suite.metaMongoClient} {
@@ -103,25 +103,28 @@ func (suite *WithMongodsTestSuite) SetupSuite() {
 	}
 }
 
-func (suite *WithMongodsTestSuite) startReplSet() {
+func (suite *WithMongodsTestSuite) startReplSets() {
 	ctx := context.Background()
-	clientOpts := options.
-		Client().
-		ApplyURI("mongodb://localhost:" + suite.srcMongoInstance.port).
-		SetDirect(true).
-		SetAppName("Verifier Test Suite")
-	directClient, err := mongo.Connect(ctx, clientOpts)
-	suite.Require().NoError(err)
-	command := bson.M{
-		"replSetInitiate": bson.M{
-			"_id": replSet,
-			"members": bson.A{
-				bson.M{"_id": 0, "host": "localhost:" + suite.srcMongoInstance.port},
+
+	for _, instance := range []MongoInstance{suite.srcMongoInstance, suite.metaMongoInstance} {
+		clientOpts := options.
+			Client().
+			ApplyURI("mongodb://localhost:" + instance.port).
+			SetDirect(true).
+			SetAppName("Verifier Test Suite")
+		directClient, err := mongo.Connect(ctx, clientOpts)
+		suite.Require().NoError(err)
+		command := bson.M{
+			"replSetInitiate": bson.M{
+				"_id": replSet,
+				"members": bson.A{
+					bson.M{"_id": 0, "host": "localhost:" + instance.port},
+				},
 			},
-		},
+		}
+		err = directClient.Database("admin").RunCommand(ctx, command).Err()
+		suite.Require().NoError(err)
 	}
-	err = directClient.Database("admin").RunCommand(ctx, command).Err()
-	suite.Require().NoError(err)
 }
 
 func (suite *WithMongodsTestSuite) TearDownSuite() {
@@ -181,7 +184,7 @@ func startTestMongods(t *testing.T, srcMongoInstance *MongoInstance, dstMongoIns
 		return err
 	}
 
-	err = startOneMongod(t, metaMongoInstance)
+	err = startOneMongod(t, metaMongoInstance, "--replSet", replSet)
 	if err != nil {
 		return err
 	}
