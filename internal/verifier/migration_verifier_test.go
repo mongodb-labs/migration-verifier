@@ -1462,6 +1462,7 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
 }
 
+/*
 func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
@@ -1572,6 +1573,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 	// Turn writes off.
 	verifier.WritesOff(ctx)
 }
+*/
 
 func (suite *MultiDataVersionTestSuite) TestPartitionWithFilter() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)

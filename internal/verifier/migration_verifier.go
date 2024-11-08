@@ -231,6 +231,9 @@ func (verifier *Verifier) SetFailureDisplaySize(size int64) {
 }
 
 func (verifier *Verifier) WritesOff(ctx context.Context) {
+	verifier.logger.Debug().
+		Msg("WritesOff called.")
+
 	verifier.mux.Lock()
 	verifier.writesOff = true
 	verifier.mux.Unlock()
