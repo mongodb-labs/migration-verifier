@@ -153,6 +153,17 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	if err != nil {
 		return err
 	}
+
+	err = verifier.doInMetaTransaction(
+		ctx,
+		func(ctx context.Context, sCtx mongo.SessionContext) error {
+			return verifier.ResetInProgressTasks(sCtx)
+		},
+	)
+	if err != nil {
+		return errors.Wrap(err, "failed to reset any in-progress tasks")
+	}
+
 	verifier.logger.Debug().Msg("Starting Check")
 
 	verifier.phase = Check
