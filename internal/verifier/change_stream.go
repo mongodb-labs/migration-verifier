@@ -145,12 +145,11 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		}
 
 		if eventsRead > 0 {
-			verifier.logger.Debug().Msgf("Received a batch of %d events", eventsRead)
-		}
-
-		err := verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
-		if err != nil {
-			return false, errors.Wrap(err, "failed to handle change events")
+			verifier.logger.Debug().Int("eventsCount", eventsRead).Msgf("Received a batch of events.")
+			err := verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
+			if err != nil {
+				return false, errors.Wrap(err, "failed to handle change events")
+			}
 		}
 
 		return eventsRead > 0, errors.Wrap(cs.Err(), "change stream iteration failed")
