@@ -47,30 +47,50 @@ func (uee UnknownEventError) Error() string {
 	return fmt.Sprintf("Received event with unknown optype: %+v", uee.Event)
 }
 
-// HandleChangeStreamEvent performs the necessary work for change stream events that occur during
-// operation.
-func (verifier *Verifier) HandleChangeStreamEvent(ctx context.Context, changeEvent *ParsedEvent) error {
-	if changeEvent.ClusterTime != nil &&
-		(verifier.lastChangeEventTime == nil ||
-			verifier.lastChangeEventTime.Compare(*changeEvent.ClusterTime) < 0) {
-		verifier.lastChangeEventTime = changeEvent.ClusterTime
+// HandleChangeStreamEvents performs the necessary work for change stream events after receiving a batch.
+func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []ParsedEvent) error {
+	if len(batch) == 0 {
+		return nil
 	}
-	switch changeEvent.OpType {
-	case "delete":
-		fallthrough
-	case "insert":
-		fallthrough
-	case "replace":
-		fallthrough
-	case "update":
-		if err := verifier.eventRecorder.AddEvent(changeEvent); err != nil {
-			return errors.Wrapf(err, "failed to augment stats with change event: %+v", *changeEvent)
-		}
 
-		return verifier.InsertChangeEventRecheckDoc(ctx, changeEvent)
-	default:
-		return UnknownEventError{Event: changeEvent}
+	dbNames := make([]string, len(batch))
+	collNames := make([]string, len(batch))
+	docIDs := make([]interface{}, len(batch))
+	dataSizes := make([]int, len(batch))
+
+	for i, changeEvent := range batch {
+		if changeEvent.ClusterTime != nil &&
+			(verifier.lastChangeEventTime == nil ||
+				verifier.lastChangeEventTime.Compare(*changeEvent.ClusterTime) < 0) {
+			verifier.lastChangeEventTime = changeEvent.ClusterTime
+		}
+		switch changeEvent.OpType {
+		case "delete":
+			fallthrough
+		case "insert":
+			fallthrough
+		case "replace":
+			fallthrough
+		case "update":
+			if err := verifier.eventRecorder.AddEvent(&changeEvent); err != nil {
+				return errors.Wrapf(err, "failed to augment stats with change event: %+v", changeEvent)
+			}
+			dbNames[i] = changeEvent.Ns.DB
+			collNames[i] = changeEvent.Ns.Coll
+			docIDs[i] = changeEvent.DocKey.ID
+
+			// We don't know the document sizes for documents for all change events,
+			// so just be conservative and assume they are maximum size.
+			//
+			// Note that this prevents us from being able to report a meaningful
+			// total data size for noninitial generations in the log.
+			dataSizes[i] = maxBSONObjSize
+		default:
+			return UnknownEventError{Event: &changeEvent}
+		}
 	}
+
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes)
 }
 
 func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
@@ -102,20 +122,37 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		return err
 	}
 
-	readOneChangeEvent := func() (bool, error) {
-		gotEvent := cs.TryNext(ctx)
-		if gotEvent {
-			var changeEvent ParsedEvent
-			if err := cs.Decode(&changeEvent); err != nil {
+	readAndHandleOneChangeEventBatch := func() (bool, error) {
+		eventsRead := 0
+		var changeEventBatch []ParsedEvent
+
+		for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
+			gotEvent := cs.TryNext(ctx)
+
+			if !gotEvent || cs.Err() != nil {
+				break
+			}
+
+			if changeEventBatch == nil {
+				changeEventBatch = make([]ParsedEvent, cs.RemainingBatchLength()+1)
+			}
+
+			if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
 				return false, errors.Wrap(err, "failed to decode change event")
 			}
-			err := verifier.HandleChangeStreamEvent(ctx, &changeEvent)
+
+			eventsRead++
+		}
+
+		if eventsRead > 0 {
+			verifier.logger.Debug().Int("eventsCount", eventsRead).Msgf("Received a batch of events.")
+			err := verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
 			if err != nil {
-				return false, errors.Wrap(err, "failed to handle change event")
+				return false, errors.Wrap(err, "failed to handle change events")
 			}
 		}
 
-		return gotEvent, errors.Wrap(cs.Err(), "change stream iteration failed")
+		return eventsRead > 0, errors.Wrap(cs.Err(), "change stream iteration failed")
 	}
 
 	for {
@@ -141,7 +178,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			// (i.e., the `getMore` call returns empty)
 			for {
 				var gotEvent bool
-				gotEvent, err = readOneChangeEvent()
+				gotEvent, err = readAndHandleOneChangeEventBatch()
 
 				if !gotEvent || err != nil {
 					break
@@ -149,7 +186,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			}
 
 		default:
-			_, err = readOneChangeEvent()
+			_, err = readAndHandleOneChangeEventBatch()
 		}
 
 		if err == nil {

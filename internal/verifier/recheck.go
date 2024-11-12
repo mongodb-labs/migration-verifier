@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -36,37 +35,31 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	namespace string, documentIDs []interface{}, dataSizes []int) error {
 	dbName, collName := SplitNamespace(namespace)
 
-	verifier.mux.Lock()
-	defer verifier.mux.Unlock()
-
-	return verifier.insertRecheckDocsUnderLock(context.Background(),
-		dbName, collName, documentIDs, dataSizes)
-}
-
-func (verifier *Verifier) InsertChangeEventRecheckDoc(ctx context.Context, changeEvent *ParsedEvent) error {
-	documentIDs := []interface{}{changeEvent.DocKey.ID}
-
-	// We don't know the document sizes for documents for all change events,
-	// so just be conservative and assume they are maximum size.
-	//
-	// Note that this prevents us from being able to report a meaningful
-	// total data size for noninitial generations in the log.
-	dataSizes := []int{maxBSONObjSize}
-
-	verifier.mux.Lock()
-	defer verifier.mux.Unlock()
-
-	if err := verifier.eventRecorder.AddEvent(changeEvent); err != nil {
-		return errors.Wrapf(err, "failed to augment stats with change event: %+v", *changeEvent)
+	dbNames := make([]string, len(documentIDs))
+	collNames := make([]string, len(documentIDs))
+	for i := range documentIDs {
+		dbNames[i] = dbName
+		collNames[i] = collName
 	}
 
-	return verifier.insertRecheckDocsUnderLock(
-		ctx, changeEvent.Ns.DB, changeEvent.Ns.Coll, documentIDs, dataSizes)
+	return verifier.insertRecheckDocs(
+		context.Background(),
+		dbNames,
+		collNames,
+		documentIDs,
+		dataSizes,
+	)
 }
 
-func (verifier *Verifier) insertRecheckDocsUnderLock(
+func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
-	dbName, collName string, documentIDs []interface{}, dataSizes []int) error {
+	dbNames []string,
+	collNames []string,
+	documentIDs []interface{},
+	dataSizes []int,
+) error {
+	verifier.mux.Lock()
+	defer verifier.mux.Unlock()
 
 	generation, _ := verifier.getGenerationWhileLocked()
 
@@ -74,8 +67,8 @@ func (verifier *Verifier) insertRecheckDocsUnderLock(
 	for i, documentID := range documentIDs {
 		pk := RecheckPrimaryKey{
 			Generation:     generation,
-			DatabaseName:   dbName,
-			CollectionName: collName,
+			DatabaseName:   dbNames[i],
+			CollectionName: collNames[i],
 			DocumentID:     documentID,
 		}
 

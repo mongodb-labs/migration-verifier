@@ -198,3 +198,31 @@ func (suite *MultiSourceVersionTestSuite) TestNoStartAtTime() {
 	suite.Require().NotNil(verifier.srcStartAtTs)
 	suite.Require().LessOrEqual(origStartTs.Compare(*verifier.srcStartAtTs), 0)
 }
+
+func (suite *MultiSourceVersionTestSuite) TestWithChangeEventsBatching() {
+	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	suite.Require().NoError(verifier.StartChangeStream(ctx))
+
+	_, err := suite.srcMongoClient.Database("testDb").Collection("testColl1").InsertOne(ctx, bson.D{{"_id", 1}})
+	suite.Require().NoError(err)
+	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl1").InsertOne(ctx, bson.D{{"_id", 2}})
+	suite.Require().NoError(err)
+
+	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl2").InsertOne(ctx, bson.D{{"_id", 1}})
+	suite.Require().NoError(err)
+
+	var rechecks []bson.M
+	require.Eventually(
+		suite.T(),
+		func() bool {
+			rechecks = suite.fetchVerifierRechecks(ctx, verifier)
+			return len(rechecks) == 3
+		},
+		time.Minute,
+		500*time.Millisecond,
+		"the verifier should flush a recheck doc after a batch",
+	)
+}

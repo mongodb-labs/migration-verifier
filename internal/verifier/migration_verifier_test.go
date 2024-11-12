@@ -18,6 +18,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/sync/errgroup"
 )
 
 var macArmMongoVersions []string = []string{
@@ -228,34 +230,32 @@ func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Recheck() {
 	ctx := context.Background()
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 
-	suite.Require().NoError(
-		verifier.InsertChangeEventRecheckDoc(
-			ctx,
-			&ParsedEvent{
-				OpType: "insert",
-				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
-				DocKey: DocKey{
-					ID: "heyhey",
-				},
+	err := verifier.HandleChangeStreamEvents(
+		ctx,
+		[]ParsedEvent{{
+			OpType: "insert",
+			Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
+			DocKey: DocKey{
+				ID: "heyhey",
 			},
-		),
+		}},
 	)
+	suite.Require().NoError(err)
 
-	suite.Require().NoError(
-		verifier.InsertChangeEventRecheckDoc(
-			ctx,
-			&ParsedEvent{
-				ID: bson.M{
-					"docID": "ID/docID",
-				},
-				OpType: "insert",
-				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
-				DocKey: DocKey{
-					ID: "hoohoo",
-				},
+	err = verifier.HandleChangeStreamEvents(
+		ctx,
+		[]ParsedEvent{{
+			ID: bson.M{
+				"docID": "ID/docID",
 			},
-		),
+			OpType: "insert",
+			Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
+			DocKey: DocKey{
+				ID: "hoohoo",
+			},
+		}},
 	)
+	suite.Require().NoError(err)
 
 	verifier.generation++
 
@@ -494,19 +494,20 @@ func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
 			Coll: "bar2",
 		},
 	}
-	err = verifier.HandleChangeStreamEvent(ctx, &event)
+
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
 	suite.Require().NoError(err)
 	event.OpType = "insert"
-	err = verifier.HandleChangeStreamEvent(ctx, &event)
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
 	suite.Require().NoError(err)
 	event.OpType = "replace"
-	err = verifier.HandleChangeStreamEvent(ctx, &event)
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
 	suite.Require().NoError(err)
 	event.OpType = "update"
-	err = verifier.HandleChangeStreamEvent(ctx, &event)
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
 	suite.Require().NoError(err)
 	event.OpType = "flibbity"
-	err = verifier.HandleChangeStreamEvent(ctx, &event)
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
 	badEventErr := UnknownEventError{}
 	suite.Require().ErrorAs(err, &badEventErr)
 	suite.Assert().Equal("flibbity", badEventErr.Event.OpType)
@@ -1363,7 +1364,7 @@ func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
 }
 
 func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
-	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
 	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
 	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
@@ -1382,10 +1383,16 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 
 	checkDoneChan := make(chan struct{})
 	checkContinueChan := make(chan struct{})
-	go func() {
-		err := verifier.CheckDriver(ctx, nil, checkDoneChan, checkContinueChan)
-		suite.Require().NoError(err)
-	}()
+
+	errGroup, errGrpCtx := errgroup.WithContext(context.Background())
+	errGroup.Go(func() error {
+		checkDriverErr := verifier.CheckDriver(errGrpCtx, nil, checkDoneChan, checkContinueChan)
+		// Log this as fatal error so that the test doesn't hang.
+		if checkDriverErr != nil {
+			log.Fatal().Err(checkDriverErr).Msg("check driver error")
+		}
+		return checkDriverErr
+	})
 
 	waitForTasks := func() *VerificationStatus {
 		status, err := verifier.GetVerificationStatus()
@@ -1459,6 +1466,9 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 	// there should be a failure from the src insert
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+
+	checkContinueChan <- struct{}{}
+	require.NoError(suite.T(), errGroup.Wait())
 }
 
 func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {

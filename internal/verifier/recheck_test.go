@@ -50,10 +50,8 @@ func (suite *MultiMetaVersionTestSuite) TestFailedCompareThenReplace() {
 		},
 	}
 
-	suite.Require().NoError(
-		verifier.InsertChangeEventRecheckDoc(ctx, &event),
-		"insert change event recheck",
-	)
+	err := verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
+	suite.Require().NoError(err)
 
 	recheckDocs = suite.fetchRecheckDocs(ctx, verifier)
 	suite.Assert().Equal(
@@ -335,8 +333,13 @@ func insertRecheckDocs(
 	documentIDs []any,
 	dataSizes []int,
 ) error {
-	verifier.mux.Lock()
-	defer verifier.mux.Unlock()
+	dbNames := make([]string, len(documentIDs))
+	collNames := make([]string, len(documentIDs))
 
-	return verifier.insertRecheckDocsUnderLock(ctx, dbName, collName, documentIDs, dataSizes)
+	for i := range documentIDs {
+		dbNames[i] = dbName
+		collNames[i] = collName
+	}
+
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes)
 }
