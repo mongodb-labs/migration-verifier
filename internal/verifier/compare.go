@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
@@ -21,31 +22,43 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	types.ByteCount,
 	error,
 ) {
-	// This function spawns three threads: one to read from the source,
-	// another to read from the destination, and a third one to receive the
-	// docs from the other 2 threads and compare them. It’s done this way,
-	// rather than fetch-everything-then-compare, to minimize memory usage.
-	errGroup, ctx := errgroup.WithContext(givenCtx)
-
-	srcChannel, dstChannel := verifier.getFetcherChannels(ctx, errGroup, task)
-
-	results := []VerificationResult{}
+	var results []VerificationResult
 	var docCount types.DocumentCount
 	var byteCount types.ByteCount
 
-	errGroup.Go(func() error {
-		var err error
-		results, docCount, byteCount, err = verifier.compareDocsFromChannels(
-			ctx,
-			task,
-			srcChannel,
-			dstChannel,
-		)
+	retryer := retry.New(retry.DefaultDurationLimit)
 
-		return err
-	})
+	err := retryer.RunForTransientErrorsOnly(
+		givenCtx,
+		verifier.logger,
+		func(_ *retry.Info) error {
+			results = []VerificationResult{}
+			docCount = 0
+			byteCount = 0
 
-	err := errGroup.Wait()
+			// This function spawns three threads: one to read from the source,
+			// another to read from the destination, and a third one to receive the
+			// docs from the other 2 threads and compare them. It’s done this way,
+			// rather than fetch-everything-then-compare, to minimize memory usage.
+			errGroup, ctx := errgroup.WithContext(givenCtx)
+
+			srcChannel, dstChannel := verifier.getFetcherChannels(ctx, errGroup, task)
+
+			errGroup.Go(func() error {
+				var err error
+				results, docCount, byteCount, err = verifier.compareDocsFromChannels(
+					ctx,
+					task,
+					srcChannel,
+					dstChannel,
+				)
+
+				return err
+			})
+
+			return errGroup.Wait()
+		},
+	)
 
 	return results, docCount, byteCount, err
 }
@@ -150,6 +163,14 @@ func (verifier *Verifier) compareDocsFromChannels(
 				byteCount += types.ByteCount(len(doc))
 
 				err = handleNewDoc(doc, true)
+
+				if err != nil {
+					err = errors.Wrapf(
+						err,
+						"comparer thread failed to handle source doc with ID %v",
+						doc.Lookup("_id"),
+					)
+				}
 			}
 		}
 
@@ -164,8 +185,20 @@ func (verifier *Verifier) compareDocsFromChannels(
 				}
 
 				err = handleNewDoc(doc, false)
+
+				if err != nil {
+					err = errors.Wrapf(
+						err,
+						"comparer thread failed to handle destination doc with ID %v",
+						doc.Lookup("_id"),
+					)
+				}
 			}
 		}
+	}
+
+	if err != nil {
+		return nil, 0, 0, errors.Wrap(err, "comparer thread failed")
 	}
 
 	// We got here because both srcChannel and dstChannel are closed,
@@ -225,7 +258,15 @@ func (verifier *Verifier) getFetcherChannels(
 		)
 
 		if err == nil {
-			err = iterateCursorToChannel(ctx, cursor, srcChannel)
+			err = errors.Wrap(
+				iterateCursorToChannel(ctx, cursor, srcChannel),
+				"failed to read source documents",
+			)
+		} else {
+			err = errors.Wrap(
+				err,
+				"failed to find source documents",
+			)
 		}
 
 		return err
@@ -241,7 +282,15 @@ func (verifier *Verifier) getFetcherChannels(
 		)
 
 		if err == nil {
-			err = iterateCursorToChannel(ctx, cursor, dstChannel)
+			err = errors.Wrap(
+				iterateCursorToChannel(ctx, cursor, dstChannel),
+				"failed to read destination documents",
+			)
+		} else {
+			err = errors.Wrap(
+				err,
+				"failed to find destination documents",
+			)
 		}
 
 		return err
