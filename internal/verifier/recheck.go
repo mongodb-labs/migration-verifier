@@ -47,6 +47,10 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		collNames[i] = collName
 	}
 
+	verifier.logger.Debug().
+		Int("count", len(documentIDs)).
+		Msg("Persisting rechecks for mismatched or missing documents.")
+
 	return verifier.insertRecheckDocs(
 		context.Background(),
 		dbNames,

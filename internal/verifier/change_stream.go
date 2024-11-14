@@ -90,6 +90,10 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 		}
 	}
 
+	verifier.logger.Debug().
+		Int("count", len(docIDs)).
+		Msg("Persisting rechecks for change events.")
+
 	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes)
 }
 
