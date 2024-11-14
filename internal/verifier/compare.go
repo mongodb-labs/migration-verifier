@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
@@ -22,43 +21,31 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	types.ByteCount,
 	error,
 ) {
-	var results []VerificationResult
+	// This function spawns three threads: one to read from the source,
+	// another to read from the destination, and a third one to receive the
+	// docs from the other 2 threads and compare them. It’s done this way,
+	// rather than fetch-everything-then-compare, to minimize memory usage.
+	errGroup, ctx := errgroup.WithContext(givenCtx)
+
+	srcChannel, dstChannel := verifier.getFetcherChannels(ctx, errGroup, task)
+
+	results := []VerificationResult{}
 	var docCount types.DocumentCount
 	var byteCount types.ByteCount
 
-	retryer := retry.New(retry.DefaultDurationLimit)
+	errGroup.Go(func() error {
+		var err error
+		results, docCount, byteCount, err = verifier.compareDocsFromChannels(
+			ctx,
+			task,
+			srcChannel,
+			dstChannel,
+		)
 
-	err := retryer.RunForTransientErrorsOnly(
-		givenCtx,
-		verifier.logger,
-		func(_ *retry.Info) error {
-			results = []VerificationResult{}
-			docCount = 0
-			byteCount = 0
+		return err
+	})
 
-			// This function spawns three threads: one to read from the source,
-			// another to read from the destination, and a third one to receive the
-			// docs from the other 2 threads and compare them. It’s done this way,
-			// rather than fetch-everything-then-compare, to minimize memory usage.
-			errGroup, ctx := errgroup.WithContext(givenCtx)
-
-			srcChannel, dstChannel := verifier.getFetcherChannels(ctx, errGroup, task)
-
-			errGroup.Go(func() error {
-				var err error
-				results, docCount, byteCount, err = verifier.compareDocsFromChannels(
-					ctx,
-					task,
-					srcChannel,
-					dstChannel,
-				)
-
-				return err
-			})
-
-			return errGroup.Wait()
-		},
-	)
+	err := errGroup.Wait()
 
 	return results, docCount, byteCount, err
 }
