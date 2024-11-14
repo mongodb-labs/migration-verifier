@@ -3,15 +3,20 @@ package verifier
 import (
 	"context"
 
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
-	recheckQueue   = "recheckQueue"
-	maxBSONObjSize = 16 * 1024 * 1024
+	recheckQueue                  = "recheckQueue"
+	maxBSONObjSize                = 16 * 1024 * 1024
+	recheckInserterThreadsSoftMax = 100
 )
 
 // RecheckPrimaryKey stores the implicit type of recheck to perform
@@ -51,6 +56,18 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	)
 }
 
+// This will split the given slice into *roughly* the given number of chunks.
+// It may end up being more or fewer, but it should be pretty close.
+func splitToChunks[T any, Slice ~[]T](elements Slice, numChunks int) []Slice {
+	elsPerChunk := len(elements) / numChunks
+
+	if elsPerChunk == 0 {
+		elsPerChunk = 1
+	}
+
+	return lo.Chunk(elements, elsPerChunk)
+}
+
 func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
 	dbNames []string,
@@ -63,38 +80,78 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	generation, _ := verifier.getGenerationWhileLocked()
 
-	models := []mongo.WriteModel{}
-	for i, documentID := range documentIDs {
-		pk := RecheckPrimaryKey{
-			Generation:     generation,
-			DatabaseName:   dbNames[i],
-			CollectionName: collNames[i],
-			DocumentID:     documentID,
-		}
+	docIDIndexes := lo.Range(len(documentIDs))
+	indexesPerThread := splitToChunks(docIDIndexes, recheckInserterThreadsSoftMax)
 
-		// The filter must exclude DataSize; otherwise, if a failed comparison
-		// and a change event happen on the same document for the same
-		// generation, the 2nd insert will fail because a) its filter won’t
-		// match anything, and b) it’ll try to insert a new document with the
-		// same _id as the one that the 1st insert already created.
-		filterDoc := bson.D{{"_id", pk}}
+	eg, groupCtx := errgroup.WithContext(ctx)
 
-		recheckDoc := RecheckDoc{
-			PrimaryKey: pk,
-			DataSize:   dataSizes[i],
-		}
+	for _, curThreadIndexes := range indexesPerThread {
+		curThreadIndexes := curThreadIndexes
 
-		models = append(models,
-			mongo.NewReplaceOneModel().
-				SetFilter(filterDoc).SetReplacement(recheckDoc).SetUpsert(true))
+		eg.Go(func() error {
+			models := make([]mongo.WriteModel, len(curThreadIndexes))
+			for m, i := range curThreadIndexes {
+				pk := RecheckPrimaryKey{
+					Generation:     generation,
+					DatabaseName:   dbNames[i],
+					CollectionName: collNames[i],
+					DocumentID:     documentIDs[i],
+				}
+
+				// The filter must exclude DataSize; otherwise, if a failed comparison
+				// and a change event happen on the same document for the same
+				// generation, the 2nd insert will fail because a) its filter won’t
+				// match anything, and b) it’ll try to insert a new document with the
+				// same _id as the one that the 1st insert already created.
+				filterDoc := bson.D{{"_id", pk}}
+
+				recheckDoc := RecheckDoc{
+					PrimaryKey: pk,
+					DataSize:   dataSizes[i],
+				}
+
+				models[m] = mongo.NewReplaceOneModel().
+					SetFilter(filterDoc).
+					SetReplacement(recheckDoc).
+					SetUpsert(true)
+			}
+
+			retryer := retry.New(retry.DefaultDurationLimit)
+			err := retryer.RunForTransientErrorsOnly(
+				groupCtx,
+				verifier.logger,
+				func(_ *retry.Info) error {
+					_, err := verifier.verificationDatabase().Collection(recheckQueue).BulkWrite(
+						groupCtx,
+						models,
+						options.BulkWrite().SetOrdered(false),
+					)
+
+					return err
+				},
+			)
+
+			return errors.Wrapf(err, "failed to persist %d recheck(s) for generation %d", len(models), generation)
+		})
 	}
-	_, err := verifier.verificationDatabase().Collection(recheckQueue).BulkWrite(ctx, models)
 
-	if err == nil {
-		verifier.logger.Debug().Msgf("Persisted %d recheck doc(s) for generation %d", len(models), generation)
+	err := eg.Wait()
+
+	if err != nil {
+		return errors.Wrapf(
+			err,
+			"failed to persist %d recheck(s) for generation %d",
+			len(documentIDs),
+			generation,
+		)
 	}
 
-	return err
+	verifier.logger.Debug().
+		Int("generation", generation).
+		Int("count", len(documentIDs)).
+		Msg("Persisted rechecks.")
+
+	return nil
 }
 
 // ClearRecheckDocs deletes the previous generation’s recheck
