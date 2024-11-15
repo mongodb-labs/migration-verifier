@@ -102,6 +102,13 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes)
 }
 
+// GetChangeStreamFilter returns an aggregation pipeline that filters
+// namespaces as per configuration.
+//
+// NB: Ideally we could make the change stream give $bsonSize(fullDocument)
+// and omit fullDocument, but $bsonSize was new in MongoDB 4.4, and we still
+// want to verify migrations from 4.2. fullDocument is unlikely to be a
+// bottleneck anyway.
 func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 	if len(verifier.srcNamespaces) == 0 {
 		return []bson.D{{bson.E{"$match", bson.D{{"ns.db", bson.D{{"$ne", verifier.metaDBName}}}}}}}
