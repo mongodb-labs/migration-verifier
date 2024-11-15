@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
@@ -63,6 +64,10 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 // This will split the given slice into *roughly* the given number of chunks.
 // It may end up being more or fewer, but it should be pretty close.
 func splitToChunks[T any, Slice ~[]T](elements Slice, numChunks int) []Slice {
+	if numChunks < 1 {
+		panic(fmt.Sprintf("numChunks (%v) should be >=1", numChunks))
+	}
+
 	elsPerChunk := len(elements) / numChunks
 
 	if elsPerChunk == 0 {
