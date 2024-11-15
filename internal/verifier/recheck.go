@@ -19,11 +19,16 @@ const (
 	recheckQueue                  = "recheckQueue"
 	maxBSONObjSize                = 16 * 1024 * 1024
 	recheckInserterThreadsSoftMax = 100
+	maxIdsPerRecheckTask          = 12 * 1024 * 1024
 )
 
 // RecheckPrimaryKey stores the implicit type of recheck to perform
 // Currently, we only handle document mismatches/change stream updates,
 // so DatabaseName, CollectionName, and DocumentID must always be specified.
+//
+// NB: Order is important here so that, within a given generation,
+// sorting by _id will guarantee that all rechecks for a given
+// namespace appear consecutively.
 type RecheckPrimaryKey struct {
 	Generation     int         `bson:"generation"`
 	DatabaseName   string      `bson:"db"`
@@ -195,11 +200,14 @@ func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
 func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	prevGeneration := verifier.getPreviousGenerationWhileLocked()
 
+	findFilter := bson.D{{"_id.generation", prevGeneration}}
+
+	verifier.logger.Debug().
+		Int("priorGeneration", prevGeneration).
+		Msgf("Counting prior generation’s enqueued rechecks.")
+
 	recheckColl := verifier.verificationDatabase().Collection(recheckQueue)
-	rechecksCount, err := recheckColl.CountDocuments(
-		ctx,
-		bson.D{{"_id.generation", prevGeneration}},
-	)
+	rechecksCount, err := recheckColl.CountDocuments(ctx, findFilter)
 	if err != nil {
 		return errors.Wrapf(err,
 			"failed to count generation %d’s rechecks",
@@ -220,30 +228,49 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	// 3) The number of documents exceeds $rechecksCount/$numWorkers. We do
 	//    this to prevent one thread from doing all of the rechecks.
 
-	prevDBName, prevCollName := "", ""
+	var prevDBName, prevCollName string
 	var idAccum []interface{}
 	var idLenAccum int
 	var dataSizeAccum int64
-	const maxIdsSize = 12 * 1024 * 1024
+
 	maxDocsPerTask := rechecksCount / int64(verifier.numWorkers)
 
 	if maxDocsPerTask < int64(verifier.numWorkers) {
 		maxDocsPerTask = int64(verifier.numWorkers)
 	}
 
+	// The sort here is important because the recheck _id is an embedded
+	// document that includes the namespace. Thus, all rechecks for a given
+	// namespace will be consecutive in this query’s result.
 	cursor, err := recheckColl.Find(
-		ctx, bson.D{{"_id.generation", prevGeneration}}, options.Find().SetSort(bson.D{{"_id", 1}}))
+		ctx,
+		findFilter,
+		options.Find().SetSort(bson.D{{"_id", 1}}),
+	)
 	if err != nil {
 		return err
 	}
 	defer cursor.Close(ctx)
 
-	createRecheckTask := func() error {
+	persistBufferedRechecks := func() error {
+		if len(idAccum) == 0 {
+			return nil
+		}
+
 		namespace := prevDBName + "." + prevCollName
 
-		err := verifier.InsertDocumentRecheckTask(idAccum, types.ByteCount(dataSizeAccum), namespace)
+		err := verifier.InsertDocumentRecheckTask(
+			idAccum,
+			types.ByteCount(dataSizeAccum),
+			namespace,
+		)
 		if err != nil {
-			return err
+			return errors.Wrapf(
+				err,
+				"failed to create a %d-document recheck task for collection %#q",
+				len(idAccum),
+				namespace,
+			)
 		}
 
 		verifier.logger.Debug().
@@ -263,27 +290,34 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+
 		idRaw := cursor.Current.Lookup("_id", "docID")
 		idLen := len(idRaw.Value)
 
+		// We persist rechecks if any of these happen:
+		// - the namespace has changed
+		// - we’ve reached the per-task recheck maximum
+		// - the buffered document IDs’ size exceeds the per-task maximum
+		// - the buffered documents exceed the partition size
+		//
 		if doc.PrimaryKey.DatabaseName != prevDBName ||
 			doc.PrimaryKey.CollectionName != prevCollName ||
 			int64(len(idAccum)) > maxDocsPerTask ||
-			idLenAccum >= maxIdsSize ||
+			idLenAccum >= maxIdsPerRecheckTask ||
 			dataSizeAccum >= verifier.partitionSizeInBytes {
 
-			if len(idAccum) > 0 {
-				err := createRecheckTask()
-				if err != nil {
-					return err
-				}
+			err := persistBufferedRechecks()
+			if err != nil {
+				return err
 			}
+
 			prevDBName = doc.PrimaryKey.DatabaseName
 			prevCollName = doc.PrimaryKey.CollectionName
 			idLenAccum = 0
 			dataSizeAccum = 0
-			idAccum = []interface{}{}
+			idAccum = idAccum[:0]
 		}
+
 		idLenAccum += idLen
 		dataSizeAccum += int64(doc.DataSize)
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
@@ -294,11 +328,5 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		return err
 	}
 
-	if len(idAccum) > 0 {
-		err := createRecheckTask()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return persistBufferedRechecks()
 }
