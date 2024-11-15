@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/pkg/errors"
@@ -194,19 +195,40 @@ func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
 func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	prevGeneration := verifier.getPreviousGenerationWhileLocked()
 
-	verifier.logger.Debug().Msgf("Creating recheck tasks from generation %d’s %s documents", prevGeneration, recheckQueue)
+	recheckColl := verifier.verificationDatabase().Collection(recheckQueue)
+	estimatedRechecks, err := recheckColl.EstimatedDocumentCount(ctx)
+	if err != nil {
+		return errors.Wrapf(err,
+			"failed to retrieve %#q’s estimated document count",
+			verifier.verificationDatabase().Name()+"."+recheckQueue,
+		)
+	}
+
+	verifier.logger.Debug().
+		Int("enqueuedInGeneration", prevGeneration).
+		Int("estimatedRechecks", int(estimatedRechecks)).
+		Msgf("Creating recheck tasks from enqueued rechecks.")
 
 	// We generate one recheck task per collection, unless
 	// 1) The size of the list of IDs would exceed 12MB (a very conservative way of avoiding
 	//    the 16MB BSON limit)
 	// 2) The size of the data would exceed our desired partition size.  This limits memory use
 	//    during the recheck phase.
+	// 3) The number of documents exceeds $rechecksCount/$numWorkers. We do
+	//    this to prevent one thread from doing all of the rechecks.
+
 	prevDBName, prevCollName := "", ""
 	var idAccum []interface{}
 	var idLenAccum int
 	var dataSizeAccum int64
 	const maxIdsSize = 12 * 1024 * 1024
-	cursor, err := verifier.verificationDatabase().Collection(recheckQueue).Find(
+	maxDocsPerTask := estimatedRechecks / int64(verifier.numWorkers)
+
+	if maxDocsPerTask < int64(verifier.numWorkers) {
+		maxDocsPerTask = int64(verifier.numWorkers)
+	}
+
+	cursor, err := recheckColl.Find(
 		ctx, bson.D{{"_id.generation", prevGeneration}}, options.Find().SetSort(bson.D{{"_id", 1}}))
 	if err != nil {
 		return err
@@ -227,10 +249,9 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		idRaw := cursor.Current.Lookup("_id", "docID")
 		idLen := len(idRaw.Value)
 
-		verifier.logger.Debug().Msgf("Found persisted recheck doc for %s.%s", doc.PrimaryKey.DatabaseName, doc.PrimaryKey.CollectionName)
-
 		if doc.PrimaryKey.DatabaseName != prevDBName ||
 			doc.PrimaryKey.CollectionName != prevCollName ||
+			int64(len(idAccum)) > maxDocsPerTask ||
 			idLenAccum >= maxIdsSize ||
 			dataSizeAccum >= verifier.partitionSizeInBytes {
 			namespace := prevDBName + "." + prevCollName
@@ -239,10 +260,11 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 				if err != nil {
 					return err
 				}
-				verifier.logger.Debug().Msgf(
-					"Created ID verification task for namespace %s with %d ids, "+
-						"%d id bytes and %d data bytes",
-					namespace, len(idAccum), idLenAccum, dataSizeAccum)
+				verifier.logger.Debug().
+					Str("namespace", namespace).
+					Int("numDocuments", len(idAccum)).
+					Str("dataSize", reportutils.FmtBytes(dataSizeAccum)).
+					Msg("Created document recheck task.")
 			}
 			prevDBName = doc.PrimaryKey.DatabaseName
 			prevCollName = doc.PrimaryKey.CollectionName
