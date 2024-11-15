@@ -459,7 +459,11 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 		}
 	}
 	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
-	verifier.logger.Debug().Msgf("getDocuments findCmd: %s opts: %v", findCmd, *runCommandOptions)
+	verifier.logger.Debug().
+		Interface("task", task.PrimaryKey).
+		Str("findCmd", fmt.Sprintf("%s", findCmd)).
+		Str("options", fmt.Sprintf("%v", *runCommandOptions)).
+		Msg("getDocuments findCmd.")
 
 	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
 }
@@ -540,7 +544,22 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 }
 
 func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTask) {
-	verifier.logger.Debug().Msgf("[Worker %d] Processing verify task", workerNum)
+	start := time.Now()
+
+	verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Interface("task", task.PrimaryKey).
+		Msg("Processing document comparison task.")
+
+	defer func() {
+		elapsed := time.Since(start)
+
+		verifier.logger.Debug().
+			Int("workerNum", workerNum).
+			Interface("task", task.PrimaryKey).
+			Stringer("timeElapsed", elapsed).
+			Msg("Finished document comparison task.")
+	}()
 
 	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(
 		context.Background(),
@@ -549,7 +568,11 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 
 	if err != nil {
 		task.Status = verificationTaskFailed
-		verifier.logger.Error().Msgf("[Worker %d] Error comparing docs: %+v", workerNum, err)
+		verifier.logger.Error().
+			Err(err).
+			Int("workerNum", workerNum).
+			Interface("task", task.PrimaryKey).
+			Msg("Failed to fetch and compare documents for document comparison task.")
 	} else {
 		task.SourceDocumentCount = docsCount
 		task.SourceByteCount = bytesCount
@@ -560,10 +583,15 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 			task.Status = verificationTaskFailed
 			// We know we won't change lastGeneration while verification tasks are running, so no mutex needed here.
 			if verifier.lastGeneration {
-				verifier.logger.Error().Msgf("[Worker %d] Verification Task %+v failed critical section and is a true error",
-					workerNum, task.PrimaryKey)
+				verifier.logger.Error().
+					Int("workerNum", workerNum).
+					Interface("task", task.PrimaryKey).
+					Msg("Document comparison task failed critical section and is a true error.")
 			} else {
-				verifier.logger.Debug().Msgf("[Worker %d] Verification Task %+v failed, may pass next generation", workerNum, task.PrimaryKey)
+				verifier.logger.Debug().
+					Int("workerNum", workerNum).
+					Interface("task", task.PrimaryKey).
+					Msg("Document comparison task failed, but it may pass in the next generation.")
 
 				var mismatches []VerificationResult
 				var missingIds []interface{}
@@ -594,7 +622,12 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 				// mismatched & missing docs.
 				err := verifier.InsertFailedCompareRecheckDocs(task.QueryFilter.Namespace, idsToRecheck, dataSizes)
 				if err != nil {
-					verifier.logger.Error().Msgf("[Worker %d] Error inserting document mismatch into Recheck queue: %+v", workerNum, err)
+					verifier.logger.Error().
+						Err(err).
+						Int("workerNum", workerNum).
+						Interface("task", task.PrimaryKey).
+						Int("rechecksCount", len(idsToRecheck)).
+						Msg("Failed to enqueue rechecks after document mismatches.")
 				}
 			}
 		}
@@ -602,7 +635,11 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 
 	err = verifier.UpdateVerificationTask(task)
 	if err != nil {
-		verifier.logger.Error().Msgf("Failed updating verification status: %v", err)
+		verifier.logger.Error().
+			Err(err).
+			Int("workerNum", workerNum).
+			Interface("task", task.PrimaryKey).
+			Msg("Failed to update task status.")
 	}
 }
 

@@ -370,7 +370,15 @@ func FetchFailedAndIncompleteTasks(ctx context.Context, coll *mongo.Collection, 
 
 func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.WaitGroup) {
 	defer wg.Done()
-	verifier.logger.Debug().Msgf("[Worker %d] Started", workerNum)
+
+	verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Msg("Worker started.")
+
+	defer verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Msg("Worker finished.")
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -378,8 +386,14 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.Wait
 		default:
 			task, err := verifier.FindNextVerifyTaskAndUpdate()
 			if errors.Is(err, mongo.ErrNoDocuments) {
-				verifier.logger.Debug().Msgf("[Worker %d] No tasks found, sleeping...", workerNum)
-				time.Sleep(verifier.workerSleepDelayMillis * time.Millisecond)
+				duration := verifier.workerSleepDelayMillis * time.Millisecond
+
+				verifier.logger.Debug().
+					Int("workerNum", workerNum).
+					Stringer("duration", duration).
+					Msg("No tasks found. Sleeping.")
+
+				time.Sleep(duration)
 				continue
 			} else if err != nil {
 				panic(err)
