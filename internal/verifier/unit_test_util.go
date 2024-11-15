@@ -123,7 +123,7 @@ func (suite *WithMongodsTestSuite) startReplSets() {
 			},
 		}
 		err = directClient.Database("admin").RunCommand(ctx, command).Err()
-		suite.Require().NoError(err)
+		suite.Require().NoError(err, "should initiate replication")
 	}
 }
 

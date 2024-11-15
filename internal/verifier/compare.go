@@ -150,6 +150,14 @@ func (verifier *Verifier) compareDocsFromChannels(
 				byteCount += types.ByteCount(len(doc))
 
 				err = handleNewDoc(doc, true)
+
+				if err != nil {
+					err = errors.Wrapf(
+						err,
+						"comparer thread failed to handle source doc with ID %v",
+						doc.Lookup("_id"),
+					)
+				}
 			}
 		}
 
@@ -164,8 +172,20 @@ func (verifier *Verifier) compareDocsFromChannels(
 				}
 
 				err = handleNewDoc(doc, false)
+
+				if err != nil {
+					err = errors.Wrapf(
+						err,
+						"comparer thread failed to handle destination doc with ID %v",
+						doc.Lookup("_id"),
+					)
+				}
 			}
 		}
+	}
+
+	if err != nil {
+		return nil, 0, 0, errors.Wrap(err, "comparer thread failed")
 	}
 
 	// We got here because both srcChannel and dstChannel are closed,
@@ -225,7 +245,15 @@ func (verifier *Verifier) getFetcherChannels(
 		)
 
 		if err == nil {
-			err = iterateCursorToChannel(ctx, cursor, srcChannel)
+			err = errors.Wrap(
+				iterateCursorToChannel(ctx, cursor, srcChannel),
+				"failed to read source documents",
+			)
+		} else {
+			err = errors.Wrap(
+				err,
+				"failed to find source documents",
+			)
 		}
 
 		return err
@@ -241,7 +269,15 @@ func (verifier *Verifier) getFetcherChannels(
 		)
 
 		if err == nil {
-			err = iterateCursorToChannel(ctx, cursor, dstChannel)
+			err = errors.Wrap(
+				iterateCursorToChannel(ctx, cursor, dstChannel),
+				"failed to read destination documents",
+			)
+		} else {
+			err = errors.Wrap(
+				err,
+				"failed to find destination documents",
+			)
 		}
 
 		return err
