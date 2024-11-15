@@ -459,7 +459,11 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 		}
 	}
 	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
-	verifier.logger.Debug().Msgf("getDocuments findCmd: %s opts: %v", findCmd, *runCommandOptions)
+	verifier.logger.Debug().
+		Interface("task", task.PrimaryKey).
+		Str("findCmd", fmt.Sprintf("%s", findCmd)).
+		Str("options", fmt.Sprintf("%v", *runCommandOptions)).
+		Msg("getDocuments findCmd.")
 
 	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
 }
