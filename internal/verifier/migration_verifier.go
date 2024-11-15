@@ -552,7 +552,7 @@ func (verifier *Verifier) ProcessVerifyTask(workerNum int, task *VerificationTas
 		Msg("Processing document comparison task.")
 
 	defer func() {
-		elapsed := time.Now().Sub(start)
+		elapsed := time.Since(start)
 
 		verifier.logger.Debug().
 			Int("workerNum", workerNum).
