@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -48,6 +49,7 @@ func (suite *MultiMetaVersionTestSuite) TestFailedCompareThenReplace() {
 			DB:   "the",
 			Coll: "namespace",
 		},
+		FullDocument: testutil.MustMarshal(bson.D{{"foo", 1}}),
 	}
 
 	err := verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
@@ -63,7 +65,7 @@ func (suite *MultiMetaVersionTestSuite) TestFailedCompareThenReplace() {
 					CollectionName: "namespace",
 					DocumentID:     "theDocID",
 				},
-				DataSize: maxBSONObjSize,
+				DataSize: len(event.FullDocument),
 			},
 		},
 		recheckDocs,
