@@ -106,7 +106,7 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 	var pipeline mongo.Pipeline
 
 	if len(verifier.srcNamespaces) == 0 {
-		pipeline = []bson.D{{{"$match", bson.D{{"ns.db", bson.D{{"$ne", verifier.metaDBName}}}}}}}
+		pipeline = []bson.D{{bson.E{"$match", bson.D{{"ns.db", bson.D{{"$ne", verifier.metaDBName}}}}}}}
 	} else {
 		filter := bson.A{}
 		for _, ns := range verifier.srcNamespaces {
