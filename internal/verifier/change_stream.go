@@ -108,7 +108,7 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 	if len(verifier.srcNamespaces) == 0 {
 		pipeline = []bson.D{{{"$match", bson.D{{"ns.db", bson.D{{"$ne", verifier.metaDBName}}}}}}}
 	} else {
-		filter := []bson.D{}
+		filter := bson.A{}
 		for _, ns := range verifier.srcNamespaces {
 			db, coll := SplitNamespace(ns)
 			filter = append(filter, bson.D{{"ns", bson.D{{"db", db}, {"coll", coll}}}})
