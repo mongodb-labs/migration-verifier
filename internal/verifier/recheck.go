@@ -196,18 +196,21 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	prevGeneration := verifier.getPreviousGenerationWhileLocked()
 
 	recheckColl := verifier.verificationDatabase().Collection(recheckQueue)
-	estimatedRechecks, err := recheckColl.EstimatedDocumentCount(ctx)
+	rechecksCount, err := recheckColl.CountDocuments(
+		ctx,
+		bson.D{{"_id.generation", prevGeneration}},
+	)
 	if err != nil {
 		return errors.Wrapf(err,
-			"failed to retrieve %#q’s estimated document count",
-			verifier.verificationDatabase().Name()+"."+recheckQueue,
+			"failed to count generation %d’s rechecks",
+			prevGeneration,
 		)
 	}
 
 	verifier.logger.Debug().
-		Int("enqueuedInGeneration", prevGeneration).
-		Int("estimatedRechecks", int(estimatedRechecks)).
-		Msgf("Creating recheck tasks from enqueued rechecks.")
+		Int("priorGeneration", prevGeneration).
+		Int("rechecksCount", int(rechecksCount)).
+		Msgf("Creating recheck tasks from prior generation’s enqueued rechecks.")
 
 	// We generate one recheck task per collection, unless
 	// 1) The size of the list of IDs would exceed 12MB (a very conservative way of avoiding
@@ -222,7 +225,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	var idLenAccum int
 	var dataSizeAccum int64
 	const maxIdsSize = 12 * 1024 * 1024
-	maxDocsPerTask := estimatedRechecks / int64(verifier.numWorkers)
+	maxDocsPerTask := rechecksCount / int64(verifier.numWorkers)
 
 	if maxDocsPerTask < int64(verifier.numWorkers) {
 		maxDocsPerTask = int64(verifier.numWorkers)
@@ -234,13 +237,27 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		return err
 	}
 	defer cursor.Close(ctx)
-	// We group these here using a sort rather than using aggregate because aggregate is
-	// subject to a 16MB limit on group size.
-	for cursor.Next(ctx) {
-		err := cursor.Err()
+
+	createRecheckTask := func() error {
+		namespace := prevDBName + "." + prevCollName
+
+		err := verifier.InsertDocumentRecheckTask(idAccum, types.ByteCount(dataSizeAccum), namespace)
 		if err != nil {
 			return err
 		}
+
+		verifier.logger.Debug().
+			Str("namespace", namespace).
+			Int("numDocuments", len(idAccum)).
+			Str("dataSize", reportutils.FmtBytes(dataSizeAccum)).
+			Msg("Created document recheck task.")
+
+		return nil
+	}
+
+	// We group these here using a sort rather than using aggregate because aggregate is
+	// subject to a 16MB limit on group size.
+	for cursor.Next(ctx) {
 		var doc RecheckDoc
 		err = cursor.Decode(&doc)
 		if err != nil {
@@ -254,17 +271,12 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			int64(len(idAccum)) > maxDocsPerTask ||
 			idLenAccum >= maxIdsSize ||
 			dataSizeAccum >= verifier.partitionSizeInBytes {
-			namespace := prevDBName + "." + prevCollName
+
 			if len(idAccum) > 0 {
-				err := verifier.InsertFailedIdsVerificationTask(idAccum, types.ByteCount(dataSizeAccum), namespace)
+				err := createRecheckTask()
 				if err != nil {
 					return err
 				}
-				verifier.logger.Debug().
-					Str("namespace", namespace).
-					Int("numDocuments", len(idAccum)).
-					Str("dataSize", reportutils.FmtBytes(dataSizeAccum)).
-					Msg("Created document recheck task.")
 			}
 			prevDBName = doc.PrimaryKey.DatabaseName
 			prevCollName = doc.PrimaryKey.CollectionName
@@ -276,16 +288,17 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		dataSizeAccum += int64(doc.DataSize)
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 	}
+
+	err = cursor.Err()
+	if err != nil {
+		return err
+	}
+
 	if len(idAccum) > 0 {
-		namespace := prevDBName + "." + prevCollName
-		err := verifier.InsertFailedIdsVerificationTask(idAccum, types.ByteCount(dataSizeAccum), namespace)
+		err := createRecheckTask()
 		if err != nil {
 			return err
 		}
-		verifier.logger.Debug().Msgf(
-			"Created ID verification task for namespace %s with %d ids, "+
-				"%d id bytes and %d data bytes",
-			namespace, len(idAccum), idLenAccum, dataSizeAccum)
 	}
 	return nil
 }
