@@ -19,12 +19,12 @@ const fauxDocSizeForDeleteEvents = 1024
 
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
 type ParsedEvent struct {
-	ID           interface{}          `bson:"_id"`
-	OpType       string               `bson:"operationType"`
-	Ns           *Namespace           `bson:"ns,omitempty"`
-	DocKey       DocKey               `bson:"documentKey,omitempty"`
-	FullDocument bson.Raw             `bson:"fullDocument,omitempty"`
-	ClusterTime  *primitive.Timestamp `bson:"clusterTime,omitEmpty"`
+	ID          interface{}          `bson:"_id"`
+	OpType      string               `bson:"operationType"`
+	Ns          *Namespace           `bson:"ns,omitempty"`
+	DocKey      DocKey               `bson:"documentKey,omitempty"`
+	DocSize     *int                 `bson:"fullDocument,omitempty"`
+	ClusterTime *primitive.Timestamp `bson:"clusterTime,omitEmpty"`
 }
 
 func (pe *ParsedEvent) String() string {
@@ -82,13 +82,13 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 			collNames[i] = changeEvent.Ns.Coll
 			docIDs[i] = changeEvent.DocKey.ID
 
-			if changeEvent.FullDocument == nil {
+			if changeEvent.DocSize == nil {
 				// This happens for deletes and for some updates.
 				// The document is probably, but not necessarily, deleted.
 				dataSizes[i] = fauxDocSizeForDeleteEvents
 			} else {
 				// This happens for inserts, replaces, and most updates.
-				dataSizes[i] = len(changeEvent.FullDocument)
+				dataSizes[i] = *changeEvent.DocSize
 			}
 		default:
 			return UnknownEventError{Event: &changeEvent}
@@ -103,16 +103,52 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 }
 
 func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
+	var pipeline mongo.Pipeline
+
 	if len(verifier.srcNamespaces) == 0 {
-		return []bson.D{{bson.E{"$match", bson.D{{"ns.db", bson.D{{"$ne", verifier.metaDBName}}}}}}}
+		pipeline = []bson.D{{bson.E{"$match", bson.D{{"ns.db", bson.D{{"$ne", verifier.metaDBName}}}}}}}
+	} else {
+		filter := bson.A{}
+		for _, ns := range verifier.srcNamespaces {
+			db, coll := SplitNamespace(ns)
+			filter = append(filter, bson.D{{"ns", bson.D{{"db", db}, {"coll", coll}}}})
+		}
+		stage := bson.D{{"$match", bson.D{{"$or", filter}}}}
+		pipeline = []bson.D{stage}
 	}
-	filter := bson.A{}
-	for _, ns := range verifier.srcNamespaces {
-		db, coll := SplitNamespace(ns)
-		filter = append(filter, bson.D{{"ns", bson.D{{"db", db}, {"coll", coll}}}})
-	}
-	stage := bson.D{{"$match", bson.D{{"$or", filter}}}}
-	return []bson.D{stage}
+
+	return append(
+		pipeline,
+		[]bson.D{
+
+			// Add a documentSize field.
+			{
+				{"$addFields", bson.D{
+					{"documentSize", bson.D{
+						{"$cond", bson.D{
+							{"if", bson.D{
+								{"$ne", bson.A{
+									"missing",
+									bson.D{{"$type", "$fullDocument"}},
+								}},
+							}}, // fullDocument exists
+							{"then", bson.D{{"$bsonSize", "$fullDocument"}}},
+							{"else", "$$REMOVE"},
+						}},
+					}},
+				}},
+			},
+
+			// Remove the fullDocument field since a) we don't use it, and
+			// b) it's big.
+			{
+				{"$project", bson.D{
+					{"fullDocument", 0},
+				}},
+			},
+		}...,
+	)
+
 }
 
 func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.ChangeStream) {
