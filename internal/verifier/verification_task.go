@@ -153,7 +153,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(partition *partitions.
 	return &verificationTask, err
 }
 
-func (verifier *Verifier) InsertFailedIdsVerificationTask(ids []interface{}, dataSize types.ByteCount, srcNamespace string) error {
+func (verifier *Verifier) InsertDocumentRecheckTask(ids []interface{}, dataSize types.ByteCount, srcNamespace string) error {
 	dstNamespace := srcNamespace
 	if len(verifier.nsMap) != 0 {
 		var ok bool

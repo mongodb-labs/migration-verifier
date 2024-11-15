@@ -15,10 +15,11 @@ import (
 
 const decimalPrecision = 2
 
-// This could include signed ints, but we have no need for now.
-// The bigger requirement is that it exclude uint8.
+// num16Plus is like realNum, but it excludes 8-bit int/uint.
 type num16Plus interface {
-	constraints.Float | ~uint | ~uint16 | ~uint32 | ~uint64
+	constraints.Float |
+		~uint | ~uint16 | ~uint32 | ~uint64 |
+		~int | ~int16 | ~int32 | ~int64
 }
 
 type realNum interface {
@@ -177,4 +178,10 @@ func FindBestUnit[T num16Plus](count T) DataUnit {
 	}
 
 	return biggestUnit
+}
+
+// FmtBytes is a convenience that combines BytesToUnit with FindBestUnit.
+// Use it to format a single count of bytes.
+func FmtBytes[T num16Plus](count T) string {
+	return BytesToUnit(count, FindBestUnit(count))
 }
