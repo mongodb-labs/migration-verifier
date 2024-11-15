@@ -31,12 +31,15 @@ import (
 )
 
 var macArmMongoVersions []string = []string{
-	"6.2.0", "6.0.1",
+	"8.0.3",
+	"7.0.15",
+	"6.0.19",
 }
 
 var preMacArmMongoVersions []string = []string{
-	"5.3.2", "5.0.11",
-	"4.4.16", "4.2.22",
+	"5.0.30",
+	"4.4.29",
+	"4.2.25",
 }
 
 type MultiDataVersionTestSuite struct {
