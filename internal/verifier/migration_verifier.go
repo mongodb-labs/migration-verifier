@@ -138,6 +138,8 @@ type Verifier struct {
 	globalFilter map[string]any
 
 	pprofInterval time.Duration
+
+	workerTracker *WorkerTracker
 }
 
 // VerificationStatus holds the Verification Status
@@ -201,6 +203,8 @@ func NewVerifier(settings VerifierSettings) *Verifier {
 		// This will get recreated once gen0 starts, but we want it
 		// here in case the change streams gets an event before then.
 		eventRecorder: NewEventRecorder(),
+
+		workerTracker: NewWorkerTracker(NumWorkers),
 	}
 }
 
@@ -1347,6 +1351,14 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	}
 
 	verifier.printChangeEventStatistics(strBuilder)
+
+	// Only print the worker status table if debug logging is enabled.
+	if verifier.logger.Debug().Enabled() {
+		switch genstatus {
+		case Gen0MetadataAnalysisComplete, GenerationInProgress:
+			verifier.printWorkerStatus(strBuilder)
+		}
+	}
 
 	var statusLine string
 

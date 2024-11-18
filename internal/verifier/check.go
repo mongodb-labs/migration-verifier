@@ -399,6 +399,8 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.Wait
 				panic(err)
 			}
 
+			verifier.workerTracker.Set(workerNum, *task)
+
 			if task.Type == verificationTaskVerifyCollection {
 				verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
 				if task.Generation == 0 {
@@ -410,6 +412,8 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.Wait
 			} else {
 				verifier.ProcessVerifyTask(workerNum, task)
 			}
+
+			verifier.workerTracker.Unset(workerNum)
 		}
 	}
 }
