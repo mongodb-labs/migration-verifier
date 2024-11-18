@@ -3,6 +3,7 @@ package verifier
 import (
 	"bytes"
 	"context"
+	"time"
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/pkg/errors"
@@ -11,6 +12,8 @@ import (
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 )
+
+const readTimeout = 10 * time.Minute
 
 func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
@@ -25,9 +28,9 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	// another to read from the destination, and a third one to receive the
 	// docs from the other 2 threads and compare them. It’s done this way,
 	// rather than fetch-everything-then-compare, to minimize memory usage.
-	errGroup, ctx := errgroup.WithContext(givenCtx)
+	errGroup, groupCtx := errgroup.WithContext(givenCtx)
 
-	srcChannel, dstChannel := verifier.getFetcherChannels(ctx, errGroup, task)
+	srcChannel, dstChannel := verifier.getFetcherChannels(groupCtx, errGroup, task)
 
 	results := []VerificationResult{}
 	var docCount types.DocumentCount
@@ -36,7 +39,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	errGroup.Go(func() error {
 		var err error
 		results, docCount, byteCount, err = verifier.compareDocsFromChannels(
-			ctx,
+			groupCtx,
 			task,
 			srcChannel,
 			dstChannel,
@@ -131,16 +134,29 @@ func (verifier *Verifier) compareDocsFromChannels(
 	}
 
 	var srcClosed, dstClosed bool
-	var err error
+
+	readTimer := time.NewTimer(0)
+	defer func() {
+		if !readTimer.Stop() {
+			<-readTimer.C
+		}
+	}()
 
 	// We always read src & dst back & forth. This ensures that, if one side
 	// lags the other significantly, we won’t keep caching the faster side’s
 	// documents and thus consume more & more memory.
-	for err == nil && (!srcClosed || !dstClosed) {
+	for !srcClosed || !dstClosed {
 		if !srcClosed {
+			simpleTimerReset(readTimer, readTimeout)
+
 			select {
 			case <-ctx.Done():
 				return nil, 0, 0, ctx.Err()
+			case <-readTimer.C:
+				return nil, 0, 0, errors.Errorf(
+					"failed to read from source after %s",
+					readTimeout,
+				)
 			case doc, alive := <-srcChannel:
 				if !alive {
 					srcClosed = true
@@ -149,10 +165,10 @@ func (verifier *Verifier) compareDocsFromChannels(
 				docCount++
 				byteCount += types.ByteCount(len(doc))
 
-				err = handleNewDoc(doc, true)
+				err := handleNewDoc(doc, true)
 
 				if err != nil {
-					err = errors.Wrapf(
+					return nil, 0, 0, errors.Wrapf(
 						err,
 						"comparer thread failed to handle source doc with ID %v",
 						doc.Lookup("_id"),
@@ -162,19 +178,29 @@ func (verifier *Verifier) compareDocsFromChannels(
 		}
 
 		if !dstClosed {
+			simpleTimerReset(readTimer, readTimeout)
+
 			select {
 			case <-ctx.Done():
 				return nil, 0, 0, ctx.Err()
+			case <-readTimer.C:
+				return nil, 0, 0, errors.Errorf(
+					"failed to read from destination after %s",
+					readTimeout,
+				)
 			case doc, alive := <-dstChannel:
 				if !alive {
+					verifier.logger.Debug().
+						Interface("task", task.PrimaryKey).
+						Msg("Destination reader closed.")
 					dstClosed = true
 					break
 				}
 
-				err = handleNewDoc(doc, false)
+				err := handleNewDoc(doc, false)
 
 				if err != nil {
-					err = errors.Wrapf(
+					return nil, 0, 0, errors.Wrapf(
 						err,
 						"comparer thread failed to handle destination doc with ID %v",
 						doc.Lookup("_id"),
@@ -182,10 +208,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 				}
 			}
 		}
-	}
-
-	if err != nil {
-		return nil, 0, 0, errors.Wrap(err, "comparer thread failed")
 	}
 
 	// We got here because both srcChannel and dstChannel are closed,
@@ -225,6 +247,14 @@ func (verifier *Verifier) compareDocsFromChannels(
 	}
 
 	return results, docCount, byteCount, nil
+}
+
+func simpleTimerReset(t *time.Timer, dur time.Duration) {
+	if !t.Stop() {
+		<-t.C
+	}
+
+	t.Reset(dur)
 }
 
 func (verifier *Verifier) getFetcherChannels(
