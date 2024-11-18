@@ -463,6 +463,11 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder) {
 		)
 	}
 
-	builder.WriteString(fmt.Sprintf("\nActive worker threads (%d):\n", activeThreadCount))
+	builder.WriteString(fmt.Sprintf(
+		"\nActive worker threads (%d of %d):\n",
+		activeThreadCount,
+		verifier.numWorkers,
+	))
+
 	table.Render()
 }
