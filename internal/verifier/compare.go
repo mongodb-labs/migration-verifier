@@ -190,9 +190,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 				)
 			case doc, alive := <-dstChannel:
 				if !alive {
-					verifier.logger.Debug().
-						Interface("task", task.PrimaryKey).
-						Msg("Destination reader closed.")
 					dstClosed = true
 					break
 				}
