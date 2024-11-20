@@ -36,6 +36,8 @@ type IntegrationTestSuite struct {
 
 var _ suite.TestingSuite = &IntegrationTestSuite{}
 
+// Context returns a Context that the suite will cancel after the test.
+// Always use this rather than context.Background() in tests!
 func (suite *IntegrationTestSuite) Context() context.Context {
 	suite.Require().NotNil(
 		suite.testContext,
