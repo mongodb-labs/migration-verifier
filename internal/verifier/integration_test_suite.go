@@ -124,11 +124,11 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	return verifier
 }
 
-func (suite *IntegrationTestSuite) DBNameForTest() string {
+func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {
 	name := suite.T().Name()
 	return strings.ReplaceAll(
 		strings.ReplaceAll(name, "/", "-"),
 		".",
 		"-",
-	)
+	) + strings.Join(suffixes, "")
 }

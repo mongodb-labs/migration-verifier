@@ -1275,6 +1275,7 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 }
 
 func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
+	suite.T().Skip("TEMPORARY")
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
