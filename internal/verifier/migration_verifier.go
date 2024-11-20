@@ -24,7 +24,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
-	"github.com/rs/zerolog"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -49,7 +48,6 @@ const (
 	SrcNamespaceField = "query_filter.namespace"
 	DstNamespaceField = "query_filter.to"
 	NumWorkers        = 10
-	refetch           = "TODO_CHANGE_ME_REFETCH"
 	Idle              = "idle"
 	Check             = "check"
 	Recheck           = "recheck"
@@ -123,12 +121,12 @@ type Verifier struct {
 	metaDBName    string
 	srcStartAtTs  *primitive.Timestamp
 
-	mux                   sync.RWMutex
-	changeStreamRunning   bool
-	changeStreamEnderChan chan struct{}
-	changeStreamErrChan   chan error
-	changeStreamDoneChan  chan struct{}
-	lastChangeEventTime   *primitive.Timestamp
+	mux                     sync.RWMutex
+	changeStreamRunning     bool
+	changeStreamFinalTsChan chan primitive.Timestamp
+	changeStreamErrChan     chan error
+	changeStreamDoneChan    chan struct{}
+	lastChangeEventTime     *primitive.Timestamp
 
 	readConcernSetting ReadConcernSetting
 
@@ -188,15 +186,15 @@ func NewVerifier(settings VerifierSettings) *Verifier {
 	}
 
 	return &Verifier{
-		phase:                 Idle,
-		numWorkers:            NumWorkers,
-		readPreference:        readpref.Primary(),
-		partitionSizeInBytes:  400 * 1024 * 1024,
-		failureDisplaySize:    DefaultFailureDisplaySize,
-		changeStreamEnderChan: make(chan struct{}),
-		changeStreamErrChan:   make(chan error),
-		changeStreamDoneChan:  make(chan struct{}),
-		readConcernSetting:    readConcern,
+		phase:                   Idle,
+		numWorkers:              NumWorkers,
+		readPreference:          readpref.Primary(),
+		partitionSizeInBytes:    400 * 1024 * 1024,
+		failureDisplaySize:      DefaultFailureDisplaySize,
+		changeStreamFinalTsChan: make(chan primitive.Timestamp),
+		changeStreamErrChan:     make(chan error),
+		changeStreamDoneChan:    make(chan struct{}),
+		readConcernSetting:      readConcern,
 
 		// This will get recreated once gen0 starts, but we want it
 		// here in case the change streams gets an event before then.
@@ -315,15 +313,7 @@ func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
 }
 
 func (verifier *Verifier) SetLogger(logPath string) {
-	writer := getLogWriter(logPath)
-	verifier.writer = writer
-
-	consoleWriter := zerolog.ConsoleWriter{
-		Out:        writer,
-		TimeFormat: timeFormat,
-	}
-	l := zerolog.New(consoleWriter).With().Timestamp().Logger()
-	verifier.logger = logger.NewLogger(&l, writer)
+	verifier.logger, verifier.writer = getLoggerAndWriter(logPath)
 }
 
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {
@@ -1170,10 +1160,6 @@ func (verifier *Verifier) verificationDatabase() *mongo.Database {
 
 func (verifier *Verifier) verificationTaskCollection() *mongo.Collection {
 	return verifier.verificationDatabase().Collection(verificationTasksCollection)
-}
-
-func (verifier *Verifier) refetchCollection() *mongo.Collection {
-	return verifier.verificationDatabase().Collection(refetch)
 }
 
 func (verifier *Verifier) srcClientDatabase(dbName string) *mongo.Database {

@@ -42,13 +42,24 @@ func (verifier *Verifier) Check(ctx context.Context, filter map[string]any) {
 	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
 }
 
-func (verifier *Verifier) waitForChangeStream() error {
+func (verifier *Verifier) waitForChangeStream(ctx context.Context) error {
 	verifier.mux.RLock()
 	csRunning := verifier.changeStreamRunning
 	verifier.mux.RUnlock()
 	if csRunning {
 		verifier.logger.Debug().Msg("Changestream still running, signalling that writes are done and waiting for change stream to exit")
-		verifier.changeStreamEnderChan <- struct{}{}
+
+		finalTs, err := GetClusterTime(
+			ctx,
+			verifier.logger,
+			verifier.srcClient,
+		)
+
+		if err != nil {
+			return errors.Wrapf(err, "failed to fetch source's cluster time")
+		}
+
+		verifier.changeStreamFinalTsChan <- finalTs
 		select {
 		case err := <-verifier.changeStreamErrChan:
 			verifier.logger.Warn().Err(err).
@@ -242,7 +253,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			// It's necessary to wait for the change stream to finish before incrementing the
 			// generation number, or the last changes will not be checked.
 			verifier.mux.Unlock()
-			err := verifier.waitForChangeStream()
+			err := verifier.waitForChangeStream(ctx)
 			if err != nil {
 				return err
 			}

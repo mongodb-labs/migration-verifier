@@ -3,6 +3,7 @@ package retry
 import (
 	"context"
 	"math/rand"
+	"slices"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/logger"
@@ -10,6 +11,8 @@ import (
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 )
+
+var CustomTransientErr = errors.New("possibly-transient failure detected")
 
 // RunForUUIDAndTransientErrors retries f() for the CollectionUUIDMismatch error and for transient errors.
 // This should be used to run a driver operation that optionally specifies the `collectionUUID` parameter
@@ -273,25 +276,42 @@ func (r *Retryer) shouldRetryWithSleep(
 		return false
 	}
 
+	var whyTransient string
+
 	errCode := util.GetErrorCode(err)
-	if util.IsTransientError(err) {
-		logger.Warn().Int("error code", errCode).Err(err).Msgf(
-			"Waiting %s seconds to retry operation after transient error.", sleepTime)
-		return true
+
+	if util.IsTransientError(err) || slices.Contains(r.additionalErrorCodes, errCode) {
+		whyTransient = "Error code suggests a transient error."
+	} else if errors.Is(err, CustomTransientErr) {
+		whyTransient = "Error may be transient."
 	}
 
-	for _, code := range r.additionalErrorCodes {
-		if code == errCode {
-			logger.Warn().Int("error code", errCode).Err(err).Msgf(
-				"Waiting %s seconds to retry operation after an error because it is in our additional codes list.", sleepTime)
-			return true
+	if whyTransient == "" {
+		event := logger.Debug().Err(err)
+
+		if errCode != 0 {
+			event = event.Int("error code", errCode)
 		}
+
+		event.Msg("Not retrying on error because it appears not to be transient.")
+
+		return false
 	}
 
-	logger.Debug().Err(err).Int("error code", errCode).
-		Msg("Not retrying on error because it is not transient nor is it in our additional codes list.")
+	retryLogEvent := logger.Warn().
+		Err(err).
+		Stringer("duration", sleepTime)
 
-	return false
+	if errCode != 0 {
+		retryLogEvent = retryLogEvent.
+			Int("error code", errCode)
+	}
+
+	retryLogEvent.
+		Str("reason", whyTransient).
+		Msg("Pausing then will retry operation.")
+
+	return true
 }
 
 // Use this method for aggregates which should take a UUID in new versions but not old ones.
