@@ -58,9 +58,6 @@ jobs:
         with:
           go-version: stable
 
-      - name: Install packages
-        run: ${{ matrix.os.setup }}
-
       - name: Install m
         run: npm install -g m mongosh
 
