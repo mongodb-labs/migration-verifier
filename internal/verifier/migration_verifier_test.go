@@ -1199,8 +1199,12 @@ func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb4").CreateCollection(ctx, "testColl6")
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "testColl7")
-	suite.Require().NoError(err)
+
+	if suite.GetSrcTopology() != TopologySharded {
+		err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "testColl7")
+		suite.Require().NoError(err)
+	}
+
 	err = suite.dstMongoClient.Database("mongosync_reserved_for_internal_use").CreateCollection(ctx, "globalState")
 	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("mongosync_reserved_for_verification_src_metadata").CreateCollection(ctx, "auditor")
@@ -1317,7 +1321,11 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 		suite.Require().NoError(err)
 
 		for status.TotalTasks == 0 && verifier.generation < 10 {
-			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting another generation …", verifier.generation)
+			delay := time.Second
+
+			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting %s then will run another generation …", verifier.generation, delay)
+
+			time.Sleep(delay)
 			checkContinueChan <- struct{}{}
 			<-checkDoneChan
 			status, err = verifier.GetVerificationStatus()
