@@ -52,13 +52,13 @@ jobs:
         run: pipx install 'mtools[all]'
 
       - name: Start source cluster
-        run: mlaunch init --port 27020 --replicaset ${{ matrix.topology.args }}
+        run: mlaunch init --port 27020 --dir src --replicaset ${{ matrix.topology.args }}
 
       - name: Start destination cluster
-        run: mlaunch init --port 27030 --replicaset ${{ matrix.topology.args }}
+        run: mlaunch init --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}
 
       - name: Start metadata cluster
-        run: mlaunch init --port 27040 --replicaset ${{ matrix.topology.args }}
+        run: mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}
 
       - name: Check out repository
         uses: actions/checkout@v4
