@@ -13,10 +13,10 @@ jobs:
       matrix:
         os:
           - runsOn: macos-latest
-            setup: brew install pipx parallel
+            setup: brew install parallel
 
           - runsOn: ubuntu-latest
-            setup: apt install -y pipx parallel
+            setup: apt install -y parallel
 
         version:
           - '4.2'
@@ -28,9 +28,15 @@ jobs:
 
         topology:
           - name: replset
+            srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
+            dstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
+            metaConnStr: mongodb://localhost:27040,localhost:27041,localhost:27042
 
           - name: sharded
             args: --sharded 2
+            srcConnStr: mongodb://localhost:27020
+            dstConnStr: mongodb://localhost:27030
+            metaConnStr: mongodb://localhost:27040
 
         go_version:
 
@@ -42,6 +48,9 @@ jobs:
     runs-on: ${{matrix.os.runsOn}}
 
     steps:
+      - name: Install packages
+        run: ${{ matrix.os.setup }}
+
       - name: Install m
         run: npm install -g m
 
@@ -73,6 +82,6 @@ jobs:
       - name: Test
         run: go test -v ./...
         env:
-          MVTEST_SRC: mongodb://localhost:27020
-          MVTEST_DST: mongodb://localhost:27030
-          MVTEST_META: mongodb://localhost:27040
+          MVTEST_SRC: ${{matrix.topology.srcConnStr}}
+          MVTEST_DST: ${{matrix.topology.dstConnStr}}
+          MVTEST_META: ${{matrix.topology.metaConnStr}}
