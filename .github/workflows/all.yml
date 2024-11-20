@@ -16,7 +16,6 @@ jobs:
             setup: brew install parallel
 
           - runsOn: ubuntu-latest
-            setup: apt install -y parallel
 
         version:
           - '4.2'
@@ -52,7 +51,7 @@ jobs:
         run: ${{ matrix.os.setup }}
 
       - name: Install m
-        run: npm install -g m
+        run: npm install -g m mongosh
 
       - name: Activate MongoDB ${{ matrix.version }}
         run: yes | m ${{ matrix.version }}
@@ -67,6 +66,9 @@ jobs:
                 echo "mlaunch init --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}"
                 echo "mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}"
             } | parallel
+
+      - name: Await source readiness
+        run: while ! $( mongosh "${{matrix.topology.srcConnStr}}" --eval 'db.ping()' ); do sleep 1; done
 
       - name: Check out repository
         uses: actions/checkout@v4
