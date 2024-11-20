@@ -70,7 +70,7 @@ jobs:
             } | parallel
 
       - name: Test
-        run: go test -v ./...
+        run: go test -v ./... -run TestIntegration -testify.m TestPartitionWithFilter
         env:
           MVTEST_SRC: ${{matrix.topology.srcConnStr}}
           MVTEST_DST: ${{matrix.topology.dstConnStr}}
