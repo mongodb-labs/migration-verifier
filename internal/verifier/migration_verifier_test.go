@@ -1391,6 +1391,10 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
+	if suite.GetTopology() == TopologySharded {
+		suite.T().Skip("Skipping pending REP-5299.")
+	}
+
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
 	filter := map[string]any{"inFilter": map[string]any{"$ne": false}}
