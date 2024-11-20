@@ -2,11 +2,12 @@ package verifier
 
 import (
 	"context"
-	"os"
 	"strings"
 
+	"github.com/10gen/migration-verifier/internal/util"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -121,19 +122,10 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 }
 
 func (suite *IntegrationTestSuite) GetTopology() TestTopology {
-	rawTopology, found := os.LookupEnv(topologyEnvVar)
+	buildInfo, err := util.GetBuildInfo(suite.Context(), suite.srcMongoClient)
+	suite.Require().NoError(err, "should read source's build info")
 
-	suite.Require().True(found, "Environment must contain %#q.", topologyEnvVar)
-
-	topology := TestTopology(rawTopology)
-
-	suite.Require().Contains(
-		knownTopologies,
-		topology,
-		"%#q must be a known value.",
-	)
-
-	return topology
+	return lo.Ternary(buildInfo.IsSharded, TopologySharded, "")
 }
 
 func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
