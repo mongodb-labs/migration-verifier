@@ -28,10 +28,9 @@ jobs:
 
         topology:
           - name: replset
-            args: --replicaset --nodes 1
 
           - name: sharded
-            args: --sharded 2 --nodes 1
+            args: --sharded 2
 
         go_version:
 
@@ -53,13 +52,13 @@ jobs:
         run: pipx install 'mtools[all]'
 
       - name: Start source cluster
-        run: mlaunch init --port 27020 ${{ matrix.topology.args }}
+        run: mlaunch init --port 27020 --replicaset ${{ matrix.topology.args }}
 
       - name: Start destination cluster
-        run: mlaunch init --port 27030 ${{ matrix.topology.args }}
+        run: mlaunch init --port 27030 --replicaset ${{ matrix.topology.args }}
 
       - name: Start metadata cluster
-        run: mlaunch init --port 27040 ${{ matrix.topology.args }}
+        run: mlaunch init --port 27040 --replicaset ${{ matrix.topology.args }}
 
       - name: Check out repository
         uses: actions/checkout@v4
