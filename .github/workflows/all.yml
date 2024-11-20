@@ -47,7 +47,17 @@ jobs:
     # There seems no good reason to test on other OSes … ?
     runs-on: ubuntu-latest
 
+    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}
+
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Fetch Go ${{ matrix.go_version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
       - name: Install packages
         run: ${{ matrix.os.setup }}
 
@@ -65,14 +75,6 @@ jobs:
 
       - name: Install mtools
         run: pipx install 'mtools[all]'
-
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Fetch Go ${{ matrix.go_version }}
-        uses: actions/setup-go@v5
-        with:
-          go-version: stable
 
       - name: Build
         run: go build main/migration_verifier.go
