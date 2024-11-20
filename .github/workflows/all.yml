@@ -11,40 +11,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mongodb_versions:
-          - src: '4.2'
-            dst:
-              - '4.2'
-              - '4.4'
-              - '5.0'
-              - '6.0'
+        mongodb_versions: &mongodb_versions
+          - [ '4.2', '4.2' ]
+          - [ '4.2', '4.4' ]
+          - [ '4.2', '5.0' ]
+          - [ '4.2', '6.0' ]
 
-          - src: '4.4'
-            dst:
-              - '4.4'
-              - '5.0'
-              - '6.0'
+          - [ '4.4', '4.4' ]
+          - [ '4.4', '5.0' ]
+          - [ '4.4', '6.0' ]
 
-          - src: '5.0'
-            dst:
-              - '5.0'
-              - '6.0'
-              - '7.0'
+          - [ '5.0', '5.0' ]
+          - [ '5.0', '6.0' ]
+          - [ '5.0', '7.0' ]
 
-          - src: '6.0'
-            dst:
-              - '6.0'
-              - '7.0'
-              - '8.0'
+          - [ '6.0', '6.0' ]
+          - [ '6.0', '7.0' ]
+          - [ '6.0', '8.0' ]
 
-          - src: '7.0'
-            dst:
-              - '7.0'
-              - '8.0'
+          - [ '7.0', '7.0' ]
+          - [ '7.0', '8.0' ]
 
-          - src: '8.0'
-            dst:
-              - '8.0'
+          - [ '8.0', '8.0' ]
 
         topology:
           - name: replset
@@ -66,17 +54,14 @@ jobs:
       - name: Install m
         run: npm install -g m mongosh
 
-      - name: Install MongoDB versions
-        run: yes | m ${{ matrix.mongodb_versions.src }} ${{ matrix.mongodb_versions.dst }} stable
+      - name: Install MongoDB ${{ matrix.mongodb_versions.0 }} (source)
+        run: yes | m ${{ matrix.mongodb_versions.0 }} && dirname $(readlink $(which mongod)) > .srcpath
 
-      - name: Set & save source version
-        run: m ${{ matrix.mongodb_versions.src }} && dirname $(readlink $(which mongod)) > .srcpath
+      - name: Install MongoDB ${{ matrix.mongodb_versions.1 }} (destination)
+        run: yes | m ${{ matrix.mongodb_versions.1 }} && dirname $(readlink $(which mongod)) > .dstpath
 
-      - name: Set & save destination version
-        run: m ${{ matrix.mongodb_versions.dst }} && dirname $(readlink $(which mongod)) > .dstpath
-
-      - name: Set & save metadata version
-        run: m stable && dirname $(readlink $(which mongod)) > .metapath
+      - name: Install latest stable MongoDB (metadata)
+        run: yes | m stable && dirname $(readlink $(which mongod)) > .metapath
 
       - name: Install mtools
         run: pipx install 'mtools[all]'
