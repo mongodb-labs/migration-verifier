@@ -68,7 +68,7 @@ jobs:
             } | parallel
 
       - name: Await source readiness
-        run: while ! $( mongosh "${{matrix.topology.srcConnStr}}" --eval 'db.ping()' ); do sleep 1; done
+        run: while ! $( mongosh "${{matrix.topology.srcConnStr}}" --eval 'db.hello()' ); do sleep 1; done
 
       - name: Check out repository
         uses: actions/checkout@v4
