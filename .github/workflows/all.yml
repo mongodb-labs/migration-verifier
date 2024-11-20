@@ -19,12 +19,12 @@ jobs:
             setup: apt install -y pip3
 
         version:
-          - 4.2
-          - 4.4
-          - 5.0
-          - 6.0
-          - 7.0
-          - 8.0
+          - '4.2'
+          - '4.4'
+          - '5.0'
+          - '6.0'
+          - '7.0'
+          - '8.0'
 
         topology:
           - name: replset
@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-       - run: echo ${{matrix}}
+       - run: echo ${{matrix.os.runsOn}}
 #    runs-on: ${{matrix.os.runsOn}}
 #
 #    steps:
