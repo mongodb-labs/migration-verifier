@@ -47,7 +47,7 @@ jobs:
         run: npm install -g m
 
       - name: Activate MongoDB ${{ matrix.version }}
-        run: m activate ${{ matrix.version }}
+        run: m ${{ matrix.version }}
 
       - name: Install mtools
         run: pipx install 'mtools[all]'
