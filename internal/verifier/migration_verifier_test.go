@@ -1498,7 +1498,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 }
 
 func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
-	suite.T().Skip("TEMPORARY")
+
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
 	ctx := context.Background()

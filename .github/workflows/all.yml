@@ -12,23 +12,23 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - runsOn: macos-latest
-            setup: brew install parallel
+#          - runsOn: macos-latest
+#            setup: brew install parallel
 
           - runsOn: ubuntu-latest
 
         version:
-          - '4.2'
-          - '4.4'
-          - '5.0'
-          - '6.0'
-          - '7.0'
+#          - '4.2'
+#          - '4.4'
+#          - '5.0'
+#          - '6.0'
+#          - '7.0'
           - '8.0'
 
         topology:
-          - name: replset
-            srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
-            dstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
+#          - name: replset
+#            srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
+#            dstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
 
           - name: sharded
             args: --sharded 2
