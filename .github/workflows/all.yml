@@ -13,10 +13,10 @@ jobs:
       matrix:
         os:
           - runsOn: macos-latest
-            setup: brew install pipx
+            setup: brew install pipx parallel
 
           - runsOn: ubuntu-latest
-            setup: apt install -y pipx
+            setup: apt install -y pipx parallel
 
         version:
           - '4.2'
@@ -51,14 +51,13 @@ jobs:
       - name: Install mtools
         run: pipx install 'mtools[all]'
 
-      - name: Start source cluster
-        run: mlaunch init --port 27020 --dir src --replicaset ${{ matrix.topology.args }}
-
-      - name: Start destination cluster
-        run: mlaunch init --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}
-
-      - name: Start metadata cluster
-        run: mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}
+      - name: Start clusters
+        run: |-
+            {
+                echo "mlaunch init --port 27020 --dir src --replicaset ${{ matrix.topology.args }}"
+                echo "mlaunch init --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}"
+                echo "mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}"
+            } | parallel
 
       - name: Check out repository
         uses: actions/checkout@v4
@@ -74,6 +73,6 @@ jobs:
       - name: Test
         run: go test -v ./...
         env:
-          MVTEST_SRC: localhost:27020
-          MVTEST_DST: localhost:27030
-          MVTEST_META: localhost:27040
+          MVTEST_SRC: mongodb://localhost:27020
+          MVTEST_DST: mongodb://localhost:27030
+          MVTEST_META: mongodb://localhost:27040
