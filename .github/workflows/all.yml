@@ -12,10 +12,10 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - name: macos-latest
+          - runsOn: macos-latest
             setup: brew install pip3
 
-          - name: ubuntu-latest
+          - runsOn: ubuntu-latest
             setup: apt install -y pip3
 
         version:
@@ -40,7 +40,7 @@ jobs:
           - '1.20'
           - stable
 
-    runs-on: ${{matrix.runsOn}}
+    runs-on: ${{matrix.os.runsOn}}
 
     steps:
       - name: Install m
