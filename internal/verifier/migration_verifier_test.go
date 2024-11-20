@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
@@ -1236,10 +1237,13 @@ func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.dstNamespaces)
 
 	// Collections in admin, config, and local should not be found
-	err = suite.srcMongoClient.Database("local").CreateCollection(ctx, "islocalSrc")
-	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "islocalDest")
-	suite.Require().NoError(err)
+	if suite.GetSrcTopology() != TopologySharded {
+		err = suite.srcMongoClient.Database("local").CreateCollection(ctx, "islocalSrc")
+		suite.Require().NoError(err)
+		err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "islocalDest")
+		suite.Require().NoError(err)
+	}
+
 	err = suite.srcMongoClient.Database("admin").CreateCollection(ctx, "isAdminSrc")
 	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("admin").CreateCollection(ctx, "isAdminDest")
@@ -1388,10 +1392,13 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
-	filter := map[string]any{"inFilter": map[string]any{"$ne": false}}
+	dbname1 := suite.DBNameForTest("1")
+	dbname2 := suite.DBNameForTest("2")
+
+	filter := bson.M{"inFilter": bson.M{"$ne": false}}
 	verifier := suite.BuildVerifier()
-	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
-	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
+	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
+	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})
 	verifier.SetNamespaceMap()
 	verifier.SetIgnoreBSONFieldOrder(true)
 	// Set this value low to test the verifier with multiple partitions.
@@ -1399,8 +1406,8 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 
 	ctx := suite.Context()
 
-	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
-	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
+	srcColl := suite.srcMongoClient.Database(dbname1).Collection("testColl1")
+	dstColl := suite.dstMongoClient.Database(dbname2).Collection("testColl3")
 
 	// Documents with _id in [0, 100) should match.
 	var docs []interface{}
@@ -1432,7 +1439,11 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 		suite.Require().NoError(err)
 
 		for status.TotalTasks == 0 && verifier.generation < 10 {
-			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting another generation …", verifier.generation)
+			delay := time.Second
+
+			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting %s then will run another generation …", verifier.generation, delay)
+
+			time.Sleep(delay)
 			checkContinueChan <- struct{}{}
 			<-checkDoneChan
 			status, err = verifier.GetVerificationStatus()
@@ -1449,6 +1460,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	suite.Require().Equal(status.FailedTasks, 0)
 
 	// Insert another document that is not in the filter.
+	// This should trigger a recheck despite being outside the filter.
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 200, "x": 200, "inFilter": false})
 	suite.Require().NoError(err)
 
@@ -1457,11 +1469,13 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 
 	// Wait for generation to finish.
 	<-checkDoneChan
+
 	status = waitForTasks()
+
 	// There should be no failures, since the inserted document is not in the filter.
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
-	// Now insert in the source, this should come up next generation.
+	// Now insert in the source. This should come up next generation.
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 201, "x": 201, "inFilter": true})
 	suite.Require().NoError(err)
 

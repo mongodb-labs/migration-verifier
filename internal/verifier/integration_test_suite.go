@@ -94,6 +94,19 @@ func (suite *IntegrationTestSuite) SetupTest() {
 		dbname,
 	)
 
+	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient} {
+		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
+		suite.Require().NoError(err, "should list database names")
+		for _, dbName := range dbNames {
+			if strings.Index(dbName, suite.DBNameForTest()) == 0 {
+				suite.T().Logf("Dropping database %#q because it seems to be left over from an earlier run of this test.", dbName)
+				suite.Require().NoError(client.Database(dbName).Drop(ctx))
+			}
+
+			suite.initialDbNames.Add(dbName)
+		}
+	}
+
 	suite.testContext, suite.contextCanceller = ctx, canceller
 }
 

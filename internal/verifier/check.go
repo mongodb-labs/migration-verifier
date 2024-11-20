@@ -77,6 +77,12 @@ func (verifier *Verifier) waitForChangeStream(ctx context.Context) error {
 func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 	verifier.logger.Debug().Msgf("Starting %d verification workers", verifier.numWorkers)
 	ctx, cancel := context.WithCancel(ctx)
+
+	if verifier.workerSleepDelayMillis == 0 {
+		verifier.logger.Info().
+			Msg("Worker sleep delay is zero. Only tests should do this.")
+	}
+
 	wg := sync.WaitGroup{}
 	for i := 0; i < verifier.numWorkers; i++ {
 		wg.Add(1)
@@ -185,7 +191,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	verifier.mux.RLock()
 	csRunning := verifier.changeStreamRunning
 	verifier.mux.RUnlock()
-	if !csRunning {
+	if csRunning {
+		verifier.logger.Debug().Msg("Check: Change stream already running.")
+	} else {
 		verifier.logger.Debug().Msg("Change stream not running; starting change stream")
 
 		err = verifier.StartChangeStream(ctx)
@@ -399,12 +407,15 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.Wait
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				duration := verifier.workerSleepDelayMillis * time.Millisecond
 
-				verifier.logger.Debug().
-					Int("workerNum", workerNum).
-					Stringer("duration", duration).
-					Msg("No tasks found. Sleeping.")
+				if duration > 0 {
+					verifier.logger.Debug().
+						Int("workerNum", workerNum).
+						Stringer("duration", duration).
+						Msg("No tasks found. Sleeping.")
 
-				time.Sleep(duration)
+					time.Sleep(duration)
+				}
+
 				continue
 			} else if err != nil {
 				panic(err)

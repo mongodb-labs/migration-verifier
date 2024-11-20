@@ -104,6 +104,11 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 // GetChangeStreamFilter returns an aggregation pipeline that filters
 // namespaces as per configuration.
 //
+// Note that this omits verifier.globalFilter because we still need to
+// recheck any out-filter documents that may have changed in order to
+// account for filter traversals (i.e., updates that change whether a
+// document matches the filter).
+//
 // NB: Ideally we could make the change stream give $bsonSize(fullDocument)
 // and omit fullDocument, but $bsonSize was new in MongoDB 4.4, and we still
 // want to verify migrations from 4.2. fullDocument is unlikely to be a
@@ -144,13 +149,19 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		var changeEventBatch []ParsedEvent
 
 		for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
-			verifier.logger.Info().Msg("reading event")
 			gotEvent := cs.TryNext(ctx)
-			verifier.logger.Info().Err(cs.Err()).Msgf("got event? %v", gotEvent)
 
-			if !gotEvent || cs.Err() != nil {
+			if cs.Err() != nil {
+				return errors.Wrap(cs.Err(), "change stream iteration failed")
+			}
+
+			if !gotEvent {
 				break
 			}
+
+			verifier.logger.Debug().
+				Stringer("resumeToken", cs.ResumeToken()).
+				Msg("TryNext got an event!")
 
 			if changeEventBatch == nil {
 				changeEventBatch = make([]ParsedEvent, cs.RemainingBatchLength()+1)
@@ -160,20 +171,13 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 				return errors.Wrap(err, "failed to decode change event")
 			}
 
-			verifier.logger.Debug().Interface("event", changeEventBatch[eventsRead]).Msg("Got event.")
-
 			eventsRead++
-		}
-
-		if cs.Err() != nil {
-			return errors.Wrap(cs.Err(), "change stream iteration failed")
 		}
 
 		if eventsRead == 0 {
 			return nil
 		}
 
-		verifier.logger.Debug().Int("eventsCount", eventsRead).Msgf("Received a batch of events.")
 		err := verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
 		if err != nil {
 			return errors.Wrap(err, "failed to handle change events")
@@ -302,7 +306,9 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 				Msg("Failed to extract timestamp from persisted resume token.")
 		}
 
-		logEvent.Msg("Starting change stream from persisted resume token.")
+		logEvent.
+			Interface("pipeline", pipeline).
+			Msg("Starting change stream from persisted resume token.")
 
 		opts = opts.SetStartAfter(savedResumeToken)
 	} else {
