@@ -59,13 +59,17 @@ jobs:
       - name: Install mtools
         run: pipx install 'mtools[all]'
 
-      - name: Start clusters
-        run: |-
-            {
-                echo "mlaunch init --port 27020 --dir src --replicaset ${{ matrix.topology.args }}"
-                echo "mlaunch init --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}"
-                echo "mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}"
-            } | parallel
+ #     - name: Start clusters
+ #       run: |-
+ #           {
+ #               echo "mlaunch init --port 27020 --dir src --replicaset ${{ matrix.topology.args }}"
+ #               echo "mlaunch init --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}"
+ #               echo "mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}"
+ #           } | parallel
+
+      - run: mlaunch init --port 27020 --dir src --replicaset ${{ matrix.topology.args }}
+      - run: mlaunch init --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}
+      - run: mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}
 
       - name: Await source readiness
         run: while true; do mongosh "${{ matrix.topology.srcConnStr }}" --eval 'db.hello()' && break; sleep 1; done

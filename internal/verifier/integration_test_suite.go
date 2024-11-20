@@ -103,9 +103,18 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 
 	ctx := context.Background()
 
-	suite.Require().NoError(verifier.SetSrcURI(ctx, suite.srcConnStr))
-	suite.Require().NoError(verifier.SetDstURI(ctx, suite.dstConnStr))
-	suite.Require().NoError(verifier.SetMetaURI(ctx, suite.metaConnStr))
+	suite.Require().NoError(
+		verifier.SetSrcURI(ctx, suite.srcConnStr),
+		"should set source connection string",
+	)
+	suite.Require().NoError(
+		verifier.SetDstURI(ctx, suite.dstConnStr),
+		"should set destination connection string",
+	)
+	suite.Require().NoError(
+		verifier.SetMetaURI(ctx, suite.metaConnStr),
+		"should set metadata connection string",
+	)
 	verifier.SetLogger("stderr")
 	verifier.SetMetaDBName(metaDBName)
 
