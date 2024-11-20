@@ -324,7 +324,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 }
 
 func addUnixTimeToLogEvent[T constraints.Integer](unixTime T, event *zerolog.Event) *zerolog.Event {
-	return event.Time("clockTime", time.Unix(int64(unixTime), int64(0)))
+	return event.Time("timestamp", time.Unix(int64(unixTime), int64(0)))
 }
 
 func (v *Verifier) getChangeStreamMetadataCollection() *mongo.Collection {
@@ -333,10 +333,6 @@ func (v *Verifier) getChangeStreamMetadataCollection() *mongo.Collection {
 
 func (verifier *Verifier) loadChangeStreamResumeToken(ctx context.Context) (bson.Raw, error) {
 	coll := verifier.getChangeStreamMetadataCollection()
-	verifier.logger.Debug().
-		Str("db", coll.Database().Name()).
-		Str("coll", coll.Name()).
-		Msg("Seeking persisted resume token.")
 
 	token, err := coll.FindOne(
 		ctx,
@@ -364,8 +360,7 @@ func (verifier *Verifier) persistChangeStreamResumeToken(ctx context.Context, cs
 	if err == nil {
 		ts, err := extractTimestampFromResumeToken(token)
 
-		logEvent := verifier.logger.Debug().
-			Interface("token", token)
+		logEvent := verifier.logger.Debug()
 
 		if err == nil {
 			logEvent = addUnixTimeToLogEvent(ts.T, logEvent)
