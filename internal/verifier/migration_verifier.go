@@ -276,7 +276,7 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 	var err error
 	verifier.srcClient, err = mongo.Connect(ctx, opts)
 	if err != nil {
-		return errors.Wrapf(err, "failed to connect to %#q", uri)
+		return err
 	}
 	verifier.srcBuildInfo, err = getBuildInfo(ctx, verifier.srcClient)
 	return err
