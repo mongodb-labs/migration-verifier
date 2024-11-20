@@ -2,11 +2,11 @@ package verifier
 
 import (
 	"context"
-	"os"
 	"strings"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -22,8 +22,6 @@ const (
 	TopologyReplset TestTopology = "replset"
 	TopologySharded TestTopology = "sharded"
 )
-
-var knownTopologies = []TestTopology{TopologyReplset, TopologySharded}
 
 type IntegrationTestSuite struct {
 	suite.Suite
@@ -120,20 +118,22 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 	}
 }
 
-func (suite *IntegrationTestSuite) GetTopology() TestTopology {
-	rawTopology, found := os.LookupEnv(topologyEnvVar)
+func (suite *IntegrationTestSuite) GetSrcTopology() TestTopology {
+	hello := struct {
+		Msg string
+	}{}
 
-	suite.Require().True(found, "Environment must contain %#q.", topologyEnvVar)
-
-	topology := TestTopology(rawTopology)
-
-	suite.Require().Contains(
-		knownTopologies,
-		topology,
-		"%#q must be a known value.",
+	resp := suite.srcMongoClient.Database("admin").RunCommand(
+		suite.Context(),
+		bson.D{{"hello", 1}},
 	)
 
-	return topology
+	suite.Require().NoError(
+		resp.Decode(&hello),
+		"should fetch & decode hello",
+	)
+
+	return lo.Ternary(hello.Msg == "isdbgrid", TopologySharded, "")
 }
 
 func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {

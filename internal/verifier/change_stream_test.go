@@ -147,7 +147,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 }
 
 func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
-	if suite.GetTopology() == TopologySharded {
+	if suite.GetSrcTopology() == TopologySharded {
 		suite.T().Skip("Skipping pending REP-5299.")
 	}
 

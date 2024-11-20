@@ -1149,7 +1149,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
-	if suite.GetTopology() == TopologySharded {
+	if suite.GetSrcTopology() == TopologySharded {
 		suite.T().Skip("Skipping pending REP-5299.")
 	}
 
@@ -1279,7 +1279,7 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 }
 
 func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
-	if suite.GetTopology() == TopologySharded {
+	if suite.GetSrcTopology() == TopologySharded {
 		suite.T().Skip("Skipping pending REP-5299.")
 	}
 
@@ -1391,7 +1391,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
-	if suite.GetTopology() == TopologySharded {
+	if suite.GetSrcTopology() == TopologySharded {
 		suite.T().Skip("Skipping pending REP-5299.")
 	}
 
