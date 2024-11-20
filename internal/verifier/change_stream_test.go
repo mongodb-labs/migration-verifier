@@ -188,7 +188,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 
 	suite.Assert().Equal(
 		*postEventsSessionTime,
-		verifier.srcStartAtTs,
+		*verifier.srcStartAtTs,
 		"verifier.srcStartAtTs should now be our session timestamp",
 	)
 }
