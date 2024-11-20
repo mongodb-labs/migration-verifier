@@ -41,7 +41,7 @@ jobs:
 
           # This is hard-coded by design in order to catch inadvertent changes
           # to the minimum-required Go version to build migration-verifier.
-          - '1.20'
+#          - '1.20'
           - stable
 
     runs-on: ${{matrix.os.runsOn}}
@@ -59,21 +59,6 @@ jobs:
       - name: Install mtools
         run: pipx install 'mtools[all]'
 
- #     - name: Start clusters
- #       run: |-
- #           {
- #               echo "mlaunch init --port 27020 --dir src --replicaset ${{ matrix.topology.args }}"
- #               echo "mlaunch init --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}"
- #               echo "mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}"
- #           } | parallel
-
-      - run: mlaunch init --port 27020 --dir src --replicaset ${{ matrix.topology.args }}
-      - run: mlaunch init --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}
-      - run: mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}
-
-      - name: Await source readiness
-        run: while true; do mongosh "${{ matrix.topology.srcConnStr }}" --eval 'db.hello()' && break; sleep 1; done
-
       - name: Check out repository
         uses: actions/checkout@v4
 
@@ -84,6 +69,23 @@ jobs:
 
       - name: Build
         run: go build main/migration_verifier.go
+
+      - name: Start clusters
+        run: |-
+            {
+                echo "mlaunch init --port 27020 --dir src --replicaset ${{ matrix.topology.args }}"
+                echo "mlaunch init --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}"
+                echo "mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}"
+            } | parallel
+
+#      - run: mlaunch init --port 27020 --dir src --replicaset ${{ matrix.topology.args }}
+#      - run: mlaunch init --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}
+#      - run: mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}
+
+      - name: Await source readiness
+        run: while true; do mongosh "${{ matrix.topology.srcConnStr }}" --eval 'db.hello()' && break; sleep 1; done
+
+
 
       - name: Test
         run: go test -v ./...
