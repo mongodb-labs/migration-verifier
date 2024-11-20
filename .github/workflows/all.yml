@@ -43,42 +43,38 @@ jobs:
     runs-on: ${{matrix.os.runsOn}}
 
     steps:
-       - run: echo ${{matrix.os.runsOn}}
-#    runs-on: ${{matrix.os.runsOn}}
-#
-#    steps:
-#      - name: Install m
-#        run: npm install -g m
-#
-#      - name: Activate MongoDB ${{ matrix.version }}
-#        run: m activate ${{ matrix.version }}
-#
-#      - name: Install mtools
-#        run: pip3 install 'mtools[all]'
-#
-#      - name: Start source cluster
-#        run: mlaunch init --port 27020 ${{ matrix.topology.args }}
-#
-#      - name: Start destination cluster
-#        run: mlaunch init --port 27030 ${{ matrix.topology.args }}
-#
-#      - name: Start metadata cluster
-#        run: mlaunch init --port 27040 ${{ matrix.topology.args }}
-#
-#      - name: Check out repository
-#        uses: actions/checkout@v4
-#
-#      - name: Fetch Go ${{ matrix.go_version }}
-#        uses: actions/setup-go@v5
-#        with:
-#          go-version: ${{ matrix.go_version }}
-#
-#      - name: Build
-#        run: go build main/migration_verifier.go
-#
-#      - name: Test
-#        run: go test -v ./...
-#        env:
-#          MVTEST_SRC: localhost:27020
-#          MVTEST_DST: localhost:27030
-#          MVTEST_META: localhost:27040
+      - name: Install m
+        run: npm install -g m
+
+      - name: Activate MongoDB ${{ matrix.version }}
+        run: m activate ${{ matrix.version }}
+
+      - name: Install mtools
+        run: pip3 install 'mtools[all]'
+
+      - name: Start source cluster
+        run: mlaunch init --port 27020 ${{ matrix.topology.args }}
+
+      - name: Start destination cluster
+        run: mlaunch init --port 27030 ${{ matrix.topology.args }}
+
+      - name: Start metadata cluster
+        run: mlaunch init --port 27040 ${{ matrix.topology.args }}
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Fetch Go ${{ matrix.go_version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go_version }}
+
+      - name: Build
+        run: go build main/migration_verifier.go
+
+      - name: Test
+        run: go test -v ./...
+        env:
+          MVTEST_SRC: localhost:27020
+          MVTEST_DST: localhost:27030
+          MVTEST_META: localhost:27040
