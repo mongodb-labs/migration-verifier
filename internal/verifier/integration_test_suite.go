@@ -87,7 +87,7 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 	suite.T().Logf("Tearing down test %#q", suite.T().Name())
 
 	ctx := context.Background()
-	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient, suite.metaMongoClient} {
+	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient} {
 		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
 		suite.Require().NoError(err)
 		for _, dbName := range dbNames {
