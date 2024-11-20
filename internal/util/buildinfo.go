@@ -30,6 +30,9 @@ func GetBuildInfo(ctx context.Context, client *mongo.Client) (BuildInfo, error) 
 
 	var msg string
 	_, err = mbson.RawLookup(rawResp, &msg, "msg")
+	if err != nil {
+		return BuildInfo{}, errors.Wrap(err, "failed to determine topology from build info")
+	}
 	bi.IsSharded = msg == "isdbgrid"
 
 	return bi, nil

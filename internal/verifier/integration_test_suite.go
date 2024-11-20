@@ -24,8 +24,6 @@ const (
 	TopologySharded TestTopology = "sharded"
 )
 
-var knownTopologies = []TestTopology{TopologyReplset, TopologySharded}
-
 type IntegrationTestSuite struct {
 	suite.Suite
 	srcConnStr, dstConnStr, metaConnStr             string
