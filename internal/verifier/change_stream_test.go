@@ -33,9 +33,9 @@ func TestChangeStreamFilter(t *testing.T) {
 // TestChangeStreamResumability creates a verifier, starts its change stream,
 // terminates that verifier, updates the source cluster, starts a new
 // verifier with change stream, and confirms that things look as they should.
-func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
+func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 	func() {
-		verifier1 := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+		verifier1 := suite.BuildVerifier()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		err := verifier1.StartChangeStream(ctx)
@@ -54,7 +54,7 @@ func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
 		)
 	suite.Require().NoError(err)
 
-	verifier2 := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	verifier2 := suite.BuildVerifier()
 
 	suite.Require().Empty(
 		suite.fetchVerifierRechecks(ctx, verifier2),
@@ -99,7 +99,7 @@ func (suite *MultiSourceVersionTestSuite) TestChangeStreamResumability() {
 	)
 }
 
-func (suite *MultiSourceVersionTestSuite) getClusterTime(ctx context.Context, client *mongo.Client) primitive.Timestamp {
+func (suite *IntegrationTestSuite) getClusterTime(ctx context.Context, client *mongo.Client) primitive.Timestamp {
 	sess, err := client.StartSession()
 	suite.Require().NoError(err, "should start session")
 
@@ -112,7 +112,7 @@ func (suite *MultiSourceVersionTestSuite) getClusterTime(ctx context.Context, cl
 	return newTime
 }
 
-func (suite *MultiSourceVersionTestSuite) fetchVerifierRechecks(ctx context.Context, verifier *Verifier) []bson.M {
+func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, verifier *Verifier) []bson.M {
 	recheckDocs := []bson.M{}
 
 	recheckColl := verifier.verificationDatabase().Collection(recheckQueue)
@@ -199,8 +199,9 @@ func (suite *MultiSourceVersionTestSuite) TestNoStartAtTime() {
 	suite.Require().LessOrEqual(origStartTs.Compare(*verifier.srcStartAtTs), 0)
 }
 
-func (suite *MultiSourceVersionTestSuite) TestWithChangeEventsBatching() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
+	verifier := suite.BuildVerifier()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

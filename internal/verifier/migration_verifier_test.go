@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"regexp"
 	"sort"
 	"testing"
@@ -113,6 +114,27 @@ func TestVerifierMultiMetaVersion(t *testing.T) {
 	metaVersions := getAllVersions(t)
 	testSuite := new(MultiMetaVersionTestSuite)
 	runMultipleVersionTests(t, testSuite, srcVersions, destVersions, metaVersions)
+}
+
+func TestIntegration(t *testing.T) {
+	envVals := map[string]string{}
+
+	for _, name := range []string{"MVTEST_SRC", "MVTEST_DST", "MVTEST_META"} {
+		connStr := os.Getenv(name)
+		if connStr == "" {
+			t.Fatalf("%s requires %#q in environment.", t.Name(), name)
+		}
+
+		envVals[name] = connStr
+	}
+
+	testSuite := &IntegrationTestSuite{
+		srcConnStr:  envVals["MVTEST_SRC"],
+		dstConnStr:  envVals["MVTEST_DST"],
+		metaConnStr: envVals["MVTEST_META"],
+	}
+
+	suite.Run(t, testSuite)
 }
 
 func runMultipleVersionTests(t *testing.T, testSuite WithMongodsTestingSuite,
