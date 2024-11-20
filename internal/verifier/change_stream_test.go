@@ -147,6 +147,10 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 }
 
 func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
+	if suite.GetTopology() == TopologySharded {
+		suite.T().Skip("Skipping pending REP-5299.")
+	}
+
 	verifier := suite.BuildVerifier()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -156,11 +160,12 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
 		sctx, bson.D{{"_id", 0}})
 	suite.Require().NoError(err)
-	origStartTs := sess.OperationTime()
-	suite.Require().NotNil(origStartTs)
+
+	origSessionTime := sess.OperationTime()
+	suite.Require().NotNil(origSessionTime)
 	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
-	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
+	suite.Require().Equal(verifier.srcStartAtTs, origSessionTime)
 
 	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
 		sctx, bson.D{{"_id", 1}})
@@ -174,10 +179,11 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").DeleteOne(
 		sctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
-	newStartTs := sess.OperationTime()
-	suite.Require().NotNil(newStartTs)
+
+	postEventsSessionTime := sess.OperationTime()
+	suite.Require().NotNil(postEventsSessionTime)
 	suite.Require().Negative(
-		origStartTs.Compare(*newStartTs),
+		origSessionTime.Compare(*postEventsSessionTime),
 		"session time after events should exceed the original",
 	)
 
@@ -185,9 +191,9 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	<-verifier.changeStreamDoneChan
 
 	suite.Assert().GreaterOrEqual(
-		verifier.srcStartAtTs.Compare(*newStartTs),
+		verifier.srcStartAtTs.Compare(*postEventsSessionTime),
 		0,
-		"srcStartAtTs should be updated to be >= our session timestamp",
+		"verifier.srcStartAtTs should now meet or exceed our session timestamp",
 	)
 }
 

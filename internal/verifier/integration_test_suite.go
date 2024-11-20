@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"os"
 	"strings"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -12,7 +13,16 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
-const metaDBName = "VERIFIER_TEST_META"
+type TestTopology string
+
+const (
+	metaDBName                   = "VERIFIER_TEST_META"
+	topologyEnvVar               = "MVTEST_TOPOLOGY"
+	TopologyReplset TestTopology = "replset"
+	TopologySharded TestTopology = "sharded"
+)
+
+var knownTopologies = []TestTopology{TopologyReplset, TopologySharded}
 
 type IntegrationTestSuite struct {
 	suite.Suite
@@ -89,6 +99,22 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 			}
 		}
 	}
+}
+
+func (suite *IntegrationTestSuite) GetTopology() TestTopology {
+	rawTopology, found := os.LookupEnv(topologyEnvVar)
+
+	suite.Require().True(found, "Environment must contain %#q.", topologyEnvVar)
+
+	topology := TestTopology(rawTopology)
+
+	suite.Require().Contains(
+		knownTopologies,
+		topology,
+		"%#q must be a known value.",
+	)
+
+	return topology
 }
 
 func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
