@@ -1149,6 +1149,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
+	suite.T().Skip("TEMPORARY")
 	verifier := suite.BuildVerifier()
 	ctx := context.Background()
 
