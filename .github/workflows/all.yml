@@ -13,10 +13,10 @@ jobs:
       matrix:
         os:
           - runsOn: macos-latest
-            setup: brew install pip3
+            setup: brew install pipx
 
           - runsOn: ubuntu-latest
-            setup: apt install -y pip3
+            setup: apt install -y pipx
 
         version:
           - '4.2'
@@ -50,7 +50,7 @@ jobs:
         run: m activate ${{ matrix.version }}
 
       - name: Install mtools
-        run: pip3 install 'mtools[all]'
+        run: pipx install 'mtools[all]'
 
       - name: Start source cluster
         run: mlaunch init --port 27020 ${{ matrix.topology.args }}
