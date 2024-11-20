@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -28,10 +29,21 @@ type IntegrationTestSuite struct {
 	suite.Suite
 	srcConnStr, dstConnStr, metaConnStr             string
 	srcMongoClient, dstMongoClient, metaMongoClient *mongo.Client
+	testContext                                     context.Context
+	contextCanceller                                context.CancelCauseFunc
 	initialDbNames                                  mapset.Set[string]
 }
 
 var _ suite.TestingSuite = &IntegrationTestSuite{}
+
+func (suite *IntegrationTestSuite) Context() context.Context {
+	suite.Require().NotNil(
+		suite.testContext,
+		"context must exist (i.e., be fetched only within a test)",
+	)
+
+	return suite.testContext
+}
 
 func (suite *IntegrationTestSuite) SetupSuite() {
 	ctx := context.Background()
@@ -60,7 +72,7 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 }
 
 func (suite *IntegrationTestSuite) SetupTest() {
-	ctx := context.Background()
+	ctx, canceller := context.WithCancelCause(context.Background())
 
 	dbname := suite.DBNameForTest()
 
@@ -81,10 +93,15 @@ func (suite *IntegrationTestSuite) SetupTest() {
 		"should drop destination db %#q",
 		dbname,
 	)
+
+	suite.testContext, suite.contextCanceller = ctx, canceller
 }
 
 func (suite *IntegrationTestSuite) TearDownTest() {
 	suite.T().Logf("Tearing down test %#q", suite.T().Name())
+
+	suite.contextCanceller(errors.Errorf("tearing down test %#q", suite.T().Name()))
+	suite.testContext, suite.contextCanceller = nil, nil
 
 	ctx := context.Background()
 	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient} {
@@ -127,7 +144,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	verifier.SetGenerationPauseDelayMillis(0)
 	verifier.SetWorkerSleepDelayMillis(0)
 
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	suite.Require().NoError(
 		verifier.SetSrcURI(ctx, suite.srcConnStr),

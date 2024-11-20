@@ -54,7 +54,7 @@ func TestIntegration(t *testing.T) {
 
 func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	verifier := suite.BuildVerifier()
-	ctx := context.Background()
+	ctx := suite.Context()
 	drop := func() {
 		err := verifier.srcClient.Database("keyhole").Drop(ctx)
 		suite.Require().NoError(err)
@@ -138,7 +138,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 }
 
 func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
-	ctx := context.Background()
+	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
 
 	err := verifier.HandleChangeStreamEvents(
@@ -198,7 +198,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
 }
 
 func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
-	ctx := context.Background()
+	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
 
 	stats, err := verifier.GetNamespaceStatistics(ctx)
@@ -389,7 +389,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 }
 
 func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
-	ctx := context.Background()
+	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
 	err := verifier.InsertFailedCompareRecheckDocs("foo.bar", []interface{}{42}, []int{100})
 	suite.Require().NoError(err)
@@ -657,7 +657,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	verifier := suite.BuildVerifier()
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	err := suite.srcMongoClient.Database("testDb").CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
@@ -770,7 +770,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 
 func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	verifier := suite.BuildVerifier()
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	// Collection exists only on source.
 	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
@@ -876,7 +876,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 
 func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	verifier := suite.BuildVerifier()
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	// Missing index on destination.
 	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl1")
@@ -1149,9 +1149,12 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
-	suite.T().Skip("TEMPORARY")
+	if suite.GetTopology() == TopologySharded {
+		suite.T().Skip("Skipping pending REP-5299.")
+	}
+
 	verifier := suite.BuildVerifier()
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	// Collections on source only
 	err := suite.srcMongoClient.Database("testDb1").CreateCollection(ctx, "testColl1")
@@ -1276,7 +1279,10 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 }
 
 func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
-	suite.T().Skip("TEMPORARY")
+	if suite.GetTopology() == TopologySharded {
+		suite.T().Skip("Skipping pending REP-5299.")
+	}
+
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
@@ -1396,7 +1402,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	// Set this value low to test the verifier with multiple partitions.
 	verifier.partitionSizeInBytes = 50
 
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
 	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
@@ -1499,7 +1505,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	// Make a filter that filters on field "n".
 	filter := map[string]any{"$expr": map[string]any{"$and": []map[string]any{
