@@ -137,7 +137,7 @@ func (p *Partition) FindCmd(
 // (e.g. use the partitions on the source to read the destination for verification)
 // If the passed-in buildinfo indicates a mongodb version < 5.0, type bracketing is not used.
 // filterAndPredicates is a slice of filter criteria that's used to construct the "filter" field in the find option.
-func (p *Partition) GetFindOptions(buildInfo *util.BuildInfo, filterAndPredicates bson.A) bson.D {
+func (p *Partition) GetFindOptions(buildInfo *bson.M, filterAndPredicates bson.A) bson.D {
 	if p == nil {
 		if len(filterAndPredicates) > 0 {
 			return bson.D{{"filter", bson.D{{"$and", filterAndPredicates}}}}
@@ -160,9 +160,16 @@ func (p *Partition) GetFindOptions(buildInfo *util.BuildInfo, filterAndPredicate
 		allowTypeBracketing := false
 		if buildInfo != nil {
 			allowTypeBracketing = true
-
-			if buildInfo.VersionArray != nil {
-				allowTypeBracketing = buildInfo.VersionArray[0] < 5
+			versionArray, ok := (*buildInfo)["versionArray"].(bson.A)
+			//bson values are int32 or int64, never int.
+			if ok {
+				majorVersion, ok := versionArray[0].(int32)
+				if ok {
+					allowTypeBracketing = majorVersion < 5
+				} else {
+					majorVersion64, _ := versionArray[0].(int64)
+					allowTypeBracketing = majorVersion64 < 5
+				}
 			}
 		}
 		if !allowTypeBracketing {

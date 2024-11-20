@@ -70,3 +70,4 @@ jobs:
           MVTEST_SRC: ${{matrix.topology.srcConnStr}}
           MVTEST_DST: ${{matrix.topology.dstConnStr}}
           MVTEST_META: mongodb://localhost:27040
+          MVTEST_TOPOLOGY: ${{matrix.topology.name}}
