@@ -57,6 +57,8 @@ jobs:
 
       - name: Fetch Go ${{ matrix.go_version }}
         uses: actions/setup-go@v5
+        with:
+          go-version: stable
 
       - name: Build
         run: go build main/migration_verifier.go
