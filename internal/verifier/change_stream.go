@@ -123,6 +123,8 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 }
 
 func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.ChangeStream) {
+	defer cs.Close(ctx)
+
 	var lastPersistedTime time.Time
 
 	persistResumeTokenIfNeeded := func() error {
@@ -179,6 +181,9 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 		// If the context is canceled, return immmediately.
 		case <-ctx.Done():
+			verifier.logger.Debug().
+				Err(ctx.Err()).
+				Msg("Change stream quitting.")
 			return
 
 		// If the changeStreamEnderChan has a message, the user has indicated that
@@ -319,7 +324,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 }
 
 func addUnixTimeToLogEvent[T constraints.Integer](unixTime T, event *zerolog.Event) *zerolog.Event {
-	return event.Time("clockTime", time.Unix(int64(unixTime), int64(0)))
+	return event.Time("timestampTime", time.Unix(int64(unixTime), int64(0)))
 }
 
 func (v *Verifier) getChangeStreamMetadataCollection() *mongo.Collection {

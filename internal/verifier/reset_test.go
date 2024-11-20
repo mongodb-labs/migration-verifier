@@ -10,8 +10,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func (suite *MultiDataVersionTestSuite) TestResetPrimaryTask() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
+	verifier := suite.BuildVerifier()
 
 	created, err := verifier.CheckIsPrimary()
 	suite.Require().NoError(err)
@@ -39,10 +39,10 @@ func (suite *MultiDataVersionTestSuite) TestResetPrimaryTask() {
 	suite.Assert().Len(taskDocs, 1)
 }
 
-func (suite *MultiDataVersionTestSuite) TestResetNonPrimaryTasks() {
+func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	ctx := context.Background()
 
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	verifier := suite.BuildVerifier()
 
 	// Create a primary task, and set it to complete.
 	created, err := verifier.CheckIsPrimary()

@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"regexp"
 	"sort"
 	"testing"
@@ -30,120 +31,33 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var macArmMongoVersions []string = []string{
-	"6.2.0", "6.0.1",
-}
-
-var preMacArmMongoVersions []string = []string{
-	"5.3.2", "5.0.11",
-	"4.4.16", "4.2.22",
-}
-
-type MultiDataVersionTestSuite struct {
-	WithMongodsTestSuite
-}
-
-type MultiSourceVersionTestSuite struct {
-	WithMongodsTestSuite
-}
-
-type MultiMetaVersionTestSuite struct {
-	WithMongodsTestSuite
-}
-
-func buildVerifier(t *testing.T, srcMongoInstance MongoInstance, dstMongoInstance MongoInstance, metaMongoInstance MongoInstance) *Verifier {
-	qfilter := QueryFilter{Namespace: "keyhole.dealers"}
-	task := VerificationTask{QueryFilter: qfilter}
-
-	verifier := NewVerifier(VerifierSettings{})
-	//verifier.SetStartClean(true)
-	verifier.SetNumWorkers(3)
-	verifier.SetGenerationPauseDelayMillis(0)
-	verifier.SetWorkerSleepDelayMillis(0)
-	require.Nil(t, verifier.SetMetaURI(context.Background(), "mongodb://localhost:"+metaMongoInstance.port))
-	require.Nil(t, verifier.SetSrcURI(context.Background(), "mongodb://localhost:"+srcMongoInstance.port))
-	require.Nil(t, verifier.SetDstURI(context.Background(), "mongodb://localhost:"+dstMongoInstance.port))
-	verifier.SetLogger("stderr")
-	verifier.SetMetaDBName("VERIFIER_META")
-	require.Nil(t, verifier.verificationTaskCollection().Drop(context.Background()))
-	require.Nil(t, verifier.refetchCollection().Drop(context.Background()))
-	require.Nil(t, verifier.srcClientCollection(&task).Drop(context.Background()))
-	require.Nil(t, verifier.dstClientCollection(&task).Drop(context.Background()))
-	require.Nil(t, verifier.verificationDatabase().Collection(recheckQueue).Drop(context.Background()))
-	require.Nil(t, verifier.AddMetaIndexes(context.Background()))
-	return verifier
-}
-
-func getAllVersions(t *testing.T) []string {
-	var versions []string
-	versions = append(versions, macArmMongoVersions...)
-
-	os, arch := getOSAndArchFromEnv(t)
-
-	if os != "macos" || arch != "arm64" {
-		versions = append(versions, preMacArmMongoVersions...)
+func TestIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration tests in short-test mode.")
 	}
+	envVals := map[string]string{}
 
-	return versions
-}
-
-func getLatestVersion() string {
-	return macArmMongoVersions[0]
-}
-
-func TestVerifierMultiversion(t *testing.T) {
-	testSuite := new(MultiDataVersionTestSuite)
-	srcVersions := getAllVersions(t)
-	destVersions := getAllVersions(t)
-	metaVersions := []string{getLatestVersion()}
-	runMultipleVersionTests(t, testSuite, srcVersions, destVersions, metaVersions)
-}
-
-func TestVerifierMultiSourceversion(t *testing.T) {
-	testSuite := new(MultiSourceVersionTestSuite)
-	srcVersions := getAllVersions(t)
-	destVersions := []string{getLatestVersion()}
-	metaVersions := []string{getLatestVersion()}
-	runMultipleVersionTests(t, testSuite, srcVersions, destVersions, metaVersions)
-}
-
-func TestVerifierMultiMetaVersion(t *testing.T) {
-	srcVersions := []string{getLatestVersion()}
-	destVersions := []string{getLatestVersion()}
-	metaVersions := getAllVersions(t)
-	testSuite := new(MultiMetaVersionTestSuite)
-	runMultipleVersionTests(t, testSuite, srcVersions, destVersions, metaVersions)
-}
-
-func runMultipleVersionTests(t *testing.T, testSuite WithMongodsTestingSuite,
-	srcVersions, destVersions, metaVersions []string) {
-	for _, srcVersion := range srcVersions {
-		for _, destVersion := range destVersions {
-			for _, metaVersion := range metaVersions {
-				testName := srcVersion + "->" + destVersion + ":" + metaVersion
-				t.Run(testName, func(t *testing.T) {
-					// TODO: this should be able to be run in parallel but we run killall mongod in the start of each of these test cases
-					// For now we are going to leave killall in because the tests don't take long and adding the killall makes them very safe
-					// t.Parallel()
-					testSuite.SetMetaInstance(MongoInstance{
-						version: metaVersion,
-					})
-					testSuite.SetSrcInstance(MongoInstance{
-						version: srcVersion,
-					})
-					testSuite.SetDstInstance(MongoInstance{
-						version: destVersion,
-					})
-					suite.Run(t, testSuite)
-				})
-			}
+	for _, name := range []string{"MVTEST_SRC", "MVTEST_DST", "MVTEST_META"} {
+		connStr := os.Getenv(name)
+		if connStr == "" {
+			t.Fatalf("%s requires %#q in environment.", t.Name(), name)
 		}
+
+		envVals[name] = connStr
 	}
+
+	testSuite := &IntegrationTestSuite{
+		srcConnStr:  envVals["MVTEST_SRC"],
+		dstConnStr:  envVals["MVTEST_DST"],
+		metaConnStr: envVals["MVTEST_META"],
+	}
+
+	suite.Run(t, testSuite)
 }
 
-func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
-	ctx := context.Background()
+func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
+	verifier := suite.BuildVerifier()
+	ctx := suite.Context()
 	drop := func() {
 		err := verifier.srcClient.Database("keyhole").Drop(ctx)
 		suite.Require().NoError(err)
@@ -226,9 +140,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierFetchDocuments() {
 	)
 }
 
-func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Recheck() {
-	ctx := context.Background()
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
+	ctx := suite.Context()
+	verifier := suite.BuildVerifier()
 
 	err := verifier.HandleChangeStreamEvents(
 		ctx,
@@ -286,9 +200,9 @@ func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Recheck() {
 	)
 }
 
-func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Gen0() {
-	ctx := context.Background()
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
+	ctx := suite.Context()
+	verifier := suite.BuildVerifier()
 
 	stats, err := verifier.GetNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
@@ -477,9 +391,9 @@ func (suite *MultiMetaVersionTestSuite) TestGetNamespaceStatistics_Gen0() {
 	)
 }
 
-func (suite *MultiMetaVersionTestSuite) TestFailedVerificationTaskInsertions() {
-	ctx := context.Background()
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
+	ctx := suite.Context()
+	verifier := suite.BuildVerifier()
 	err := verifier.InsertFailedCompareRecheckDocs("foo.bar", []interface{}{42}, []int{100})
 	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs("foo.bar", []interface{}{43, 44}, []int{100, 100})
@@ -744,9 +658,9 @@ func TestVerifierCompareDocs(t *testing.T) {
 	}
 }
 
-func (suite *MultiDataVersionTestSuite) TestVerifierCompareViews() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
-	ctx := context.Background()
+func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
+	verifier := suite.BuildVerifier()
+	ctx := suite.Context()
 
 	err := suite.srcMongoClient.Database("testDb").CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
@@ -857,9 +771,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareViews() {
 	}
 }
 
-func (suite *MultiDataVersionTestSuite) TestVerifierCompareMetadata() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
-	ctx := context.Background()
+func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
+	verifier := suite.BuildVerifier()
+	ctx := suite.Context()
 
 	// Collection exists only on source.
 	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
@@ -963,9 +877,9 @@ func (suite *MultiDataVersionTestSuite) TestVerifierCompareMetadata() {
 	suite.Equal(verificationTaskCompleted, task.Status)
 }
 
-func (suite *MultiDataVersionTestSuite) TestVerifierCompareIndexes() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
-	ctx := context.Background()
+func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
+	verifier := suite.BuildVerifier()
+	ctx := suite.Context()
 
 	// Missing index on destination.
 	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl1")
@@ -1237,9 +1151,13 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 	}
 }
 
-func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
-	ctx := context.Background()
+func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
+	if suite.GetSrcTopology() == TopologySharded {
+		suite.T().Skip("Skipping pending REP-5299.")
+	}
+
+	verifier := suite.BuildVerifier()
+	ctx := suite.Context()
 
 	// Collections on source only
 	err := suite.srcMongoClient.Database("testDb1").CreateCollection(ctx, "testColl1")
@@ -1340,8 +1258,8 @@ func (suite *MultiDataVersionTestSuite) TestVerifierNamespaceList() {
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.dstNamespaces)
 }
 
-func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestVerificationStatus() {
+	verifier := suite.BuildVerifier()
 	ctx := context.Background()
 
 	metaColl := verifier.verificationDatabase().Collection(verificationTasksCollection)
@@ -1363,9 +1281,13 @@ func (suite *MultiDataVersionTestSuite) TestVerificationStatus() {
 	suite.Equal(1, status.CompletedTasks, "completed tasks not equal")
 }
 
-func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
+func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
+	if suite.GetSrcTopology() == TopologySharded {
+		suite.T().Skip("Skipping pending REP-5299.")
+	}
+
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
 	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
 	verifier.SetNamespaceMap()
@@ -1471,11 +1393,15 @@ func (suite *MultiDataVersionTestSuite) TestGenerationalRechecking() {
 	require.NoError(suite.T(), errGroup.Wait())
 }
 
-func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
+func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
+	if suite.GetSrcTopology() == TopologySharded {
+		suite.T().Skip("Skipping pending REP-5299.")
+	}
+
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
 	filter := map[string]any{"inFilter": map[string]any{"$ne": false}}
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
 	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
 	verifier.SetNamespaceMap()
@@ -1483,7 +1409,7 @@ func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 	// Set this value low to test the verifier with multiple partitions.
 	verifier.partitionSizeInBytes = 50
 
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
 	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
@@ -1583,17 +1509,17 @@ func (suite *MultiDataVersionTestSuite) TestVerifierWithFilter() {
 	<-checkDoneChan
 }
 
-func (suite *MultiDataVersionTestSuite) TestPartitionWithFilter() {
+func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	// Make a filter that filters on field "n".
 	filter := map[string]any{"$expr": map[string]any{"$and": []map[string]any{
 		{"$gte": []any{"$n", 100}}, {"$lt": []any{"$n", 200}}}}}
 
 	// Set up the verifier for testing.
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
 	verifier.SetNamespaceMap()
 	verifier.globalFilter = filter
