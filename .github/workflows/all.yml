@@ -12,11 +12,26 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - runsOn: macos-latest
-            mongodb_distro: mongodb-macos-arm64
+          - name: macos-latest
+            setup: brew install pip3
 
-          - runsOn: ubuntu-latest
-            mongodb_distro: mongodb-linux-x86_64-ubuntu1804
+          - name: ubuntu-latest
+            setup: apt install -y pip3
+
+        version:
+          - 4.2
+          - 4.4
+          - 5.0
+          - 6.0
+          - 7.0
+          - 8.0
+
+        topology:
+          - name: replset
+            args: --replicaset --nodes 1
+
+          - name: sharded
+            args: --sharded 2 --nodes 1
 
         go_version:
 
@@ -25,9 +40,27 @@ jobs:
           - '1.20'
           - stable
 
-    runs-on: ${{matrix.os.runsOn}}
+    runs-on: ${{matrix.runsOn}}
 
     steps:
+      - name: Install m
+        run: npm install -g m
+
+      - name: Activate MongoDB ${{ matrix.version }}
+        run: m activate ${{ matrix.version }}
+
+      - name: Install mtools
+        run: pip3 install 'mtools[all]'
+
+      - name: Start source cluster
+        run: mlaunch init --port 27020 ${{ matrix.topology.args }}
+
+      - name: Start destination cluster
+        run: mlaunch init --port 27030 ${{ matrix.topology.args }}
+
+      - name: Start metadata cluster
+        run: mlaunch init --port 27040 ${{ matrix.topology.args }}
+
       - name: Check out repository
         uses: actions/checkout@v4
 
@@ -42,4 +75,6 @@ jobs:
       - name: Test
         run: go test -v ./...
         env:
-          MONGODB_DISTRO: ${{matrix.os.mongodb_distro}}
+          MVTEST_SRC: localhost:27020
+          MVTEST_DST: localhost:27030
+          MVTEST_META: localhost:27040
