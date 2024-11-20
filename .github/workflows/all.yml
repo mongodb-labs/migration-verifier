@@ -11,6 +11,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+
+        # versions are: source, destination
         mongodb_versions:
           - [ '4.2', '4.2' ]
           - [ '4.2', '4.4' ]
