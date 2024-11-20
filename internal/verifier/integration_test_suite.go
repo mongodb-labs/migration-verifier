@@ -12,6 +12,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
+const metaDBName = "VERIFIER_TEST_META"
+
 type IntegrationTestSuite struct {
 	suite.Suite
 	srcConnStr, dstConnStr, metaConnStr             string
@@ -45,6 +47,30 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 			suite.initialDbNames.Add(dbName)
 		}
 	}
+}
+
+func (suite *IntegrationTestSuite) SetupTest() {
+	ctx := context.Background()
+
+	dbname := suite.DBNameForTest()
+
+	suite.Require().NoError(
+		suite.srcMongoClient.Database(dbname).Drop(ctx),
+		"should drop source db %#q",
+		dbname,
+	)
+
+	suite.Require().NoError(
+		suite.dstMongoClient.Database(dbname).Drop(ctx),
+		"should drop destination db %#q",
+		dbname,
+	)
+
+	suite.Require().NoError(
+		suite.metaMongoClient.Database(metaDBName).Drop(ctx),
+		"should drop destination db %#q",
+		dbname,
+	)
 }
 
 func (suite *IntegrationTestSuite) TearDownTest() {
@@ -81,9 +107,8 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	suite.Require().NoError(verifier.SetDstURI(ctx, suite.dstConnStr))
 	suite.Require().NoError(verifier.SetMetaURI(ctx, suite.metaConnStr))
 	verifier.SetLogger("stderr")
-	verifier.SetMetaDBName("VERIFIER_META")
+	verifier.SetMetaDBName(metaDBName)
 
-	verifier.verificationDatabase().Drop(ctx)
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))
 	suite.Require().NoError(verifier.dstClientCollection(&task).Drop(ctx))
 	suite.Require().NoError(verifier.AddMetaIndexes(ctx))

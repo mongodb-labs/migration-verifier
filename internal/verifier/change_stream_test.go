@@ -46,7 +46,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 	defer cancel()
 
 	_, err := suite.srcMongoClient.
-		Database("testDb").
+		Database(suite.DBNameForTest()).
 		Collection("testColl").
 		InsertOne(
 			ctx,
@@ -89,7 +89,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	suite.Assert().Equal(
 		bson.M{
-			"db":         "testDb",
+			"db":         suite.DBNameForTest(),
 			"coll":       "testColl",
 			"generation": int32(0),
 			"docID":      "heyhey",

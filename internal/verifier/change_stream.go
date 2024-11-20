@@ -333,6 +333,10 @@ func (v *Verifier) getChangeStreamMetadataCollection() *mongo.Collection {
 
 func (verifier *Verifier) loadChangeStreamResumeToken(ctx context.Context) (bson.Raw, error) {
 	coll := verifier.getChangeStreamMetadataCollection()
+	verifier.logger.Debug().
+		Str("db", coll.Database().Name()).
+		Str("coll", coll.Name()).
+		Msg("Seeking persisted resume token.")
 
 	token, err := coll.FindOne(
 		ctx,
@@ -360,7 +364,8 @@ func (verifier *Verifier) persistChangeStreamResumeToken(ctx context.Context, cs
 	if err == nil {
 		ts, err := extractTimestampFromResumeToken(token)
 
-		logEvent := verifier.logger.Debug()
+		logEvent := verifier.logger.Debug().
+			Interface("token", token)
 
 		if err == nil {
 			logEvent = addUnixTimeToLogEvent(ts.T, logEvent)
