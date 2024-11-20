@@ -1385,7 +1385,6 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
-	suite.T().Skip("TEMPORARY")
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
 	filter := map[string]any{"inFilter": map[string]any{"$ne": false}}
@@ -1498,7 +1497,6 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 }
 
 func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
-
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
 	ctx := context.Background()
