@@ -31,18 +31,11 @@ jobs:
             dstConnStr: mongodb://127.0.0.1:27030,127.0.0.1:27031,127.0.0.1:27032
             metaConnStr: mongodb://127.0.0.1:27040,127.0.0.1:27041,127.0.0.1:27042
 
-#          - name: sharded
-#            args: --sharded 2
-#            srcConnStr: mongodb://127.0.0.1:27020
-#            dstConnStr: mongodb://127.0.0.1:27030
-#            metaConnStr: mongodb://127.0.0.1:27040
-
-        go_version:
-
-          # This is hard-coded by design in order to catch inadvertent changes
-          # to the minimum-required Go version to build migration-verifier.
-#          - '1.20'
-          - stable
+          - name: sharded
+            args: --sharded 2
+            srcConnStr: mongodb://127.0.0.1:27020
+            dstConnStr: mongodb://127.0.0.1:27030
+            metaConnStr: mongodb://127.0.0.1:27040
 
     runs-on: ${{matrix.os.runsOn}}
 
@@ -64,8 +57,6 @@ jobs:
 
       - name: Fetch Go ${{ matrix.go_version }}
         uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go_version }}
 
       - name: Build
         run: go build main/migration_verifier.go
@@ -78,21 +69,9 @@ jobs:
                 echo "mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}"
             } | parallel
 
-#      - run: mlaunch init --port 27020 --dir src --replicaset ${{ matrix.topology.args }}
-#      - run: mlaunch init --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}
-#      - run: mlaunch init --port 27040 --dir meta --replicaset ${{ matrix.topology.args }}
-
-      - name: Await source readiness
-        run: while true; do mongosh "${{ matrix.topology.srcConnStr }}" --eval 'db.hello()' && break; sleep 1; done
-
-
-
       - name: Test
         run: go test -v ./...
         env:
           MVTEST_SRC: ${{matrix.topology.srcConnStr}}
           MVTEST_DST: ${{matrix.topology.dstConnStr}}
           MVTEST_META: ${{matrix.topology.metaConnStr}}
-        continue-on-error: true
-
-      - run: ls -la src
