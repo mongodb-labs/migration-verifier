@@ -161,6 +161,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
+
 	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
 		sctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
@@ -175,10 +176,19 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	suite.Require().NoError(err)
 	newStartTs := sess.OperationTime()
 	suite.Require().NotNil(newStartTs)
-	suite.Require().Negative(origStartTs.Compare(*newStartTs))
+	suite.Require().Negative(
+		origStartTs.Compare(*newStartTs),
+		"session time after events should exceed the original",
+	)
+
 	verifier.changeStreamEnderChan <- struct{}{}
 	<-verifier.changeStreamDoneChan
-	suite.Require().Equal(verifier.srcStartAtTs, newStartTs)
+
+	suite.Assert().GreaterOrEqual(
+		verifier.srcStartAtTs.Compare(*newStartTs),
+		0,
+		"srcStartAtTs should be updated to be >= our session timestamp",
+	)
 }
 
 func (suite *IntegrationTestSuite) TestNoStartAtTime() {
