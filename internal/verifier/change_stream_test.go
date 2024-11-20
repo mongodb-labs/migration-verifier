@@ -126,8 +126,8 @@ func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, ve
 	return recheckDocs
 }
 
-func (suite *MultiSourceVersionTestSuite) TestStartAtTimeNoChanges() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
+	verifier := suite.BuildVerifier()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sess, err := suite.srcMongoClient.StartSession()
@@ -146,8 +146,8 @@ func (suite *MultiSourceVersionTestSuite) TestStartAtTimeNoChanges() {
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
 }
 
-func (suite *MultiSourceVersionTestSuite) TestStartAtTimeWithChanges() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
+	verifier := suite.BuildVerifier()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sess, err := suite.srcMongoClient.StartSession()
@@ -181,8 +181,8 @@ func (suite *MultiSourceVersionTestSuite) TestStartAtTimeWithChanges() {
 	suite.Require().Equal(verifier.srcStartAtTs, newStartTs)
 }
 
-func (suite *MultiSourceVersionTestSuite) TestNoStartAtTime() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestNoStartAtTime() {
+	verifier := suite.BuildVerifier()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sess, err := suite.srcMongoClient.StartSession()
