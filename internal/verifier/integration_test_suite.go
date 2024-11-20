@@ -40,9 +40,9 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 	suite.Require().NoError(err)
 
 	suite.initialDbNames = mapset.NewSet[string]()
-	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient, suite.metaMongoClient} {
+	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient} {
 		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
-		suite.Require().NoError(err)
+		suite.Require().NoError(err, "should list database names")
 		for _, dbName := range dbNames {
 			suite.initialDbNames.Add(dbName)
 		}
