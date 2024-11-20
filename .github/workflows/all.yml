@@ -40,6 +40,8 @@ jobs:
           - '1.20'
           - stable
 
+    runs-on: ubuntu-latest
+
     steps:
        - run: echo ${{matrix}}
 #    runs-on: ${{matrix.os.runsOn}}
