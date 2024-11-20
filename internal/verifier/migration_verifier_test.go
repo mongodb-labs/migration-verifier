@@ -32,6 +32,9 @@ import (
 )
 
 func TestIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration tests in short-test mode.")
+	}
 	envVals := map[string]string{}
 
 	for _, name := range []string{"MVTEST_SRC", "MVTEST_DST", "MVTEST_META"} {
