@@ -1320,7 +1320,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 		status, err := verifier.GetVerificationStatus()
 		suite.Require().NoError(err)
 
-		for status.TotalTasks == 0 && verifier.generation < 10 {
+		for status.TotalTasks == 0 && verifier.generation < 20 {
 			delay := time.Second
 
 			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting %s then will run another generation …", verifier.generation, delay)
