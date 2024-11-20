@@ -141,16 +141,12 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
-	verifier.changeStreamEnderChan <- struct{}{}
+	verifier.changeStreamFinalTsChan <- *origStartTs
 	<-verifier.changeStreamDoneChan
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
 }
 
 func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
-	if suite.GetSrcTopology() == TopologySharded {
-		suite.T().Skip("Skipping pending REP-5299.")
-	}
-
 	verifier := suite.BuildVerifier()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -187,13 +183,13 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 		"session time after events should exceed the original",
 	)
 
-	verifier.changeStreamEnderChan <- struct{}{}
+	verifier.changeStreamFinalTsChan <- *postEventsSessionTime
 	<-verifier.changeStreamDoneChan
 
-	suite.Assert().GreaterOrEqual(
-		verifier.srcStartAtTs.Compare(*postEventsSessionTime),
-		0,
-		"verifier.srcStartAtTs should now meet or exceed our session timestamp",
+	suite.Assert().Equal(
+		*postEventsSessionTime,
+		verifier.srcStartAtTs,
+		"verifier.srcStartAtTs should now be our session timestamp",
 	)
 }
 

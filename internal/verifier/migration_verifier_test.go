@@ -1152,10 +1152,6 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
-	if suite.GetSrcTopology() == TopologySharded {
-		suite.T().Skip("Skipping pending REP-5299.")
-	}
-
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
 
@@ -1282,10 +1278,6 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 }
 
 func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
-	if suite.GetSrcTopology() == TopologySharded {
-		suite.T().Skip("Skipping pending REP-5299.")
-	}
-
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
@@ -1394,10 +1386,6 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
-	if suite.GetSrcTopology() == TopologySharded {
-		suite.T().Skip("Skipping pending REP-5299.")
-	}
-
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
 	filter := map[string]any{"inFilter": map[string]any{"$ne": false}}
