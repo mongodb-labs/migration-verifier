@@ -324,7 +324,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 }
 
 func addUnixTimeToLogEvent[T constraints.Integer](unixTime T, event *zerolog.Event) *zerolog.Event {
-	return event.Time("timestamp", time.Unix(int64(unixTime), int64(0)))
+	return event.Time("timestampTime", time.Unix(int64(unixTime), int64(0)))
 }
 
 func (v *Verifier) getChangeStreamMetadataCollection() *mongo.Collection {
