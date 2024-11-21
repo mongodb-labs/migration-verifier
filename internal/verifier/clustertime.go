@@ -23,7 +23,7 @@ const opTimeKeyInServerResponse = "operationTime"
 func GetClusterTime(
 	ctx context.Context,
 	logger *logger.Logger,
-	client *mongo.Client, // could change to type=any if we need
+	client *mongo.Client,
 ) (primitive.Timestamp, error) {
 	retryer := retry.New(retry.DefaultDurationLimit)
 
@@ -39,7 +39,7 @@ func GetClusterTime(
 		logger,
 		func(_ *retry.Info) error {
 			var err error
-			optime, err = runAppendOplogNote(ctx, client, true)
+			optime, err = syncClusterTimeAcrossShards(ctx, client)
 			if err != nil {
 				err = fmt.Errorf("%w: %w", retry.CustomTransientErr, err)
 			}
@@ -51,8 +51,9 @@ func GetClusterTime(
 		return primitive.Timestamp{}, err
 	}
 
-	// OPTIMIZATION: We now append an oplog entry--this time for real!--to
-	// cause any lagging shards to output their events.
+	// OPTIMIZATION FOR SHARDED CLUSTERS: We append another oplog entry to
+	// bring all shards to a cluster time that’s *after* the optime that we’ll
+	// return. That way any events *at*
 	//
 	// Since this is just an optimization, failures here are nonfatal.
 	err = retryer.RunForTransientErrorsOnly(
@@ -60,7 +61,7 @@ func GetClusterTime(
 		logger,
 		func(_ *retry.Info) error {
 			var err error
-			optime, err = runAppendOplogNote(ctx, client, false)
+			optime, err = syncClusterTimeAcrossShards(ctx, client)
 			if err != nil {
 				err = fmt.Errorf("%w: %w", retry.CustomTransientErr, err)
 			}
@@ -76,53 +77,73 @@ func GetClusterTime(
 	return optime, nil
 }
 
-func runAppendOplogNote(
+// Use this when we just need the correct cluster time without
+// actually changing any shards’ oplogs.
+func fetchClusterTime(
 	ctx context.Context,
 	client *mongo.Client,
-	doomed bool,
 ) (primitive.Timestamp, error) {
-	// We don’t need to write to any shards’ oplogs; we just
-	// need to fetch
-	cmd := bson.D{
-		{"appendOplogNote", 1},
-		{"data", bson.D{
-			{"migration-verifier", "expect StaleClusterTime error"},
-		}},
+	cmd, rawResponse, err := runAppendOplogNote(
+		ctx,
+		client,
+		"expect StaleClusterTime error",
+		bson.E{"maxClusterTime", primitive.Timestamp{1, 0}},
+	)
+
+	// We expect an error here; if we didn't get one then something is
+	// amiss on the server.
+	if err == nil {
+		return primitive.Timestamp{}, errors.Errorf("server request unexpectedly succeeded: %v", cmd)
 	}
 
-	if doomed {
-		cmd = append(cmd, bson.E{"maxClusterTime", primitive.Timestamp{1, 0}})
-	}
-
-	resp := client.Database("admin").RunCommand(ctx, cmd)
-
-	err := resp.Err()
-
-	if doomed {
-		// We expect an error here; if we didn't get one then something is
-		// amiss on the server.
-		if err == nil {
-			return primitive.Timestamp{}, errors.Errorf("server request unexpectedly succeeded: %v", cmd)
-		}
-
-		if !util.IsStaleClusterTimeError(err) {
-			return primitive.Timestamp{}, errors.Errorf(
-				"unexpected error (expected StaleClusterTime) from request (%v): %v",
-				err,
-				cmd,
-			)
-		}
-	} else if err != nil {
-		return primitive.Timestamp{}, errors.Wrapf(
+	if !util.IsStaleClusterTimeError(err) {
+		return primitive.Timestamp{}, errors.Wrap(
 			err,
-			"command (%v) failed unexpectedly",
-			cmd,
+			"unexpected error (expected StaleClusterTime) from request",
 		)
 	}
 
-	rawResponse, _ := resp.Raw()
+	return getOpTimeFromRawResponse(rawResponse)
+}
+
+func syncClusterTimeAcrossShards(
+	ctx context.Context,
+	client *mongo.Client,
+) (primitive.Timestamp, error) {
+	_, rawResponse, err := runAppendOplogNote(ctx, client, "syncing cluster time")
+
+	if err != nil {
+		return primitive.Timestamp{}, err
+	}
 
 	return getOpTimeFromRawResponse(rawResponse)
+}
+
+func runAppendOplogNote(
+	ctx context.Context,
+	client *mongo.Client,
+	note string,
+	extraPieces ...bson.E,
+) (bson.D, bson.Raw, error) {
+	cmd := append(
+		bson.D{
+			{"appendOplogNote", 1},
+			{"data", bson.D{
+				{"migration-verifier", note},
+			}},
+		},
+		extraPieces...,
+	)
+
+	resp := client.Database("admin").RunCommand(ctx, cmd)
+
+	raw, err := resp.Raw()
+
+	return cmd, raw, errors.Wrapf(
+		err,
+		"command (%v) failed unexpectedly",
+		cmd,
+	)
 }
 
 func getOpTimeFromRawResponse(rawResponse bson.Raw) (primitive.Timestamp, error) {

@@ -126,6 +126,44 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 	return []bson.D{stage}
 }
 
+func (verifier *Verifier) readAndHandleOneChangeEventBatch(ctx context.Context, cs *mongo.ChangeStream) error {
+	eventsRead := 0
+	var changeEventBatch []ParsedEvent
+
+	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
+		gotEvent := cs.TryNext(ctx)
+
+		if cs.Err() != nil {
+			return errors.Wrap(cs.Err(), "change stream iteration failed")
+		}
+
+		if !gotEvent {
+			break
+		}
+
+		if changeEventBatch == nil {
+			changeEventBatch = make([]ParsedEvent, cs.RemainingBatchLength()+1)
+		}
+
+		if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
+			return errors.Wrap(err, "failed to decode change event")
+		}
+
+		eventsRead++
+	}
+
+	if eventsRead == 0 {
+		return nil
+	}
+
+	err := verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
+	if err != nil {
+		return errors.Wrap(err, "failed to handle change events")
+	}
+
+	return nil
+}
+
 func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.ChangeStream) {
 	defer cs.Close(ctx)
 
@@ -142,44 +180,6 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		}
 
 		return err
-	}
-
-	readAndHandleOneChangeEventBatch := func() error {
-		eventsRead := 0
-		var changeEventBatch []ParsedEvent
-
-		for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
-			gotEvent := cs.TryNext(ctx)
-
-			if cs.Err() != nil {
-				return errors.Wrap(cs.Err(), "change stream iteration failed")
-			}
-
-			if !gotEvent {
-				break
-			}
-
-			if changeEventBatch == nil {
-				changeEventBatch = make([]ParsedEvent, cs.RemainingBatchLength()+1)
-			}
-
-			if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
-				return errors.Wrap(err, "failed to decode change event")
-			}
-
-			eventsRead++
-		}
-
-		if eventsRead == 0 {
-			return nil
-		}
-
-		err := verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
-		if err != nil {
-			return errors.Wrap(err, "failed to handle change events")
-		}
-
-		return nil
 	}
 
 	for {
@@ -224,7 +224,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 					break
 				}
 
-				err = readAndHandleOneChangeEventBatch()
+				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
 
 				if err != nil {
 					break
@@ -232,7 +232,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			}
 
 		default:
-			err = readAndHandleOneChangeEventBatch()
+			err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
 
 			if err == nil {
 				err = persistResumeTokenIfNeeded()
