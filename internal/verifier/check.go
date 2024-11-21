@@ -78,11 +78,6 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 	verifier.logger.Debug().Msgf("Starting %d verification workers", verifier.numWorkers)
 	ctx, cancel := context.WithCancel(ctx)
 
-	if verifier.workerSleepDelayMillis == 0 {
-		verifier.logger.Info().
-			Msg("Worker sleep delay is zero. Only tests should do this.")
-	}
-
 	wg := sync.WaitGroup{}
 	for i := 0; i < verifier.numWorkers; i++ {
 		wg.Add(1)
