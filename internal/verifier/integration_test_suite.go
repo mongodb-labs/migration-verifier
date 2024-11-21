@@ -98,7 +98,7 @@ func (suite *IntegrationTestSuite) SetupTest() {
 		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
 		suite.Require().NoError(err, "should list database names")
 		for _, dbName := range dbNames {
-			if strings.Index(dbName, suite.DBNameForTest()) == 0 {
+			if strings.HasPrefix(dbName, suite.DBNameForTest()) {
 				suite.T().Logf("Dropping database %#q because it seems to be left over from an earlier run of this test.", dbName)
 				suite.Require().NoError(client.Database(dbName).Drop(ctx))
 			}
