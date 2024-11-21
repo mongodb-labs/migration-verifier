@@ -49,7 +49,7 @@ func (verifier *Verifier) waitForChangeStream(ctx context.Context) error {
 	if csRunning {
 		verifier.logger.Debug().Msg("Changestream still running, signalling that writes are done and waiting for change stream to exit")
 
-		finalTs, err := GetClusterTime(
+		finalTs, err := GetNewClusterTime(
 			ctx,
 			verifier.logger,
 			verifier.srcClient,
