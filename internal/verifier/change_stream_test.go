@@ -141,7 +141,8 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
-	verifier.changeStreamFinalTsChan <- *origStartTs
+	//verifier.changeStreamFinalTsChan <- *origStartTs
+	verifier.changeStreamEnderChan <- struct{}{}
 	<-verifier.changeStreamDoneChan
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
 }
@@ -183,7 +184,8 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 		"session time after events should exceed the original",
 	)
 
-	verifier.changeStreamFinalTsChan <- *postEventsSessionTime
+	//verifier.changeStreamFinalTsChan <- *postEventsSessionTime
+	verifier.changeStreamEnderChan <- struct{}{}
 	<-verifier.changeStreamDoneChan
 
 	suite.Assert().Equal(

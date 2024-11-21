@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/exp/constraints"
 )
 
 const fauxDocSizeForDeleteEvents = 1024
@@ -104,11 +105,6 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 // GetChangeStreamFilter returns an aggregation pipeline that filters
 // namespaces as per configuration.
 //
-// Note that this omits verifier.globalFilter because we still need to
-// recheck any out-filter documents that may have changed in order to
-// account for filter traversals (i.e., updates that change whether a
-// document matches the filter).
-//
 // NB: Ideally we could make the change stream give $bsonSize(fullDocument)
 // and omit fullDocument, but $bsonSize was new in MongoDB 4.4, and we still
 // want to verify migrations from 4.2. fullDocument is unlikely to be a
@@ -124,44 +120,6 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 	}
 	stage := bson.D{{"$match", bson.D{{"$or", filter}}}}
 	return []bson.D{stage}
-}
-
-func (verifier *Verifier) readAndHandleOneChangeEventBatch(ctx context.Context, cs *mongo.ChangeStream) error {
-	eventsRead := 0
-	var changeEventBatch []ParsedEvent
-
-	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
-		gotEvent := cs.TryNext(ctx)
-
-		if cs.Err() != nil {
-			return errors.Wrap(cs.Err(), "change stream iteration failed")
-		}
-
-		if !gotEvent {
-			break
-		}
-
-		if changeEventBatch == nil {
-			changeEventBatch = make([]ParsedEvent, cs.RemainingBatchLength()+1)
-		}
-
-		if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
-			return errors.Wrap(err, "failed to decode change event")
-		}
-
-		eventsRead++
-	}
-
-	if eventsRead == 0 {
-		return nil
-	}
-
-	err := verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
-	if err != nil {
-		return errors.Wrap(err, "failed to handle change events")
-	}
-
-	return nil
 }
 
 func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.ChangeStream) {
@@ -182,6 +140,39 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		return err
 	}
 
+	readAndHandleOneChangeEventBatch := func() (bool, error) {
+		eventsRead := 0
+		var changeEventBatch []ParsedEvent
+
+		for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
+			gotEvent := cs.TryNext(ctx)
+
+			if !gotEvent || cs.Err() != nil {
+				break
+			}
+
+			if changeEventBatch == nil {
+				changeEventBatch = make([]ParsedEvent, cs.RemainingBatchLength()+1)
+			}
+
+			if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
+				return false, errors.Wrap(err, "failed to decode change event")
+			}
+
+			eventsRead++
+		}
+
+		if eventsRead > 0 {
+			verifier.logger.Debug().Int("eventsCount", eventsRead).Msgf("Received a batch of events.")
+			err := verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
+			if err != nil {
+				return false, errors.Wrap(err, "failed to handle change events")
+			}
+		}
+
+		return eventsRead > 0, errors.Wrap(cs.Err(), "change stream iteration failed")
+	}
+
 	for {
 		var err error
 		var changeStreamEnded bool
@@ -198,45 +189,29 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		// If the changeStreamEnderChan has a message, the user has indicated that
 		// source writes are ended. This means we should exit rather than continue
 		// reading the change stream since there should be no more events.
-		case finalTs := <-verifier.changeStreamFinalTsChan:
+		case <-verifier.changeStreamEnderChan:
 			verifier.logger.Debug().
-				Interface("finalTimestamp", finalTs).
-				Msg("Change stream thread received final timestamp. Finalizing change stream.")
+				Msg("Change stream thread received shutdown request.")
 
 			changeStreamEnded = true
 
 			// Read all change events until the source reports no events.
 			// (i.e., the `getMore` call returns empty)
 			for {
-				var curTs primitive.Timestamp
-				curTs, err = extractTimestampFromResumeToken(cs.ResumeToken())
-				if err != nil {
-					err = errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
-					break
-				}
+				var gotEvent bool
+				gotEvent, err = readAndHandleOneChangeEventBatch()
 
-				if curTs == finalTs || curTs.After(finalTs) {
-					verifier.logger.Debug().
-						Interface("currentTimestamp", curTs).
-						Interface("finalTimestamp", finalTs).
-						Msg("Change stream has reached the final timestamp. Shutting down.")
-
-					break
-				}
-
-				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
-
-				if err != nil {
+				if !gotEvent || err != nil {
 					break
 				}
 			}
 
 		default:
-			err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
+			_, err = readAndHandleOneChangeEventBatch()
+		}
 
-			if err == nil {
-				err = persistResumeTokenIfNeeded()
-			}
+		if err == nil {
+			err = persistResumeTokenIfNeeded()
 		}
 
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -267,9 +242,9 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 	infoLog := verifier.logger.Info()
 	if verifier.lastChangeEventTime == nil {
-		infoLog = infoLog.Str("lastEventTime", "none")
+		infoLog = infoLog.Str("changeStreamStopTime", "none")
 	} else {
-		infoLog = infoLog.Interface("lastEventTime", *verifier.lastChangeEventTime)
+		infoLog = infoLog.Interface("changeStreamStopTime", *verifier.lastChangeEventTime)
 	}
 
 	infoLog.Msg("Change stream is done.")
@@ -295,7 +270,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 
 		ts, err := extractTimestampFromResumeToken(savedResumeToken)
 		if err == nil {
-			logEvent = addTimestampToLogEvent(ts, logEvent)
+			logEvent = addUnixTimeToLogEvent(ts.T, logEvent)
 		} else {
 			verifier.logger.Warn().
 				Err(err).
@@ -348,10 +323,8 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 	return nil
 }
 
-func addTimestampToLogEvent(ts primitive.Timestamp, event *zerolog.Event) *zerolog.Event {
-	return event.
-		Interface("timestamp", ts).
-		Time("time", time.Unix(int64(ts.T), int64(0)))
+func addUnixTimeToLogEvent[T constraints.Integer](unixTime T, event *zerolog.Event) *zerolog.Event {
+	return event.Time("timestampTime", time.Unix(int64(unixTime), int64(0)))
 }
 
 func (v *Verifier) getChangeStreamMetadataCollection() *mongo.Collection {
@@ -390,7 +363,7 @@ func (verifier *Verifier) persistChangeStreamResumeToken(ctx context.Context, cs
 		logEvent := verifier.logger.Debug()
 
 		if err == nil {
-			logEvent = addTimestampToLogEvent(ts, logEvent)
+			logEvent = addUnixTimeToLogEvent(ts.T, logEvent)
 		} else {
 			verifier.logger.Warn().Err(err).
 				Msg("failed to extract resume token timestamp")
