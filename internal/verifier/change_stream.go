@@ -215,7 +215,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 					break
 				}
 
-				if curTs.Compare(finalTs) >= 0 {
+				if curTs == finalTs || curTs.After(finalTs) {
 					verifier.logger.Debug().
 						Interface("currentTimestamp", curTs).
 						Interface("finalTimestamp", finalTs).
