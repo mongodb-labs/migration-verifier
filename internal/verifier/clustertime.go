@@ -10,6 +10,8 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
 const opTimeKeyInServerResponse = "operationTime"
@@ -51,7 +53,12 @@ func syncClusterTimeAcrossShards(
 		}},
 	}
 
-	resp := client.Database("admin").RunCommand(ctx, cmd)
+	resp := client.
+		Database(
+			"admin",
+			options.Database().SetWriteConcern(writeconcern.Majority()),
+		).
+		RunCommand(ctx, cmd)
 
 	rawResponse, err := resp.Raw()
 
