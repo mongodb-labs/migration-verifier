@@ -42,13 +42,24 @@ func (verifier *Verifier) Check(ctx context.Context, filter map[string]any) {
 	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
 }
 
-func (verifier *Verifier) waitForChangeStream() error {
+func (verifier *Verifier) waitForChangeStream(ctx context.Context) error {
 	verifier.mux.RLock()
 	csRunning := verifier.changeStreamRunning
 	verifier.mux.RUnlock()
 	if csRunning {
 		verifier.logger.Debug().Msg("Changestream still running, signalling that writes are done and waiting for change stream to exit")
-		verifier.changeStreamEnderChan <- struct{}{}
+
+		finalTs, err := GetNewClusterTime(
+			ctx,
+			verifier.logger,
+			verifier.srcClient,
+		)
+
+		if err != nil {
+			return errors.Wrapf(err, "failed to fetch source's cluster time")
+		}
+
+		verifier.changeStreamFinalTsChan <- finalTs
 		select {
 		case err := <-verifier.changeStreamErrChan:
 			verifier.logger.Warn().Err(err).
@@ -66,6 +77,7 @@ func (verifier *Verifier) waitForChangeStream() error {
 func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 	verifier.logger.Debug().Msgf("Starting %d verification workers", verifier.numWorkers)
 	ctx, cancel := context.WithCancel(ctx)
+
 	wg := sync.WaitGroup{}
 	for i := 0; i < verifier.numWorkers; i++ {
 		wg.Add(1)
@@ -174,7 +186,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	verifier.mux.RLock()
 	csRunning := verifier.changeStreamRunning
 	verifier.mux.RUnlock()
-	if !csRunning {
+	if csRunning {
+		verifier.logger.Debug().Msg("Check: Change stream already running.")
+	} else {
 		verifier.logger.Debug().Msg("Change stream not running; starting change stream")
 
 		err = verifier.StartChangeStream(ctx)
@@ -242,7 +256,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			// It's necessary to wait for the change stream to finish before incrementing the
 			// generation number, or the last changes will not be checked.
 			verifier.mux.Unlock()
-			err := verifier.waitForChangeStream()
+			err := verifier.waitForChangeStream(ctx)
 			if err != nil {
 				return err
 			}
@@ -388,12 +402,15 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.Wait
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				duration := verifier.workerSleepDelayMillis * time.Millisecond
 
-				verifier.logger.Debug().
-					Int("workerNum", workerNum).
-					Stringer("duration", duration).
-					Msg("No tasks found. Sleeping.")
+				if duration > 0 {
+					verifier.logger.Debug().
+						Int("workerNum", workerNum).
+						Stringer("duration", duration).
+						Msg("No tasks found. Sleeping.")
 
-				time.Sleep(duration)
+					time.Sleep(duration)
+				}
+
 				continue
 			} else if err != nil {
 				panic(err)
