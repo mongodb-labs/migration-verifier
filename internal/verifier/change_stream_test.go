@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -240,4 +241,69 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 		500*time.Millisecond,
 		"the verifier should flush a recheck doc after a batch",
 	)
+}
+
+func (suite *IntegrationTestSuite) TestEventBeforeWritesOff() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+
+	checkDoneChan := make(chan struct{})
+	checkContinueChan := make(chan struct{})
+
+	// start verifier
+	verifierDoneChan := make(chan struct{})
+	go func() {
+		err := verifier.CheckDriver(ctx, nil, checkDoneChan, checkContinueChan)
+		suite.Require().NoError(err)
+
+		close(verifierDoneChan)
+	}()
+
+	// wait for generation 1
+	<-checkDoneChan
+
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	coll := db.Collection("mycoll")
+
+	docsCount := 10_000
+	docs := lo.RepeatBy(docsCount, func(_ int) bson.D { return bson.D{} })
+	_, err := coll.InsertMany(
+		ctx,
+		lo.ToAnySlice(docs),
+	)
+	suite.Require().NoError(err)
+
+	verifier.WritesOff(ctx)
+
+	verifierDone := false
+	for !verifierDone {
+		select {
+		case <-verifierDoneChan:
+			verifierDone = true
+		case <-checkDoneChan:
+		case checkContinueChan <- struct{}{}:
+		}
+	}
+
+	generation := verifier.generation
+	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
+		ctx,
+		verifier.verificationTaskCollection(),
+		verificationTaskVerifyDocuments,
+		generation,
+	)
+	suite.Require().NoError(err)
+
+	suite.Require().Empty(incompleteTasks, "all tasks should be finished")
+
+	totalFailed := lo.Reduce(
+		failedTasks,
+		func(sofar int, task VerificationTask, _ int) int {
+			return sofar + len(task.Ids)
+		},
+		0,
+	)
+
+	suite.Assert().Equal(docsCount, totalFailed, "all source docs should be missing")
 }
