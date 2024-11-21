@@ -159,10 +159,6 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 				break
 			}
 
-			verifier.logger.Debug().
-				Stringer("resumeToken", cs.ResumeToken()).
-				Msg("TryNext got an event!")
-
 			if changeEventBatch == nil {
 				changeEventBatch = make([]ParsedEvent, cs.RemainingBatchLength()+1)
 			}
@@ -306,9 +302,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 				Msg("Failed to extract timestamp from persisted resume token.")
 		}
 
-		logEvent.
-			Interface("pipeline", pipeline).
-			Msg("Starting change stream from persisted resume token.")
+		logEvent.Msg("Starting change stream from persisted resume token.")
 
 		opts = opts.SetStartAfter(savedResumeToken)
 	} else {
@@ -320,7 +314,6 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 		return errors.Wrap(err, "failed to start session")
 	}
 	sctx := mongo.NewSessionContext(ctx, sess)
-	verifier.logger.Debug().Interface("pipeline", pipeline).Msg("Opened change stream.")
 	srcChangeStream, err := verifier.srcClient.Watch(sctx, pipeline, opts)
 	if err != nil {
 		return errors.Wrap(err, "failed to open change stream")
