@@ -58,7 +58,7 @@ jobs:
       - name: Fetch Go ${{ matrix.go_version }}
         uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: 1.22
 
       - name: Install m and mtools
         run: |-
