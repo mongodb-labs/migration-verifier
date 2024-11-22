@@ -30,8 +30,8 @@ func NewMockVerifier() *MockVerifier {
 func (verifier *MockVerifier) Check(ctx context.Context, filter map[string]any) {
 	verifier.filter = filter
 }
-func (verifier *MockVerifier) WritesOff(ctx context.Context) {}
-func (verifier *MockVerifier) WritesOn(ctx context.Context)  {}
+func (verifier *MockVerifier) WritesOff(ctx context.Context) error { return nil }
+func (verifier *MockVerifier) WritesOn(ctx context.Context)        {}
 func (verifier *MockVerifier) GetProgress(ctx context.Context) (Progress, error) {
 	return Progress{}, nil
 }

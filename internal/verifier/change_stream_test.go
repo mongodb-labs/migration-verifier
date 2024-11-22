@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -141,16 +142,12 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
-	verifier.changeStreamEnderChan <- struct{}{}
+	verifier.changeStreamWritesOffTsChan <- *origStartTs
 	<-verifier.changeStreamDoneChan
 	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
 }
 
 func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
-	if suite.GetSrcTopology() == TopologySharded {
-		suite.T().Skip("Skipping pending REP-5299.")
-	}
-
 	verifier := suite.BuildVerifier()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -187,13 +184,13 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 		"session time after events should exceed the original",
 	)
 
-	verifier.changeStreamEnderChan <- struct{}{}
+	verifier.changeStreamWritesOffTsChan <- *postEventsSessionTime
 	<-verifier.changeStreamDoneChan
 
-	suite.Assert().GreaterOrEqual(
-		verifier.srcStartAtTs.Compare(*postEventsSessionTime),
-		0,
-		"verifier.srcStartAtTs should now meet or exceed our session timestamp",
+	suite.Assert().Equal(
+		*postEventsSessionTime,
+		*verifier.srcStartAtTs,
+		"verifier.srcStartAtTs should now be our session timestamp",
 	)
 }
 
@@ -242,4 +239,55 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 		500*time.Millisecond,
 		"the verifier should flush a recheck doc after a batch",
 	)
+}
+
+func (suite *IntegrationTestSuite) TestEventBeforeWritesOff() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	coll := db.Collection("mycoll")
+	suite.Require().NoError(
+		db.CreateCollection(ctx, coll.Name()),
+	)
+
+	// start verifier
+	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
+
+	// wait for generation 0 to end
+	verifierRunner.AwaitGenerationEnd()
+
+	docsCount := 10_000
+	docs := lo.RepeatBy(docsCount, func(_ int) bson.D { return bson.D{} })
+	_, err := coll.InsertMany(
+		ctx,
+		lo.ToAnySlice(docs),
+	)
+	suite.Require().NoError(err)
+
+	suite.Require().NoError(verifier.WritesOff(ctx))
+
+	suite.Require().NoError(verifierRunner.Await())
+
+	generation := verifier.generation
+	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
+		ctx,
+		verifier.verificationTaskCollection(),
+		verificationTaskVerifyDocuments,
+		generation,
+	)
+	suite.Require().NoError(err)
+
+	suite.Require().Empty(incompleteTasks, "all tasks should be finished")
+
+	totalFailed := lo.Reduce(
+		failedTasks,
+		func(sofar int, task VerificationTask, _ int) int {
+			return sofar + len(task.Ids)
+		},
+		0,
+	)
+
+	suite.Assert().Equal(docsCount, totalFailed, "all source docs should be missing")
 }

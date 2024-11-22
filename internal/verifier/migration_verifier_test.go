@@ -14,12 +14,12 @@ import (
 	"regexp"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,7 +28,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"golang.org/x/sync/errgroup"
 )
 
 func TestIntegration(t *testing.T) {
@@ -1152,10 +1151,6 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
-	if suite.GetSrcTopology() == TopologySharded {
-		suite.T().Skip("Skipping pending REP-5299.")
-	}
-
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
 
@@ -1202,8 +1197,12 @@ func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb4").CreateCollection(ctx, "testColl6")
 	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "testColl7")
-	suite.Require().NoError(err)
+
+	if suite.GetSrcTopology() != TopologySharded {
+		err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "testColl7")
+		suite.Require().NoError(err)
+	}
+
 	err = suite.dstMongoClient.Database("mongosync_reserved_for_internal_use").CreateCollection(ctx, "globalState")
 	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("mongosync_reserved_for_verification_src_metadata").CreateCollection(ctx, "auditor")
@@ -1240,10 +1239,13 @@ func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.dstNamespaces)
 
 	// Collections in admin, config, and local should not be found
-	err = suite.srcMongoClient.Database("local").CreateCollection(ctx, "islocalSrc")
-	suite.Require().NoError(err)
-	err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "islocalDest")
-	suite.Require().NoError(err)
+	if suite.GetSrcTopology() != TopologySharded {
+		err = suite.srcMongoClient.Database("local").CreateCollection(ctx, "islocalSrc")
+		suite.Require().NoError(err)
+		err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "islocalDest")
+		suite.Require().NoError(err)
+	}
+
 	err = suite.srcMongoClient.Database("admin").CreateCollection(ctx, "isAdminSrc")
 	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("admin").CreateCollection(ctx, "isAdminDest")
@@ -1282,17 +1284,13 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 }
 
 func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
-	if suite.GetSrcTopology() == TopologySharded {
-		suite.T().Skip("Skipping pending REP-5299.")
-	}
-
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
 	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
 	verifier.SetNamespaceMap()
 
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
 	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
@@ -1303,27 +1301,20 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 1, "x": 42})
 	suite.Require().NoError(err)
 
-	checkDoneChan := make(chan struct{})
-	checkContinueChan := make(chan struct{})
-
-	errGroup, errGrpCtx := errgroup.WithContext(context.Background())
-	errGroup.Go(func() error {
-		checkDriverErr := verifier.CheckDriver(errGrpCtx, nil, checkDoneChan, checkContinueChan)
-		// Log this as fatal error so that the test doesn't hang.
-		if checkDriverErr != nil {
-			log.Fatal().Err(checkDriverErr).Msg("check driver error")
-		}
-		return checkDriverErr
-	})
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 
 	waitForTasks := func() *VerificationStatus {
 		status, err := verifier.GetVerificationStatus()
 		suite.Require().NoError(err)
 
-		for status.TotalTasks == 0 && verifier.generation < 10 {
-			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting another generation …", verifier.generation)
-			checkContinueChan <- struct{}{}
-			<-checkDoneChan
+		for status.TotalTasks == 0 && verifier.generation < 50 {
+			delay := time.Second
+
+			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting %s then will run another generation …", verifier.generation, delay)
+
+			time.Sleep(delay)
+			runner.StartNextGeneration()
+			runner.AwaitGenerationEnd()
 			status, err = verifier.GetVerificationStatus()
 			suite.Require().NoError(err)
 		}
@@ -1331,7 +1322,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	}
 
 	// wait for one generation to finish
-	<-checkDoneChan
+	runner.AwaitGenerationEnd()
 	status := waitForTasks()
 	suite.Require().Equal(VerificationStatus{TotalTasks: 2, FailedTasks: 1, CompletedTasks: 1}, *status)
 
@@ -1340,10 +1331,10 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 
 	// tell check to start the next generation
-	checkContinueChan <- struct{}{}
+	runner.StartNextGeneration()
 
 	// wait for generation to finish
-	<-checkDoneChan
+	runner.AwaitGenerationEnd()
 	status = waitForTasks()
 	// there should be no failures now, since they are are equivalent at this point in time
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
@@ -1353,10 +1344,10 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 
 	// tell check to start the next generation
-	checkContinueChan <- struct{}{}
+	runner.StartNextGeneration()
 
 	// wait for one generation to finish
-	<-checkDoneChan
+	runner.AwaitGenerationEnd()
 	status = waitForTasks()
 
 	// there should be a failure from the src insert
@@ -1367,43 +1358,32 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 
 	// continue
-	checkContinueChan <- struct{}{}
+	runner.StartNextGeneration()
 
 	// wait for it to finish again, this should be a clean run
-	<-checkDoneChan
+	runner.AwaitGenerationEnd()
 	status = waitForTasks()
 
 	// there should be no failures now, since they are are equivalent at this point in time
-	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	suite.Assert().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
-	// turn writes off
-	verifier.WritesOff(ctx)
-	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 1019, "x": 1019})
-	suite.Require().NoError(err)
-	checkContinueChan <- struct{}{}
-	<-checkDoneChan
-	// now write to the source, this should not be seen by the change stream which should have ended
-	// because of the calls to WritesOff
-	status, err = verifier.GetVerificationStatus()
-	suite.Require().NoError(err)
-	// there should be a failure from the src insert
-	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
-
-	checkContinueChan <- struct{}{}
-	require.NoError(suite.T(), errGroup.Wait())
+	// We could just abandon this verifier, but we might as well shut it down
+	// gracefully. That prevents a spurious error in the log from “drop”
+	// change events.
+	suite.Require().NoError(verifier.WritesOff(ctx))
+	suite.Require().NoError(runner.Await())
 }
 
 func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
-	if suite.GetSrcTopology() == TopologySharded {
-		suite.T().Skip("Skipping pending REP-5299.")
-	}
-
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
-	filter := map[string]any{"inFilter": map[string]any{"$ne": false}}
+	dbname1 := suite.DBNameForTest("1")
+	dbname2 := suite.DBNameForTest("2")
+
+	filter := bson.M{"inFilter": bson.M{"$ne": false}}
 	verifier := suite.BuildVerifier()
-	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
-	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
+	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
+	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})
 	verifier.SetNamespaceMap()
 	verifier.SetIgnoreBSONFieldOrder(true)
 	// Set this value low to test the verifier with multiple partitions.
@@ -1411,8 +1391,8 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 
 	ctx := suite.Context()
 
-	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
-	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
+	srcColl := suite.srcMongoClient.Database(dbname1).Collection("testColl1")
+	dstColl := suite.dstMongoClient.Database(dbname2).Collection("testColl3")
 
 	// Documents with _id in [0, 100) should match.
 	var docs []interface{}
@@ -1443,8 +1423,12 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 		status, err := verifier.GetVerificationStatus()
 		suite.Require().NoError(err)
 
-		for status.TotalTasks == 0 && verifier.generation < 10 {
-			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting another generation …", verifier.generation)
+		for status.TotalTasks == 0 && verifier.generation < 50 {
+			delay := time.Second
+
+			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting %s then will run another generation …", verifier.generation, delay)
+
+			time.Sleep(delay)
 			checkContinueChan <- struct{}{}
 			<-checkDoneChan
 			status, err = verifier.GetVerificationStatus()
@@ -1461,6 +1445,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	suite.Require().Equal(status.FailedTasks, 0)
 
 	// Insert another document that is not in the filter.
+	// This should trigger a recheck despite being outside the filter.
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 200, "x": 200, "inFilter": false})
 	suite.Require().NoError(err)
 
@@ -1469,11 +1454,13 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 
 	// Wait for generation to finish.
 	<-checkDoneChan
+
 	status = waitForTasks()
+
 	// There should be no failures, since the inserted document is not in the filter.
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
-	// Now insert in the source, this should come up next generation.
+	// Now insert in the source. This should come up next generation.
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 201, "x": 201, "inFilter": true})
 	suite.Require().NoError(err)
 
@@ -1502,7 +1489,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	// Turn writes off.
-	verifier.WritesOff(ctx)
+	suite.Require().NoError(verifier.WritesOff(ctx))
 
 	// Tell CheckDriver to do one more pass. This should terminate the change stream.
 	checkContinueChan <- struct{}{}

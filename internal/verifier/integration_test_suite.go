@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 	"strings"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
@@ -11,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
@@ -47,17 +49,23 @@ func (suite *IntegrationTestSuite) Context() context.Context {
 
 func (suite *IntegrationTestSuite) SetupSuite() {
 	ctx := context.Background()
-	clientOpts := options.Client().ApplyURI(suite.srcConnStr).SetAppName("Verifier Test Suite").SetWriteConcern(writeconcern.Majority())
+	clientOpts := options.Client().ApplyURI(suite.srcConnStr).SetAppName("Verifier Test Suite").
+		SetWriteConcern(writeconcern.Majority()).
+		SetReadConcern(readconcern.Majority())
 	var err error
 
 	suite.srcMongoClient, err = mongo.Connect(ctx, clientOpts)
 	suite.Require().NoError(err)
 
-	clientOpts = options.Client().ApplyURI(suite.dstConnStr).SetAppName("Verifier Test Suite").SetWriteConcern(writeconcern.Majority())
+	clientOpts = options.Client().ApplyURI(suite.dstConnStr).SetAppName("Verifier Test Suite").
+		SetWriteConcern(writeconcern.Majority()).
+		SetReadConcern(readconcern.Majority())
 	suite.dstMongoClient, err = mongo.Connect(ctx, clientOpts)
 	suite.Require().NoError(err)
 
-	clientOpts = options.Client().ApplyURI(suite.metaConnStr).SetAppName("Verifier Test Suite")
+	clientOpts = options.Client().ApplyURI(suite.metaConnStr).SetAppName("Verifier Test Suite").
+		SetWriteConcern(writeconcern.Majority()).
+		SetReadConcern(readconcern.Majority())
 	suite.metaMongoClient, err = mongo.Connect(ctx, clientOpts)
 	suite.Require().NoError(err)
 
@@ -93,6 +101,19 @@ func (suite *IntegrationTestSuite) SetupTest() {
 		"should drop destination db %#q",
 		dbname,
 	)
+
+	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient} {
+		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
+		suite.Require().NoError(err, "should list database names")
+		for _, dbName := range dbNames {
+			if strings.HasPrefix(dbName, suite.DBNameForTest()) {
+				suite.T().Logf("Dropping database %#q because it seems to be left over from an earlier run of this test.", dbName)
+				suite.Require().NoError(client.Database(dbName).Drop(ctx))
+			}
+
+			suite.initialDbNames.Add(dbName)
+		}
+	}
 
 	suite.testContext, suite.contextCanceller = ctx, canceller
 }
@@ -145,6 +166,8 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	verifier.SetNumWorkers(3)
 	verifier.SetGenerationPauseDelayMillis(0)
 	verifier.SetWorkerSleepDelayMillis(0)
+
+	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
 
 	ctx := suite.Context()
 

@@ -176,7 +176,11 @@ func main() {
 				zerolog.SetGlobalLevel(zerolog.DebugLevel)
 			}
 			if cCtx.Bool(checkOnly) {
-				verifier.WritesOff(ctx)
+				err := verifier.WritesOff(ctx)
+				if err != nil {
+					return errors.Wrap(err, "failed to set writes off")
+				}
+
 				return verifier.CheckDriver(ctx, nil)
 			} else {
 				return verifier.StartServer()
