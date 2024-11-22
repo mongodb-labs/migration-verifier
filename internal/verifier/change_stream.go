@@ -126,26 +126,22 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 	return []bson.D{stage}
 }
 
+// This function reads a single `getMore` response into a slice.
+//
+// Note that this doesn’t care about the writesOff timestamp. Thus,
+// if writesOff has happened and a `getMore` response’s events straddle
+// the writesOff timestamp (i.e., some events precede it & others follow it),
+// the verifier will enqueue rechecks from those post-writesOff events. This
+// is unideal but shouldn’t impede correctness since post-writesOff events
+// shouldn’t really happen anyway by definition.
 func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 	ctx context.Context,
 	cs *mongo.ChangeStream,
-	writesOffTs *primitive.Timestamp,
 ) error {
 	eventsRead := 0
 	var changeEventBatch []ParsedEvent
 
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
-		// Once the change stream reaches the writesOff timestamp we should stop reading.
-		if writesOffTs != nil {
-			csTimestamp, err := extractTimestampFromResumeToken(cs.ResumeToken())
-			if err != nil {
-				return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
-			}
-			if !csTimestamp.Before(*writesOffTs) {
-				break
-			}
-		}
-
 		gotEvent := cs.TryNext(ctx)
 
 		if cs.Err() != nil {
@@ -239,7 +235,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 					break
 				}
 
-				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs, &writesOffTs)
+				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
 
 				if err != nil {
 					break
@@ -247,7 +243,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			}
 
 		default:
-			err = verifier.readAndHandleOneChangeEventBatch(ctx, cs, nil)
+			err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
 
 			if err == nil {
 				err = persistResumeTokenIfNeeded()
