@@ -40,17 +40,17 @@ func (verifier *Verifier) Check(ctx context.Context, filter map[string]any) {
 	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
 }
 
-func (verifier *Verifier) waitForChangeStream(ctx context.Context) error {
+func (verifier *Verifier) waitForChangeStream(ctx context.Context, csr *ChangeStreamReader) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case err := <-verifier.changeStreamErrChan:
+	case err := <-csr.ChangeStreamErrChan:
 		verifier.logger.Warn().Err(err).
-			Msg("Received error from change stream.")
+			Msgf("Received error from %s.", csr)
 		return err
-	case <-verifier.changeStreamDoneChan:
+	case <-csr.ChangeStreamDoneChan:
 		verifier.logger.Debug().
-			Msg("Received completion signal from change stream.")
+			Msgf("Received completion signal from %s.", csr)
 		break
 	}
 
@@ -87,10 +87,10 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 		select {
 		case err := <-verifier.srcChangeStreamReader.ChangeStreamErrChan:
 			cancel()
-			return err
+			return errors.Wrapf(err, "got an error from %s", verifier.srcChangeStreamReader)
 		case err := <-verifier.dstChangeStreamReader.ChangeStreamErrChan:
 			cancel()
-			return err
+			return errors.Wrapf(err, "got an error from %s", verifier.dstChangeStreamReader)
 		case <-ctx.Done():
 			cancel()
 			return nil
@@ -170,27 +170,30 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		verifier.phase = Idle
 	}()
 
-	verifier.mux.RLock()
-	csRunning := verifier.changeStreamRunning
-	verifier.mux.RUnlock()
-	if csRunning {
-		verifier.logger.Debug().Msg("Check: Change stream already running.")
+	if verifier.srcChangeStreamReader.changeStreamRunning {
+		verifier.logger.Debug().Msg("Check: Source change stream already running.")
 	} else {
-		verifier.logger.Debug().Msg("Change stream not running; starting change stream")
+		verifier.logger.Debug().Msg("Source change stream not running; starting change stream")
 
 		err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
 		if err != nil {
 			return errors.Wrap(err, "failed to start change stream on source")
 		}
+		verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
 	}
-	if !verifier.dstChangeStreamReader.changeStreamRunning {
+
+	if verifier.dstChangeStreamReader.changeStreamRunning {
+		verifier.logger.Debug().Msg("Check: Destination change stream already running.")
+	} else {
 		verifier.logger.Debug().Msg("Destination change stream not running; starting change stream")
 
 		err = verifier.dstChangeStreamReader.StartChangeStream(ctx)
 		if err != nil {
 			return errors.Wrap(err, "failed to start change stream on destination")
 		}
+		verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader)
 	}
+
 	// Log out the verification status when initially booting up so it's easy to see the current state
 	verificationStatus, err := verifier.GetVerificationStatus()
 	if err != nil {
@@ -251,10 +254,10 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			// It's necessary to wait for the change stream to finish before incrementing the
 			// generation number, or the last changes will not be checked.
 			verifier.mux.Unlock()
-			if err = verifier.srcChangeStreamReader.Wait(); err != nil {
+			if err = verifier.waitForChangeStream(ctx, verifier.srcChangeStreamReader); err != nil {
 				return err
 			}
-			if err = verifier.dstChangeStreamReader.Wait(); err != nil {
+			if err = verifier.waitForChangeStream(ctx, verifier.dstChangeStreamReader); err != nil {
 				return err
 			}
 			verifier.mux.Lock()

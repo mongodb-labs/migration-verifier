@@ -52,7 +52,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 		FullDocument: testutil.MustMarshal(bson.D{{"foo", 1}}),
 	}
 
-	err := verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
+	err := verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, srcReaderType)
 	suite.Require().NoError(err)
 
 	recheckDocs = suite.fetchRecheckDocs(ctx, verifier)

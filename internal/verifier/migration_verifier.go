@@ -124,17 +124,14 @@ type Verifier struct {
 
 	srcNamespaces []string
 	dstNamespaces []string
-	nsMap         map[string]string
+	srcDstNsMap   map[string]string
+	dstSrcNsMap   map[string]string
 	metaDBName    string
 
 	mux sync.RWMutex
 
-	changeStreamWritesOffTsChan chan primitive.Timestamp
-	srcChangeStreamReader       *ChangeStreamReader
-	dstChangeStreamReader       *ChangeStreamReader
-
-	lastChangeEventTime *primitive.Timestamp
-	writesOffTimestamp  *primitive.Timestamp
+	srcChangeStreamReader *ChangeStreamReader
+	dstChangeStreamReader *ChangeStreamReader
 
 	readConcernSetting ReadConcernSetting
 
@@ -196,12 +193,11 @@ func NewVerifier(settings VerifierSettings) *Verifier {
 	}
 
 	return &Verifier{
-		phase:                       Idle,
-		numWorkers:                  NumWorkers,
-		readPreference:              readpref.Primary(),
-		partitionSizeInBytes:        400 * 1024 * 1024,
-		failureDisplaySize:          DefaultFailureDisplaySize,
-		changeStreamWritesOffTsChan: make(chan primitive.Timestamp),
+		phase:                Idle,
+		numWorkers:           NumWorkers,
+		readPreference:       readpref.Primary(),
+		partitionSizeInBytes: 400 * 1024 * 1024,
+		failureDisplaySize:   DefaultFailureDisplaySize,
 
 		readConcernSetting: readConcern,
 
@@ -242,32 +238,37 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 		Msg("WritesOff called.")
 
 	verifier.mux.Lock()
-	verifier.writesOff = true
-
-	if verifier.writesOffTimestamp == nil {
-		verifier.logger.Debug().Msg("Change stream still running. Signalling that writes are done.")
-
-		finalTs, err := GetNewClusterTime(
-			ctx,
-			verifier.logger,
-			verifier.srcClient,
-		)
-
-		if err != nil {
-			return errors.Wrapf(err, "failed to fetch source's cluster time")
-		}
-
-		verifier.writesOffTimestamp = &finalTs
-
+	if verifier.writesOff {
 		verifier.mux.Unlock()
-
-		// This has to happen under the lock because the change stream
-		// might be inserting docs into the recheck queue, which happens
-		// under the lock.
-		verifier.changeStreamWritesOffTsChan <- finalTs
-	} else {
-		verifier.mux.Unlock()
+		return errors.New("writesOff already set")
 	}
+	verifier.writesOff = true
+	verifier.mux.Unlock()
+
+	verifier.logger.Debug().Msg("Signalling that writes are done.")
+
+	srcFinalTs, err := GetNewClusterTime(
+		ctx,
+		verifier.logger,
+		verifier.srcClient,
+	)
+
+	if err != nil {
+		return errors.Wrapf(err, "failed to fetch source's cluster time")
+	}
+
+	dstFinalTs, err := GetNewClusterTime(
+		ctx,
+		verifier.logger,
+		verifier.dstClient,
+	)
+
+	if err != nil {
+		return errors.Wrapf(err, "failed to fetch destination's cluster time")
+	}
+
+	verifier.srcChangeStreamReader.ChangeStreamWritesOffTsChan <- srcFinalTs
+	verifier.dstChangeStreamReader.ChangeStreamWritesOffTsChan <- dstFinalTs
 
 	return nil
 }
@@ -362,12 +363,13 @@ func (verifier *Verifier) SetDstNamespaces(arg []string) {
 }
 
 func (verifier *Verifier) SetNamespaceMap() {
-	verifier.nsMap = make(map[string]string)
+	verifier.srcDstNsMap = make(map[string]string)
 	if len(verifier.dstNamespaces) == 0 {
 		return
 	}
 	for i, ns := range verifier.srcNamespaces {
-		verifier.nsMap[ns] = verifier.dstNamespaces[i]
+		verifier.srcDstNsMap[ns] = verifier.dstNamespaces[i]
+		verifier.dstSrcNsMap[verifier.dstNamespaces[i]] = ns
 	}
 }
 

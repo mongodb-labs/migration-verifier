@@ -267,7 +267,7 @@ func (verifier *Verifier) getFetcherChannels(
 			ctx,
 			verifier.srcClientCollection(task),
 			verifier.srcBuildInfo,
-			verifier.srcStartAtTs,
+			verifier.srcChangeStreamReader.startAtTs,
 			task,
 		)
 
@@ -291,7 +291,7 @@ func (verifier *Verifier) getFetcherChannels(
 			ctx,
 			verifier.dstClientCollection(task),
 			verifier.dstBuildInfo,
-			nil, //startAtTs
+			verifier.dstChangeStreamReader.startAtTs,
 			task,
 		)
 
