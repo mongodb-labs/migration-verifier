@@ -89,8 +89,8 @@ type Verifier struct {
 	metaClient         *mongo.Client
 	srcClient          *mongo.Client
 	dstClient          *mongo.Client
-	srcBuildInfo       *bson.M
-	dstBuildInfo       *bson.M
+	srcBuildInfo       *util.BuildInfo
+	dstBuildInfo       *util.BuildInfo
 	numWorkers         int
 	failureDisplaySize int64
 
@@ -308,10 +308,20 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 	var err error
 	verifier.srcClient, err = mongo.Connect(ctx, opts)
 	if err != nil {
+<<<<<<< HEAD
 		return err
+=======
+		return errors.Wrapf(err, "failed to connect to source %#q", uri)
+>>>>>>> 2304fca (refactor build infio)
 	}
-	verifier.srcBuildInfo, err = getBuildInfo(ctx, verifier.srcClient)
-	return err
+
+	buildInfo, err := util.GetBuildInfo(ctx, verifier.srcClient)
+	if err != nil {
+		return errors.Wrap(err, "failed to read source build info")
+	}
+
+	verifier.srcBuildInfo = &buildInfo
+	return nil
 }
 
 func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
@@ -319,10 +329,16 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 	var err error
 	verifier.dstClient, err = mongo.Connect(ctx, opts)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "failed to connect to destination %#q", uri)
 	}
-	verifier.dstBuildInfo, err = getBuildInfo(ctx, verifier.dstClient)
-	return err
+
+	buildInfo, err := util.GetBuildInfo(ctx, verifier.dstClient)
+	if err != nil {
+		return errors.Wrap(err, "failed to read destination build info")
+	}
+
+	verifier.dstBuildInfo = &buildInfo
+	return nil
 }
 
 func (verifier *Verifier) SetServerPort(port int) {
@@ -453,7 +469,7 @@ func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A)
 	return append(predicates, verifier.globalFilter)
 }
 
-func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, buildInfo *bson.M,
+func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, buildInfo *util.BuildInfo,
 	startAtTs *primitive.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
@@ -1505,17 +1521,4 @@ func (verifier *Verifier) getNamespaces(ctx context.Context, fieldName string) (
 		namespaces = append(namespaces, v.(string))
 	}
 	return namespaces, nil
-}
-
-func getBuildInfo(ctx context.Context, client *mongo.Client) (*bson.M, error) {
-	commandResult := client.Database("admin").RunCommand(ctx, bson.D{{"buildinfo", 1}})
-	if commandResult.Err() != nil {
-		return nil, commandResult.Err()
-	}
-	var buildInfoMap bson.M
-	err := commandResult.Decode(&buildInfoMap)
-	if err != nil {
-		return nil, err
-	}
-	return &buildInfoMap, nil
 }
