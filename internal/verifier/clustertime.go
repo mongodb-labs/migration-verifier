@@ -35,7 +35,7 @@ func GetNewClusterTime(
 		logger,
 		func(_ *retry.Info) error {
 			var err error
-			clusterTime, err = fetchNewClusterTime(ctx, client)
+			clusterTime, err = fetchClusterTime(ctx, client)
 			return err
 		},
 	)
@@ -67,7 +67,7 @@ func GetNewClusterTime(
 
 // Use this when we just need the correct cluster time without
 // actually changing any shards’ oplogs.
-func fetchNewClusterTime(
+func fetchClusterTime(
 	ctx context.Context,
 	client *mongo.Client,
 ) (primitive.Timestamp, error) {
@@ -75,6 +75,7 @@ func fetchNewClusterTime(
 		ctx,
 		client,
 		"expect StaleClusterTime error",
+		primitive.Timestamp{1, 0},
 	)
 
 	// We expect an error here; if we didn't get one then something is
@@ -102,7 +103,7 @@ func syncClusterTimeAcrossShards(
 		ctx,
 		client,
 		"syncing cluster time",
-		bson.E{"maxClusterTime", maxTime},
+		maxTime,
 	)
 
 	if err != nil {
@@ -119,17 +120,15 @@ func runAppendOplogNote(
 	ctx context.Context,
 	client *mongo.Client,
 	note string,
-	extra ...bson.E,
+	maxClusterTime primitive.Timestamp,
 ) (bson.D, bson.Raw, error) {
-	cmd := append(
-		bson.D{
-			{"appendOplogNote", 1},
-			{"data", bson.D{
-				{"migration-verifier", note},
-			}},
-		},
-		extra...,
-	)
+	cmd := bson.D{
+		{"appendOplogNote", 1},
+		{"maxClusterTime", maxClusterTime},
+		{"data", bson.D{
+			{"migration-verifier", note},
+		}},
+	}
 
 	resp := client.
 		Database(
