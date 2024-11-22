@@ -1302,12 +1302,13 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 		suite.Require().NoError(err)
 	}
 
-	srcColl.Indexes().CreateOne(
+	_, err := srcColl.Indexes().CreateOne(
 		ctx,
 		mongo.IndexModel{
 			Keys: bson.D{{"foo", 1}},
 		},
 	)
+	suite.Require().NoError(err)
 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	runner.AwaitGenerationEnd()
