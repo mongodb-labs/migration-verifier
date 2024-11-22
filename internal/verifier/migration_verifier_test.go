@@ -18,6 +18,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -1281,6 +1282,68 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 	suite.Equal(1, status.FailedTasks, "failed tasks not equal")
 	suite.Equal(1, status.MetadataMismatchTasks, "metadata mismatch tasks not equal")
 	suite.Equal(1, status.CompletedTasks, "completed tasks not equal")
+}
+
+func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
+	ctx := suite.Context()
+
+	srcColl := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("coll")
+	dstColl := suite.dstMongoClient.Database(suite.DBNameForTest()).Collection("coll")
+
+	verifier := suite.BuildVerifier()
+
+	ns := srcColl.Database().Name() + "." + srcColl.Name()
+	verifier.SetSrcNamespaces([]string{ns})
+	verifier.SetDstNamespaces([]string{ns})
+	verifier.SetNamespaceMap()
+
+	for _, coll := range mslices.Of(srcColl, dstColl) {
+		_, err := coll.InsertOne(ctx, bson.M{"_id": 1, "x": 42})
+		suite.Require().NoError(err)
+	}
+
+	_, err := srcColl.Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys: bson.D{{"foo", 1}},
+		},
+	)
+	suite.Require().NoError(err)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	runner.AwaitGenerationEnd()
+
+	cursor, err := verifier.verificationTaskCollection().Find(
+		ctx,
+		bson.M{"generation": 0},
+		options.Find().SetSort(bson.M{"type": 1}),
+	)
+	suite.Require().NoError(err)
+
+	var tasks []VerificationTask
+	suite.Require().NoError(cursor.All(ctx, &tasks))
+
+	suite.Require().Len(tasks, 2)
+	suite.Require().Equal(verificationTaskVerifyDocuments, tasks[0].Type)
+	suite.Require().Equal(verificationTaskCompleted, tasks[0].Status)
+	suite.Require().Equal(verificationTaskVerifyCollection, tasks[1].Type)
+	suite.Require().Equal(verificationTaskMetadataMismatch, tasks[1].Status)
+
+	runner.StartNextGeneration()
+	runner.AwaitGenerationEnd()
+
+	cursor, err = verifier.verificationTaskCollection().Find(
+		ctx,
+		bson.M{"generation": 1},
+		options.Find().SetSort(bson.M{"type": 1}),
+	)
+	suite.Require().NoError(err)
+
+	suite.Require().NoError(cursor.All(ctx, &tasks))
+
+	suite.Require().Len(tasks, 1, "generation 1 should only have done 1 task")
+	suite.Require().Equal(verificationTaskVerifyCollection, tasks[0].Type)
+	suite.Require().Equal(verificationTaskMetadataMismatch, tasks[0].Status)
 }
 
 func (suite *IntegrationTestSuite) TestGenerationalRechecking() {

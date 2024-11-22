@@ -1082,22 +1082,25 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 		task.Status = verificationTaskMetadataMismatch
 	}
 
-	partitions, shardKeys, docsCount, bytesCount, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
-	if err != nil {
-		task.Status = verificationTaskFailed
-		verifier.logger.Error().Msgf("[Worker %d] Error partitioning collection: %+v", workerNum, err)
-		return
-	}
-	verifier.logger.Debug().Msgf("[Worker %d] split collection “%s” into %d partitions", workerNum, srcNs, len(partitions))
-
-	task.SourceDocumentCount = docsCount
-	task.SourceByteCount = bytesCount
-
-	for _, partition := range partitions {
-		_, err := verifier.InsertPartitionVerificationTask(partition, shardKeys, dstNs)
+	if task.Generation == 0 {
+		partitions, shardKeys, docsCount, bytesCount, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
 		if err != nil {
 			task.Status = verificationTaskFailed
-			verifier.logger.Error().Msgf("[Worker %d] Error inserting verifier tasks: %+v", workerNum, err)
+
+			verifier.logger.Error().Msgf("[Worker %d] Error partitioning collection: %+v", workerNum, err)
+			return
+		}
+		verifier.logger.Debug().Msgf("[Worker %d] split collection “%s” into %d partitions", workerNum, srcNs, len(partitions))
+
+		task.SourceDocumentCount = docsCount
+		task.SourceByteCount = bytesCount
+
+		for _, partition := range partitions {
+			_, err := verifier.InsertPartitionVerificationTask(partition, shardKeys, dstNs)
+			if err != nil {
+				task.Status = verificationTaskFailed
+				verifier.logger.Error().Msgf("[Worker %d] Error inserting verifier tasks: %+v", workerNum, err)
+			}
 		}
 	}
 
