@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
@@ -47,17 +48,23 @@ func (suite *IntegrationTestSuite) Context() context.Context {
 
 func (suite *IntegrationTestSuite) SetupSuite() {
 	ctx := context.Background()
-	clientOpts := options.Client().ApplyURI(suite.srcConnStr).SetAppName("Verifier Test Suite").SetWriteConcern(writeconcern.Majority())
+	clientOpts := options.Client().ApplyURI(suite.srcConnStr).SetAppName("Verifier Test Suite").
+		SetWriteConcern(writeconcern.Majority()).
+		SetReadConcern(readconcern.Majority())
 	var err error
 
 	suite.srcMongoClient, err = mongo.Connect(ctx, clientOpts)
 	suite.Require().NoError(err)
 
-	clientOpts = options.Client().ApplyURI(suite.dstConnStr).SetAppName("Verifier Test Suite").SetWriteConcern(writeconcern.Majority())
+	clientOpts = options.Client().ApplyURI(suite.dstConnStr).SetAppName("Verifier Test Suite").
+		SetWriteConcern(writeconcern.Majority()).
+		SetReadConcern(readconcern.Majority())
 	suite.dstMongoClient, err = mongo.Connect(ctx, clientOpts)
 	suite.Require().NoError(err)
 
-	clientOpts = options.Client().ApplyURI(suite.metaConnStr).SetAppName("Verifier Test Suite")
+	clientOpts = options.Client().ApplyURI(suite.metaConnStr).SetAppName("Verifier Test Suite").
+		SetWriteConcern(writeconcern.Majority()).
+		SetReadConcern(readconcern.Majority())
 	suite.metaMongoClient, err = mongo.Connect(ctx, clientOpts)
 	suite.Require().NoError(err)
 
