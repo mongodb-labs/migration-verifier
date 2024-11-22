@@ -885,7 +885,7 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Ra
 	}
 
 	defer func() {
-		coll.DeleteOne(ctx, bson.M{"_id": insert.InsertedID})
+		_, _ = coll.DeleteOne(ctx, bson.M{"_id": insert.InsertedID})
 	}()
 
 	cursor, err := coll.Aggregate(
@@ -934,67 +934,6 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Ra
 	}
 
 	return false, errors.Errorf("weirdly received %d matching index docs (should be 0 or 1)", count)
-}
-
-/*
-
-	// Order is always significant in the keys document.
-	if !bytes.Equal(srcSpec.KeysDocument, dstSpec.KeysDocument) {
-		results = append(results, VerificationResult{
-			NameSpace: dstSpec.Namespace,
-			Cluster:   ClusterTarget,
-			ID:        dstSpec.Name,
-			Field:     "KeysDocument",
-			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.KeysDocument, dstSpec.KeysDocument)})
-	}
-
-	// We don't check version because it may change when migrating between server versions.
-
-	if !reflect.DeepEqual(srcSpec.ExpireAfterSeconds, dstSpec.ExpireAfterSeconds) {
-		results = append(results, VerificationResult{
-			NameSpace: dstSpec.Namespace,
-			Cluster:   ClusterTarget,
-			ID:        dstSpec.Name,
-			Field:     "ExpireAfterSeconds",
-			Details:   Mismatch + fmt.Sprintf(" : src: %s, dst: %s", nilableToString(srcSpec.ExpireAfterSeconds), nilableToString(dstSpec.ExpireAfterSeconds))})
-	}
-
-	if !reflect.DeepEqual(srcSpec.Sparse, dstSpec.Sparse) {
-		results = append(results, VerificationResult{
-			NameSpace: dstSpec.Namespace,
-			Cluster:   ClusterTarget,
-			ID:        dstSpec.Name,
-			Field:     "Sparse",
-			Details:   Mismatch + fmt.Sprintf(" : src: %s, dst: %s", nilableToString(srcSpec.Sparse), nilableToString(dstSpec.Sparse))})
-	}
-
-	if !reflect.DeepEqual(srcSpec.Unique, dstSpec.Unique) {
-		results = append(results, VerificationResult{
-			NameSpace: dstSpec.Namespace,
-			Cluster:   ClusterTarget,
-			ID:        dstSpec.Name,
-			Field:     "Unique",
-			Details:   Mismatch + fmt.Sprintf(" : src: %s, dst: %s", nilableToString(srcSpec.Unique), nilableToString(dstSpec.Unique))})
-	}
-
-	if !reflect.DeepEqual(srcSpec.Clustered, dstSpec.Clustered) {
-		results = append(results, VerificationResult{
-			NameSpace: dstSpec.Namespace,
-			Cluster:   ClusterTarget,
-			ID:        dstSpec.Name,
-			Field:     "Clustered",
-			Details:   Mismatch + fmt.Sprintf(" : src: %s, dst: %s", nilableToString(srcSpec.Clustered), nilableToString(dstSpec.Clustered))})
-	}
-	return results
-}
-*/
-
-func nilableToString[T any](ptr *T) string {
-	if ptr == nil {
-		return "(unset)"
-	}
-
-	return fmt.Sprintf("%v", *ptr)
 }
 
 func (verifier *Verifier) ProcessCollectionVerificationTask(ctx context.Context, workerNum int, task *VerificationTask) {
