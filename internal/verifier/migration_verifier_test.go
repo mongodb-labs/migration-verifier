@@ -1381,28 +1381,20 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	// turn writes off
-	verifier.WritesOff(ctx)
+	suite.Require().NoError(verifier.WritesOff(ctx))
+
+	// now write to the source, this should not be seen by the change stream which should have ended
+	// because of the calls to WritesOff
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 1019, "x": 1019})
 	suite.Require().NoError(err)
 	checkContinueChan <- struct{}{}
 	<-checkDoneChan
-	// now write to the source, this should not be seen by the change stream which should have ended
-	// because of the calls to WritesOff
+
 	status, err = verifier.GetVerificationStatus()
 	suite.Require().NoError(err)
 
-	// there should be a failure from the src insert
-	suite.T().Logf("status: %+v", *status)
-	suite.Assert().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
-
-	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
-		ctx,
-		verifier.verificationTaskCollection(),
-		verificationTaskVerifyDocuments,
-		verifier.generation,
-	)
-	suite.T().Logf("failed: %+v", failedTasks)
-	suite.T().Logf("incomplete: %+v", incompleteTasks)
+	// there should be a no more tasks
+	suite.Assert().Equal(VerificationStatus{}, *status)
 
 	checkContinueChan <- struct{}{}
 	require.NoError(suite.T(), errGroup.Wait())
@@ -1523,7 +1515,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	// Turn writes off.
-	verifier.WritesOff(ctx)
+	suite.Require().NoError(verifier.WritesOff(ctx))
 
 	// Tell CheckDriver to do one more pass. This should terminate the change stream.
 	checkContinueChan <- struct{}{}

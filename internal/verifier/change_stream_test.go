@@ -275,7 +275,7 @@ func (suite *IntegrationTestSuite) TestEventBeforeWritesOff() {
 	)
 	suite.Require().NoError(err)
 
-	verifier.WritesOff(ctx)
+	suite.Require().NoError(verifier.WritesOff(ctx))
 
 	verifierDone := false
 	for !verifierDone {
