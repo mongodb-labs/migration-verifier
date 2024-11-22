@@ -57,8 +57,8 @@ func GetNewClusterTime(
 		},
 	)
 	if err != nil {
-		// This isn't serious enough even to warn on, so leave it at info-level.
-		logger.Info().Err(err).
+		// This isn't serious enough even for info-level.
+		logger.Debug().Err(err).
 			Msg("Failed to append oplog note; change stream may need extra time to finish.")
 	}
 
