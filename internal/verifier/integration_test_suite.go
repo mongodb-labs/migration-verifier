@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 	"strings"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
@@ -165,6 +166,8 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	verifier.SetNumWorkers(3)
 	verifier.SetGenerationPauseDelayMillis(0)
 	verifier.SetWorkerSleepDelayMillis(0)
+
+	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
 
 	ctx := suite.Context()
 

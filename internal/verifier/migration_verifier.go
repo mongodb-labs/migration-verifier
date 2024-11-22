@@ -121,13 +121,13 @@ type Verifier struct {
 	metaDBName    string
 	srcStartAtTs  *primitive.Timestamp
 
-	mux                     sync.RWMutex
-	changeStreamRunning     bool
-	changeStreamFinalTsChan chan primitive.Timestamp
-	changeStreamErrChan     chan error
-	changeStreamDoneChan    chan struct{}
-	lastChangeEventTime     *primitive.Timestamp
-	writesOffTimestamp      *primitive.Timestamp
+	mux                         sync.RWMutex
+	changeStreamRunning         bool
+	changeStreamWritesOffTsChan chan primitive.Timestamp
+	changeStreamErrChan         chan error
+	changeStreamDoneChan        chan struct{}
+	lastChangeEventTime         *primitive.Timestamp
+	writesOffTimestamp          *primitive.Timestamp
 
 	readConcernSetting ReadConcernSetting
 
@@ -137,6 +137,8 @@ type Verifier struct {
 	globalFilter map[string]any
 
 	pprofInterval time.Duration
+
+	verificationStatusCheckInterval time.Duration
 }
 
 // VerificationStatus holds the Verification Status
@@ -187,19 +189,21 @@ func NewVerifier(settings VerifierSettings) *Verifier {
 	}
 
 	return &Verifier{
-		phase:                   Idle,
-		numWorkers:              NumWorkers,
-		readPreference:          readpref.Primary(),
-		partitionSizeInBytes:    400 * 1024 * 1024,
-		failureDisplaySize:      DefaultFailureDisplaySize,
-		changeStreamFinalTsChan: make(chan primitive.Timestamp),
-		changeStreamErrChan:     make(chan error),
-		changeStreamDoneChan:    make(chan struct{}),
-		readConcernSetting:      readConcern,
+		phase:                       Idle,
+		numWorkers:                  NumWorkers,
+		readPreference:              readpref.Primary(),
+		partitionSizeInBytes:        400 * 1024 * 1024,
+		failureDisplaySize:          DefaultFailureDisplaySize,
+		changeStreamWritesOffTsChan: make(chan primitive.Timestamp),
+		changeStreamErrChan:         make(chan error),
+		changeStreamDoneChan:        make(chan struct{}),
+		readConcernSetting:          readConcern,
 
 		// This will get recreated once gen0 starts, but we want it
 		// here in case the change streams gets an event before then.
 		eventRecorder: NewEventRecorder(),
+
+		verificationStatusCheckInterval: 15 * time.Second,
 	}
 }
 
@@ -250,7 +254,7 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 
 		verifier.writesOffTimestamp = &finalTs
 
-		verifier.changeStreamFinalTsChan <- finalTs
+		verifier.changeStreamWritesOffTsChan <- finalTs
 	}
 
 	return nil

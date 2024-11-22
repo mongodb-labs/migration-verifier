@@ -213,7 +213,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		// If the changeStreamEnderChan has a message, the user has indicated that
 		// source writes are ended. This means we should exit rather than continue
 		// reading the change stream since there should be no more events.
-		case finalTs := <-verifier.changeStreamFinalTsChan:
+		case finalTs := <-verifier.changeStreamWritesOffTsChan:
 			verifier.logger.Debug().
 				Interface("finalTimestamp", finalTs).
 				Msg("Change stream thread received final timestamp. Finalizing change stream.")

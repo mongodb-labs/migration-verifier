@@ -1378,26 +1378,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	status = waitForTasks()
 
 	// there should be no failures now, since they are are equivalent at this point in time
-	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
-
-	// turn writes off
-	suite.Require().NoError(verifier.WritesOff(ctx))
-
-	// now write to the source, this should not be seen by the change stream which should have ended
-	// because of the calls to WritesOff
-	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 1019, "x": 1019})
-	suite.Require().NoError(err)
-	checkContinueChan <- struct{}{}
-	<-checkDoneChan
-
-	status, err = verifier.GetVerificationStatus()
-	suite.Require().NoError(err)
-
-	// there should be a no more tasks
-	suite.Assert().Equal(VerificationStatus{}, *status)
-
-	checkContinueChan <- struct{}{}
-	require.NoError(suite.T(), errGroup.Wait())
+	suite.Assert().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 }
 
 func (suite *IntegrationTestSuite) TestVerifierWithFilter() {

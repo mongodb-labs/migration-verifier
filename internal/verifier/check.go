@@ -25,8 +25,6 @@ var failedStatus = mapset.NewSet(
 	verificationTaskMetadataMismatch,
 )
 
-var verificationStatusCheckInterval time.Duration = 15 * time.Second
-
 // Check is the asynchronous entry point to Check, should only be called by the web server. Use
 // CheckDriver directly for synchronous run.
 // testChan is a pair of channels for coordinating generations in tests.
@@ -110,7 +108,7 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 		//wait for task to be created, if none of the tasks found.
 		if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 || verificationStatus.RecheckTasks > 0 {
 			waitForTaskCreation++
-			time.Sleep(verificationStatusCheckInterval)
+			time.Sleep(verifier.verificationStatusCheckInterval)
 		} else {
 			verifier.PrintVerificationSummary(ctx, GenerationComplete)
 			verifier.logger.Debug().Msg("Verification tasks complete")
