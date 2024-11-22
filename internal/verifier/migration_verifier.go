@@ -887,33 +887,22 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Ra
 		coll.DeleteOne(ctx, bson.M{"_id": insert.InsertedID})
 	}()
 
-	cursor, err := coll.Aggregate(
+	count, err := coll.CountDocuments(
 		ctx,
-		mongo.Pipeline{
-			{
-				{"$match", bson.D{{"_id", insert.InsertedID}}},
-				{"$match", bson.D{
-					{"$expr", bson.D{
-						{"$eq", bson.A{
-							"$spec",
-							dstSpec,
-						}},
-					}},
-				}},
-				{"$project", bson.D{{"_id", 1}}},
-			},
+		bson.D{
+			{"_id", insert.InsertedID},
+			{"spec", dstSpec},
 		},
 	)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to check index specification match in metadata")
-	}
-	var docs []bson.Raw
-	err = cursor.All(ctx, &docs)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to parse index specification match’s result")
+
+	switch count {
+	case 0:
+		return false, nil
+	case 1:
+		return true, nil
 	}
 
-	return len(docs) == 1, nil
+	return false, errors.Errorf("weirdly received %d matching index docs (should be 0 or 1)", count)
 }
 
 /*
