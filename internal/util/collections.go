@@ -10,7 +10,9 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// CollectionSpec is like mongo.CollectionSpecification,
+// CollectionSpec is like mongo.CollectionSpecification except:
+// - IDIndex is a bson.Raw rather than mongo.IndexSpecification.
+// - It can detect unexpected fields.
 type CollectionSpec struct {
 	Name    string
 	Type    string
@@ -26,12 +28,15 @@ type CollectionSpec struct {
 	Extra map[string]any
 }
 
-// Returns full name of collection including database name
+// FullName returns the collection's full namespace.
 func FullName(collection *mongo.Collection) string {
 	return collection.Database().Name() + "." + collection.Name()
 }
 
-func GetCollectionSpec(
+// GetCollectionSpecIfExists returns the given collection’s specification,
+// or empty if the collection doesn’t exist. If any unexpected properties
+// exist in the collection specification then an error is returned.
+func GetCollectionSpecIfExists(
 	ctx context.Context,
 	coll *mongo.Collection,
 ) (option.Option[CollectionSpec], error) {

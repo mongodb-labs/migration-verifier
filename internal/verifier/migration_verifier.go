@@ -1123,12 +1123,12 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 	srcNs := FullName(srcColl)
 	dstNs := FullName(dstColl)
 
-	srcSpecOpt, srcErr := util.GetCollectionSpec(ctx, srcColl)
+	srcSpecOpt, srcErr := util.GetCollectionSpecIfExists(ctx, srcColl)
 	if srcErr != nil {
 		verifier.markCollectionFailed(workerNum, task, ClusterSource, srcNs, srcErr)
 	}
 
-	dstSpecOpt, dstErr := util.GetCollectionSpec(ctx, dstColl)
+	dstSpecOpt, dstErr := util.GetCollectionSpecIfExists(ctx, dstColl)
 	if dstErr != nil {
 		verifier.markCollectionFailed(workerNum, task, ClusterTarget, dstNs, dstErr)
 	}
