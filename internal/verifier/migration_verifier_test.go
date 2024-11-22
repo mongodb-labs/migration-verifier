@@ -1390,8 +1390,19 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	// because of the calls to WritesOff
 	status, err = verifier.GetVerificationStatus()
 	suite.Require().NoError(err)
+
 	// there should be a failure from the src insert
-	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+	suite.T().Logf("status: %+v", *status)
+	suite.Assert().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+
+	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
+		ctx,
+		verifier.verificationTaskCollection(),
+		verificationTaskVerifyDocuments,
+		verifier.generation,
+	)
+	suite.T().Logf("failed: %+v", failedTasks)
+	suite.T().Logf("incomplete: %+v", incompleteTasks)
 
 	checkContinueChan <- struct{}{}
 	require.NoError(suite.T(), errGroup.Wait())

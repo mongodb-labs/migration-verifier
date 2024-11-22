@@ -127,6 +127,7 @@ type Verifier struct {
 	changeStreamErrChan     chan error
 	changeStreamDoneChan    chan struct{}
 	lastChangeEventTime     *primitive.Timestamp
+	writesOffTimestamp      *primitive.Timestamp
 
 	readConcernSetting ReadConcernSetting
 
@@ -226,13 +227,33 @@ func (verifier *Verifier) SetFailureDisplaySize(size int64) {
 	verifier.failureDisplaySize = size
 }
 
-func (verifier *Verifier) WritesOff(ctx context.Context) {
+func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	verifier.logger.Debug().
 		Msg("WritesOff called.")
 
 	verifier.mux.Lock()
+	defer verifier.mux.Unlock()
 	verifier.writesOff = true
-	verifier.mux.Unlock()
+
+	if verifier.writesOffTimestamp == nil {
+		verifier.logger.Debug().Msg("Change stream still running. Signalling that writes are done.")
+
+		finalTs, err := GetNewClusterTime(
+			ctx,
+			verifier.logger,
+			verifier.srcClient,
+		)
+
+		if err != nil {
+			return errors.Wrapf(err, "failed to fetch source's cluster time")
+		}
+
+		verifier.writesOffTimestamp = &finalTs
+
+		verifier.changeStreamFinalTsChan <- finalTs
+	}
+
+	return nil
 }
 
 func (verifier *Verifier) WritesOn(ctx context.Context) {

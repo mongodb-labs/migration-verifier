@@ -43,34 +43,19 @@ func (verifier *Verifier) Check(ctx context.Context, filter map[string]any) {
 }
 
 func (verifier *Verifier) waitForChangeStream(ctx context.Context) error {
-	verifier.mux.RLock()
-	csRunning := verifier.changeStreamRunning
-	verifier.mux.RUnlock()
-	if csRunning {
-		verifier.logger.Debug().Msg("Changestream still running, signalling that writes are done and waiting for change stream to exit")
-
-		finalTs, err := GetNewClusterTime(
-			ctx,
-			verifier.logger,
-			verifier.srcClient,
-		)
-
-		if err != nil {
-			return errors.Wrapf(err, "failed to fetch source's cluster time")
-		}
-
-		verifier.changeStreamFinalTsChan <- finalTs
-		select {
-		case err := <-verifier.changeStreamErrChan:
-			verifier.logger.Warn().Err(err).
-				Msg("Received error from change stream.")
-			return err
-		case <-verifier.changeStreamDoneChan:
-			verifier.logger.Debug().
-				Msg("Received completion signal from change stream.")
-			break
-		}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-verifier.changeStreamErrChan:
+		verifier.logger.Warn().Err(err).
+			Msg("Received error from change stream.")
+		return err
+	case <-verifier.changeStreamDoneChan:
+		verifier.logger.Debug().
+			Msg("Received completion signal from change stream.")
+		break
 	}
+
 	return nil
 }
 

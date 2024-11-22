@@ -126,11 +126,26 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 	return []bson.D{stage}
 }
 
-func (verifier *Verifier) readAndHandleOneChangeEventBatch(ctx context.Context, cs *mongo.ChangeStream) error {
+func (verifier *Verifier) readAndHandleOneChangeEventBatch(
+	ctx context.Context,
+	cs *mongo.ChangeStream,
+	finalTs *primitive.Timestamp,
+) error {
 	eventsRead := 0
 	var changeEventBatch []ParsedEvent
 
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
+		// Once the change stream reaches the final timestamp we should stop reading.
+		if finalTs != nil {
+			csTimestamp, err := extractTimestampFromResumeToken(cs.ResumeToken())
+			if err != nil {
+				return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
+			}
+			if !csTimestamp.Before(*finalTs) {
+				break
+			}
+		}
+
 		gotEvent := cs.TryNext(ctx)
 
 		if cs.Err() != nil {
@@ -184,7 +199,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 	for {
 		var err error
-		var changeStreamEnded bool
+		var gotFinalTimestamp bool
 
 		select {
 
@@ -203,7 +218,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 				Interface("finalTimestamp", finalTs).
 				Msg("Change stream thread received final timestamp. Finalizing change stream.")
 
-			changeStreamEnded = true
+			gotFinalTimestamp = true
 
 			// Read all change events until the source reports no events.
 			// (i.e., the `getMore` call returns empty)
@@ -224,7 +239,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 					break
 				}
 
-				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
+				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs, &finalTs)
 
 				if err != nil {
 					break
@@ -232,7 +247,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			}
 
 		default:
-			err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
+			err = verifier.readAndHandleOneChangeEventBatch(ctx, cs, nil)
 
 			if err == nil {
 				err = persistResumeTokenIfNeeded()
@@ -246,12 +261,12 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 			verifier.changeStreamErrChan <- err
 
-			if !changeStreamEnded {
+			if !gotFinalTimestamp {
 				break
 			}
 		}
 
-		if changeStreamEnded {
+		if gotFinalTimestamp {
 			verifier.mux.Lock()
 			verifier.changeStreamRunning = false
 			if verifier.lastChangeEventTime != nil {
@@ -260,7 +275,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			verifier.mux.Unlock()
 			// since we have started Recheck, we must signal that we have
 			// finished the change stream changes so that Recheck can continue.
-			verifier.changeStreamDoneChan <- struct{}{}
+			close(verifier.changeStreamDoneChan)
 			break
 		}
 	}
