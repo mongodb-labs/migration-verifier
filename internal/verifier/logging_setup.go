@@ -37,19 +37,19 @@ func getLoggerAndWriter(logPath string) (*logger.Logger, io.Writer) {
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        writer,
 		TimeFormat: timeFormat,
-		NoColor:    shouldSuppressColor(rawWriter),
+		NoColor:    !shouldColorize(rawWriter),
 	}
 
 	l := zerolog.New(consoleWriter).With().Timestamp().Logger()
 	return logger.NewLogger(&l, writer), writer
 }
 
-// Returns true unless the writer is a TTY.
-func shouldSuppressColor(writer io.Writer) bool {
+// Returns true only if the writer is a TTY.
+func shouldColorize(writer io.Writer) bool {
 	osFile, isOsFile := writer.(*os.File)
 	if !isOsFile {
 		return true
 	}
 
-	return !term.IsTerminal(int(osFile.Fd()))
+	return term.IsTerminal(int(osFile.Fd()))
 }
