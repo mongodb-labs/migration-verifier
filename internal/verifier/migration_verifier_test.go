@@ -145,36 +145,28 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
 
 	err := verifier.HandleChangeStreamEvents(
 		ctx,
-		[]bson.Raw{
-			testutil.MustMarshal(
-				ParsedEvent{
-					OpType: "insert",
-					Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
-					DocKey: DocKey{
-						ID: "heyhey",
-					},
-				},
-			),
-		},
+		[]ParsedEvent{{
+			OpType: "insert",
+			Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
+			DocKey: DocKey{
+				ID: "heyhey",
+			},
+		}},
 	)
 	suite.Require().NoError(err)
 
 	err = verifier.HandleChangeStreamEvents(
 		ctx,
-		[]bson.Raw{
-			testutil.MustMarshal(
-				ParsedEvent{
-					ID: bson.M{
-						"docID": "ID/docID",
-					},
-					OpType: "insert",
-					Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
-					DocKey: DocKey{
-						ID: "hoohoo",
-					},
-				},
-			),
-		},
+		[]ParsedEvent{{
+			ID: bson.M{
+				"docID": "ID/docID",
+			},
+			OpType: "insert",
+			Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
+			DocKey: DocKey{
+				ID: "hoohoo",
+			},
+		}},
 	)
 	suite.Require().NoError(err)
 
@@ -416,19 +408,19 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		},
 	}
 
-	err = verifier.HandleChangeStreamEvents(ctx, []bson.Raw{testutil.MustMarshal(event)})
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
 	suite.Require().NoError(err)
 	event.OpType = "insert"
-	err = verifier.HandleChangeStreamEvents(ctx, []bson.Raw{testutil.MustMarshal(event)})
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
 	suite.Require().NoError(err)
 	event.OpType = "replace"
-	err = verifier.HandleChangeStreamEvents(ctx, []bson.Raw{testutil.MustMarshal(event)})
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
 	suite.Require().NoError(err)
 	event.OpType = "update"
-	err = verifier.HandleChangeStreamEvents(ctx, []bson.Raw{testutil.MustMarshal(event)})
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
 	suite.Require().NoError(err)
 	event.OpType = "flibbity"
-	err = verifier.HandleChangeStreamEvents(ctx, []bson.Raw{testutil.MustMarshal(event)})
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
 	badEventErr := UnknownEventError{}
 	suite.Require().ErrorAs(err, &badEventErr)
 	suite.Assert().Equal("flibbity", badEventErr.Event.OpType)

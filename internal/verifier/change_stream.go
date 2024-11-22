@@ -42,16 +42,15 @@ const (
 )
 
 type UnknownEventError struct {
-	Event    ParsedEvent
-	RawEvent bson.Raw
+	Event ParsedEvent
 }
 
 func (uee UnknownEventError) Error() string {
-	return fmt.Sprintf("received event with unknown optype: %+v", uee.RawEvent)
+	return fmt.Sprintf("received event with unknown optype: %+v", uee.Event)
 }
 
 // HandleChangeStreamEvents performs the necessary work for change stream events after receiving a batch.
-func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []bson.Raw) error {
+func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []ParsedEvent) error {
 	if len(batch) == 0 {
 		return nil
 	}
@@ -61,13 +60,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 	docIDs := make([]interface{}, len(batch))
 	dataSizes := make([]int, len(batch))
 
-	for i, rawChangeEvent := range batch {
-		var changeEvent ParsedEvent
-		err := bson.Unmarshal(rawChangeEvent, &changeEvent)
-		if err != nil {
-			return errors.Wrapf(err, "failed to unmarshal change event %d of %d (%+v) to %T", 1+i, len(batch), rawChangeEvent, changeEvent)
-		}
-
+	for i, changeEvent := range batch {
 		if changeEvent.ClusterTime != nil &&
 			(verifier.lastChangeEventTime == nil ||
 				verifier.lastChangeEventTime.Compare(*changeEvent.ClusterTime) < 0) {
@@ -82,7 +75,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 			fallthrough
 		case "update":
 			if err := verifier.eventRecorder.AddEvent(&changeEvent); err != nil {
-				return errors.Wrapf(err, "failed to augment stats with change event (%+v)", rawChangeEvent)
+				return errors.Wrapf(err, "failed to augment stats with change event (%+v)", changeEvent)
 			}
 			dbNames[i] = changeEvent.Ns.DB
 			collNames[i] = changeEvent.Ns.Coll
@@ -97,10 +90,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 				dataSizes[i] = len(changeEvent.FullDocument)
 			}
 		default:
-			return UnknownEventError{
-				Event:    changeEvent,
-				RawEvent: rawChangeEvent,
-			}
+			return UnknownEventError{Event: changeEvent}
 		}
 	}
 
@@ -139,11 +129,23 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 	ctx context.Context,
 	cs *mongo.ChangeStream,
+	writesOffTs *primitive.Timestamp,
 ) error {
 	eventsRead := 0
-	var changeEventBatch []bson.Raw
+	var changeEventBatch []ParsedEvent
 
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
+		// Once the change stream reaches the writesOff timestamp we should stop reading.
+		if writesOffTs != nil {
+			csTimestamp, err := extractTimestampFromResumeToken(cs.ResumeToken())
+			if err != nil {
+				return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
+			}
+			if !csTimestamp.Before(*writesOffTs) {
+				break
+			}
+		}
+
 		gotEvent := cs.TryNext(ctx)
 
 		if cs.Err() != nil {
@@ -155,12 +157,9 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 		}
 
 		if changeEventBatch == nil {
-			changeEventBatch = make([]bson.Raw, cs.RemainingBatchLength()+1)
+			changeEventBatch = make([]ParsedEvent, cs.RemainingBatchLength()+1)
 		}
 
-		fmt.Printf("\n===== event: %+v\n", cs.Current)
-
-		// NB: Decode() achieves a deep-clone of cs.Current.
 		if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
 			return errors.Wrap(err, "failed to decode change event")
 		}
@@ -240,7 +239,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 					break
 				}
 
-				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
+				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs, &writesOffTs)
 
 				if err != nil {
 					break
@@ -248,7 +247,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			}
 
 		default:
-			err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
+			err = verifier.readAndHandleOneChangeEventBatch(ctx, cs, nil)
 
 			if err == nil {
 				err = persistResumeTokenIfNeeded()
