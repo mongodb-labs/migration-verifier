@@ -42,7 +42,7 @@ const (
 )
 
 type UnknownEventError struct {
-	Event ParsedEvent
+	Event *ParsedEvent
 }
 
 func (uee UnknownEventError) Error() string {
@@ -90,7 +90,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 				dataSizes[i] = len(changeEvent.FullDocument)
 			}
 		default:
-			return UnknownEventError{Event: changeEvent}
+			return UnknownEventError{Event: &changeEvent}
 		}
 	}
 
@@ -161,7 +161,7 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 		}
 
 		if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
-			return errors.Wrap(err, "failed to decode change event")
+			return errors.Wrapf(err, "failed to decode change event to %T", changeEventBatch[eventsRead])
 		}
 
 		eventsRead++
