@@ -51,7 +51,7 @@ func GetNewClusterTime(
 		logger,
 		func(_ *retry.Info) error {
 			var err error
-			clusterTime, err = syncClusterTimeAcrossShards(ctx, client, clusterTime)
+			_, err = syncClusterTimeAcrossShards(ctx, client, clusterTime)
 			return err
 		},
 	)
