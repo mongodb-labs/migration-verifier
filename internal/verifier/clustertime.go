@@ -5,7 +5,6 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
-	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
@@ -71,22 +70,15 @@ func fetchNewClusterTime(
 	ctx context.Context,
 	client *mongo.Client,
 ) (primitive.Timestamp, error) {
-	cmd, rawResponse, err := runAppendOplogNote(
+	_, rawResponse, err := runAppendOplogNote(
 		ctx,
 		client,
 		"expect StaleClusterTime error",
 	)
-
-	// We expect an error here; if we didn't get one then something is
-	// amiss on the server.
-	if err == nil {
-		return primitive.Timestamp{}, errors.Errorf("server request unexpectedly succeeded: %v", cmd)
-	}
-
-	if !util.IsStaleClusterTimeError(err) {
+	if err != nil {
 		return primitive.Timestamp{}, errors.Wrap(
 			err,
-			"unexpected error (expected StaleClusterTime) from request",
+			"failed to append note to oplog",
 		)
 	}
 
