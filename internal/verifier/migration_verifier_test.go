@@ -20,7 +20,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,7 +28,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"golang.org/x/sync/errgroup"
 )
 
 func TestIntegration(t *testing.T) {
@@ -1292,7 +1290,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
 	verifier.SetNamespaceMap()
 
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
 	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
@@ -1303,18 +1301,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 1, "x": 42})
 	suite.Require().NoError(err)
 
-	checkDoneChan := make(chan struct{})
-	checkContinueChan := make(chan struct{})
-
-	errGroup, errGrpCtx := errgroup.WithContext(context.Background())
-	errGroup.Go(func() error {
-		checkDriverErr := verifier.CheckDriver(errGrpCtx, nil, checkDoneChan, checkContinueChan)
-		// Log this as fatal error so that the test doesn't hang.
-		if checkDriverErr != nil {
-			log.Fatal().Err(checkDriverErr).Msg("check driver error")
-		}
-		return checkDriverErr
-	})
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 
 	waitForTasks := func() *VerificationStatus {
 		status, err := verifier.GetVerificationStatus()
@@ -1326,8 +1313,8 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting %s then will run another generation …", verifier.generation, delay)
 
 			time.Sleep(delay)
-			checkContinueChan <- struct{}{}
-			<-checkDoneChan
+			runner.StartNextGeneration()
+			runner.AwaitGenerationEnd()
 			status, err = verifier.GetVerificationStatus()
 			suite.Require().NoError(err)
 		}
@@ -1335,7 +1322,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	}
 
 	// wait for one generation to finish
-	<-checkDoneChan
+	runner.AwaitGenerationEnd()
 	status := waitForTasks()
 	suite.Require().Equal(VerificationStatus{TotalTasks: 2, FailedTasks: 1, CompletedTasks: 1}, *status)
 
@@ -1344,10 +1331,10 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 
 	// tell check to start the next generation
-	checkContinueChan <- struct{}{}
+	runner.StartNextGeneration()
 
 	// wait for generation to finish
-	<-checkDoneChan
+	runner.AwaitGenerationEnd()
 	status = waitForTasks()
 	// there should be no failures now, since they are are equivalent at this point in time
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
@@ -1357,10 +1344,10 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 
 	// tell check to start the next generation
-	checkContinueChan <- struct{}{}
+	runner.StartNextGeneration()
 
 	// wait for one generation to finish
-	<-checkDoneChan
+	runner.AwaitGenerationEnd()
 	status = waitForTasks()
 
 	// there should be a failure from the src insert
@@ -1371,19 +1358,20 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 
 	// continue
-	checkContinueChan <- struct{}{}
+	runner.StartNextGeneration()
 
 	// wait for it to finish again, this should be a clean run
-	<-checkDoneChan
+	runner.AwaitGenerationEnd()
 	status = waitForTasks()
 
 	// there should be no failures now, since they are are equivalent at this point in time
 	suite.Assert().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
+	// We could just abandon this verifier, but we might as well shut it down
+	// gracefully. That prevents a spurious error in the log from “drop”
+	// change events.
 	suite.Require().NoError(verifier.WritesOff(ctx))
-
-	checkContinueChan <- struct{}{}
-	require.NoError(suite.T(), errGroup.Wait())
+	suite.Require().NoError(runner.Await())
 }
 
 func (suite *IntegrationTestSuite) TestVerifierWithFilter() {

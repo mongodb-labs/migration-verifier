@@ -246,9 +246,6 @@ func (suite *IntegrationTestSuite) TestEventBeforeWritesOff() {
 
 	verifier := suite.BuildVerifier()
 
-	checkDoneChan := make(chan struct{})
-	checkContinueChan := make(chan struct{})
-
 	db := suite.srcMongoClient.Database(suite.DBNameForTest())
 	coll := db.Collection("mycoll")
 	suite.Require().NoError(
@@ -256,16 +253,10 @@ func (suite *IntegrationTestSuite) TestEventBeforeWritesOff() {
 	)
 
 	// start verifier
-	verifierDoneChan := make(chan struct{})
-	go func() {
-		err := verifier.CheckDriver(ctx, nil, checkDoneChan, checkContinueChan)
-		suite.Require().NoError(err)
+	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
 
-		close(verifierDoneChan)
-	}()
-
-	// wait for generation 1
-	<-checkDoneChan
+	// wait for generation 0 to end
+	verifierRunner.AwaitGenerationEnd()
 
 	docsCount := 10_000
 	docs := lo.RepeatBy(docsCount, func(_ int) bson.D { return bson.D{} })
@@ -277,15 +268,7 @@ func (suite *IntegrationTestSuite) TestEventBeforeWritesOff() {
 
 	suite.Require().NoError(verifier.WritesOff(ctx))
 
-	verifierDone := false
-	for !verifierDone {
-		select {
-		case <-verifierDoneChan:
-			verifierDone = true
-		case <-checkDoneChan:
-		case checkContinueChan <- struct{}{}:
-		}
-	}
+	suite.Require().NoError(verifierRunner.Await())
 
 	generation := verifier.generation
 	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
