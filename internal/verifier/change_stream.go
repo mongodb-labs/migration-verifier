@@ -139,23 +139,11 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 	ctx context.Context,
 	cs *mongo.ChangeStream,
-	writesOffTs *primitive.Timestamp,
 ) error {
 	eventsRead := 0
 	var changeEventBatch []bson.Raw
 
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
-		// Once the change stream reaches the writesOff timestamp we should stop reading.
-		if writesOffTs != nil {
-			csTimestamp, err := extractTimestampFromResumeToken(cs.ResumeToken())
-			if err != nil {
-				return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
-			}
-			if !csTimestamp.Before(*writesOffTs) {
-				break
-			}
-		}
-
 		gotEvent := cs.TryNext(ctx)
 
 		if cs.Err() != nil {
@@ -252,7 +240,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 					break
 				}
 
-				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs, &writesOffTs)
+				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
 
 				if err != nil {
 					break
@@ -260,7 +248,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			}
 
 		default:
-			err = verifier.readAndHandleOneChangeEventBatch(ctx, cs, nil)
+			err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
 
 			if err == nil {
 				err = persistResumeTokenIfNeeded()
