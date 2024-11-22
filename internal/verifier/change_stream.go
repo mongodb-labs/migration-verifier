@@ -170,6 +170,8 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 			changeEventBatch = make([]bson.Raw, cs.RemainingBatchLength()+1)
 		}
 
+		fmt.Printf("\n===== event: %+v\n", cs.Current)
+
 		// NB: Decode() achieves a deep-clone of cs.Current.
 		if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
 			return errors.Wrap(err, "failed to decode change event")

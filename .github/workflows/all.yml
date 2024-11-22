@@ -88,7 +88,7 @@ jobs:
             } | parallel
 
       - name: Test
-        run: go test -v ./... -race
+        run: go test -v ./... -race -testify.m TestEventBeforeWritesOff
         env:
           MVTEST_SRC: ${{matrix.topology.srcConnStr}}
           MVTEST_DST: ${{matrix.topology.dstConnStr}}
