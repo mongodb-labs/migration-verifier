@@ -15,6 +15,7 @@ import (
 
 func TestChangeStreamFilter(t *testing.T) {
 	verifier := Verifier{}
+	verifier.initializeChangeStreamReaders()
 	verifier.SetMetaDBName("metadb")
 	require.Equal(t, []bson.D{{{"$match", bson.D{{"ns.db", bson.D{{"$ne", "metadb"}}}}}}},
 		verifier.srcChangeStreamReader.GetChangeStreamFilter())
