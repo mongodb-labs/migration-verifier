@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/10gen/migration-verifier/internal/util"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -140,7 +139,6 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 	}
 }
 
-<<<<<<< HEAD
 func (suite *IntegrationTestSuite) GetSrcTopology() TestTopology {
 	hello := struct {
 		Msg string
@@ -157,13 +155,6 @@ func (suite *IntegrationTestSuite) GetSrcTopology() TestTopology {
 	)
 
 	return lo.Ternary(hello.Msg == "isdbgrid", TopologySharded, "")
-=======
-func (suite *IntegrationTestSuite) GetTopology() TestTopology {
-	buildInfo, err := util.GetBuildInfo(suite.Context(), suite.srcMongoClient)
-	suite.Require().NoError(err, "should read source's build info")
-
-	return lo.Ternary(buildInfo.IsSharded, TopologySharded, "")
->>>>>>> 2304fca (refactor build infio)
 }
 
 func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {

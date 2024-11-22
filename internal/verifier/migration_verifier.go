@@ -308,11 +308,7 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 	var err error
 	verifier.srcClient, err = mongo.Connect(ctx, opts)
 	if err != nil {
-<<<<<<< HEAD
-		return err
-=======
 		return errors.Wrapf(err, "failed to connect to source %#q", uri)
->>>>>>> 2304fca (refactor build infio)
 	}
 
 	buildInfo, err := util.GetBuildInfo(ctx, verifier.srcClient)

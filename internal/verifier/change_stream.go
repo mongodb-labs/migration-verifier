@@ -293,6 +293,10 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 		SetMaxAwaitTime(1 * time.Second).
 		SetFullDocument(options.UpdateLookup)
 
+	if verifier.srcBuildInfo.VersionArray[0] >= 6 {
+		opts = opts.SetCustomPipeline(bson.M{"showExpandedEvents": true})
+	}
+
 	savedResumeToken, err := verifier.loadChangeStreamResumeToken(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to load persisted change stream resume token")
