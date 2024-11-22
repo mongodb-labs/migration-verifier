@@ -65,7 +65,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 		var changeEvent ParsedEvent
 		err := bson.Unmarshal(rawChangeEvent, &changeEvent)
 		if err != nil {
-			return errors.Wrapf(err, "failed to unmarshal change event (%+v) to %T", rawChangeEvent, changeEvent)
+			return errors.Wrapf(err, "failed to unmarshal change event %d of %d (%+v) to %T", 1+i, len(batch), rawChangeEvent, changeEvent)
 		}
 
 		if changeEvent.ClusterTime != nil &&
