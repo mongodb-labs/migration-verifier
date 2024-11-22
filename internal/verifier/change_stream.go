@@ -42,6 +42,7 @@ const (
 )
 
 type UnknownEventError struct {
+	Event    ParsedEvent
 	RawEvent bson.Raw
 }
 
@@ -96,7 +97,10 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 				dataSizes[i] = len(changeEvent.FullDocument)
 			}
 		default:
-			return UnknownEventError{RawEvent: rawChangeEvent}
+			return UnknownEventError{
+				Event:    changeEvent,
+				RawEvent: rawChangeEvent,
+			}
 		}
 	}
 
@@ -138,7 +142,7 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 	writesOffTs *primitive.Timestamp,
 ) error {
 	eventsRead := 0
-	var changeEventBatch []ParsedEvent
+	var changeEventBatch []bson.Raw
 
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
 		// Once the change stream reaches the writesOff timestamp we should stop reading.
@@ -163,12 +167,10 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 		}
 
 		if changeEventBatch == nil {
-			changeEventBatch = make([]ParsedEvent, cs.RemainingBatchLength()+1)
+			changeEventBatch = make([]bson.Raw, cs.RemainingBatchLength()+1)
 		}
 
-		if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
-			return errors.Wrap(err, "failed to decode change event")
-		}
+		copy(changeEventBatch[eventsRead], cs.Current)
 
 		eventsRead++
 	}

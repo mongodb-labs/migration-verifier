@@ -60,8 +60,12 @@ jobs:
         with:
           go-version: stable
 
-      - name: Install m
-        run: npm install -g m mongosh
+      - name: Install m and mtools
+        run: |-
+            {
+                echo npm install -g m
+                echo pipx install 'mtools[all]'
+            } | parallel
 
       - name: Install MongoDB ${{ matrix.mongodb_versions[0] }} (source)
         run: yes | m ${{ matrix.mongodb_versions[0] }} && dirname $(readlink $(which mongod)) > .srcpath
@@ -72,18 +76,15 @@ jobs:
       - name: Install latest stable MongoDB (metadata)
         run: yes | m stable && dirname $(readlink $(which mongod)) > .metapath
 
-      - name: Install mtools
-        run: pipx install 'mtools[all]'
-
       - name: Build
         run: go build main/migration_verifier.go
 
       - name: Start clusters
         run: |-
             {
-                echo "mlaunch init --binarypath $(cat .srcpath) --port 27020 --dir src --replicaset ${{ matrix.topology.args }}"
-                echo "mlaunch init --binarypath $(cat .dstpath) --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}"
-                echo "mlaunch init --binarypath $(cat .metapath) --port 27040 --dir meta --replicaset --nodes 1"
+                echo mlaunch init --binarypath $(cat .srcpath) --port 27020 --dir src --replicaset ${{ matrix.topology.args }}
+                echo mlaunch init --binarypath $(cat .dstpath) --port 27030 --dir dst --replicaset ${{ matrix.topology.args }}
+                echo mlaunch init --binarypath $(cat .metapath) --port 27040 --dir meta --replicaset --nodes 1
             } | parallel
 
       - name: Test
