@@ -1379,6 +1379,11 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 
 	// there should be no failures now, since they are are equivalent at this point in time
 	suite.Assert().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+
+	suite.Require().NoError(verifier.WritesOff(ctx))
+
+	checkContinueChan <- struct{}{}
+	require.NoError(suite.T(), errGroup.Wait())
 }
 
 func (suite *IntegrationTestSuite) TestVerifierWithFilter() {

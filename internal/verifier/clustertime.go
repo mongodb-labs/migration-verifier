@@ -106,7 +106,10 @@ func syncClusterTimeAcrossShards(
 		maxTime,
 	)
 
-	if err != nil {
+	// If any shard’s cluster time >= maxTime, the mongos will return a
+	// StaleClusterTime error. This particular error doesn’t indicate a
+	// failure, so we ignore it.
+	if err != nil && !util.IsStaleClusterTimeError(err) {
 		return primitive.Timestamp{}, errors.Wrap(
 			err,
 			"failed to append note to oplog",

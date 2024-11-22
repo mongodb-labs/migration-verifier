@@ -236,7 +236,6 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 		Msg("WritesOff called.")
 
 	verifier.mux.Lock()
-	defer verifier.mux.Unlock()
 	verifier.writesOff = true
 
 	if verifier.writesOffTimestamp == nil {
@@ -254,7 +253,10 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 
 		verifier.writesOffTimestamp = &finalTs
 
+		verifier.mux.Unlock()
 		verifier.changeStreamWritesOffTsChan <- finalTs
+	} else {
+		verifier.mux.Unlock()
 	}
 
 	return nil
