@@ -1019,6 +1019,21 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexSpecs() {
 			},
 			shouldMatch: true,
 		},
+
+		{
+			label: "ignore `ns` field",
+			src: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo": 123}},
+				{"ns", "foo.bar"},
+			},
+			dst: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo": 123}},
+			},
+			shouldMatch: true,
+		},
+
 		{
 			label: "ignore number types",
 			src: bson.D{

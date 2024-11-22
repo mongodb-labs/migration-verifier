@@ -23,6 +23,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
@@ -887,13 +888,43 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Ra
 		coll.DeleteOne(ctx, bson.M{"_id": insert.InsertedID})
 	}()
 
-	count, err := coll.CountDocuments(
+	cursor, err := coll.Aggregate(
 		ctx,
-		bson.D{
-			{"_id", insert.InsertedID},
-			{"spec", dstSpec},
+		mongo.Pipeline{
+			// Select our source spec.
+			{{"$match", bson.D{{"_id", insert.InsertedID}}}},
+
+			// Add the destination spec.
+			{{"$addFields", bson.D{
+				{"dstSpec", dstSpec},
+			}}},
+
+			// Remove the “ns” field from both. (NB: 4.4+ don’t create these,
+			// though in-place upgrades may cause them still to exist.)
+			{{"$addFields", bson.D{
+				{"spec.ns", "$$REMOVE"},
+				{"dstSpec.ns", "$$REMOVE"},
+			}}},
+
+			// Now check to be sure that those specs match.
+			{{"$match", bson.D{
+				{"$expr", bson.D{
+					{"$eq", mslices.Of("$spec", "$dstSpec")},
+				}},
+			}}},
 		},
 	)
+
+	if err != nil {
+		return false, errors.Wrap(err, "failed to check index specification match in metadata")
+	}
+	var docs []bson.Raw
+	err = cursor.All(ctx, &docs)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to parse index specification match’s result")
+	}
+
+	count := len(docs)
 
 	switch count {
 	case 0:
@@ -1212,7 +1243,6 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 		partitions, shardKeys, docsCount, bytesCount, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
 		if err != nil {
 			task.Status = verificationTaskFailed
-
 			verifier.logger.Error().Msgf("[Worker %d] Error partitioning collection: %+v", workerNum, err)
 			return
 		}
