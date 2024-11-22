@@ -74,6 +74,13 @@ const (
 	notOkSymbol = "\u2757" // heavy exclamation mark symbol
 )
 
+type clusterType string
+
+const (
+	srcReaderType clusterType = "source"
+	dstReaderType clusterType = "destination"
+)
+
 var timeFormat = time.RFC3339
 
 // Verifier is the main state for the migration verifier
@@ -121,14 +128,15 @@ type Verifier struct {
 	dstNamespaces []string
 	nsMap         map[string]string
 	metaDBName    string
-	srcStartAtTs  *primitive.Timestamp
 
-	mux                   sync.RWMutex
-	changeStreamRunning   bool
-	changeStreamEnderChan chan struct{}
-	changeStreamErrChan   chan error
-	changeStreamDoneChan  chan struct{}
-	lastChangeEventTime   *primitive.Timestamp
+	mux sync.RWMutex
+
+	srcChangeStreamReader *ChangeStreamReader
+	dstChangeStreamReader *ChangeStreamReader
+
+	//ChangeStreamEnderChan chan struct{}
+	//ChangeStreamErrChan   chan error
+	//ChangeStreamDoneChan  chan struct{}
 
 	readConcernSetting ReadConcernSetting
 
@@ -188,15 +196,13 @@ func NewVerifier(settings VerifierSettings) *Verifier {
 	}
 
 	return &Verifier{
-		phase:                 Idle,
-		numWorkers:            NumWorkers,
-		readPreference:        readpref.Primary(),
-		partitionSizeInBytes:  400 * 1024 * 1024,
-		failureDisplaySize:    DefaultFailureDisplaySize,
-		changeStreamEnderChan: make(chan struct{}),
-		changeStreamErrChan:   make(chan error),
-		changeStreamDoneChan:  make(chan struct{}),
-		readConcernSetting:    readConcern,
+		phase:                Idle,
+		numWorkers:           NumWorkers,
+		readPreference:       readpref.Primary(),
+		partitionSizeInBytes: 400 * 1024 * 1024,
+		failureDisplaySize:   DefaultFailureDisplaySize,
+
+		readConcernSetting: readConcern,
 
 		// This will get recreated once gen0 starts, but we want it
 		// here in case the change streams gets an event before then.

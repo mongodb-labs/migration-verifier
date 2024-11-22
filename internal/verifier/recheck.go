@@ -29,6 +29,8 @@ const (
 // NB: Order is important here so that, within a given generation,
 // sorting by _id will guarantee that all rechecks for a given
 // namespace appear consecutively.
+//
+// DatabaseName and CollectionName should be on the source.
 type RecheckPrimaryKey struct {
 	Generation     int         `bson:"generation"`
 	DatabaseName   string      `bson:"db"`

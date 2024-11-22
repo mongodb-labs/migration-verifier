@@ -16,7 +16,7 @@ func TestChangeStreamFilter(t *testing.T) {
 	verifier := Verifier{}
 	verifier.SetMetaDBName("metadb")
 	require.Equal(t, []bson.D{{{"$match", bson.D{{"ns.db", bson.D{{"$ne", "metadb"}}}}}}},
-		verifier.GetChangeStreamFilter())
+		verifier.GetChangeStreamFilter(verifier.srcNamespaces))
 	verifier.srcNamespaces = []string{"foo.bar", "foo.baz", "test.car", "test.chaz"}
 	require.Equal(t, []bson.D{
 		{{"$match", bson.D{
@@ -27,7 +27,7 @@ func TestChangeStreamFilter(t *testing.T) {
 				bson.D{{"ns", bson.D{{"db", "test"}, {"coll", "chaz"}}}},
 			}},
 		}}},
-	}, verifier.GetChangeStreamFilter())
+	}, verifier.GetChangeStreamFilter(verifier.srcNamespaces))
 }
 
 // TestChangeStreamResumability creates a verifier, starts its change stream,
