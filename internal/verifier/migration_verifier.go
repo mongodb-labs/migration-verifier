@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	_ "net/http/pprof"
 	"os"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,7 +20,10 @@ import (
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
+	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
@@ -796,34 +798,22 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 	return partitionList, shardKeys, srcDocs, srcBytes, nil
 }
 
-func (verifier *Verifier) getCollectionSpecification(ctx context.Context, collection *mongo.Collection) (*mongo.CollectionSpecification, error) {
-	filter := bson.D{{"name", collection.Name()}}
-	specifications, err := collection.Database().ListCollectionSpecifications(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	if len(specifications) > 1 {
-		return nil, errors.Errorf("Too many collections named %s %+v", FullName(collection), specifications)
-	}
-	if len(specifications) == 1 {
-		verifier.logger.Debug().Msgf("Collection specification: %+v", specifications[0])
-		return specifications[0], nil
-	}
-
-	// Collection not found.
-	return nil, nil
-}
-
 // Returns a slice of VerificationResults with the differences, and a boolean indicating whether or
 // not the collection data can be safely verified.
-func (verifier *Verifier) compareCollectionSpecifications(srcNs string, dstNs string, srcSpec *mongo.CollectionSpecification, dstSpec *mongo.CollectionSpecification) ([]VerificationResult, bool) {
-	if srcSpec == nil {
+func (verifier *Verifier) compareCollectionSpecifications(
+	srcNs, dstNs string,
+	srcSpecOpt, dstSpecOpt option.Option[util.CollectionSpec],
+) ([]VerificationResult, bool) {
+	srcSpec, hasSrcSpec := srcSpecOpt.Get()
+	dstSpec, hasDstSpec := dstSpecOpt.Get()
+
+	if !hasSrcSpec {
 		return []VerificationResult{{
 			NameSpace: srcNs,
 			Cluster:   ClusterSource,
 			Details:   Missing}}, false
 	}
-	if dstSpec == nil {
+	if !hasDstSpec {
 		return []VerificationResult{{
 			NameSpace: dstNs,
 			Cluster:   ClusterTarget,
@@ -838,12 +828,12 @@ func (verifier *Verifier) compareCollectionSpecifications(srcNs string, dstNs st
 		// If the types differ, the rest is not important.
 	}
 	var results []VerificationResult
-	if srcSpec.ReadOnly != dstSpec.ReadOnly {
+	if srcSpec.Info.ReadOnly != dstSpec.Info.ReadOnly {
 		results = append(results, VerificationResult{
 			NameSpace: dstNs,
 			Cluster:   ClusterTarget,
 			Field:     "ReadOnly",
-			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.ReadOnly, dstSpec.ReadOnly)})
+			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Info.ReadOnly, dstSpec.Info.ReadOnly)})
 	}
 	if !bytes.Equal(srcSpec.Options, dstSpec.Options) {
 		mismatchDetails, err := BsonUnorderedCompareRawDocumentWithDetails(srcSpec.Options, dstSpec.Options)
@@ -875,8 +865,59 @@ func (verifier *Verifier) compareCollectionSpecifications(srcNs string, dstNs st
 	return results, canCompareData
 }
 
-func compareIndexSpecifications(srcSpec *mongo.IndexSpecification, dstSpec *mongo.IndexSpecification) []VerificationResult {
-	var results []VerificationResult
+func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Raw, dstSpec bson.Raw) (bool, error) {
+	// If the byte buffers match, then we’re done.
+	if bytes.Equal(srcSpec, dstSpec) {
+		return true, nil
+	}
+
+	// Next check to see if the only differences are type differences.
+	// If we didn’t support pre-v5 servers we could use a $documents aggregation,
+	// but we can’t do that, so we write to a temporary collection.
+	coll := verifier.metaClient.Database(verifier.metaDBName).Collection("indexCompare")
+	insert, err := coll.InsertOne(
+		ctx,
+		bson.M{"spec": srcSpec},
+	)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to persist index specification to metadata")
+	}
+
+	defer func() {
+		coll.DeleteOne(ctx, bson.M{"_id": insert.InsertedID})
+	}()
+
+	cursor, err := coll.Aggregate(
+		ctx,
+		mongo.Pipeline{
+			{
+				{"$match", bson.D{
+					{"_id", insert.InsertedID},
+					{"$expr", bson.D{
+						{"$eq", bson.A{
+							"$spec",
+							dstSpec,
+						}},
+					}},
+				}},
+				{"$project", bson.D{{"_id", 1}}},
+			},
+		},
+	)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to check index specification match in metadata")
+	}
+	var docs []bson.Raw
+	err = cursor.All(ctx, &docs)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to parse index specification match’s result")
+	}
+
+	return len(docs) == 1, nil
+}
+
+/*
+
 	// Order is always significant in the keys document.
 	if !bytes.Equal(srcSpec.KeysDocument, dstSpec.KeysDocument) {
 		results = append(results, VerificationResult{
@@ -926,6 +967,7 @@ func compareIndexSpecifications(srcSpec *mongo.IndexSpecification, dstSpec *mong
 	}
 	return results
 }
+*/
 
 func nilableToString[T any](ptr *T) string {
 	if ptr == nil {
@@ -953,50 +995,131 @@ func (verifier *Verifier) markCollectionFailed(workerNum int, task *Verification
 		Details:   Failed + fmt.Sprintf(" %v", err)})
 }
 
-func verifyIndexes(ctx context.Context, _ int, _ *VerificationTask, srcColl, dstColl *mongo.Collection,
-	srcIdIndexSpec, dstIdIndexSpec *mongo.IndexSpecification) ([]VerificationResult, error) {
-	srcSpecs, err := srcColl.Indexes().ListSpecifications(ctx)
+func getIndexesMap(
+	ctx context.Context,
+	coll *mongo.Collection,
+) (map[string]bson.Raw, error) {
+
+	var specs []bson.Raw
+	specsMap := map[string]bson.Raw{}
+
+	cursor, err := coll.Indexes().List(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(
+			err,
+			"failed to read %#q’s indexes",
+			FullName(coll),
+		)
 	}
+	err = cursor.All(ctx, &specs)
+	if err != nil {
+		return nil, errors.Wrapf(
+			err,
+			"failed to parse %#q’s indexes",
+			FullName(coll),
+		)
+	}
+
+	for _, spec := range specs {
+		var name string
+		has, err := mbson.RawLookup(spec, &name, "name")
+
+		if !has {
+			return nil, errors.Errorf(
+				"%#q has an unnamed index (%+v)",
+				FullName(coll),
+				spec,
+			)
+		}
+
+		if err != nil {
+			return nil, errors.Wrapf(
+				err,
+				"failed to extract %#q from %#q's index specification (%+v)",
+				"name",
+				FullName(coll),
+				spec,
+			)
+		}
+
+		specsMap[name] = spec
+	}
+
+	return specsMap, nil
+}
+
+func (verifier *Verifier) verifyIndexes(
+	ctx context.Context,
+	srcColl, dstColl *mongo.Collection,
+	srcIdIndexSpec, dstIdIndexSpec bson.Raw,
+) ([]VerificationResult, error) {
+
+	srcMap, err := getIndexesMap(ctx, srcColl)
+	if err != nil {
+		return nil, errors.Wrapf(
+			err,
+			"failed to fetch %#q's indexes on source",
+			FullName(srcColl),
+		)
+	}
+
 	if srcIdIndexSpec != nil {
-		srcSpecs = append(srcSpecs, srcIdIndexSpec)
+		srcMap["_id"] = srcIdIndexSpec
 	}
-	dstSpecs, err := dstColl.Indexes().ListSpecifications(ctx)
+
+	dstMap, err := getIndexesMap(ctx, dstColl)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(
+			err,
+			"failed to fetch %#q's indexes on destination",
+			FullName(dstColl),
+		)
 	}
+
 	if dstIdIndexSpec != nil {
-		dstSpecs = append(dstSpecs, dstIdIndexSpec)
+		dstMap["_id"] = dstIdIndexSpec
 	}
+
 	var results []VerificationResult
-	srcMap := map[string](*mongo.IndexSpecification){}
 	srcMapUsed := map[string]bool{}
-	for _, srcSpec := range srcSpecs {
-		srcMap[srcSpec.Name] = srcSpec
-	}
-	for _, dstSpec := range dstSpecs {
-		srcSpec := srcMap[dstSpec.Name]
-		if srcSpec == nil {
+
+	for indexName, dstSpec := range dstMap {
+		srcSpec, exists := srcMap[indexName]
+		if exists {
+			srcMapUsed[indexName] = true
+			theyMatch, err := verifier.doIndexSpecsMatch(ctx, srcSpec, dstSpec)
+			if err != nil {
+				return nil, errors.Wrapf(
+					err,
+					"failed to check whether %#q's source & desstination %#q indexes match",
+					FullName(srcColl),
+					indexName,
+				)
+			}
+
+			if !theyMatch {
+				results = append(results, VerificationResult{
+					NameSpace: FullName(dstColl),
+					Cluster:   ClusterTarget,
+					ID:        indexName,
+					Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec, dstSpec),
+				})
+			}
+		} else {
 			results = append(results, VerificationResult{
-				ID:        dstSpec.Name,
+				ID:        indexName,
 				Details:   Missing,
 				Cluster:   ClusterSource,
-				NameSpace: FullName(srcColl)})
-		} else {
-			srcMapUsed[srcSpec.Name] = true
-			compareSpecResults := compareIndexSpecifications(srcSpec, dstSpec)
-			if compareSpecResults != nil {
-				results = append(results, compareSpecResults...)
-			}
+				NameSpace: FullName(srcColl),
+			})
 		}
 	}
 
 	// Find any index specs which existed in the source cluster but not the target cluster.
-	for _, srcSpec := range srcSpecs {
-		if !srcMapUsed[srcSpec.Name] {
+	for indexName := range srcMap {
+		if !srcMapUsed[indexName] {
 			results = append(results, VerificationResult{
-				ID:        srcSpec.Name,
+				ID:        indexName,
 				Details:   Missing,
 				Cluster:   ClusterTarget,
 				NameSpace: FullName(dstColl)})
@@ -1011,12 +1134,12 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 	srcNs := FullName(srcColl)
 	dstNs := FullName(dstColl)
 
-	srcSpec, srcErr := verifier.getCollectionSpecification(ctx, srcColl)
+	srcSpecOpt, srcErr := util.GetCollectionSpec(ctx, srcColl)
 	if srcErr != nil {
 		verifier.markCollectionFailed(workerNum, task, ClusterSource, srcNs, srcErr)
 	}
 
-	dstSpec, dstErr := verifier.getCollectionSpecification(ctx, dstColl)
+	dstSpecOpt, dstErr := util.GetCollectionSpec(ctx, dstColl)
 	if dstErr != nil {
 		verifier.markCollectionFailed(workerNum, task, ClusterTarget, dstNs, dstErr)
 	}
@@ -1028,17 +1151,26 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 	insertFailedCollection := func() {
 		_, err := verifier.InsertFailedCollectionVerificationTask(srcNs)
 		if err != nil {
-			verifier.
-				logger.
-				Fatal().
+			verifier.logger.Fatal().
+				Int("workerNum", workerNum).
+				Str("srcNamespace", srcNs).
+				Str("dstNamespace", dstNs).
 				Err(err).
-				Msg("Unrecoverable error in inserting failed collection verification task")
+				Msg("Failed to persist collection verification task.")
 		}
 	}
 
-	if dstSpec == nil {
-		if srcSpec == nil {
-			verifier.logger.Info().Msgf("[Worker %d] Collection not present on either cluster: %s -> %s", workerNum, srcNs, dstNs)
+	srcSpec, hasSrcSpec := srcSpecOpt.Get()
+	dstSpec, hasDstSpec := dstSpecOpt.Get()
+
+	if !hasDstSpec {
+		if !hasSrcSpec {
+			verifier.logger.Info().
+				Int("workerNum", workerNum).
+				Str("srcNamespace", srcNs).
+				Str("dstNamespace", dstNs).
+				Msg("Collection not present on either cluster.")
+
 			// This counts as success.
 			task.Status = verificationTaskCompleted
 			return
@@ -1047,7 +1179,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 		// Fall through here; comparing the collection specifications will produce the correct
 		// failure output.
 	}
-	specificationProblems, verifyData := verifier.compareCollectionSpecifications(srcNs, dstNs, srcSpec, dstSpec)
+	specificationProblems, verifyData := verifier.compareCollectionSpecifications(srcNs, dstNs, srcSpecOpt, dstSpecOpt)
 	if specificationProblems != nil {
 		insertFailedCollection()
 		task.FailedDocs = specificationProblems
@@ -1067,10 +1199,15 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(ctx context.Conte
 		return
 	}
 
-	indexProblems, err := verifyIndexes(ctx, workerNum, task, srcColl, dstColl, srcSpec.IDIndex, dstSpec.IDIndex)
+	indexProblems, err := verifier.verifyIndexes(ctx, srcColl, dstColl, srcSpec.IDIndex, dstSpec.IDIndex)
 	if err != nil {
 		task.Status = verificationTaskFailed
-		verifier.logger.Error().Msgf("[Worker %d] Error getting indexes for collection: %+v", workerNum, err)
+		verifier.logger.Error().
+			Int("workerNum", workerNum).
+			Str("namespace", srcNs).
+			Err(err).
+			Msgf("Failed to compare collection indexes.")
+
 		return
 	}
 	if indexProblems != nil {

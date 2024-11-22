@@ -996,6 +996,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	}
 }
 
+/*
 func TestVerifierCompareIndexSpecs(t *testing.T) {
 	// Index specification
 	keysDoc1 := bson.D{{"a", 1}, {"b", -1}}
@@ -1149,6 +1150,7 @@ func TestVerifierCompareIndexSpecs(t *testing.T) {
 		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
 	}
 }
+*/
 
 func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 	verifier := suite.BuildVerifier()
