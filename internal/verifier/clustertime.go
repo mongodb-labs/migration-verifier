@@ -28,8 +28,8 @@ func GetNewClusterTime(
 
 	var clusterTime primitive.Timestamp
 
-	// First we just fetch the latest cluster time without updating any
-	// shards’ oplogs.
+	// First we just fetch the latest cluster time among all shards without
+	// updating any shards’ oplogs.
 	err := retryer.RunForTransientErrorsOnly(
 		ctx,
 		logger,
@@ -107,7 +107,10 @@ func syncClusterTimeAcrossShards(
 	)
 
 	if err != nil {
-		return primitive.Timestamp{}, err
+		return primitive.Timestamp{}, errors.Wrap(
+			err,
+			"failed to append note to oplog",
+		)
 	}
 
 	return getOpTimeFromRawResponse(rawResponse)

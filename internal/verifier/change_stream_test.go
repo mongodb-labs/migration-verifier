@@ -249,6 +249,12 @@ func (suite *IntegrationTestSuite) TestEventBeforeWritesOff() {
 	checkDoneChan := make(chan struct{})
 	checkContinueChan := make(chan struct{})
 
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	coll := db.Collection("mycoll")
+	suite.Require().NoError(
+		db.CreateCollection(ctx, coll.Name()),
+	)
+
 	// start verifier
 	verifierDoneChan := make(chan struct{})
 	go func() {
@@ -260,9 +266,6 @@ func (suite *IntegrationTestSuite) TestEventBeforeWritesOff() {
 
 	// wait for generation 1
 	<-checkDoneChan
-
-	db := suite.srcMongoClient.Database(suite.DBNameForTest())
-	coll := db.Collection("mycoll")
 
 	docsCount := 10_000
 	docs := lo.RepeatBy(docsCount, func(_ int) bson.D { return bson.D{} })
