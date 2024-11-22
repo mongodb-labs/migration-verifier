@@ -42,15 +42,15 @@ const (
 )
 
 type UnknownEventError struct {
-	Event *ParsedEvent
+	RawEvent bson.Raw
 }
 
 func (uee UnknownEventError) Error() string {
-	return fmt.Sprintf("Received event with unknown optype: %+v", uee.Event)
+	return fmt.Sprintf("received event with unknown optype: %+v", uee.RawEvent)
 }
 
 // HandleChangeStreamEvents performs the necessary work for change stream events after receiving a batch.
-func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []ParsedEvent) error {
+func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []bson.Raw) error {
 	if len(batch) == 0 {
 		return nil
 	}
@@ -60,7 +60,13 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 	docIDs := make([]interface{}, len(batch))
 	dataSizes := make([]int, len(batch))
 
-	for i, changeEvent := range batch {
+	for i, rawChangeEvent := range batch {
+		var changeEvent ParsedEvent
+		err := bson.Unmarshal(rawChangeEvent, &changeEvent)
+		if err != nil {
+			return errors.Wrapf(err, "failed to unmarshal change event (%+v) to %T", rawChangeEvent, changeEvent)
+		}
+
 		if changeEvent.ClusterTime != nil &&
 			(verifier.lastChangeEventTime == nil ||
 				verifier.lastChangeEventTime.Compare(*changeEvent.ClusterTime) < 0) {
@@ -75,7 +81,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 			fallthrough
 		case "update":
 			if err := verifier.eventRecorder.AddEvent(&changeEvent); err != nil {
-				return errors.Wrapf(err, "failed to augment stats with change event: %+v", changeEvent)
+				return errors.Wrapf(err, "failed to augment stats with change event (%+v)", rawChangeEvent)
 			}
 			dbNames[i] = changeEvent.Ns.DB
 			collNames[i] = changeEvent.Ns.Coll
@@ -90,7 +96,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 				dataSizes[i] = len(changeEvent.FullDocument)
 			}
 		default:
-			return UnknownEventError{Event: &changeEvent}
+			return UnknownEventError{RawEvent: rawChangeEvent}
 		}
 	}
 
@@ -129,19 +135,19 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 	ctx context.Context,
 	cs *mongo.ChangeStream,
-	finalTs *primitive.Timestamp,
+	writesOffTs *primitive.Timestamp,
 ) error {
 	eventsRead := 0
 	var changeEventBatch []ParsedEvent
 
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
-		// Once the change stream reaches the final timestamp we should stop reading.
-		if finalTs != nil {
+		// Once the change stream reaches the writesOff timestamp we should stop reading.
+		if writesOffTs != nil {
 			csTimestamp, err := extractTimestampFromResumeToken(cs.ResumeToken())
 			if err != nil {
 				return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
 			}
-			if !csTimestamp.Before(*finalTs) {
+			if !csTimestamp.Before(*writesOffTs) {
 				break
 			}
 		}
@@ -199,7 +205,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 	for {
 		var err error
-		var gotFinalTimestamp bool
+		var gotwritesOffTimestamp bool
 
 		select {
 
@@ -213,12 +219,12 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 		// If the changeStreamEnderChan has a message, the user has indicated that
 		// source writes are ended. This means we should exit rather than continue
 		// reading the change stream since there should be no more events.
-		case finalTs := <-verifier.changeStreamWritesOffTsChan:
+		case writesOffTs := <-verifier.changeStreamWritesOffTsChan:
 			verifier.logger.Debug().
-				Interface("finalTimestamp", finalTs).
-				Msg("Change stream thread received final timestamp. Finalizing change stream.")
+				Interface("writesOffTimestamp", writesOffTs).
+				Msg("Change stream thread received writesOff timestamp. Finalizing change stream.")
 
-			gotFinalTimestamp = true
+			gotwritesOffTimestamp = true
 
 			// Read all change events until the source reports no events.
 			// (i.e., the `getMore` call returns empty)
@@ -230,16 +236,16 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 					break
 				}
 
-				if curTs == finalTs || curTs.After(finalTs) {
+				if curTs == writesOffTs || curTs.After(writesOffTs) {
 					verifier.logger.Debug().
 						Interface("currentTimestamp", curTs).
-						Interface("finalTimestamp", finalTs).
-						Msg("Change stream has reached the final timestamp. Shutting down.")
+						Interface("writesOffTimestamp", writesOffTs).
+						Msg("Change stream has reached the writesOff timestamp. Shutting down.")
 
 					break
 				}
 
-				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs, &finalTs)
+				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs, &writesOffTs)
 
 				if err != nil {
 					break
@@ -261,12 +267,12 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 			verifier.changeStreamErrChan <- err
 
-			if !gotFinalTimestamp {
+			if !gotwritesOffTimestamp {
 				break
 			}
 		}
 
-		if gotFinalTimestamp {
+		if gotwritesOffTimestamp {
 			verifier.mux.Lock()
 			verifier.changeStreamRunning = false
 			if verifier.lastChangeEventTime != nil {
