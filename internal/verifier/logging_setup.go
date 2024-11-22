@@ -29,3 +29,15 @@ func getLogWriter(logPath string) io.Writer {
 
 	return zerolog.SyncWriter(writer)
 }
+
+func getLoggerAndWriter(logPath string) (*logger.Logger, io.Writer) {
+	writer := getLogWriter(logPath)
+
+	consoleWriter := zerolog.ConsoleWriter{
+		Out:        writer,
+		TimeFormat: timeFormat,
+	}
+
+	l := zerolog.New(consoleWriter).With().Timestamp().Logger()
+	return logger.NewLogger(&l, writer), writer
+}
