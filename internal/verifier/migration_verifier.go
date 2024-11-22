@@ -891,8 +891,8 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Ra
 		ctx,
 		mongo.Pipeline{
 			{
+				{"$match", bson.D{{"_id", insert.InsertedID}}},
 				{"$match", bson.D{
-					{"_id", insert.InsertedID},
 					{"$expr", bson.D{
 						{"$eq", bson.A{
 							"$spec",
