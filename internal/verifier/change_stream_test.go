@@ -17,7 +17,7 @@ func TestChangeStreamFilter(t *testing.T) {
 	verifier := Verifier{}
 	verifier.SetMetaDBName("metadb")
 	require.Equal(t, []bson.D{{{"$match", bson.D{{"ns.db", bson.D{{"$ne", "metadb"}}}}}}},
-		verifier.GetChangeStreamFilter(verifier.srcNamespaces))
+		verifier.srcChangeStreamReader.GetChangeStreamFilter())
 	verifier.srcNamespaces = []string{"foo.bar", "foo.baz", "test.car", "test.chaz"}
 	require.Equal(t, []bson.D{
 		{{"$match", bson.D{
@@ -28,7 +28,7 @@ func TestChangeStreamFilter(t *testing.T) {
 				bson.D{{"ns", bson.D{{"db", "test"}, {"coll", "chaz"}}}},
 			}},
 		}}},
-	}, verifier.GetChangeStreamFilter(verifier.srcNamespaces))
+	}, verifier.srcChangeStreamReader.GetChangeStreamFilter())
 }
 
 // TestChangeStreamResumability creates a verifier, starts its change stream,
@@ -39,7 +39,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 		verifier1 := suite.BuildVerifier()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		err := verifier1.StartChangeStream(ctx)
+		err := verifier1.srcChangeStreamReader.StartChangeStream(ctx)
 		suite.Require().NoError(err)
 	}()
 
@@ -64,13 +64,13 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	newTime := suite.getClusterTime(ctx, suite.srcMongoClient)
 
-	err = verifier2.StartChangeStream(ctx)
+	err = verifier2.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 
-	suite.Require().NotNil(verifier2.srcStartAtTs)
+	suite.Require().NotNil(verifier2.srcChangeStreamReader.startAtTs)
 
 	suite.Assert().False(
-		verifier2.srcStartAtTs.After(newTime),
+		verifier2.srcChangeStreamReader.startAtTs.After(newTime),
 		"verifier2's change stream should be no later than this new session",
 	)
 
@@ -139,12 +139,12 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	err = verifier.StartChangeStream(ctx)
+	err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
-	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
-	verifier.changeStreamWritesOffTsChan <- *origStartTs
-	<-verifier.changeStreamDoneChan
-	suite.Require().Equal(verifier.srcStartAtTs, origStartTs)
+	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
+	verifier.srcChangeStreamReader.ChangeStreamWritesOffTsChan <- *origStartTs
+	<-verifier.srcChangeStreamReader.ChangeStreamDoneChan
+	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
 }
 
 func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
@@ -160,9 +160,9 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 
 	origSessionTime := sess.OperationTime()
 	suite.Require().NotNil(origSessionTime)
-	err = verifier.StartChangeStream(ctx)
+	err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
-	suite.Require().Equal(verifier.srcStartAtTs, origSessionTime)
+	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origSessionTime)
 
 	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
 		sctx, bson.D{{"_id", 1}})
@@ -184,12 +184,12 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 		"session time after events should exceed the original",
 	)
 
-	verifier.changeStreamWritesOffTsChan <- *postEventsSessionTime
-	<-verifier.changeStreamDoneChan
+	verifier.srcChangeStreamReader.ChangeStreamWritesOffTsChan <- *postEventsSessionTime
+	<-verifier.srcChangeStreamReader.ChangeStreamDoneChan
 
 	suite.Assert().Equal(
 		*postEventsSessionTime,
-		*verifier.srcStartAtTs,
+		*verifier.srcChangeStreamReader.startAtTs,
 		"verifier.srcStartAtTs should now be our session timestamp",
 	)
 }
@@ -206,10 +206,10 @@ func (suite *IntegrationTestSuite) TestNoStartAtTime() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	err = verifier.StartChangeStream(ctx)
+	err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
-	suite.Require().NotNil(verifier.srcStartAtTs)
-	suite.Require().LessOrEqual(origStartTs.Compare(*verifier.srcStartAtTs), 0)
+	suite.Require().NotNil(verifier.srcChangeStreamReader.startAtTs)
+	suite.Require().LessOrEqual(origStartTs.Compare(*verifier.srcChangeStreamReader.startAtTs), 0)
 }
 
 func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
@@ -218,7 +218,7 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	suite.Require().NoError(verifier.StartChangeStream(ctx))
+	suite.Require().NoError(verifier.srcChangeStreamReader.StartChangeStream(ctx))
 
 	_, err := suite.srcMongoClient.Database("testDb").Collection("testColl1").InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
