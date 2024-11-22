@@ -271,7 +271,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 			verifier.mux.Unlock()
 			// since we have started Recheck, we must signal that we have
 			// finished the change stream changes so that Recheck can continue.
-			close(verifier.changeStreamDoneChan)
+			verifier.changeStreamDoneChan <- struct{}{}
 			break
 		}
 	}
