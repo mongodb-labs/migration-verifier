@@ -162,7 +162,13 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	suite.Require().NotNil(origSessionTime)
 	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
-	suite.Require().Equal(verifier.srcStartAtTs, origSessionTime)
+
+	// srcStartAtTs derives from the change stream’s resume token, which can
+	// postdate our session time but should not precede it.
+	suite.Require().False(
+		verifier.srcStartAtTs.Before(*origSessionTime),
+		"srcStartAtTs should be >= the insert’s optime",
+	)
 
 	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
 		sctx, bson.D{{"_id", 1}})
