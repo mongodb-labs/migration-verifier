@@ -162,7 +162,13 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	suite.Require().NotNil(origSessionTime)
 	err = verifier.StartChangeStream(ctx)
 	suite.Require().NoError(err)
-	suite.Require().Equal(verifier.srcStartAtTs, origSessionTime)
+
+	// srcStartAtTs derives from the change stream’s resume token, which can
+	// postdate our session time but should not precede it.
+	suite.Require().False(
+		verifier.srcStartAtTs.Before(*origSessionTime),
+		"srcStartAtTs should be >= the insert’s optime",
+	)
 
 	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
 		sctx, bson.D{{"_id", 1}})
@@ -241,7 +247,15 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 	)
 }
 
-func (suite *IntegrationTestSuite) TestEventBeforeWritesOff() {
+func (suite *IntegrationTestSuite) TestManyInsertsBeforeWritesOff() {
+	suite.testInsertsBeforeWritesOff(10_000)
+}
+
+func (suite *IntegrationTestSuite) TestOneInsertBeforeWritesOff() {
+	suite.testInsertsBeforeWritesOff(1)
+}
+
+func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 	ctx := suite.Context()
 
 	verifier := suite.BuildVerifier()
@@ -258,7 +272,6 @@ func (suite *IntegrationTestSuite) TestEventBeforeWritesOff() {
 	// wait for generation 0 to end
 	verifierRunner.AwaitGenerationEnd()
 
-	docsCount := 10_000
 	docs := lo.RepeatBy(docsCount, func(_ int) bson.D { return bson.D{} })
 	_, err := coll.InsertMany(
 		ctx,
