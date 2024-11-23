@@ -226,7 +226,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 					break
 				}
 
-				if curTs == writesOffTs || curTs.After(writesOffTs) {
+				if curTs.After(writesOffTs) {
 					verifier.logger.Debug().
 						Interface("currentTimestamp", curTs).
 						Interface("writesOffTimestamp", writesOffTs).

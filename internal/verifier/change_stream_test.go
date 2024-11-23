@@ -241,7 +241,15 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 	)
 }
 
-func (suite *IntegrationTestSuite) TestEventBeforeWritesOff() {
+func (suite *IntegrationTestSuite) TestManyInsertsBeforeWritesOff() {
+	suite.testInsertsBeforeWritesOff(10_000)
+}
+
+func (suite *IntegrationTestSuite) TestOneInsertBeforeWritesOff() {
+	suite.testInsertsBeforeWritesOff(1)
+}
+
+func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 	ctx := suite.Context()
 
 	verifier := suite.BuildVerifier()
@@ -258,7 +266,6 @@ func (suite *IntegrationTestSuite) TestEventBeforeWritesOff() {
 	// wait for generation 0 to end
 	verifierRunner.AwaitGenerationEnd()
 
-	docsCount := 10_000
 	docs := lo.RepeatBy(docsCount, func(_ int) bson.D { return bson.D{} })
 	_, err := coll.InsertMany(
 		ctx,
