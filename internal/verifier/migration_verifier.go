@@ -258,7 +258,7 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 
 		verifier.mux.Unlock()
 
-		// This has to happen under the lock because the change stream
+		// This has to happen outside the lock because the change stream
 		// might be inserting docs into the recheck queue, which happens
 		// under the lock.
 		select {

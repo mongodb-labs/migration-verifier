@@ -20,8 +20,9 @@ import (
 // `ErrorCode` newtype, but that requires a more invasive change to everything
 // that uses error codes.
 const (
-	LockFailed              int = 107
-	SampleTooManyDuplicates int = 28799
+	LockFailed              = 107
+	SampleTooManyDuplicates = 28799
+	CursorKilled            = 237
 )
 
 //

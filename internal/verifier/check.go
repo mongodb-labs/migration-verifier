@@ -87,7 +87,7 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 		select {
 		case err := <-verifier.changeStreamErrChan:
 			cancel()
-			return err
+			return errors.Wrap(err, "change stream failed")
 		case <-ctx.Done():
 			cancel()
 			return nil
