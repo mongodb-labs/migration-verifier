@@ -6,8 +6,11 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/keystring"
+	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
+	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -63,7 +66,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 	for i, changeEvent := range batch {
 		if changeEvent.ClusterTime != nil &&
 			(verifier.lastChangeEventTime == nil ||
-				verifier.lastChangeEventTime.Compare(*changeEvent.ClusterTime) < 0) {
+				verifier.lastChangeEventTime.Before(*changeEvent.ClusterTime)) {
 			verifier.lastChangeEventTime = changeEvent.ClusterTime
 		}
 		switch changeEvent.OpType {
@@ -136,6 +139,7 @@ func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
 // shouldn’t really happen anyway by definition.
 func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 	ctx context.Context,
+	ri *retry.Info,
 	cs *mongo.ChangeStream,
 ) error {
 	eventsRead := 0
@@ -163,6 +167,8 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
+	ri.IterationSuccess()
+
 	if eventsRead == 0 {
 		return nil
 	}
@@ -175,9 +181,11 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 	return nil
 }
 
-func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.ChangeStream) {
-	defer cs.Close(ctx)
-
+func (verifier *Verifier) iterateChangeStream(
+	ctx context.Context,
+	ri *retry.Info,
+	cs *mongo.ChangeStream,
+) error {
 	var lastPersistedTime time.Time
 
 	persistResumeTokenIfNeeded := func() error {
@@ -201,10 +209,7 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 
 		// If the context is canceled, return immmediately.
 		case <-ctx.Done():
-			verifier.logger.Debug().
-				Err(ctx.Err()).
-				Msg("Change stream quitting.")
-			return
+			return ctx.Err()
 
 		// If the changeStreamEnderChan has a message, the user has indicated that
 		// source writes are ended. This means we should exit rather than continue
@@ -222,10 +227,11 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 				var curTs primitive.Timestamp
 				curTs, err = extractTimestampFromResumeToken(cs.ResumeToken())
 				if err != nil {
-					err = errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
-					break
+					return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
 				}
 
+				// writesOffTs never refers to a real event,
+				// so we can stop once curTs >= writesOffTs.
 				if !curTs.Before(writesOffTs) {
 					verifier.logger.Debug().
 						Interface("currentTimestamp", curTs).
@@ -235,30 +241,22 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 					break
 				}
 
-				err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
+				err = verifier.readAndHandleOneChangeEventBatch(ctx, ri, cs)
 
 				if err != nil {
-					break
+					return err
 				}
 			}
 
 		default:
-			err = verifier.readAndHandleOneChangeEventBatch(ctx, cs)
+			err = verifier.readAndHandleOneChangeEventBatch(ctx, ri, cs)
 
 			if err == nil {
 				err = persistResumeTokenIfNeeded()
 			}
-		}
 
-		if err != nil && !errors.Is(err, context.Canceled) {
-			verifier.logger.Debug().
-				Err(err).
-				Msg("Sending change stream error.")
-
-			verifier.changeStreamErrChan <- err
-
-			if !gotwritesOffTimestamp {
-				break
+			if err != nil {
+				return err
 			}
 		}
 
@@ -284,10 +282,13 @@ func (verifier *Verifier) iterateChangeStream(ctx context.Context, cs *mongo.Cha
 	}
 
 	infoLog.Msg("Change stream is done.")
+
+	return nil
 }
 
-// StartChangeStream starts the change stream.
-func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
+func (verifier *Verifier) createChangeStream(
+	ctx context.Context,
+) (*mongo.ChangeStream, primitive.Timestamp, error) {
 	pipeline := verifier.GetChangeStreamFilter()
 	opts := options.ChangeStream().
 		SetMaxAwaitTime(1 * time.Second).
@@ -299,7 +300,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 
 	savedResumeToken, err := verifier.loadChangeStreamResumeToken(ctx)
 	if err != nil {
-		return errors.Wrap(err, "failed to load persisted change stream resume token")
+		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
 	}
 
 	csStartLogEvent := verifier.logger.Info()
@@ -326,39 +327,99 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 
 	sess, err := verifier.srcClient.StartSession()
 	if err != nil {
-		return errors.Wrap(err, "failed to start session")
+		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to start session")
 	}
 	sctx := mongo.NewSessionContext(ctx, sess)
 	srcChangeStream, err := verifier.srcClient.Watch(sctx, pipeline, opts)
 	if err != nil {
-		return errors.Wrap(err, "failed to open change stream")
+		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
 
 	err = verifier.persistChangeStreamResumeToken(ctx, srcChangeStream)
 	if err != nil {
+		return nil, primitive.Timestamp{}, err
+	}
+
+	startTs, err := extractTimestampFromResumeToken(srcChangeStream.ResumeToken())
+	if err != nil {
+		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
+	}
+
+	// With sharded clusters the resume token might lead the cluster time
+	// by 1 increment. In that case we need the actual cluster time;
+	// otherwise we will get errors.
+	clusterTime, err := getClusterTimeFromSession(sess)
+	if err != nil {
+		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to read cluster time from session")
+	}
+
+	if startTs.After(clusterTime) {
+		startTs = clusterTime
+	}
+
+	return srcChangeStream, startTs, nil
+}
+
+// StartChangeStream starts the change stream.
+func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
+	// This channel holds the first change stream creation's result, whether
+	// success or failure. Rather than using a Result we could make separate
+	// Timestamp and error channels, but the single channel is cleaner since
+	// there's no chance of "nonsense" like both channels returning a payload.
+	initialCreateResultChan := make(chan mo.Result[primitive.Timestamp])
+
+	go func() {
+		retryer := retry.New(retry.DefaultDurationLimit)
+		retryer = retryer.WithErrorCodes(util.CursorKilled)
+
+		parentThreadWaiting := true
+
+		err := retryer.RunForTransientErrorsOnly(
+			ctx,
+			verifier.logger,
+			func(ri *retry.Info) error {
+				srcChangeStream, startTs, err := verifier.createChangeStream(ctx)
+				if err != nil {
+					if parentThreadWaiting {
+						initialCreateResultChan <- mo.Err[primitive.Timestamp](err)
+						return nil
+					}
+
+					return err
+				}
+
+				defer srcChangeStream.Close(ctx)
+
+				if parentThreadWaiting {
+					initialCreateResultChan <- mo.Ok(startTs)
+					close(initialCreateResultChan)
+					parentThreadWaiting = false
+				}
+
+				return verifier.iterateChangeStream(ctx, ri, srcChangeStream)
+			},
+		)
+
+		if err != nil {
+			// NB: This failure always happens after the initial change stream
+			// creation.
+			verifier.changeStreamErrChan <- err
+			close(verifier.changeStreamErrChan)
+		}
+	}()
+
+	result := <-initialCreateResultChan
+
+	startTs, err := result.Get()
+	if err != nil {
 		return err
 	}
 
-	csTimestamp, err := extractTimestampFromResumeToken(srcChangeStream.ResumeToken())
-	if err != nil {
-		return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
-	}
-
-	clusterTime, err := getClusterTimeFromSession(sess)
-	if err != nil {
-		return errors.Wrap(err, "failed to read cluster time from session")
-	}
-
-	verifier.srcStartAtTs = &csTimestamp
-	if csTimestamp.After(clusterTime) {
-		verifier.srcStartAtTs = &clusterTime
-	}
+	verifier.srcStartAtTs = &startTs
 
 	verifier.mux.Lock()
 	verifier.changeStreamRunning = true
 	verifier.mux.Unlock()
-
-	go verifier.iterateChangeStream(ctx, srcChangeStream)
 
 	return nil
 }
