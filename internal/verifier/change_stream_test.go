@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
@@ -35,6 +37,12 @@ func TestChangeStreamFilter(t *testing.T) {
 // terminates that verifier, updates the source cluster, starts a new
 // verifier with change stream, and confirms that things look as they should.
 func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
+	suite.Require().NoError(
+		suite.srcMongoClient.
+			Database(suite.DBNameForTest()).
+			CreateCollection(suite.Context(), "testColl"),
+	)
+
 	func() {
 		verifier1 := suite.BuildVerifier()
 		ctx, cancel := context.WithCancel(context.Background())
@@ -43,7 +51,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 		suite.Require().NoError(err)
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(suite.Context())
 	defer cancel()
 
 	_, err := suite.srcMongoClient.
@@ -219,19 +227,26 @@ func (suite *IntegrationTestSuite) TestNoStartAtTime() {
 }
 
 func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
-	verifier := suite.BuildVerifier()
+	ctx := suite.Context()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	coll1 := db.Collection("testColl1")
+	coll2 := db.Collection("testColl2")
+
+	for _, coll := range mslices.Of(coll1, coll2) {
+		suite.Require().NoError(db.CreateCollection(ctx, coll.Name()))
+	}
+
+	verifier := suite.BuildVerifier()
 
 	suite.Require().NoError(verifier.StartChangeStream(ctx))
 
-	_, err := suite.srcMongoClient.Database("testDb").Collection("testColl1").InsertOne(ctx, bson.D{{"_id", 1}})
+	_, err := coll1.InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
-	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl1").InsertOne(ctx, bson.D{{"_id", 2}})
+	_, err = coll1.InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
 
-	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl2").InsertOne(ctx, bson.D{{"_id", 1}})
+	_, err = coll2.InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 
 	var rechecks []bson.M
@@ -245,6 +260,7 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 		500*time.Millisecond,
 		"the verifier should flush a recheck doc after a batch",
 	)
+
 }
 
 func (suite *IntegrationTestSuite) TestManyInsertsBeforeWritesOff() {
@@ -303,4 +319,41 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 	)
 
 	suite.Assert().Equal(docsCount, totalFailed, "all source docs should be missing")
+}
+
+func (suite *IntegrationTestSuite) TestCreateForbidden() {
+	ctx := suite.Context()
+	buildInfo, err := util.GetBuildInfo(ctx, suite.srcMongoClient)
+	suite.Require().NoError(err)
+
+	if buildInfo.VersionArray[0] < 6 {
+		suite.T().Skipf("This test requires server v6+. (Found: %v)", buildInfo.VersionArray)
+	}
+
+	verifier := suite.BuildVerifier()
+
+	// start verifier
+	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
+
+	// wait for generation 0 to end
+	verifierRunner.AwaitGenerationEnd()
+
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	coll := db.Collection("mycoll")
+	suite.Require().NoError(
+		db.CreateCollection(ctx, coll.Name()),
+	)
+
+	// The error from the create event will come either at WritesOff
+	// or when we finalize the change stream.
+	err = verifier.WritesOff(ctx)
+	if err == nil {
+		err = verifierRunner.Await()
+	}
+
+	suite.Require().Error(err, "should detect forbidden create event")
+
+	eventErr := UnknownEventError{}
+	suite.Require().ErrorAs(err, &eventErr)
+	suite.Assert().Equal("create", eventErr.Event.OpType)
 }
