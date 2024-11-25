@@ -18,6 +18,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -998,157 +999,91 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	}
 }
 
-func TestVerifierCompareIndexSpecs(t *testing.T) {
-	// Index specification
-	keysDoc1 := bson.D{{"a", 1}, {"b", -1}}
-	// We marshal the key document twice so they are physically separate memory.
-	keysRaw1, err := bson.Marshal(keysDoc1)
-	require.NoError(t, err)
-	keysRaw2, err := bson.Marshal(keysDoc1)
-	require.NoError(t, err)
-	simpleIndexSpec1 := mongo.IndexSpecification{
-		Name:         "testIndex",
-		Namespace:    "testDB.testIndex",
-		KeysDocument: keysRaw1,
-		Version:      1}
+func (suite *IntegrationTestSuite) TestVerifierCompareIndexSpecs() {
+	ctx := suite.Context()
+	verifier := suite.BuildVerifier()
 
-	simpleIndexSpec2 := mongo.IndexSpecification{
-		Name:         "testIndex",
-		Namespace:    "testDB.testIndex",
-		KeysDocument: keysRaw2,
-		Version:      2}
+	cases := []struct {
+		label       string
+		src         bson.D
+		dst         bson.D
+		shouldMatch bool
+	}{
+		{
+			label: "simple",
+			src: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo": 123}},
+			},
+			dst: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo": 123}},
+			},
+			shouldMatch: true,
+		},
 
-	results := compareIndexSpecifications(&simpleIndexSpec1, &simpleIndexSpec2)
-	assert.Nil(t, results)
+		{
+			label: "ignore `ns` field",
+			src: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo": 123}},
+				{"ns", "foo.bar"},
+			},
+			dst: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo": 123}},
+			},
+			shouldMatch: true,
+		},
 
-	// Changing version should not be an issue
-	simpleIndexSpec3 := simpleIndexSpec2
-	simpleIndexSpec3.Version = 4
-	results = compareIndexSpecifications(&simpleIndexSpec1, &simpleIndexSpec3)
-	assert.Nil(t, results)
+		{
+			label: "ignore number types",
+			src: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo": 123}},
+			},
+			dst: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo": float64(123)}},
+			},
+			shouldMatch: true,
+		},
 
-	// Changing the key spec order matters
-	keysDoc3 := bson.D{{"b", -1}, {"a", 1}}
-	keysRaw3, err := bson.Marshal(keysDoc3)
-	require.NoError(t, err)
-	simpleIndexSpec3 = simpleIndexSpec2
-	simpleIndexSpec3.KeysDocument = keysRaw3
-	results = compareIndexSpecifications(&simpleIndexSpec1, &simpleIndexSpec3)
-	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
-		result := results[0]
-		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
-		assert.Equal(t, "KeysDocument", result.Field)
-		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
-		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
+		{
+			label: "find number differences",
+			src: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo": 1}},
+			},
+			dst: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo": -1}},
+			},
+			shouldMatch: false,
+		},
+
+		{
+			label: "key order differences",
+			src: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.D{{"foo", 1}, {"bar", 1}}},
+			},
+			dst: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.D{{"bar", 1}, {"foo", 1}}},
+			},
+			shouldMatch: false,
+		},
 	}
 
-	// Shortening the key mattes
-	keysDoc3 = bson.D{{"a", 1}}
-	keysRaw3, err = bson.Marshal(keysDoc3)
-	require.NoError(t, err)
-	simpleIndexSpec3 = simpleIndexSpec2
-	simpleIndexSpec3.KeysDocument = keysRaw3
-	results = compareIndexSpecifications(&simpleIndexSpec1, &simpleIndexSpec3)
-	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
-		result := results[0]
-		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
-		assert.Equal(t, "KeysDocument", result.Field)
-		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
-		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
-	}
-
-	var expireAfterSeconds30, expireAfterSeconds0_1, expireAfterSeconds0_2 int32
-	expireAfterSeconds30 = 30
-	expireAfterSeconds0_1, expireAfterSeconds0_2 = 0, 0
-	sparseTrue := true
-	sparseFalse_1, sparseFalse_2 := false, false
-	uniqueTrue := true
-	uniqueFalse_1, uniqueFalse_2 := false, false
-	clusteredTrue := true
-	clusteredFalse_1, clusteredFalse_2 := false, false
-	fullIndexSpec1 := mongo.IndexSpecification{
-		Name:               "testIndex",
-		Namespace:          "testDB.testIndex",
-		KeysDocument:       keysRaw1,
-		Version:            1,
-		ExpireAfterSeconds: &expireAfterSeconds0_1,
-		Sparse:             &sparseFalse_1,
-		Unique:             &uniqueFalse_1,
-		Clustered:          &clusteredFalse_1}
-
-	fullIndexSpec2 := mongo.IndexSpecification{
-		Name:               "testIndex",
-		Namespace:          "testDB.testIndex",
-		KeysDocument:       keysRaw2,
-		Version:            2,
-		ExpireAfterSeconds: &expireAfterSeconds0_2,
-		Sparse:             &sparseFalse_2,
-		Unique:             &uniqueFalse_2,
-		Clustered:          &clusteredFalse_2}
-
-	results = compareIndexSpecifications(&fullIndexSpec1, &fullIndexSpec2)
-	assert.Nil(t, results)
-
-	// The full index spec should not equal the equivalent simple index spec.
-	results = compareIndexSpecifications(&fullIndexSpec1, &simpleIndexSpec2)
-	var diffFields []interface{}
-	for _, result := range results {
-		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
-		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
-		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
-		diffFields = append(diffFields, result.Field)
-	}
-	assert.ElementsMatch(t, []string{"Sparse", "Unique", "ExpireAfterSeconds", "Clustered"}, diffFields)
-
-	fullIndexSpec3 := fullIndexSpec2
-	fullIndexSpec3.ExpireAfterSeconds = &expireAfterSeconds30
-	results = compareIndexSpecifications(&fullIndexSpec1, &fullIndexSpec3)
-	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
-		result := results[0]
-		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
-		assert.Equal(t, "ExpireAfterSeconds", result.Field)
-		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
-		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
-	}
-
-	fullIndexSpec3 = fullIndexSpec2
-	fullIndexSpec3.Sparse = &sparseTrue
-	results = compareIndexSpecifications(&fullIndexSpec1, &fullIndexSpec3)
-	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
-		result := results[0]
-		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
-		assert.Equal(t, "Sparse", result.Field)
-		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
-		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
-	}
-
-	fullIndexSpec3 = fullIndexSpec2
-	fullIndexSpec3.Unique = &uniqueTrue
-	results = compareIndexSpecifications(&fullIndexSpec1, &fullIndexSpec3)
-	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
-		result := results[0]
-		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
-		assert.Equal(t, "Unique", result.Field)
-		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
-		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
-	}
-
-	fullIndexSpec3 = fullIndexSpec2
-	fullIndexSpec3.Clustered = &clusteredTrue
-	results = compareIndexSpecifications(&fullIndexSpec1, &fullIndexSpec3)
-	if assert.Equalf(t, 1, len(results), "Actual mismatches: %+v", results) {
-		result := results[0]
-		assert.Equal(t, "testIndex", result.ID)
-		assert.Equal(t, "testDB.testIndex", result.NameSpace)
-		assert.Equal(t, "Clustered", result.Field)
-		assert.Regexp(t, regexp.MustCompile("^"+Mismatch), result.Details)
-		assert.NotRegexp(t, regexp.MustCompile("0x"), result.Details)
+	for _, curCase := range cases {
+		matchYN, err := verifier.doIndexSpecsMatch(
+			ctx,
+			testutil.MustMarshal(curCase.src),
+			testutil.MustMarshal(curCase.dst),
+		)
+		suite.Require().NoError(err)
+		suite.Assert().Equal(curCase.shouldMatch, matchYN, curCase.label)
 	}
 }
 
@@ -1283,6 +1218,68 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 	suite.Equal(1, status.FailedTasks, "failed tasks not equal")
 	suite.Equal(1, status.MetadataMismatchTasks, "metadata mismatch tasks not equal")
 	suite.Equal(1, status.CompletedTasks, "completed tasks not equal")
+}
+
+func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
+	ctx := suite.Context()
+
+	srcColl := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("coll")
+	dstColl := suite.dstMongoClient.Database(suite.DBNameForTest()).Collection("coll")
+
+	verifier := suite.BuildVerifier()
+
+	ns := srcColl.Database().Name() + "." + srcColl.Name()
+	verifier.SetSrcNamespaces([]string{ns})
+	verifier.SetDstNamespaces([]string{ns})
+	verifier.SetNamespaceMap()
+
+	for _, coll := range mslices.Of(srcColl, dstColl) {
+		_, err := coll.InsertOne(ctx, bson.M{"_id": 1, "x": 42})
+		suite.Require().NoError(err)
+	}
+
+	_, err := srcColl.Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys: bson.D{{"foo", 1}},
+		},
+	)
+	suite.Require().NoError(err)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	runner.AwaitGenerationEnd()
+
+	cursor, err := verifier.verificationTaskCollection().Find(
+		ctx,
+		bson.M{"generation": 0},
+		options.Find().SetSort(bson.M{"type": 1}),
+	)
+	suite.Require().NoError(err)
+
+	var tasks []VerificationTask
+	suite.Require().NoError(cursor.All(ctx, &tasks))
+
+	suite.Require().Len(tasks, 2)
+	suite.Require().Equal(verificationTaskVerifyDocuments, tasks[0].Type)
+	suite.Require().Equal(verificationTaskCompleted, tasks[0].Status)
+	suite.Require().Equal(verificationTaskVerifyCollection, tasks[1].Type)
+	suite.Require().Equal(verificationTaskMetadataMismatch, tasks[1].Status)
+
+	runner.StartNextGeneration()
+	runner.AwaitGenerationEnd()
+
+	cursor, err = verifier.verificationTaskCollection().Find(
+		ctx,
+		bson.M{"generation": 1},
+		options.Find().SetSort(bson.M{"type": 1}),
+	)
+	suite.Require().NoError(err)
+
+	suite.Require().NoError(cursor.All(ctx, &tasks))
+
+	suite.Require().Len(tasks, 1, "generation 1 should only have done 1 task")
+	suite.Require().Equal(verificationTaskVerifyCollection, tasks[0].Type)
+	suite.Require().Equal(verificationTaskMetadataMismatch, tasks[0].Status)
 }
 
 func (suite *IntegrationTestSuite) TestGenerationalRechecking() {

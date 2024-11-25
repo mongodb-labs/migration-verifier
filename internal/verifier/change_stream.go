@@ -319,7 +319,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(ctx context.Context, cs *mong
 					break
 				}
 
-				if curTs == writesOffTs || curTs.After(writesOffTs) {
+				if curTs.After(writesOffTs) {
 					csr.logger.Debug().
 						Interface("currentTimestamp", curTs).
 						Interface("writesOffTimestamp", writesOffTs).
