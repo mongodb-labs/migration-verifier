@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -318,4 +319,37 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 	)
 
 	suite.Assert().Equal(docsCount, totalFailed, "all source docs should be missing")
+}
+
+func (suite *IntegrationTestSuite) TestCreateForbidden() {
+	ctx := suite.Context()
+	buildInfo, err := util.GetBuildInfo(ctx, suite.srcMongoClient)
+	suite.Require().NoError(err)
+
+	if buildInfo.VersionArray[0] < 6 {
+		suite.T().Skipf("This test requires server v6+. (Found: %v)", buildInfo.VersionArray)
+	}
+
+	verifier := suite.BuildVerifier()
+
+	// start verifier
+	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
+
+	// wait for generation 0 to end
+	verifierRunner.AwaitGenerationEnd()
+
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	coll := db.Collection("mycoll")
+	suite.Require().NoError(
+		db.CreateCollection(ctx, coll.Name()),
+	)
+
+	suite.Require().NoError(verifier.WritesOff(ctx))
+
+	err = verifierRunner.Await()
+	suite.Require().Error(err, "should detect forbidden create event")
+
+	eventErr := UnknownEventError{}
+	suite.Require().ErrorAs(err, &eventErr)
+	suite.Assert().Equal("create", eventErr.Event.OpType)
 }
