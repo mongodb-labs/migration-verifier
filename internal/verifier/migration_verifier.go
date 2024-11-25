@@ -27,6 +27,7 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -888,6 +889,14 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Ra
 		return true, nil
 	}
 
+	var fieldsToRemove = []string{
+		// v4.4 stopped adding “ns” to index fields.
+		"ns",
+
+		// v4.2+ ignores this field.
+		"background",
+	}
+
 	// Next check to see if the only differences are type differences.
 	// (We can safely use $documents here since this is against the metadata
 	// cluster, which we can require to be v5+.)
@@ -904,12 +913,13 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Ra
 				{"dstSpec", dstSpec},
 			}}},
 
-			// Remove the “ns” field from both. (NB: 4.4+ don’t create these,
-			// though in-place upgrades may cause them still to exist.)
-			{{"$addFields", bson.D{
-				{"spec.ns", "$$REMOVE"},
-				{"dstSpec.ns", "$$REMOVE"},
-			}}},
+			{{"$unset", lo.Reduce(
+				fieldsToRemove,
+				func(cur []string, field string, _ int) []string {
+					return append(cur, "spec."+field, "dstSpec."+field)
+				},
+				[]string{},
+			)}},
 
 			// Now check to be sure that those specs match.
 			{{"$match", bson.D{
