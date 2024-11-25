@@ -344,9 +344,13 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 		db.CreateCollection(ctx, coll.Name()),
 	)
 
-	suite.Require().NoError(verifier.WritesOff(ctx))
+	// The error from the create event will come either at WritesOff
+	// or when we finalize the change stream.
+	err = verifier.WritesOff(ctx)
+	if err == nil {
+		err = verifierRunner.Await()
+	}
 
-	err = verifierRunner.Await()
 	suite.Require().Error(err, "should detect forbidden create event")
 
 	eventErr := UnknownEventError{}

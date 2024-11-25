@@ -261,7 +261,11 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 		// This has to happen under the lock because the change stream
 		// might be inserting docs into the recheck queue, which happens
 		// under the lock.
-		verifier.changeStreamWritesOffTsChan <- finalTs
+		select {
+		case verifier.changeStreamWritesOffTsChan <- finalTs:
+		case err := <-verifier.changeStreamErrChan:
+			return errors.Wrap(err, "tried to send writes-off timestamp to change stream, but change stream already failed")
+		}
 	} else {
 		verifier.mux.Unlock()
 	}
