@@ -19,7 +19,6 @@ func (o Option[T]) MarshalBSONValue() (bsontype.Type, []byte, error) {
 
 // UnmarshalBSONValue implements bson.ValueUnmarshaler.
 func (o *Option[T]) UnmarshalBSONValue(bType bsontype.Type, raw []byte) error {
-
 	switch bType {
 	case bson.TypeNull:
 		o.val = nil
