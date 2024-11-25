@@ -185,6 +185,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	)
 	verifier.SetLogger("stderr")
 	verifier.SetMetaDBName(metaDBName)
+	verifier.initializeChangeStreamReaders()
 
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))
 	suite.Require().NoError(verifier.dstClientCollection(&task).Drop(ctx))
