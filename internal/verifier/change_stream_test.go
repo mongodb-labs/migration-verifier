@@ -2,38 +2,46 @@ package verifier
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readconcern"
 )
 
 func TestChangeStreamFilter(t *testing.T) {
 	verifier := Verifier{}
 	verifier.SetMetaDBName("metadb")
-	verifier.srcNamespaces = []string{"foo.bar", "foo.baz", "test.car", "test.chaz"}
-
 	verifier.initializeChangeStreamReaders()
-
-	require.Equal(t, []bson.D{{{"$match", bson.D{{"ns.db", bson.D{{"$ne", "metadb"}}}}}}},
-		verifier.srcChangeStreamReader.GetChangeStreamFilter())
-	require.Equal(t, []bson.D{
-		{{"$match", bson.D{
-			{"$or", bson.A{
-				bson.D{{"ns", bson.D{{"db", "foo"}, {"coll", "bar"}}}},
-				bson.D{{"ns", bson.D{{"db", "foo"}, {"coll", "baz"}}}},
-				bson.D{{"ns", bson.D{{"db", "test"}, {"coll", "car"}}}},
-				bson.D{{"ns", bson.D{{"db", "test"}, {"coll", "chaz"}}}},
+	assert.Contains(t,
+		verifier.srcChangeStreamReader.GetChangeStreamFilter(),
+		bson.D{
+			{"$match", bson.D{{"ns.db", bson.D{{"$ne", "metadb"}}}}},
+		},
+	)
+	verifier.srcChangeStreamReader.namespaces = []string{"foo.bar", "foo.baz", "test.car", "test.chaz"}
+	assert.Contains(t,
+		verifier.srcChangeStreamReader.GetChangeStreamFilter(),
+		bson.D{{"$match", bson.D{
+			{"$or", []bson.D{
+				{{"ns", bson.D{{"db", "foo"}, {"coll", "bar"}}}},
+				{{"ns", bson.D{{"db", "foo"}, {"coll", "baz"}}}},
+				{{"ns", bson.D{{"db", "test"}, {"coll", "car"}}}},
+				{{"ns", bson.D{{"db", "test"}, {"coll", "chaz"}}}},
 			}},
 		}}},
-	}, verifier.srcChangeStreamReader.GetChangeStreamFilter())
+	)
 }
 
 // TestChangeStreamResumability creates a verifier, starts its change stream,
@@ -271,6 +279,92 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 	)
 }
 
+func (suite *IntegrationTestSuite) TestCursorKilledResilience() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	coll := db.Collection("mycoll")
+	suite.Require().NoError(
+		db.CreateCollection(ctx, coll.Name()),
+	)
+
+	// start verifier
+	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
+
+	// wait for generation 0 to end
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+	const mvName = "Migration Verifier"
+
+	// Kill verifier’s change stream.
+	cursor, err := suite.srcMongoClient.Database(
+		"admin",
+		options.Database().SetReadConcern(readconcern.Local()),
+	).Aggregate(
+		ctx,
+		mongo.Pipeline{
+			{
+				{"$currentOp", bson.D{
+					{"idleCursors", true},
+				}},
+			},
+			{
+				{"$match", bson.D{
+					{"clientMetadata.application.name", mvName},
+					{"command.collection", "$cmd.aggregate"},
+					{"cursor.originatingCommand.pipeline.0.$_internalChangeStreamOplogMatch",
+						bson.D{{"$type", "object"}},
+					},
+				}},
+			},
+		},
+	)
+	suite.Require().NoError(err)
+
+	var ops []bson.Raw
+	suite.Require().NoError(cursor.All(ctx, &ops))
+
+	for _, cursorRaw := range ops {
+		opId, err := cursorRaw.LookupErr("opid")
+		suite.Require().NoError(err, "should get opid from op")
+
+		suite.T().Logf("Killing change stream op %+v", opId)
+
+		suite.Require().NoError(
+			suite.srcMongoClient.Database("admin").RunCommand(
+				ctx,
+				bson.D{
+					{"killOp", 1},
+					{"op", opId},
+				},
+			).Err(),
+		)
+	}
+
+	_, err = coll.InsertOne(
+		ctx,
+		bson.D{{"_id", "after kill"}},
+	)
+	suite.Require().NoError(err)
+
+	suite.Require().NoError(verifier.WritesOff(ctx))
+
+	suite.Require().NoError(verifierRunner.Await())
+
+	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
+		ctx,
+		verifier.verificationTaskCollection(),
+		verificationTaskVerifyDocuments,
+		verifier.generation,
+	)
+	suite.Require().NoError(err)
+
+	suite.Assert().Zero(incompleteTasks, "no incomplete tasks")
+	suite.Require().Len(failedTasks, 1, "expect one failed task")
+}
+
 func (suite *IntegrationTestSuite) TestManyInsertsBeforeWritesOff() {
 	suite.testInsertsBeforeWritesOff(10_000)
 }
@@ -294,7 +388,7 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
 
 	// wait for generation 0 to end
-	verifierRunner.AwaitGenerationEnd()
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
 
 	docs := lo.RepeatBy(docsCount, func(_ int) bson.D { return bson.D{} })
 	_, err := coll.InsertMany(
@@ -344,7 +438,7 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
 
 	// wait for generation 0 to end
-	verifierRunner.AwaitGenerationEnd()
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
 
 	db := suite.srcMongoClient.Database(suite.DBNameForTest())
 	coll := db.Collection("mycoll")
@@ -426,4 +520,60 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	}
 	suite.Require().Equal(2, coll1RecheckCount)
 	suite.Require().Equal(1, coll2RecheckCount)
+}
+
+func (suite *IntegrationTestSuite) TestLargeEvents() {
+	ctx := suite.Context()
+
+	docID := 123
+
+	makeDoc := func(char string, len int) bson.D {
+		return bson.D{{"_id", docID}, {"str", strings.Repeat(char, len)}}
+	}
+
+	smallDoc := testutil.MustMarshal(makeDoc("a", 1))
+	suite.T().Logf("small size: %v", len(smallDoc))
+	maxBSONSize := 16 * 1024 * 1024
+
+	maxStringLen := maxBSONSize - len(smallDoc) - 1
+
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	suite.Require().NoError(db.CreateCollection(ctx, "mystuff"))
+
+	verifier := suite.BuildVerifier()
+	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+	coll := db.Collection("mystuff")
+	_, err := coll.InsertOne(
+		ctx,
+		makeDoc("a", maxStringLen),
+	)
+	suite.Require().NoError(err, "should insert")
+
+	updated, err := coll.UpdateByID(
+		ctx,
+		docID,
+		bson.D{
+			{"$set", bson.D{
+				// smallDoc happens to be the minimum length to subtract
+				// in order to satisfy the server’s requirements on
+				// document sizes in updates.
+				{"str", strings.Repeat("b", maxStringLen-len(smallDoc))},
+			}},
+		},
+	)
+	suite.Require().NoError(err, "should update")
+	suite.Require().EqualValues(1, updated.ModifiedCount)
+
+	replaced, err := coll.ReplaceOne(
+		ctx,
+		bson.D{{"_id", docID}},
+		makeDoc("c", maxStringLen-len(smallDoc)),
+	)
+	suite.Require().NoError(err, "should replace")
+	suite.Require().EqualValues(1, replaced.ModifiedCount)
+
+	suite.Require().NoError(verifier.WritesOff(ctx))
+	suite.Require().NoError(verifierRunner.Await())
 }
