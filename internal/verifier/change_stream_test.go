@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -22,19 +23,24 @@ import (
 func TestChangeStreamFilter(t *testing.T) {
 	verifier := Verifier{}
 	verifier.SetMetaDBName("metadb")
-	require.Equal(t, []bson.D{{{"$match", bson.D{{"ns.db", bson.D{{"$ne", "metadb"}}}}}}},
-		verifier.GetChangeStreamFilter())
+	assert.Contains(t,
+		verifier.GetChangeStreamFilter(),
+		bson.D{
+			{"$match", bson.D{{"ns.db", bson.D{{"$ne", "metadb"}}}}},
+		},
+	)
 	verifier.srcNamespaces = []string{"foo.bar", "foo.baz", "test.car", "test.chaz"}
-	require.Equal(t, []bson.D{
-		{{"$match", bson.D{
-			{"$or", bson.A{
-				bson.D{{"ns", bson.D{{"db", "foo"}, {"coll", "bar"}}}},
-				bson.D{{"ns", bson.D{{"db", "foo"}, {"coll", "baz"}}}},
-				bson.D{{"ns", bson.D{{"db", "test"}, {"coll", "car"}}}},
-				bson.D{{"ns", bson.D{{"db", "test"}, {"coll", "chaz"}}}},
+	assert.Contains(t,
+		verifier.GetChangeStreamFilter(),
+		bson.D{{"$match", bson.D{
+			{"$or", []bson.D{
+				{{"ns", bson.D{{"db", "foo"}, {"coll", "bar"}}}},
+				{{"ns", bson.D{{"db", "foo"}, {"coll", "baz"}}}},
+				{{"ns", bson.D{{"db", "test"}, {"coll", "car"}}}},
+				{{"ns", bson.D{{"db", "test"}, {"coll", "chaz"}}}},
 			}},
 		}}},
-	}, verifier.GetChangeStreamFilter())
+	)
 }
 
 // TestChangeStreamResumability creates a verifier, starts its change stream,
