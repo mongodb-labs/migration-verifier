@@ -367,6 +367,7 @@ func (verifier *Verifier) SetDstNamespaces(arg []string) {
 
 func (verifier *Verifier) SetNamespaceMap() {
 	verifier.srcDstNsMap = make(map[string]string)
+	verifier.dstSrcNsMap = make(map[string]string)
 	if len(verifier.dstNamespaces) == 0 {
 		return
 	}
