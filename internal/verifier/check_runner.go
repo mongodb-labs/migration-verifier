@@ -3,6 +3,8 @@ package verifier
 import (
 	"context"
 	"testing"
+
+	"github.com/pkg/errors"
 )
 
 type CheckRunner struct {
@@ -30,14 +32,25 @@ func RunVerifierCheck(ctx context.Context, t *testing.T, verifier *Verifier) *Ch
 }
 
 // AwaitGenerationEnd blocks until the check’s current generation ends.
-func (cr *CheckRunner) AwaitGenerationEnd() {
-	<-cr.generationDoneChan
+func (cr *CheckRunner) AwaitGenerationEnd() error {
+	select {
+	case <-cr.generationDoneChan:
+		return nil
+	case err := <-cr.checkDoneChan:
+		return errors.Wrap(err, "verifier failed while test awaited generation completion")
+	}
 }
 
 // StartNextGeneration blocks until it can tell the check to start
 // the next generation.
-func (cr *CheckRunner) StartNextGeneration() {
-	cr.doNextGenerationChan <- struct{}{}
+func (cr *CheckRunner) StartNextGeneration() error {
+	select {
+	case cr.doNextGenerationChan <- struct{}{}:
+		return nil
+	case err := <-cr.checkDoneChan:
+		return errors.Wrap(err, "verifier failed while test waited to start next generation")
+	}
+
 }
 
 // Await will await generations and start new ones until the check

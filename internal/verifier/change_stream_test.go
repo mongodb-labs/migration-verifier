@@ -282,7 +282,7 @@ func (suite *IntegrationTestSuite) TestCursorKilledResilience() {
 	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
 
 	// wait for generation 0 to end
-	verifierRunner.AwaitGenerationEnd()
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
 
 	const mvName = "Migration Verifier"
 
@@ -376,7 +376,7 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
 
 	// wait for generation 0 to end
-	verifierRunner.AwaitGenerationEnd()
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
 
 	docs := lo.RepeatBy(docsCount, func(_ int) bson.D { return bson.D{} })
 	_, err := coll.InsertMany(
@@ -426,7 +426,7 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
 
 	// wait for generation 0 to end
-	verifierRunner.AwaitGenerationEnd()
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
 
 	db := suite.srcMongoClient.Database(suite.DBNameForTest())
 	coll := db.Collection("mycoll")
