@@ -873,26 +873,15 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Ra
 	}
 
 	// Next check to see if the only differences are type differences.
-	// If we didn’t support pre-v5 servers we could use a $documents aggregation,
-	// but we can’t do that, so we write to a temporary collection.
-	coll := verifier.metaClient.Database(verifier.metaDBName).Collection("indexCompare")
-	insert, err := coll.InsertOne(
-		ctx,
-		bson.M{"spec": srcSpec},
-	)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to persist index specification to metadata")
-	}
-
-	defer func() {
-		_, _ = coll.DeleteOne(ctx, bson.M{"_id": insert.InsertedID})
-	}()
-
-	cursor, err := coll.Aggregate(
+	// (We can safely use $documents here since this is against the metadata
+	// cluster, which we can require to be v5+.)
+	db := verifier.metaClient.Database(verifier.metaDBName)
+	cursor, err := db.Aggregate(
 		ctx,
 		mongo.Pipeline{
-			// Select our source spec.
-			{{"$match", bson.D{{"_id", insert.InsertedID}}}},
+			{{"$documents", []bson.D{
+				{{"spec", srcSpec}},
+			}}},
 
 			// Add the destination spec.
 			{{"$addFields", bson.D{
