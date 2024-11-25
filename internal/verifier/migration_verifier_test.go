@@ -1536,7 +1536,7 @@ func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {
 	verifier.SetNamespaceMap()
 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
-	runner.AwaitGenerationEnd()
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 
 	status, err := verifier.GetVerificationStatus()
 	suite.Require().NoError(err)

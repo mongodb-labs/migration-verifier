@@ -116,17 +116,38 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 // and omit fullDocument, but $bsonSize was new in MongoDB 4.4, and we still
 // want to verify migrations from 4.2. fullDocument is unlikely to be a
 // bottleneck anyway.
-func (verifier *Verifier) GetChangeStreamFilter() []bson.D {
+func (verifier *Verifier) GetChangeStreamFilter() (pipeline mongo.Pipeline) {
+
 	if len(verifier.srcNamespaces) == 0 {
-		return []bson.D{{bson.E{"$match", bson.D{{"ns.db", bson.D{{"$ne", verifier.metaDBName}}}}}}}
+		pipeline = mongo.Pipeline{
+			{{"$match", bson.D{
+				{"ns.db", bson.D{{"$ne", verifier.metaDBName}}},
+			}}},
+		}
+	} else {
+		filter := []bson.D{}
+		for _, ns := range verifier.srcNamespaces {
+			db, coll := SplitNamespace(ns)
+			filter = append(filter, bson.D{
+				{"ns", bson.D{
+					{"db", db},
+					{"coll", coll},
+				}},
+			})
+		}
+		pipeline = mongo.Pipeline{
+			{{"$match", bson.D{{"$or", filter}}}},
+		}
 	}
-	filter := bson.A{}
-	for _, ns := range verifier.srcNamespaces {
-		db, coll := SplitNamespace(ns)
-		filter = append(filter, bson.D{{"ns", bson.D{{"db", db}, {"coll", coll}}}})
-	}
-	stage := bson.D{{"$match", bson.D{{"$or", filter}}}}
-	return []bson.D{stage}
+
+	return append(
+		pipeline,
+		bson.D{
+			{"$unset", []string{
+				"updateDescription",
+			}},
+		},
+	)
 }
 
 // This function reads a single `getMore` response into a slice.
