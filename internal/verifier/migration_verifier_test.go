@@ -1493,6 +1493,59 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	<-checkDoneChan
 }
 
+func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {
+	ctx := suite.Context()
+
+	srcDB := suite.srcMongoClient.Database(suite.DBNameForTest())
+	dstDB := suite.dstMongoClient.Database(suite.DBNameForTest())
+
+	suite.Require().NoError(
+		srcDB.RunCommand(
+			ctx,
+			bson.D{
+				{"createIndexes", "mycoll"},
+				{"indexes", []bson.D{
+					{
+						{"name", "index1"},
+						{"key", bson.D{{"someField", 1}}},
+					},
+				}},
+			},
+		).Err(),
+	)
+
+	suite.Require().NoError(
+		dstDB.RunCommand(
+			ctx,
+			bson.D{
+				{"createIndexes", "mycoll"},
+				{"indexes", []bson.D{
+					{
+						{"name", "index1"},
+						{"key", bson.D{{"someField", 1}}},
+						{"background", 1},
+					},
+				}},
+			},
+		).Err(),
+	)
+
+	verifier := suite.BuildVerifier()
+	verifier.SetSrcNamespaces([]string{srcDB.Name() + ".mycoll"})
+	verifier.SetDstNamespaces([]string{dstDB.Name() + ".mycoll"})
+	verifier.SetNamespaceMap()
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	runner.AwaitGenerationEnd()
+
+	status, err := verifier.GetVerificationStatus()
+	suite.Require().NoError(err)
+	suite.Assert().Zero(
+		status.MetadataMismatchTasks,
+		"no metadata mismatch",
+	)
+}
+
 func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
