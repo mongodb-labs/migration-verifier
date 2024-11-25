@@ -328,7 +328,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			return ctx.Err()
 
 		// If the ChangeStreamEnderChan has a message, the user has indicated that
-		// source writes are ended. This means we should exit rather than continue
+		// source and destination writes are ended. This means we should exit rather than continue
 		// reading the change stream since there should be no more events.
 		case writesOffTs := <-csr.ChangeStreamWritesOffTsChan:
 			csr.logger.Debug().
@@ -337,7 +337,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 			gotwritesOffTimestamp = true
 
-			// Read all change events until the source reports no events.
+			// Read all change events until the source / destination reports no events.
 			// (i.e., the `getMore` call returns empty)
 			for {
 				var curTs primitive.Timestamp
@@ -454,7 +454,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 		return nil, primitive.Timestamp{}, err
 	}
 
-	startTs, err := extractTimestampFromResumeToken(srcChangeStream.ResumeToken())
+	startTs, err := extractTimestampFromResumeToken(changeStream.ResumeToken())
 	if err != nil {
 		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
 	}
@@ -471,11 +471,11 @@ func (csr *ChangeStreamReader) createChangeStream(
 		startTs = clusterTime
 	}
 
-	return srcChangeStream, startTs, nil
+	return changeStream, startTs, nil
 }
 
 // StartChangeStream starts the change stream.
-func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
+func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 	// This channel holds the first change stream creation's result, whether
 	// success or failure. Rather than using a Result we could make separate
 	// Timestamp and error channels, but the single channel is cleaner since
@@ -490,9 +490,9 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 
 		err := retryer.RunForTransientErrorsOnly(
 			ctx,
-			verifier.logger,
+			csr.logger,
 			func(ri *retry.Info) error {
-				srcChangeStream, startTs, err := verifier.createChangeStream(ctx)
+				changeStream, startTs, err := csr.createChangeStream(ctx)
 				if err != nil {
 					if parentThreadWaiting {
 						initialCreateResultChan <- mo.Err[primitive.Timestamp](err)
@@ -502,7 +502,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 					return err
 				}
 
-				defer srcChangeStream.Close(ctx)
+				defer changeStream.Close(ctx)
 
 				if parentThreadWaiting {
 					initialCreateResultChan <- mo.Ok(startTs)
@@ -510,15 +510,15 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 					parentThreadWaiting = false
 				}
 
-				return verifier.iterateChangeStream(ctx, ri, srcChangeStream)
+				return csr.iterateChangeStream(ctx, ri, changeStream)
 			},
 		)
 
 		if err != nil {
 			// NB: This failure always happens after the initial change stream
 			// creation.
-			verifier.changeStreamErrChan <- err
-			close(verifier.changeStreamErrChan)
+			csr.ChangeStreamErrChan <- err
+			close(csr.ChangeStreamErrChan)
 		}
 	}()
 
