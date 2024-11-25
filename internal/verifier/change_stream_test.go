@@ -468,7 +468,7 @@ func (suite *IntegrationTestSuite) TestLargeEvents() {
 
 	verifier := suite.BuildVerifier()
 	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
-	verifierRunner.AwaitGenerationEnd()
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
 
 	coll := db.Collection("mystuff")
 	_, err := coll.InsertOne(
