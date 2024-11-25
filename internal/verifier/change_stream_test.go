@@ -17,11 +17,13 @@ import (
 
 func TestChangeStreamFilter(t *testing.T) {
 	verifier := Verifier{}
-	verifier.initializeChangeStreamReaders()
 	verifier.SetMetaDBName("metadb")
+	verifier.srcNamespaces = []string{"foo.bar", "foo.baz", "test.car", "test.chaz"}
+
+	verifier.initializeChangeStreamReaders()
+
 	require.Equal(t, []bson.D{{{"$match", bson.D{{"ns.db", bson.D{{"$ne", "metadb"}}}}}}},
 		verifier.srcChangeStreamReader.GetChangeStreamFilter())
-	verifier.srcNamespaces = []string{"foo.bar", "foo.baz", "test.car", "test.chaz"}
 	require.Equal(t, []bson.D{
 		{{"$match", bson.D{
 			{"$or", bson.A{
@@ -48,6 +50,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 		verifier1 := suite.BuildVerifier()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		verifier1.StartChangeEventHandler(ctx, verifier1.srcChangeStreamReader)
 		err := verifier1.srcChangeStreamReader.StartChangeStream(ctx)
 		suite.Require().NoError(err)
 	}()
@@ -73,6 +76,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	newTime := suite.getClusterTime(ctx, suite.srcMongoClient)
 
+	verifier2.StartChangeEventHandler(ctx, verifier2.srcChangeStreamReader)
 	err = verifier2.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 
@@ -148,6 +152,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
+	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
 	err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
@@ -169,6 +174,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 
 	origSessionTime := sess.OperationTime()
 	suite.Require().NotNil(origSessionTime)
+	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
 	err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 
@@ -221,6 +227,7 @@ func (suite *IntegrationTestSuite) TestNoStartAtTime() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
+	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
 	err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().NotNil(verifier.srcChangeStreamReader.startAtTs)
@@ -240,6 +247,7 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 
 	verifier := suite.BuildVerifier()
 
+	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
 	suite.Require().NoError(verifier.srcChangeStreamReader.StartChangeStream(ctx))
 
 	_, err := coll1.InsertOne(ctx, bson.D{{"_id", 1}})
@@ -261,7 +269,6 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 		500*time.Millisecond,
 		"the verifier should flush a recheck doc after a batch",
 	)
-
 }
 
 func (suite *IntegrationTestSuite) TestManyInsertsBeforeWritesOff() {
@@ -357,4 +364,66 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 	eventErr := UnknownEventError{}
 	suite.Require().ErrorAs(err, &eventErr)
 	suite.Assert().Equal("create", eventErr.Event.OpType)
+}
+
+func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
+	ctx := suite.Context()
+
+	db := suite.dstMongoClient.Database("dstDB")
+	coll1 := db.Collection("dstColl1")
+	coll2 := db.Collection("dstColl2")
+
+	for _, coll := range mslices.Of(coll1, coll2) {
+		suite.Require().NoError(db.CreateCollection(ctx, coll.Name()))
+	}
+
+	verifier := suite.BuildVerifier()
+	verifier.SetSrcNamespaces([]string{"srcDB.srcColl1", "srcDB.srcColl2"})
+	verifier.SetDstNamespaces([]string{"dstDB.dstColl1", "dstDB.dstColl2"})
+	verifier.SetNamespaceMap()
+
+	verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader)
+	suite.Require().NoError(verifier.dstChangeStreamReader.StartChangeStream(ctx))
+
+	_, err := coll1.InsertOne(ctx, bson.D{{"_id", 1}})
+	suite.Require().NoError(err)
+	_, err = coll1.InsertOne(ctx, bson.D{{"_id", 2}})
+	suite.Require().NoError(err)
+
+	_, err = coll2.InsertOne(ctx, bson.D{{"_id", 1}})
+	suite.Require().NoError(err)
+
+	var rechecks []RecheckDoc
+	require.Eventually(
+		suite.T(),
+		func() bool {
+			recheckColl := verifier.verificationDatabase().Collection(recheckQueue)
+			cursor, err := recheckColl.Find(ctx, bson.D{})
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				return false
+			}
+
+			suite.Require().NoError(err)
+			suite.Require().NoError(cursor.All(ctx, &rechecks))
+			return len(rechecks) == 3
+		},
+		time.Minute,
+		500*time.Millisecond,
+		"the verifier should flush a recheck doc after a batch",
+	)
+
+	coll1RecheckCount, coll2RecheckCount := 0, 0
+	for _, recheck := range rechecks {
+		suite.Require().Equal("srcDB", recheck.PrimaryKey.DatabaseName)
+		switch recheck.PrimaryKey.CollectionName {
+		case "srcColl1":
+			coll1RecheckCount++
+		case "srcColl2":
+			coll2RecheckCount++
+		default:
+			suite.T().Fatalf("unknown collection name: %v", recheck.PrimaryKey.CollectionName)
+		}
+	}
+	suite.Require().Equal(2, coll1RecheckCount)
+	suite.Require().Equal(1, coll2RecheckCount)
 }
