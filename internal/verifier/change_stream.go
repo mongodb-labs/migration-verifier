@@ -7,6 +7,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"go.mongodb.org/mongo-driver/bson"
@@ -60,6 +61,7 @@ type ChangeStreamReader struct {
 
 	metaClient    *mongo.Client
 	watcherClient *mongo.Client
+	buildInfo     *util.BuildInfo
 
 	changeStreamRunning         bool
 	ChangeEventBatchChan        chan []ParsedEvent
@@ -79,6 +81,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		metaDBName:                  verifier.metaDBName,
 		metaClient:                  verifier.metaClient,
 		watcherClient:               verifier.srcClient,
+		buildInfo:                   verifier.srcBuildInfo,
 		changeStreamRunning:         false,
 		ChangeEventBatchChan:        make(chan []ParsedEvent),
 		ChangeStreamWritesOffTsChan: make(chan primitive.Timestamp),
@@ -94,6 +97,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		metaDBName:                  verifier.metaDBName,
 		metaClient:                  verifier.metaClient,
 		watcherClient:               verifier.dstClient,
+		buildInfo:                   verifier.dstBuildInfo,
 		changeStreamRunning:         false,
 		ChangeEventBatchChan:        make(chan []ParsedEvent),
 		ChangeStreamWritesOffTsChan: make(chan primitive.Timestamp),
@@ -385,7 +389,7 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 		SetMaxAwaitTime(1 * time.Second).
 		SetFullDocument(options.UpdateLookup)
 
-	if verifier.srcBuildInfo.VersionArray[0] >= 6 {
+	if csr.buildInfo.VersionArray[0] >= 6 {
 		opts = opts.SetCustomPipeline(bson.M{"showExpandedEvents": true})
 	}
 
