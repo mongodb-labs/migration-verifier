@@ -236,6 +236,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		// paying attention. Also, this should not matter too much because any failures will be
 		// caught again on the next iteration.
 		if verifier.writesOff {
+			verifier.logger.Debug().
+				Msg("Waiting for change stream to end.")
+
 			// It's necessary to wait for the change stream to finish before incrementing the
 			// generation number, or the last changes will not be checked.
 			verifier.mux.Unlock()
