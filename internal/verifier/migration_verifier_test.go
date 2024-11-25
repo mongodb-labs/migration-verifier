@@ -1245,7 +1245,7 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	suite.Require().NoError(err)
 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
-	runner.AwaitGenerationEnd()
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 
 	cursor, err := verifier.verificationTaskCollection().Find(
 		ctx,
@@ -1263,8 +1263,8 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	suite.Require().Equal(verificationTaskVerifyCollection, tasks[1].Type)
 	suite.Require().Equal(verificationTaskMetadataMismatch, tasks[1].Status)
 
-	runner.StartNextGeneration()
-	runner.AwaitGenerationEnd()
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 
 	cursor, err = verifier.verificationTaskCollection().Find(
 		ctx,
@@ -1310,8 +1310,8 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 			suite.T().Logf("TotalTasks is 0 (generation=%d); waiting %s then will run another generation …", verifier.generation, delay)
 
 			time.Sleep(delay)
-			runner.StartNextGeneration()
-			runner.AwaitGenerationEnd()
+			suite.Require().NoError(runner.StartNextGeneration())
+			suite.Require().NoError(runner.AwaitGenerationEnd())
 			status, err = verifier.GetVerificationStatus()
 			suite.Require().NoError(err)
 		}
@@ -1319,7 +1319,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	}
 
 	// wait for one generation to finish
-	runner.AwaitGenerationEnd()
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status := waitForTasks()
 	suite.Require().Equal(VerificationStatus{TotalTasks: 2, FailedTasks: 1, CompletedTasks: 1}, *status)
 
@@ -1328,10 +1328,10 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 
 	// tell check to start the next generation
-	runner.StartNextGeneration()
+	suite.Require().NoError(runner.StartNextGeneration())
 
 	// wait for generation to finish
-	runner.AwaitGenerationEnd()
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status = waitForTasks()
 	// there should be no failures now, since they are are equivalent at this point in time
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
@@ -1341,10 +1341,10 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 
 	// tell check to start the next generation
-	runner.StartNextGeneration()
+	suite.Require().NoError(runner.StartNextGeneration())
 
 	// wait for one generation to finish
-	runner.AwaitGenerationEnd()
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status = waitForTasks()
 
 	// there should be a failure from the src insert
@@ -1355,10 +1355,10 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 
 	// continue
-	runner.StartNextGeneration()
+	suite.Require().NoError(runner.StartNextGeneration())
 
 	// wait for it to finish again, this should be a clean run
-	runner.AwaitGenerationEnd()
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status = waitForTasks()
 
 	// there should be no failures now, since they are are equivalent at this point in time
