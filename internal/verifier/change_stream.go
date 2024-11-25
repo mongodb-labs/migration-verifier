@@ -135,7 +135,7 @@ func (verifier *Verifier) GetChangeStreamFilter() (pipeline mongo.Pipeline) {
 				}},
 			})
 		}
-		pipeline = []bson.D{
+		pipeline = mongo.Pipeline{
 			{{"$match", bson.D{{"$or", filter}}}},
 		}
 	}
