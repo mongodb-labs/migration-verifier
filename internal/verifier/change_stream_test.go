@@ -242,10 +242,10 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 
 	_, err := coll1.InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
-	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl1").InsertOne(ctx, bson.D{{"_id", 2}})
+	_, err = coll1.InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
 
-	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl2").InsertOne(ctx, bson.D{{"_id", 1}})
+	_, err = coll2.InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 
 	var rechecks []bson.M
