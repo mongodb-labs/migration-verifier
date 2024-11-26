@@ -24,6 +24,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
@@ -130,6 +131,7 @@ type Verifier struct {
 	changeStreamWritesOffTsChan chan primitive.Timestamp
 	changeStreamErrChan         chan error
 	changeStreamDoneChan        chan struct{}
+	changeStreamLag             *msync.TypedAtomic[option.Option[time.Duration]]
 	lastChangeEventTime         *primitive.Timestamp
 	writesOffTimestamp          *primitive.Timestamp
 
@@ -201,6 +203,7 @@ func NewVerifier(settings VerifierSettings) *Verifier {
 		changeStreamWritesOffTsChan: make(chan primitive.Timestamp),
 		changeStreamErrChan:         make(chan error),
 		changeStreamDoneChan:        make(chan struct{}),
+		changeStreamLag:             msync.NewTypedAtomic(option.None[time.Duration]()),
 		readConcernSetting:          readConcern,
 
 		// This will get recreated once gen0 starts, but we want it

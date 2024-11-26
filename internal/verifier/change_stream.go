@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/mo"
@@ -166,8 +167,15 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 	eventsRead := 0
 	var changeEventBatch []ParsedEvent
 
+	sess, err := verifier.srcClient.StartSession()
+	if err != nil {
+		return errors.Wrap(err, "failed to start session to read change stream")
+	}
+
+	sctx := mongo.NewSessionContext(ctx, sess)
+
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
-		gotEvent := cs.TryNext(ctx)
+		gotEvent := cs.TryNext(sctx)
 
 		if cs.Err() != nil {
 			return errors.Wrap(cs.Err(), "change stream iteration failed")
@@ -194,7 +202,19 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 		return nil
 	}
 
-	err := verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
+	fmt.Printf("\n======== events batch: %+v\n\n", changeEventBatch)
+
+	var curTs primitive.Timestamp
+	curTs, err = extractTimestampFromResumeToken(cs.ResumeToken())
+	if err == nil {
+		lagSecs := curTs.T - sctx.OperationTime().T
+		verifier.changeStreamLag.Store(option.Some(time.Second * time.Duration(lagSecs)))
+	} else {
+		// TODO warn
+		//return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
+	}
+
+	err = verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
 	if err != nil {
 		return errors.Wrap(err, "failed to handle change events")
 	}

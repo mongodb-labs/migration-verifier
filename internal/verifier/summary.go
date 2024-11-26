@@ -424,4 +424,10 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 
 	builder.WriteString("\nMost frequently-changing namespaces:\n")
 	table.Render()
+
+	if lag, hasLag := verifier.changeStreamLag.Load().Get(); hasLag {
+		builder.WriteString(
+			fmt.Sprintf("\nChange stream lag: %s\n", reportutils.DurationToHMS(lag)),
+		)
+	}
 }
