@@ -216,10 +216,10 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now add 2 namespaces. Add them “out of order” to test
 	// that we sort the returned array by Namespace.
 
-	task2, err := verifier.InsertCollectionVerificationTask("mydb.coll2")
+	task2, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll2")
 	suite.Require().NoError(err)
 
-	task1, err := verifier.InsertCollectionVerificationTask("mydb.coll1")
+	task1, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll1")
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetNamespaceStatistics(ctx)
@@ -276,6 +276,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	task2parts := [2]*VerificationTask{}
 	for i := range task1parts {
 		task1part, err := verifier.InsertPartitionVerificationTask(
+			ctx,
 			&partitions.Partition{
 				Ns: &partitions.Namespace{DB: "mydb", Coll: "coll1"},
 			},
@@ -287,6 +288,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 		task1parts[i] = task1part
 
 		task2part, err := verifier.InsertPartitionVerificationTask(
+			ctx,
 			&partitions.Partition{
 				Ns: &partitions.Namespace{DB: "mydb", Coll: "coll2"},
 			},

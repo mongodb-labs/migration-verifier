@@ -125,17 +125,25 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 }
 
 func (verifier *Verifier) InsertCollectionVerificationTask(
-	srcNamespace string) (*VerificationTask, error) {
+	ctx context.Context,
+	srcNamespace string,
+) (*VerificationTask, error) {
 	return verifier.insertCollectionVerificationTask(srcNamespace, verifier.generation)
 }
 
 func (verifier *Verifier) InsertFailedCollectionVerificationTask(
-	srcNamespace string) (*VerificationTask, error) {
+	ctx context.Context,
+	srcNamespace string,
+) (*VerificationTask, error) {
 	return verifier.insertCollectionVerificationTask(srcNamespace, verifier.generation+1)
 }
 
-func (verifier *Verifier) InsertPartitionVerificationTask(partition *partitions.Partition, shardKeys []string,
-	dstNamespace string) (*VerificationTask, error) {
+func (verifier *Verifier) InsertPartitionVerificationTask(
+	ctx context.Context,
+	partition *partitions.Partition,
+	shardKeys []string,
+	dstNamespace string,
+) (*VerificationTask, error) {
 	srcNamespace := strings.Join([]string{partition.Ns.DB, partition.Ns.Coll}, ".")
 	verificationTask := VerificationTask{
 		PrimaryKey: primitive.NewObjectID(),
@@ -153,7 +161,12 @@ func (verifier *Verifier) InsertPartitionVerificationTask(partition *partitions.
 	return &verificationTask, err
 }
 
-func (verifier *Verifier) InsertDocumentRecheckTask(ids []interface{}, dataSize types.ByteCount, srcNamespace string) error {
+func (verifier *Verifier) InsertDocumentRecheckTask(
+	ctx context.Context,
+	ids []interface{},
+	dataSize types.ByteCount,
+	srcNamespace string,
+) error {
 	dstNamespace := srcNamespace
 	if len(verifier.nsMap) != 0 {
 		var ok bool
@@ -176,7 +189,7 @@ func (verifier *Verifier) InsertDocumentRecheckTask(ids []interface{}, dataSize 
 		SourceDocumentCount: types.DocumentCount(len(ids)),
 		SourceByteCount:     dataSize,
 	}
-	var ctx = context.Background()
+
 	_, err := verifier.verificationTaskCollection().InsertOne(ctx, &verificationTask)
 	return err
 }

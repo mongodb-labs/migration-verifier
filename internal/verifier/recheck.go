@@ -261,6 +261,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		namespace := prevDBName + "." + prevCollName
 
 		err := verifier.InsertDocumentRecheckTask(
+			ctx,
 			idAccum,
 			types.ByteCount(dataSizeAccum),
 			namespace,

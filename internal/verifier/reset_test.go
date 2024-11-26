@@ -11,16 +11,16 @@ import (
 )
 
 func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
+	ctx := suite.Context()
+
 	verifier := suite.BuildVerifier()
 
 	created, err := verifier.CheckIsPrimary()
 	suite.Require().NoError(err)
 	suite.Require().True(created)
 
-	_, err = verifier.InsertCollectionVerificationTask("foo.bar")
+	_, err = verifier.InsertCollectionVerificationTask(ctx, "foo.bar")
 	suite.Require().NoError(err)
-
-	ctx := context.Background()
 
 	err = verifier.doInMetaTransaction(
 		ctx,
@@ -55,7 +55,7 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	ns2 := "qux.quux"
 
 	// Create a collection-verification task, and set it to processing.
-	collTask, err := verifier.InsertCollectionVerificationTask(ns1)
+	collTask, err := verifier.InsertCollectionVerificationTask(ctx, ns1)
 	suite.Require().NoError(err)
 
 	collTask.Status = verificationTaskProcessing
@@ -79,6 +79,7 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 		{verificationTaskCompleted, ns2},
 	} {
 		task, err := verifier.InsertPartitionVerificationTask(
+			ctx,
 			&partitions.Partition{
 				Ns: &partitions.Namespace{
 					DB:   strings.Split(taskParts.Namespace, ".")[0],

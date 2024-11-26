@@ -89,7 +89,7 @@ func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifie
 
 func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	verifier := suite.BuildVerifier()
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	overlyLarge := 7 * 1024 * 1024 // Three of these exceed our 16MB limit, but two do not
 	id1 := strings.Repeat("a", overlyLarge)
@@ -151,7 +151,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	verifier := suite.BuildVerifier()
 	verifier.partitionSizeInBytes = 1024 * 1024
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	id1 := "a"
 	id2 := "b"
@@ -212,7 +212,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 
 func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 	verifier := suite.BuildVerifier()
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	id1 := "a"
 	id2 := "b"
@@ -263,7 +263,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 
 func (suite *IntegrationTestSuite) TestGenerationalClear() {
 	verifier := suite.BuildVerifier()
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	id1 := "a"
 	id2 := "b"

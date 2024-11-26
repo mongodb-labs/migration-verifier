@@ -1142,7 +1142,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	}
 
 	insertFailedCollection := func() error {
-		_, err := verifier.InsertFailedCollectionVerificationTask(srcNs)
+		_, err := verifier.InsertFailedCollectionVerificationTask(ctx, srcNs)
 		return errors.Wrapf(
 			err,
 			"failed to persist metadata mismatch for collection %#q",
@@ -1236,7 +1236,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		task.SourceByteCount = bytesCount
 
 		for _, partition := range partitions {
-			_, err := verifier.InsertPartitionVerificationTask(partition, shardKeys, dstNs)
+			_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeys, dstNs)
 			if err != nil {
 				return errors.Wrapf(
 					err,

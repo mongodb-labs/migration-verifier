@@ -93,7 +93,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	for i := 0; i < verifier.numWorkers; i++ {
 		eg.Go(func() error {
 			return errors.Wrapf(
-				verifier.Work(ctx, i),
+				verifier.work(ctx, i),
 				"worker %d failed",
 				i,
 			)
@@ -103,7 +103,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	waitForTaskCreation := 0
 
-	succeededErr := errors.Errorf("generation %d finished", generation)
+	succeeded := false
 
 	eg.Go(func() error {
 		for {
@@ -130,7 +130,8 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 				continue
 			} else {
 				verifier.PrintVerificationSummary(ctx, GenerationComplete)
-				canceler(succeededErr)
+				succeeded = true
+				canceler(errors.New("ok"))
 				return nil
 			}
 		}
@@ -138,7 +139,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	err := eg.Wait()
 
-	if errors.Is(err, succeededErr) {
+	if succeeded {
 		err = nil
 	}
 
@@ -225,7 +226,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		verifier.logger.Debug().Msgf("Initial verification phase: %+v", verificationStatus)
 	}
 
-	err = verifier.CreateInitialTasks()
+	err = verifier.CreateInitialTasks(ctx)
 	if err != nil {
 		return err
 	}
@@ -335,7 +336,7 @@ func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {
 	return nil
 }
 
-func (verifier *Verifier) CreateInitialTasks() error {
+func (verifier *Verifier) CreateInitialTasks(ctx context.Context) error {
 	// If we don't know the src namespaces, we're definitely not the primary task.
 	if !verifier.verifyAll {
 		if len(verifier.srcNamespaces) == 0 {
@@ -359,13 +360,13 @@ func (verifier *Verifier) CreateInitialTasks() error {
 		return nil
 	}
 	if verifier.verifyAll {
-		err := verifier.setupAllNamespaceList(context.Background())
+		err := verifier.setupAllNamespaceList(ctx)
 		if err != nil {
 			return err
 		}
 	}
 	for _, src := range verifier.srcNamespaces {
-		_, err := verifier.InsertCollectionVerificationTask(src)
+		_, err := verifier.InsertCollectionVerificationTask(ctx, src)
 		if err != nil {
 			verifier.logger.Error().Msgf("Failed to insert collection verification task: %s", err)
 			return err
@@ -407,8 +408,8 @@ func FetchFailedAndIncompleteTasks(ctx context.Context, coll *mongo.Collection, 
 	return FailedTasks, IncompleteTasks, nil
 }
 
-// Work is the logic for an individual worker thread.
-func (verifier *Verifier) Work(ctx context.Context, workerNum int) error {
+// work is the logic for an individual worker thread.
+func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
 		Msg("Worker started.")
@@ -432,9 +433,12 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int) error {
 			}
 
 			continue
-		} else if errors.Is(err, context.Canceled) {
-			return nil
+			/*
+				} else if errors.Is(err, context.Canceled) {
+					return nil
+			*/
 		} else if err != nil {
+
 			return errors.Wrap(
 				err,
 				"failed to seek next task",
