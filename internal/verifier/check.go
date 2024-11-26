@@ -76,7 +76,8 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	verifier.writeStringBuilder(genStartReport)
 
-	eg, ctx := errgroup.WithContext(ctxIn)
+	cancelableCtx, canceler := context.WithCancelCause(ctxIn)
+	eg, ctx := errgroup.WithContext(cancelableCtx)
 
 	// If the change stream fails, everything should stop.
 	eg.Go(func() error {
@@ -101,6 +102,8 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	}
 
 	waitForTaskCreation := 0
+
+	succeededErr := errors.Errorf("generation %d finished", generation)
 
 	eg.Go(func() error {
 		for {
@@ -127,12 +130,17 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 				continue
 			} else {
 				verifier.PrintVerificationSummary(ctx, GenerationComplete)
+				canceler(succeededErr)
 				return nil
 			}
 		}
 	})
 
 	err := eg.Wait()
+
+	if errors.Is(err, succeededErr) {
+		err = nil
+	}
 
 	if err != nil {
 		verifier.logger.Debug().
@@ -410,51 +418,46 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int) error {
 		Msg("Worker finished.")
 
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			task, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
-			if errors.Is(err, mongo.ErrNoDocuments) {
-				duration := verifier.workerSleepDelayMillis * time.Millisecond
+		task, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			duration := verifier.workerSleepDelayMillis * time.Millisecond
 
-				if duration > 0 {
-					verifier.logger.Debug().
-						Int("workerNum", workerNum).
-						Stringer("duration", duration).
-						Msg("No tasks found. Sleeping.")
+			if duration > 0 {
+				verifier.logger.Debug().
+					Int("workerNum", workerNum).
+					Stringer("duration", duration).
+					Msg("No tasks found. Sleeping.")
 
-					time.Sleep(duration)
-				}
-
-				continue
-			} else if err != nil {
-				return errors.Wrap(
-					err,
-					"failed to seek next task",
-				)
+				time.Sleep(duration)
 			}
 
-			switch task.Type {
-			case verificationTaskVerifyCollection:
-				err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
-				if err != nil {
-					return err
+			continue
+		} else if errors.Is(err, context.Canceled) {
+			return nil
+		} else if err != nil {
+			return errors.Wrap(
+				err,
+				"failed to seek next task",
+			)
+		}
+
+		switch task.Type {
+		case verificationTaskVerifyCollection:
+			err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
+			if err != nil {
+				return err
+			}
+			if task.Generation == 0 {
+				newVal := verifier.gen0PendingCollectionTasks.Add(-1)
+				if newVal == 0 {
+					verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
 				}
-				if task.Generation == 0 {
-					newVal := verifier.gen0PendingCollectionTasks.Add(-1)
-					if newVal == 0 {
-						verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
-					}
-				}
-			case verificationTaskVerifyDocuments:
-				err := verifier.ProcessVerifyTask(ctx, workerNum, task)
-				if err != nil {
-					return err
-				}
+			}
+		case verificationTaskVerifyDocuments:
+			err := verifier.ProcessVerifyTask(ctx, workerNum, task)
+			if err != nil {
+				return err
 			}
 		}
 	}
-
-	return nil
 }

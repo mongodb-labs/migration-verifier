@@ -980,21 +980,6 @@ func (verifier *Verifier) ProcessCollectionVerificationTask(
 	)
 }
 
-func (verifier *Verifier) markCollectionFailed(workerNum int, task *VerificationTask, cluster string, namespace string, err error) {
-	task.Status = verificationTaskFailed
-	verifier.logger.Error().
-		Int("workerNum", workerNum).
-		Interface("task", task.PrimaryKey).
-		Str("namespace", namespace).
-		Err(err).
-		Msg("Failed to read collection metadata.")
-
-	task.FailedDocs = append(task.FailedDocs, VerificationResult{
-		NameSpace: namespace,
-		Cluster:   cluster,
-		Details:   Failed + fmt.Sprintf(" %v", err)})
-}
-
 func getIndexesMap(
 	ctx context.Context,
 	coll *mongo.Collection,
