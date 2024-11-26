@@ -40,7 +40,7 @@ func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
 }
 
 func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	verifier := suite.BuildVerifier()
 
@@ -61,7 +61,7 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	collTask.Status = verificationTaskProcessing
 
 	suite.Require().NoError(
-		verifier.UpdateVerificationTask(collTask),
+		verifier.UpdateVerificationTask(ctx, collTask),
 	)
 
 	// Create three partition tasks with the same namespace as the
@@ -92,7 +92,7 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 
 		task.Status = taskParts.Status
 		suite.Require().NoError(
-			verifier.UpdateVerificationTask(task),
+			verifier.UpdateVerificationTask(ctx, task),
 		)
 	}
 

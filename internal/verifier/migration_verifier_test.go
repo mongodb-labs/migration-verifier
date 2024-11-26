@@ -244,10 +244,10 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	task2.SourceDocumentCount = 900
 	task2.SourceByteCount = 9_000
 
-	err = verifier.UpdateVerificationTask(task2)
+	err = verifier.UpdateVerificationTask(ctx, task2)
 	suite.Require().NoError(err)
 
-	err = verifier.UpdateVerificationTask(task1)
+	err = verifier.UpdateVerificationTask(ctx, task1)
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetNamespaceStatistics(ctx)
@@ -323,7 +323,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now set one task to status=processing
 
 	task1parts[0].Status = verificationTaskProcessing
-	err = verifier.UpdateVerificationTask(task1parts[0])
+	err = verifier.UpdateVerificationTask(ctx, task1parts[0])
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetNamespaceStatistics(ctx)
@@ -359,10 +359,10 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	task2parts[1].SourceDocumentCount = task2.SourceDocumentCount / 2
 	task2parts[1].SourceByteCount = task2.SourceByteCount / 2
 
-	err = verifier.UpdateVerificationTask(task2parts[0])
+	err = verifier.UpdateVerificationTask(ctx, task2parts[0])
 	suite.Require().NoError(err)
 
-	err = verifier.UpdateVerificationTask(task2parts[1])
+	err = verifier.UpdateVerificationTask(ctx, task2parts[1])
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetNamespaceStatistics(ctx)
@@ -394,11 +394,11 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
-	err := verifier.InsertFailedCompareRecheckDocs("foo.bar", []interface{}{42}, []int{100})
+	err := verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []interface{}{42}, []int{100})
 	suite.Require().NoError(err)
-	err = verifier.InsertFailedCompareRecheckDocs("foo.bar", []interface{}{43, 44}, []int{100, 100})
+	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []interface{}{43, 44}, []int{100, 100})
 	suite.Require().NoError(err)
-	err = verifier.InsertFailedCompareRecheckDocs("foo.bar2", []interface{}{42}, []int{100})
+	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar2", []interface{}{42}, []int{100})
 	suite.Require().NoError(err)
 	event := ParsedEvent{
 		DocKey: DocKey{ID: int32(55)},
@@ -1197,7 +1197,7 @@ func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 
 func (suite *IntegrationTestSuite) TestVerificationStatus() {
 	verifier := suite.BuildVerifier()
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	metaColl := verifier.verificationDatabase().Collection(verificationTasksCollection)
 	_, err := metaColl.InsertMany(ctx, []interface{}{
@@ -1209,7 +1209,7 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 	})
 	suite.Require().NoError(err)
 
-	status, err := verifier.GetVerificationStatus()
+	status, err := verifier.GetVerificationStatus(ctx)
 	suite.Require().NoError(err)
 	suite.Equal(1, status.AddedTasks, "added tasks not equal")
 	suite.Equal(1, status.ProcessingTasks, "processing tasks not equal")
@@ -1301,7 +1301,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 
 	waitForTasks := func() *VerificationStatus {
-		status, err := verifier.GetVerificationStatus()
+		status, err := verifier.GetVerificationStatus(ctx)
 		suite.Require().NoError(err)
 
 		for status.TotalTasks == 0 && verifier.generation < 50 {
@@ -1312,7 +1312,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 			time.Sleep(delay)
 			suite.Require().NoError(runner.StartNextGeneration())
 			suite.Require().NoError(runner.AwaitGenerationEnd())
-			status, err = verifier.GetVerificationStatus()
+			status, err = verifier.GetVerificationStatus(ctx)
 			suite.Require().NoError(err)
 		}
 		return status
@@ -1417,7 +1417,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	}()
 
 	waitForTasks := func() *VerificationStatus {
-		status, err := verifier.GetVerificationStatus()
+		status, err := verifier.GetVerificationStatus(ctx)
 		suite.Require().NoError(err)
 
 		for status.TotalTasks == 0 && verifier.generation < 50 {
@@ -1428,7 +1428,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 			time.Sleep(delay)
 			checkContinueChan <- struct{}{}
 			<-checkDoneChan
-			status, err = verifier.GetVerificationStatus()
+			status, err = verifier.GetVerificationStatus(ctx)
 			suite.Require().NoError(err)
 		}
 		return status
@@ -1538,7 +1538,7 @@ func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	status, err := verifier.GetVerificationStatus()
+	status, err := verifier.GetVerificationStatus(ctx)
 	suite.Require().NoError(err)
 	suite.Assert().Zero(
 		status.MetadataMismatchTasks,

@@ -12,10 +12,11 @@ import (
 
 func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 	verifier := suite.BuildVerifier()
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	suite.Require().NoError(
 		verifier.InsertFailedCompareRecheckDocs(
+			ctx,
 			"the.namespace",
 			[]any{"theDocID"},
 			[]int{1234},

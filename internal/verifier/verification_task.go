@@ -181,7 +181,7 @@ func (verifier *Verifier) InsertDocumentRecheckTask(ids []interface{}, dataSize 
 	return err
 }
 
-func (verifier *Verifier) FindNextVerifyTaskAndUpdate() (*VerificationTask, error) {
+func (verifier *Verifier) FindNextVerifyTaskAndUpdate(ctx context.Context) (*VerificationTask, error) {
 	var verificationTask = VerificationTask{}
 	filter := bson.M{
 		"$and": bson.A{
@@ -209,12 +209,11 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate() (*VerificationTask, erro
 	// We want “verifyCollection” tasks before “verify”(-document) ones.
 	opts.SetSort(bson.M{"type": -1})
 
-	err := coll.FindOneAndUpdate(context.Background(), filter, updates, opts).Decode(&verificationTask)
+	err := coll.FindOneAndUpdate(ctx, filter, updates, opts).Decode(&verificationTask)
 	return &verificationTask, err
 }
 
-func (verifier *Verifier) UpdateVerificationTask(task *VerificationTask) error {
-	var ctx = context.Background()
+func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *VerificationTask) error {
 	updateFields := bson.M{
 		"$set": bson.M{
 			"status":                 task.Status,
