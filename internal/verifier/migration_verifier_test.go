@@ -1048,6 +1048,19 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexSpecs() {
 		},
 
 		{
+			label: "ignore number types, deep",
+			src: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo.bar": float64(123)}},
+			},
+			dst: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo.bar": 123}},
+			},
+			shouldMatch: true,
+		},
+
+		{
 			label: "find number differences",
 			src: bson.D{
 				{"name", "testIndex"},

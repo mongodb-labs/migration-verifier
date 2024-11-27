@@ -905,12 +905,10 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Ra
 		ctx,
 		mongo.Pipeline{
 			{{"$documents", []bson.D{
-				{{"spec", srcSpec}},
-			}}},
-
-			// Add the destination spec.
-			{{"$addFields", bson.D{
-				{"dstSpec", dstSpec},
+				{
+					{"spec", bson.D{{"$literal", srcSpec}}},
+					{"dstSpec", bson.D{{"$literal", dstSpec}}},
+				},
 			}}},
 
 			{{"$unset", lo.Reduce(
