@@ -128,8 +128,7 @@ type Verifier struct {
 
 	srcNamespaces []string
 	dstNamespaces []string
-	srcDstNsMap   map[string]string
-	dstSrcNsMap   map[string]string
+	nsMap         *NSMap
 	metaDBName    string
 
 	mux sync.RWMutex
@@ -271,7 +270,7 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 		return errors.Wrapf(err, "failed to fetch destination's cluster time")
 	}
 
-	// This has to happen under the lock because the change stream
+	// This has to happen outside the lock because the change stream
 	// might be inserting docs into the recheck queue, which happens
 	// under the lock.
 	select {
@@ -391,15 +390,8 @@ func (verifier *Verifier) SetDstNamespaces(arg []string) {
 }
 
 func (verifier *Verifier) SetNamespaceMap() {
-	verifier.srcDstNsMap = make(map[string]string)
-	verifier.dstSrcNsMap = make(map[string]string)
-	if len(verifier.dstNamespaces) == 0 {
-		return
-	}
-	for i, ns := range verifier.srcNamespaces {
-		verifier.srcDstNsMap[ns] = verifier.dstNamespaces[i]
-		verifier.dstSrcNsMap[verifier.dstNamespaces[i]] = ns
-	}
+	verifier.nsMap = NewNSMap()
+	verifier.nsMap.PopulateWithNamespaces(verifier.srcNamespaces, verifier.dstNamespaces)
 }
 
 func (verifier *Verifier) SetMetaDBName(arg string) {

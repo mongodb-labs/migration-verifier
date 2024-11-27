@@ -463,7 +463,10 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	ctx := suite.Context()
 
-	db := suite.dstMongoClient.Database("dstDB")
+	srcDBName := suite.DBNameForTest() + "_src"
+	dstDBName := suite.DBNameForTest() + "_dst"
+
+	db := suite.dstMongoClient.Database(dstDBName)
 	coll1 := db.Collection("dstColl1")
 	coll2 := db.Collection("dstColl2")
 
@@ -472,8 +475,8 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	}
 
 	verifier := suite.BuildVerifier()
-	verifier.SetSrcNamespaces([]string{"srcDB.srcColl1", "srcDB.srcColl2"})
-	verifier.SetDstNamespaces([]string{"dstDB.dstColl1", "dstDB.dstColl2"})
+	verifier.SetSrcNamespaces([]string{srcDBName + ".srcColl1", srcDBName + ".srcColl2"})
+	verifier.SetDstNamespaces([]string{dstDBName + ".dstColl1", dstDBName + ".dstColl2"})
 	verifier.SetNamespaceMap()
 
 	verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader)
@@ -508,14 +511,14 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 
 	coll1RecheckCount, coll2RecheckCount := 0, 0
 	for _, recheck := range rechecks {
-		suite.Require().Equal("srcDB", recheck.PrimaryKey.DatabaseName)
-		switch recheck.PrimaryKey.CollectionName {
+		suite.Require().Equal(srcDBName, recheck.PrimaryKey.SrcDatabaseName)
+		switch recheck.PrimaryKey.SrcCollectionName {
 		case "srcColl1":
 			coll1RecheckCount++
 		case "srcColl2":
 			coll2RecheckCount++
 		default:
-			suite.T().Fatalf("unknown collection name: %v", recheck.PrimaryKey.CollectionName)
+			suite.T().Fatalf("unknown collection name: %v", recheck.PrimaryKey.SrcCollectionName)
 		}
 	}
 	suite.Require().Equal(2, coll1RecheckCount)

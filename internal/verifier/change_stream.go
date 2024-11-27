@@ -59,11 +59,10 @@ type ChangeStreamReader struct {
 	lastChangeEventTime *primitive.Timestamp
 	logger              *logger.Logger
 	namespaces          []string
-	metaDBName          string
 
-	metaClient    *mongo.Client
+	metaDB        *mongo.Database
 	watcherClient *mongo.Client
-	buildInfo     *util.BuildInfo
+	buildInfo     util.BuildInfo
 
 	changeStreamRunning         bool
 	ChangeEventBatchChan        chan []ParsedEvent
@@ -77,35 +76,29 @@ type ChangeStreamReader struct {
 func (verifier *Verifier) initializeChangeStreamReaders() {
 	verifier.srcChangeStreamReader = &ChangeStreamReader{
 		readerType:                  srcReaderType,
-		lastChangeEventTime:         nil,
 		logger:                      verifier.logger,
 		namespaces:                  verifier.srcNamespaces,
-		metaDBName:                  verifier.metaDBName,
-		metaClient:                  verifier.metaClient,
+		metaDB:                      verifier.metaClient.Database(verifier.metaDBName),
 		watcherClient:               verifier.srcClient,
-		buildInfo:                   verifier.srcBuildInfo,
+		buildInfo:                   *verifier.srcBuildInfo,
 		changeStreamRunning:         false,
 		ChangeEventBatchChan:        make(chan []ParsedEvent),
 		ChangeStreamWritesOffTsChan: make(chan primitive.Timestamp),
 		ChangeStreamErrChan:         make(chan error),
 		ChangeStreamDoneChan:        make(chan struct{}),
-		startAtTs:                   nil,
 	}
 	verifier.dstChangeStreamReader = &ChangeStreamReader{
 		readerType:                  dstReaderType,
-		lastChangeEventTime:         nil,
 		logger:                      verifier.logger,
 		namespaces:                  verifier.dstNamespaces,
-		metaDBName:                  verifier.metaDBName,
-		metaClient:                  verifier.metaClient,
+		metaDB:                      verifier.metaClient.Database(verifier.metaDBName),
 		watcherClient:               verifier.dstClient,
-		buildInfo:                   verifier.dstBuildInfo,
+		buildInfo:                   *verifier.dstBuildInfo,
 		changeStreamRunning:         false,
 		ChangeEventBatchChan:        make(chan []ParsedEvent),
 		ChangeStreamWritesOffTsChan: make(chan primitive.Timestamp),
 		ChangeStreamErrChan:         make(chan error),
 		ChangeStreamDoneChan:        make(chan struct{}),
-		startAtTs:                   nil,
 	}
 }
 
@@ -156,12 +149,13 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 			// We need to retrieve the source namespaces if change events are from the destination.
 			switch eventOrigin {
 			case dstReaderType:
-				if len(verifier.dstSrcNsMap) == 0 {
+				if verifier.nsMap.Len() == 0 {
+					// Namespace is not remapped. Source namespace is the same as the destination.
 					srcDBName = changeEvent.Ns.DB
 					srcCollName = changeEvent.Ns.Coll
 				} else {
 					dstNs := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
-					srcNs, exist := verifier.dstSrcNsMap[dstNs]
+					srcNs, exist := verifier.nsMap.GetSrcNamespace(dstNs)
 					if !exist {
 						return errors.Errorf("no source namespace corresponding to the destination namepsace %s", dstNs)
 					}
@@ -214,7 +208,7 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 	if len(csr.namespaces) == 0 {
 		pipeline = mongo.Pipeline{
 			{{"$match", bson.D{
-				{"ns.db", bson.D{{"$ne", csr.metaDBName}}},
+				{"ns.db", bson.D{{"$ne", csr.metaDB.Name()}}},
 			}}},
 		}
 	} else {
@@ -328,8 +322,9 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			return ctx.Err()
 
 		// If the ChangeStreamEnderChan has a message, the user has indicated that
-		// source and destination writes are ended. This means we should exit rather than continue
-		// reading the change stream since there should be no more events.
+		// source writes are ended and the migration tool is finished / committed.
+		// This means we should exit rather than continue reading the change stream
+		// since there should be no more events.
 		case writesOffTs := <-csr.ChangeStreamWritesOffTsChan:
 			csr.logger.Debug().
 				Interface("writesOffTimestamp", writesOffTs).
@@ -337,7 +332,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 			gotwritesOffTimestamp = true
 
-			// Read all change events until the source / destination reports no events.
+			// Read change events until the stream reaches the writesOffTs.
 			// (i.e., the `getMore` call returns empty)
 			for {
 				var curTs primitive.Timestamp
@@ -543,7 +538,7 @@ func addTimestampToLogEvent(ts primitive.Timestamp, event *zerolog.Event) *zerol
 }
 
 func (csr *ChangeStreamReader) getChangeStreamMetadataCollection() *mongo.Collection {
-	return csr.metaClient.Database(csr.metaDBName).Collection(metadataChangeStreamCollectionName)
+	return csr.metaDB.Collection(metadataChangeStreamCollectionName)
 }
 
 func (csr *ChangeStreamReader) loadChangeStreamResumeToken(ctx context.Context) (bson.Raw, error) {

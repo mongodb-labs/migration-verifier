@@ -87,10 +87,10 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 		select {
 		case err := <-verifier.srcChangeStreamReader.ChangeStreamErrChan:
 			cancel()
-			return errors.Wrapf(err, "got an error from %s", verifier.srcChangeStreamReader)
+			return errors.Wrapf(err, "%s failed", verifier.srcChangeStreamReader)
 		case err := <-verifier.dstChangeStreamReader.ChangeStreamErrChan:
 			cancel()
-			return errors.Wrapf(err, "got an error from %s", verifier.dstChangeStreamReader)
+			return errors.Wrapf(err, "%s failed", verifier.dstChangeStreamReader)
 		case <-ctx.Done():
 			cancel()
 			return nil
@@ -170,16 +170,18 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		verifier.phase = Idle
 	}()
 
-	if verifier.srcChangeStreamReader.changeStreamRunning {
-		verifier.logger.Debug().Msg("Check: Source change stream already running.")
-	} else {
-		verifier.logger.Debug().Msg("Source change stream not running; starting change stream")
+	for _, csReader := range []*ChangeStreamReader{verifier.srcChangeStreamReader, verifier.dstChangeStreamReader} {
+		if csReader.changeStreamRunning {
+			verifier.logger.Debug().Msgf("Check: %s already running.", csReader)
+		} else {
+			verifier.logger.Debug().Msgf("%s not running; starting change stream", csReader)
 
-		err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
-		if err != nil {
-			return errors.Wrap(err, "failed to start change stream on source")
+			err = csReader.StartChangeStream(ctx)
+			if err != nil {
+				return errors.Wrapf(err, "failed to start %s", csReader)
+			}
+			verifier.StartChangeEventHandler(ctx, csReader)
 		}
-		verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
 	}
 
 	if verifier.dstChangeStreamReader.changeStreamRunning {

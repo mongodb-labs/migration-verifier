@@ -24,18 +24,16 @@ const (
 
 // RecheckPrimaryKey stores the implicit type of recheck to perform
 // Currently, we only handle document mismatches/change stream updates,
-// so DatabaseName, CollectionName, and DocumentID must always be specified.
+// so SrcDatabaseName, SrcCollectionName, and DocumentID must always be specified.
 //
 // NB: Order is important here so that, within a given generation,
 // sorting by _id will guarantee that all rechecks for a given
 // namespace appear consecutively.
-//
-// DatabaseName and CollectionName should be on the source.
 type RecheckPrimaryKey struct {
-	Generation     int         `bson:"generation"`
-	DatabaseName   string      `bson:"db"`
-	CollectionName string      `bson:"coll"`
-	DocumentID     interface{} `bson:"docID"`
+	Generation        int         `bson:"generation"`
+	SrcDatabaseName   string      `bson:"db"`
+	SrcCollectionName string      `bson:"coll"`
+	DocumentID        interface{} `bson:"docID"`
 }
 
 // RecheckDoc stores the necessary information to know which documents must be rechecked.
@@ -109,10 +107,10 @@ func (verifier *Verifier) insertRecheckDocs(
 			models := make([]mongo.WriteModel, len(curThreadIndexes))
 			for m, i := range curThreadIndexes {
 				pk := RecheckPrimaryKey{
-					Generation:     generation,
-					DatabaseName:   dbNames[i],
-					CollectionName: collNames[i],
-					DocumentID:     documentIDs[i],
+					Generation:        generation,
+					SrcDatabaseName:   dbNames[i],
+					SrcCollectionName: collNames[i],
+					DocumentID:        documentIDs[i],
 				}
 
 				// The filter must exclude DataSize; otherwise, if a failed comparison
@@ -302,8 +300,8 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		// - the buffered document IDs’ size exceeds the per-task maximum
 		// - the buffered documents exceed the partition size
 		//
-		if doc.PrimaryKey.DatabaseName != prevDBName ||
-			doc.PrimaryKey.CollectionName != prevCollName ||
+		if doc.PrimaryKey.SrcDatabaseName != prevDBName ||
+			doc.PrimaryKey.SrcCollectionName != prevCollName ||
 			int64(len(idAccum)) > maxDocsPerTask ||
 			idLenAccum >= maxIdsPerRecheckTask ||
 			dataSizeAccum >= verifier.partitionSizeInBytes {
@@ -313,8 +311,8 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 				return err
 			}
 
-			prevDBName = doc.PrimaryKey.DatabaseName
-			prevCollName = doc.PrimaryKey.CollectionName
+			prevDBName = doc.PrimaryKey.SrcDatabaseName
+			prevCollName = doc.PrimaryKey.SrcCollectionName
 			idLenAccum = 0
 			dataSizeAccum = 0
 			idAccum = idAccum[:0]

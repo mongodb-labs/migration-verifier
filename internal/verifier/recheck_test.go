@@ -28,10 +28,10 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 		[]RecheckDoc{
 			{
 				PrimaryKey: RecheckPrimaryKey{
-					Generation:     verifier.generation,
-					DatabaseName:   "the",
-					CollectionName: "namespace",
-					DocumentID:     "theDocID",
+					Generation:        verifier.generation,
+					SrcDatabaseName:   "the",
+					SrcCollectionName: "namespace",
+					DocumentID:        "theDocID",
 				},
 				DataSize: 1234,
 			},
@@ -60,10 +60,10 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 		[]RecheckDoc{
 			{
 				PrimaryKey: RecheckPrimaryKey{
-					Generation:     verifier.generation,
-					DatabaseName:   "the",
-					CollectionName: "namespace",
-					DocumentID:     "theDocID",
+					Generation:        verifier.generation,
+					SrcDatabaseName:   "the",
+					SrcCollectionName: "namespace",
+					DocumentID:        "theDocID",
 				},
 				DataSize: len(event.FullDocument),
 			},
@@ -101,10 +101,10 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 
 	d1 := RecheckDoc{
 		PrimaryKey: RecheckPrimaryKey{
-			Generation:     0,
-			DatabaseName:   "testDB",
-			CollectionName: "testColl",
-			DocumentID:     id1,
+			Generation:        0,
+			SrcDatabaseName:   "testDB",
+			SrcCollectionName: "testColl",
+			DocumentID:        id1,
 		},
 		DataSize: overlyLarge}
 	d2 := d1
@@ -161,10 +161,10 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	suite.Require().NoError(err)
 	d1 := RecheckDoc{
 		PrimaryKey: RecheckPrimaryKey{
-			Generation:     0,
-			DatabaseName:   "testDB",
-			CollectionName: "testColl",
-			DocumentID:     id1,
+			Generation:        0,
+			SrcDatabaseName:   "testDB",
+			SrcCollectionName: "testColl",
+			DocumentID:        id1,
 		},
 		DataSize: dataSizes[0]}
 	d2 := d1
@@ -283,10 +283,10 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 
 	d1 := RecheckDoc{
 		PrimaryKey: RecheckPrimaryKey{
-			Generation:     0,
-			DatabaseName:   "testDB",
-			CollectionName: "testColl",
-			DocumentID:     id1,
+			Generation:        0,
+			SrcDatabaseName:   "testDB",
+			SrcCollectionName: "testColl",
+			DocumentID:        id1,
 		},
 		DataSize: dataSizes[0]}
 	d2 := d1
