@@ -216,10 +216,10 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now add 2 namespaces. Add them “out of order” to test
 	// that we sort the returned array by Namespace.
 
-	task2, err := verifier.InsertCollectionVerificationTask("mydb.coll2")
+	task2, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll2")
 	suite.Require().NoError(err)
 
-	task1, err := verifier.InsertCollectionVerificationTask("mydb.coll1")
+	task1, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll1")
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetNamespaceStatistics(ctx)
@@ -244,10 +244,10 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	task2.SourceDocumentCount = 900
 	task2.SourceByteCount = 9_000
 
-	err = verifier.UpdateVerificationTask(task2)
+	err = verifier.UpdateVerificationTask(ctx, task2)
 	suite.Require().NoError(err)
 
-	err = verifier.UpdateVerificationTask(task1)
+	err = verifier.UpdateVerificationTask(ctx, task1)
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetNamespaceStatistics(ctx)
@@ -276,6 +276,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	task2parts := [2]*VerificationTask{}
 	for i := range task1parts {
 		task1part, err := verifier.InsertPartitionVerificationTask(
+			ctx,
 			&partitions.Partition{
 				Ns: &partitions.Namespace{DB: "mydb", Coll: "coll1"},
 			},
@@ -287,6 +288,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 		task1parts[i] = task1part
 
 		task2part, err := verifier.InsertPartitionVerificationTask(
+			ctx,
 			&partitions.Partition{
 				Ns: &partitions.Namespace{DB: "mydb", Coll: "coll2"},
 			},
@@ -323,7 +325,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now set one task to status=processing
 
 	task1parts[0].Status = verificationTaskProcessing
-	err = verifier.UpdateVerificationTask(task1parts[0])
+	err = verifier.UpdateVerificationTask(ctx, task1parts[0])
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetNamespaceStatistics(ctx)
@@ -359,10 +361,10 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	task2parts[1].SourceDocumentCount = task2.SourceDocumentCount / 2
 	task2parts[1].SourceByteCount = task2.SourceByteCount / 2
 
-	err = verifier.UpdateVerificationTask(task2parts[0])
+	err = verifier.UpdateVerificationTask(ctx, task2parts[0])
 	suite.Require().NoError(err)
 
-	err = verifier.UpdateVerificationTask(task2parts[1])
+	err = verifier.UpdateVerificationTask(ctx, task2parts[1])
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetNamespaceStatistics(ctx)
@@ -394,11 +396,11 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
-	err := verifier.InsertFailedCompareRecheckDocs("foo.bar", []interface{}{42}, []int{100})
+	err := verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []interface{}{42}, []int{100})
 	suite.Require().NoError(err)
-	err = verifier.InsertFailedCompareRecheckDocs("foo.bar", []interface{}{43, 44}, []int{100, 100})
+	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []interface{}{43, 44}, []int{100, 100})
 	suite.Require().NoError(err)
-	err = verifier.InsertFailedCompareRecheckDocs("foo.bar2", []interface{}{42}, []int{100})
+	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar2", []interface{}{42}, []int{100})
 	suite.Require().NoError(err)
 	event := ParsedEvent{
 		DocKey: DocKey{ID: int32(55)},
@@ -671,7 +673,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.sameView",
 			To:        "testDb.sameView"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskCompleted, task.Status)
 	suite.Nil(task.FailedDocs)
 
@@ -685,7 +689,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.wrongColl",
 			To:        "testDb.wrongColl"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskFailed, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(task.FailedDocs[0].Field, "Options.viewOn")
@@ -703,7 +709,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.wrongPipeline",
 			To:        "testDb.wrongPipeline"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskFailed, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(task.FailedDocs[0].Field, "Options.pipeline")
@@ -726,7 +734,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.missingOptionsSrc",
 			To:        "testDb.missingOptionsSrc"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskFailed, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
@@ -744,7 +754,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.missingOptionsDst",
 			To:        "testDb.missingOptionsDst"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskFailed, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
@@ -762,7 +774,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.differentOptions",
 			To:        "testDb.differentOptions"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskFailed, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
@@ -783,7 +797,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl",
 			To:        "testDb.testColl"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskFailed, task.Status)
 	suite.Equal(1, len(task.FailedDocs))
 	suite.Equal(task.FailedDocs[0].Details, Missing)
@@ -798,7 +814,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl",
 			To:        "testDb.testCollTo"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskFailed, task.Status)
 	suite.Equal(1, len(task.FailedDocs))
 	suite.Equal(task.FailedDocs[0].Details, Missing)
@@ -813,7 +831,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.destOnlyColl",
 			To:        "testDb.destOnlyColl"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskFailed, task.Status)
 	suite.Equal(1, len(task.FailedDocs))
 	suite.Equal(task.FailedDocs[0].Details, Missing)
@@ -830,7 +850,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.viewOnSrc",
 			To:        "testDb.viewOnSrc"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskFailed, task.Status)
 	suite.Equal(1, len(task.FailedDocs))
 	suite.Equal(task.FailedDocs[0].Field, "Type")
@@ -847,7 +869,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.cappedOnDst",
 			To:        "testDb.cappedOnDst"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskFailed, task.Status)
 	// Capped and size should differ
 	var wrongFields []string
@@ -864,7 +888,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl",
 			To:        "testDb.testColl"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskCompleted, task.Status)
 
 	// Neither collection exists success case
@@ -873,7 +899,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testCollDNE",
 			To:        "testDb.testCollDNE"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskCompleted, task.Status)
 }
 
@@ -900,7 +928,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 			To:        "testDb.testColl1",
 		},
 	}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(srcIndexNames[1], task.FailedDocs[0].ID)
@@ -926,7 +956,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl2",
 			To:        "testDb.testColl2"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal(dstIndexNames[1], task.FailedDocs[0].ID)
@@ -952,7 +984,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl3",
 			To:        "testDb.testColl3"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
 	if suite.Equal(2, len(task.FailedDocs)) {
 		sort.Slice(task.FailedDocs, func(i, j int) bool {
@@ -987,7 +1021,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl4",
 			To:        "testDb.testColl4"}}
-	verifier.verifyMetadataAndPartitionCollection(ctx, 1, task)
+	suite.Require().NoError(
+		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
+	)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
 	if suite.Equal(1, len(task.FailedDocs)) {
 		suite.Equal("wrong", task.FailedDocs[0].ID)
@@ -1043,6 +1079,19 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexSpecs() {
 			dst: bson.D{
 				{"name", "testIndex"},
 				{"key", bson.M{"foo": float64(123)}},
+			},
+			shouldMatch: true,
+		},
+
+		{
+			label: "ignore number types, deep",
+			src: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo.bar": float64(123)}},
+			},
+			dst: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo.bar": 123}},
 			},
 			shouldMatch: true,
 		},
@@ -1197,7 +1246,7 @@ func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 
 func (suite *IntegrationTestSuite) TestVerificationStatus() {
 	verifier := suite.BuildVerifier()
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	metaColl := verifier.verificationDatabase().Collection(verificationTasksCollection)
 	_, err := metaColl.InsertMany(ctx, []interface{}{
@@ -1209,7 +1258,7 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 	})
 	suite.Require().NoError(err)
 
-	status, err := verifier.GetVerificationStatus()
+	status, err := verifier.GetVerificationStatus(ctx)
 	suite.Require().NoError(err)
 	suite.Equal(1, status.AddedTasks, "added tasks not equal")
 	suite.Equal(1, status.ProcessingTasks, "processing tasks not equal")
@@ -1281,16 +1330,19 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 }
 
 func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
+	dbname1 := suite.DBNameForTest("1")
+	dbname2 := suite.DBNameForTest("2")
+
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	verifier := suite.BuildVerifier()
-	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
-	verifier.SetDstNamespaces([]string{"testDb2.testColl3"})
+	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
+	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})
 	verifier.SetNamespaceMap()
 
 	ctx := suite.Context()
 
-	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
-	dstColl := suite.dstMongoClient.Database("testDb2").Collection("testColl3")
+	srcColl := suite.srcMongoClient.Database(dbname1).Collection("testColl1")
+	dstColl := suite.dstMongoClient.Database(dbname2).Collection("testColl3")
 	_, err := srcColl.InsertOne(ctx, bson.M{"_id": 1, "x": 42})
 	suite.Require().NoError(err)
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 2, "x": 43})
@@ -1301,7 +1353,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 
 	waitForTasks := func() *VerificationStatus {
-		status, err := verifier.GetVerificationStatus()
+		status, err := verifier.GetVerificationStatus(ctx)
 		suite.Require().NoError(err)
 
 		for status.TotalTasks == 0 && verifier.generation < 50 {
@@ -1312,7 +1364,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 			time.Sleep(delay)
 			suite.Require().NoError(runner.StartNextGeneration())
 			suite.Require().NoError(runner.AwaitGenerationEnd())
-			status, err = verifier.GetVerificationStatus()
+			status, err = verifier.GetVerificationStatus(ctx)
 			suite.Require().NoError(err)
 		}
 		return status
@@ -1417,7 +1469,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	}()
 
 	waitForTasks := func() *VerificationStatus {
-		status, err := verifier.GetVerificationStatus()
+		status, err := verifier.GetVerificationStatus(ctx)
 		suite.Require().NoError(err)
 
 		for status.TotalTasks == 0 && verifier.generation < 50 {
@@ -1428,7 +1480,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 			time.Sleep(delay)
 			checkContinueChan <- struct{}{}
 			<-checkDoneChan
-			status, err = verifier.GetVerificationStatus()
+			status, err = verifier.GetVerificationStatus(ctx)
 			suite.Require().NoError(err)
 		}
 		return status
@@ -1538,7 +1590,7 @@ func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	status, err := verifier.GetVerificationStatus()
+	status, err := verifier.GetVerificationStatus(ctx)
 	suite.Require().NoError(err)
 	suite.Assert().Zero(
 		status.MetadataMismatchTasks,
@@ -1548,6 +1600,7 @@ func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {
 
 func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	dbname := suite.DBNameForTest()
 
 	ctx := suite.Context()
 
@@ -1557,14 +1610,14 @@ func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 
 	// Set up the verifier for testing.
 	verifier := suite.BuildVerifier()
-	verifier.SetSrcNamespaces([]string{"testDb1.testColl1"})
+	verifier.SetSrcNamespaces([]string{dbname + ".testColl1"})
 	verifier.SetNamespaceMap()
 	verifier.globalFilter = filter
 	// Use a small partition size so that we can test creating multiple partitions.
 	verifier.partitionSizeInBytes = 30
 
 	// Insert documents into the source.
-	srcColl := suite.srcMongoClient.Database("testDb1").Collection("testColl1")
+	srcColl := suite.srcMongoClient.Database(dbname).Collection("testColl1")
 
 	// 30 documents with _ids [0, 30) are in the filter.
 	for i := 0; i < 30; i++ {
@@ -1579,7 +1632,7 @@ func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 	}
 
 	// Create partitions with the filter.
-	partitions, _, _, _, err := verifier.partitionAndInspectNamespace(ctx, "testDb1.testColl1")
+	partitions, _, _, _, err := verifier.partitionAndInspectNamespace(ctx, dbname+".testColl1")
 	suite.Require().NoError(err)
 
 	// Check that each partition have bounds in the filter.
