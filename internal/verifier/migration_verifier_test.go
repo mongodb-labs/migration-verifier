@@ -1021,6 +1021,19 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexSpecs() {
 		},
 
 		{
+			label: "simple deep",
+			src: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"$foo.bar": 123}},
+			},
+			dst: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"$foo.bar": 123}},
+			},
+			shouldMatch: true,
+		},
+
+		{
 			label: "ignore `ns` field",
 			src: bson.D{
 				{"name", "testIndex"},
