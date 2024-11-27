@@ -353,7 +353,7 @@ func (verifier *Verifier) CreateInitialTasks(ctx context.Context) error {
 			)
 		}
 	}
-	isPrimary, err := verifier.CheckIsPrimary()
+	isPrimary, err := verifier.CheckIsPrimary(ctx)
 	if err != nil {
 		return err
 	}
@@ -380,7 +380,7 @@ func (verifier *Verifier) CreateInitialTasks(ctx context.Context) error {
 
 	verifier.gen0PendingCollectionTasks.Store(int32(len(verifier.srcNamespaces)))
 
-	err = verifier.UpdatePrimaryTaskComplete()
+	err = verifier.UpdatePrimaryTaskComplete(ctx)
 	if err != nil {
 		return err
 	}

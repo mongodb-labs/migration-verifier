@@ -90,6 +90,7 @@ type VerificationRange struct {
 }
 
 func (verifier *Verifier) insertCollectionVerificationTask(
+	ctx context.Context,
 	srcNamespace string,
 	generation int) (*VerificationTask, error) {
 
@@ -120,7 +121,7 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 			To:        dstNamespace,
 		},
 	}
-	_, err := verifier.verificationTaskCollection().InsertOne(context.Background(), verificationTask)
+	_, err := verifier.verificationTaskCollection().InsertOne(ctx, verificationTask)
 	return &verificationTask, err
 }
 
@@ -128,14 +129,14 @@ func (verifier *Verifier) InsertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
 ) (*VerificationTask, error) {
-	return verifier.insertCollectionVerificationTask(srcNamespace, verifier.generation)
+	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation)
 }
 
 func (verifier *Verifier) InsertFailedCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
 ) (*VerificationTask, error) {
-	return verifier.insertCollectionVerificationTask(srcNamespace, verifier.generation+1)
+	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation+1)
 }
 
 func (verifier *Verifier) InsertPartitionVerificationTask(
@@ -157,7 +158,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 			To:        dstNamespace,
 		},
 	}
-	_, err := verifier.verificationTaskCollection().InsertOne(context.Background(), verificationTask)
+	_, err := verifier.verificationTaskCollection().InsertOne(ctx, verificationTask)
 	return &verificationTask, err
 }
 
@@ -247,7 +248,7 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *Veri
 	return err
 }
 
-func (verifier *Verifier) CheckIsPrimary() (bool, error) {
+func (verifier *Verifier) CheckIsPrimary(ctx context.Context) (bool, error) {
 	ownerSetId := primitive.NewObjectID()
 	filter := bson.M{"type": verificationTaskPrimary}
 	opts := options.Update()
@@ -259,7 +260,7 @@ func (verifier *Verifier) CheckIsPrimary() (bool, error) {
 			"status": verificationTaskAdded,
 		},
 	}
-	result, err := verifier.verificationTaskCollection().UpdateOne(context.Background(), filter, update, opts)
+	result, err := verifier.verificationTaskCollection().UpdateOne(ctx, filter, update, opts)
 	if err != nil {
 		return false, err
 	}
@@ -268,8 +269,7 @@ func (verifier *Verifier) CheckIsPrimary() (bool, error) {
 	return isPrimary, nil
 }
 
-func (verifier *Verifier) UpdatePrimaryTaskComplete() error {
-	var ctx = context.Background()
+func (verifier *Verifier) UpdatePrimaryTaskComplete(ctx context.Context) error {
 	updateFields := bson.M{
 		"$set": bson.M{
 			"status": verificationTaskCompleted,
