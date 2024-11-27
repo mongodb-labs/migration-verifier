@@ -44,6 +44,7 @@ type RecheckDoc struct {
 
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
+	ctx context.Context,
 	namespace string, documentIDs []interface{}, dataSizes []int) error {
 	dbName, collName := SplitNamespace(namespace)
 
@@ -59,7 +60,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		Msg("Persisting rechecks for mismatched or missing documents.")
 
 	return verifier.insertRecheckDocs(
-		context.Background(),
+		ctx,
 		dbNames,
 		collNames,
 		documentIDs,
@@ -260,6 +261,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		namespace := prevDBName + "." + prevCollName
 
 		err := verifier.InsertDocumentRecheckTask(
+			ctx,
 			idAccum,
 			types.ByteCount(dataSizeAccum),
 			namespace,

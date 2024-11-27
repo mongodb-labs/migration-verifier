@@ -3,13 +3,13 @@ package verifier
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"golang.org/x/sync/errgroup"
 )
 
 type GenerationStatus string
@@ -57,18 +57,13 @@ func (verifier *Verifier) waitForChangeStream(ctx context.Context, csr *ChangeSt
 	return nil
 }
 
-func (verifier *Verifier) CheckWorker(ctx context.Context) error {
-	verifier.logger.Debug().Msgf("Starting %d verification workers", verifier.numWorkers)
-	ctx, cancel := context.WithCancel(ctx)
-
-	wg := sync.WaitGroup{}
-	for i := 0; i < verifier.numWorkers; i++ {
-		wg.Add(1)
-		go verifier.Work(ctx, i, &wg)
-		time.Sleep(10 * time.Millisecond)
-	}
-
+func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	generation := verifier.generation
+
+	verifier.logger.Debug().
+		Int("generation", generation).
+		Int("workersCount", verifier.numWorkers).
+		Msgf("Starting verification worker threads.")
 
 	// Since we do a progress report right at the start we don’t need
 	// this to go in non-debug output.
@@ -81,47 +76,89 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 
 	verifier.writeStringBuilder(genStartReport)
 
-	waitForTaskCreation := 0
+	cancelableCtx, canceler := context.WithCancelCause(ctxIn)
+	eg, ctx := errgroup.WithContext(cancelableCtx)
 
-	for {
+	// If the change stream fails, everything should stop.
+	eg.Go(func() error {
 		select {
 		case err := <-verifier.srcChangeStreamReader.ChangeStreamErrChan:
-			cancel()
 			return errors.Wrapf(err, "%s failed", verifier.srcChangeStreamReader)
 		case err := <-verifier.dstChangeStreamReader.ChangeStreamErrChan:
-			cancel()
 			return errors.Wrapf(err, "%s failed", verifier.dstChangeStreamReader)
 		case <-ctx.Done():
-			cancel()
 			return nil
-		default:
 		}
+	})
 
-		verificationStatus, err := verifier.GetVerificationStatus()
-		if err != nil {
-			verifier.logger.Error().Msgf("Failed getting verification status: %v", err)
-		}
+	// Start the worker threads.
+	for i := 0; i < verifier.numWorkers; i++ {
+		eg.Go(func() error {
+			return errors.Wrapf(
+				verifier.work(ctx, i),
+				"worker %d failed",
+				i,
+			)
+		})
+		time.Sleep(10 * time.Millisecond)
+	}
 
-		if waitForTaskCreation%2 == 0 {
-			if generation > 0 || verifier.gen0PendingCollectionTasks.Load() == 0 {
-				verifier.PrintVerificationSummary(ctx, GenerationInProgress)
+	waitForTaskCreation := 0
+
+	succeeded := false
+
+	eg.Go(func() error {
+		for {
+			verificationStatus, err := verifier.GetVerificationStatus(ctx)
+			if err != nil {
+				return errors.Wrapf(
+					err,
+					"failed to retrieve status of generation %d's tasks",
+					generation,
+				)
+			}
+
+			if waitForTaskCreation%2 == 0 {
+				if generation > 0 || verifier.gen0PendingCollectionTasks.Load() == 0 {
+					verifier.PrintVerificationSummary(ctx, GenerationInProgress)
+				}
+			}
+
+			// The generation continues as long as >=1 task for this generation is
+			// “added” or “pending”.
+			if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 {
+				waitForTaskCreation++
+				time.Sleep(verifier.verificationStatusCheckInterval)
+			} else {
+				verifier.PrintVerificationSummary(ctx, GenerationComplete)
+				succeeded = true
+				canceler(errors.Errorf("generation %d succeeded", generation))
+				return nil
 			}
 		}
+	})
 
-		//wait for task to be created, if none of the tasks found.
-		if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 || verificationStatus.RecheckTasks > 0 {
-			waitForTaskCreation++
-			time.Sleep(verifier.verificationStatusCheckInterval)
-		} else {
-			verifier.PrintVerificationSummary(ctx, GenerationComplete)
-			verifier.logger.Debug().Msg("Verification tasks complete")
-			cancel()
-			wg.Wait()
-			break
+	err := eg.Wait()
+
+	if succeeded {
+		if !errors.Is(err, context.Canceled) {
+			panic("success should mean that err is context.Canceled, not: " + err.Error())
 		}
+
+		err = nil
 	}
-	verifier.logger.Debug().Msgf("Check generation %d finished", generation)
-	return nil
+
+	if err != nil {
+		verifier.logger.Debug().
+			Int("generation", generation).
+			Msgf("Check finished.")
+	}
+
+	return errors.Wrapf(
+		err,
+		"check generation %d failed",
+		generation,
+	)
 }
 
 func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any, testChan ...chan struct{}) error {
@@ -184,27 +221,18 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		}
 	}
 
-	if verifier.dstChangeStreamReader.changeStreamRunning {
-		verifier.logger.Debug().Msg("Check: Destination change stream already running.")
-	} else {
-		verifier.logger.Debug().Msg("Destination change stream not running; starting change stream")
-
-		err = verifier.dstChangeStreamReader.StartChangeStream(ctx)
-		if err != nil {
-			return errors.Wrap(err, "failed to start change stream on destination")
-		}
-		verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader)
-	}
-
-	// Log out the verification status when initially booting up so it's easy to see the current state
-	verificationStatus, err := verifier.GetVerificationStatus()
+	// Log the verification status when initially booting up so it's easy to see the current state
+	verificationStatus, err := verifier.GetVerificationStatus(ctx)
 	if err != nil {
-		verifier.logger.Error().Msgf("Failed getting verification status: %v", err)
+		return errors.Wrapf(
+			err,
+			"failed to retrieve verification status",
+		)
 	} else {
 		verifier.logger.Debug().Msgf("Initial verification phase: %+v", verificationStatus)
 	}
 
-	err = verifier.CreateInitialTasks()
+	err = verifier.CreateInitialTasks(ctx)
 	if err != nil {
 		return err
 	}
@@ -278,8 +306,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 
 		err = verifier.ClearRecheckDocs(ctx)
 		if err != nil {
-			verifier.logger.Error().Msgf("Failed trying to clear out old recheck docs, continuing: %v",
-				err)
+			verifier.logger.Warn().
+				Err(err).
+				Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
 		}
 		verifier.mux.Unlock()
 	}
@@ -315,7 +344,7 @@ func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {
 	return nil
 }
 
-func (verifier *Verifier) CreateInitialTasks() error {
+func (verifier *Verifier) CreateInitialTasks(ctx context.Context) error {
 	// If we don't know the src namespaces, we're definitely not the primary task.
 	if !verifier.verifyAll {
 		if len(verifier.srcNamespaces) == 0 {
@@ -325,12 +354,14 @@ func (verifier *Verifier) CreateInitialTasks() error {
 			verifier.dstNamespaces = verifier.srcNamespaces
 		}
 		if len(verifier.srcNamespaces) != len(verifier.dstNamespaces) {
-			err := errors.Errorf("Different number of source and destination namespaces")
-			verifier.logger.Error().Msgf("%s", err)
-			return err
+			return errors.Errorf(
+				"source has %d namespace(s), but destination has %d (they must match)",
+				len(verifier.srcNamespaces),
+				len(verifier.dstNamespaces),
+			)
 		}
 	}
-	isPrimary, err := verifier.CheckIsPrimary()
+	isPrimary, err := verifier.CheckIsPrimary(ctx)
 	if err != nil {
 		return err
 	}
@@ -339,22 +370,25 @@ func (verifier *Verifier) CreateInitialTasks() error {
 		return nil
 	}
 	if verifier.verifyAll {
-		err := verifier.setupAllNamespaceList(context.Background())
+		err := verifier.setupAllNamespaceList(ctx)
 		if err != nil {
 			return err
 		}
 	}
 	for _, src := range verifier.srcNamespaces {
-		_, err := verifier.InsertCollectionVerificationTask(src)
+		_, err := verifier.InsertCollectionVerificationTask(ctx, src)
 		if err != nil {
-			verifier.logger.Error().Msgf("Failed to insert collection verification task: %s", err)
-			return err
+			return errors.Wrapf(
+				err,
+				"failed to insert collection verification task for namespace %#q",
+				src,
+			)
 		}
 	}
 
 	verifier.gen0PendingCollectionTasks.Store(int32(len(verifier.srcNamespaces)))
 
-	err = verifier.UpdatePrimaryTaskComplete()
+	err = verifier.UpdatePrimaryTaskComplete(ctx)
 	if err != nil {
 		return err
 	}
@@ -387,9 +421,8 @@ func FetchFailedAndIncompleteTasks(ctx context.Context, coll *mongo.Collection, 
 	return FailedTasks, IncompleteTasks, nil
 }
 
-func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+// work is the logic for an individual worker thread.
+func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
 		Msg("Worker started.")
@@ -399,39 +432,46 @@ func (verifier *Verifier) Work(ctx context.Context, workerNum int, wg *sync.Wait
 		Msg("Worker finished.")
 
 	for {
-		select {
-		case <-ctx.Done():
-			return
+		task, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			duration := verifier.workerSleepDelayMillis * time.Millisecond
+
+			if duration > 0 {
+				verifier.logger.Debug().
+					Int("workerNum", workerNum).
+					Stringer("duration", duration).
+					Msg("No tasks found. Sleeping.")
+
+				time.Sleep(duration)
+			}
+
+			continue
+		} else if err != nil {
+			return errors.Wrap(
+				err,
+				"failed to seek next task",
+			)
+		}
+
+		switch task.Type {
+		case verificationTaskVerifyCollection:
+			err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
+			if err != nil {
+				return err
+			}
+			if task.Generation == 0 {
+				newVal := verifier.gen0PendingCollectionTasks.Add(-1)
+				if newVal == 0 {
+					verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
+				}
+			}
+		case verificationTaskVerifyDocuments:
+			err := verifier.ProcessVerifyTask(ctx, workerNum, task)
+			if err != nil {
+				return err
+			}
 		default:
-			task, err := verifier.FindNextVerifyTaskAndUpdate()
-			if errors.Is(err, mongo.ErrNoDocuments) {
-				duration := verifier.workerSleepDelayMillis * time.Millisecond
-
-				if duration > 0 {
-					verifier.logger.Debug().
-						Int("workerNum", workerNum).
-						Stringer("duration", duration).
-						Msg("No tasks found. Sleeping.")
-
-					time.Sleep(duration)
-				}
-
-				continue
-			} else if err != nil {
-				panic(err)
-			}
-
-			if task.Type == verificationTaskVerifyCollection {
-				verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
-				if task.Generation == 0 {
-					newVal := verifier.gen0PendingCollectionTasks.Add(-1)
-					if newVal == 0 {
-						verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
-					}
-				}
-			} else {
-				verifier.ProcessVerifyTask(workerNum, task)
-			}
+			panic("Unknown verification task type: " + task.Type)
 		}
 	}
 }

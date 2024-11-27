@@ -56,7 +56,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	func() {
 		verifier1 := suite.BuildVerifier()
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(suite.Context())
 		defer cancel()
 		verifier1.StartChangeEventHandler(ctx, verifier1.srcChangeStreamReader)
 		err := verifier1.srcChangeStreamReader.StartChangeStream(ctx)
@@ -150,8 +150,7 @@ func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, ve
 
 func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	verifier := suite.BuildVerifier()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := suite.Context()
 	sess, err := suite.srcMongoClient.StartSession()
 	suite.Require().NoError(err)
 	sctx := mongo.NewSessionContext(ctx, sess)
@@ -171,8 +170,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 
 func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	verifier := suite.BuildVerifier()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := suite.Context()
 	sess, err := suite.srcMongoClient.StartSession()
 	suite.Require().NoError(err)
 	sctx := mongo.NewSessionContext(ctx, sess)
@@ -225,8 +223,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 
 func (suite *IntegrationTestSuite) TestNoStartAtTime() {
 	verifier := suite.BuildVerifier()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := suite.Context()
 	sess, err := suite.srcMongoClient.StartSession()
 	suite.Require().NoError(err)
 	sctx := mongo.NewSessionContext(ctx, sess)
