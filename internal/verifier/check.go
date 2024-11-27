@@ -294,7 +294,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			if err = verifier.waitForChangeStream(ctx, verifier.dstChangeStreamReader); err != nil {
 				return err
 			}
-			ceHandlerGroup.Wait()
+			if err = ceHandlerGroup.Wait(); err != nil {
+				return err
+			}
 			verifier.mux.Lock()
 			verifier.lastGeneration = true
 		}
