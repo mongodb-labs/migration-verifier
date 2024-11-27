@@ -163,19 +163,13 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 	ctx context.Context,
 	ri *retry.Info,
 	cs *mongo.ChangeStream,
+	sess mongo.Session,
 ) error {
 	eventsRead := 0
 	var changeEventBatch []ParsedEvent
 
-	sess, err := verifier.srcClient.StartSession()
-	if err != nil {
-		return errors.Wrap(err, "failed to start session to read change stream")
-	}
-
-	sctx := mongo.NewSessionContext(ctx, sess)
-
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
-		gotEvent := cs.TryNext(sctx)
+		gotEvent := cs.TryNext(ctx)
 
 		if cs.Err() != nil {
 			return errors.Wrap(cs.Err(), "change stream iteration failed")
@@ -202,16 +196,15 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 		return nil
 	}
 
-	fmt.Printf("\n======== events batch: %+v\n\n", changeEventBatch)
-
 	var curTs primitive.Timestamp
-	curTs, err = extractTimestampFromResumeToken(cs.ResumeToken())
+	curTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
 	if err == nil {
-		lagSecs := curTs.T - sctx.OperationTime().T
+		lagSecs := curTs.T - sess.OperationTime().T
 		verifier.changeStreamLag.Store(option.Some(time.Second * time.Duration(lagSecs)))
 	} else {
-		// TODO warn
-		//return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
+		verifier.logger.Warn().
+			Err(err).
+			Msg("Failed to extract timestamp from change stream’s resume token to compute change stream lag.")
 	}
 
 	err = verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
@@ -226,6 +219,7 @@ func (verifier *Verifier) iterateChangeStream(
 	ctx context.Context,
 	ri *retry.Info,
 	cs *mongo.ChangeStream,
+	sess mongo.Session,
 ) error {
 	var lastPersistedTime time.Time
 
@@ -282,7 +276,7 @@ func (verifier *Verifier) iterateChangeStream(
 					break
 				}
 
-				err = verifier.readAndHandleOneChangeEventBatch(ctx, ri, cs)
+				err = verifier.readAndHandleOneChangeEventBatch(ctx, ri, cs, sess)
 
 				if err != nil {
 					return err
@@ -290,7 +284,7 @@ func (verifier *Verifier) iterateChangeStream(
 			}
 
 		default:
-			err = verifier.readAndHandleOneChangeEventBatch(ctx, ri, cs)
+			err = verifier.readAndHandleOneChangeEventBatch(ctx, ri, cs, sess)
 
 			if err == nil {
 				err = persistResumeTokenIfNeeded()
@@ -329,7 +323,7 @@ func (verifier *Verifier) iterateChangeStream(
 
 func (verifier *Verifier) createChangeStream(
 	ctx context.Context,
-) (*mongo.ChangeStream, primitive.Timestamp, error) {
+) (*mongo.ChangeStream, mongo.Session, primitive.Timestamp, error) {
 	pipeline := verifier.GetChangeStreamFilter()
 	opts := options.ChangeStream().
 		SetMaxAwaitTime(1 * time.Second).
@@ -341,7 +335,7 @@ func (verifier *Verifier) createChangeStream(
 
 	savedResumeToken, err := verifier.loadChangeStreamResumeToken(ctx)
 	if err != nil {
-		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
+		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
 	}
 
 	csStartLogEvent := verifier.logger.Info()
@@ -368,22 +362,22 @@ func (verifier *Verifier) createChangeStream(
 
 	sess, err := verifier.srcClient.StartSession()
 	if err != nil {
-		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to start session")
+		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to start session")
 	}
 	sctx := mongo.NewSessionContext(ctx, sess)
 	srcChangeStream, err := verifier.srcClient.Watch(sctx, pipeline, opts)
 	if err != nil {
-		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to open change stream")
+		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
 
 	err = verifier.persistChangeStreamResumeToken(ctx, srcChangeStream)
 	if err != nil {
-		return nil, primitive.Timestamp{}, err
+		return nil, nil, primitive.Timestamp{}, err
 	}
 
 	startTs, err := extractTimestampFromResumeToken(srcChangeStream.ResumeToken())
 	if err != nil {
-		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
+		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
 	}
 
 	// With sharded clusters the resume token might lead the cluster time
@@ -391,14 +385,14 @@ func (verifier *Verifier) createChangeStream(
 	// otherwise we will get errors.
 	clusterTime, err := getClusterTimeFromSession(sess)
 	if err != nil {
-		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to read cluster time from session")
+		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to read cluster time from session")
 	}
 
 	if startTs.After(clusterTime) {
 		startTs = clusterTime
 	}
 
-	return srcChangeStream, startTs, nil
+	return srcChangeStream, sess, startTs, nil
 }
 
 // StartChangeStream starts the change stream.
@@ -419,7 +413,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 			ctx,
 			verifier.logger,
 			func(ri *retry.Info) error {
-				srcChangeStream, startTs, err := verifier.createChangeStream(ctx)
+				srcChangeStream, csSess, startTs, err := verifier.createChangeStream(ctx)
 				if err != nil {
 					if parentThreadWaiting {
 						initialCreateResultChan <- mo.Err[primitive.Timestamp](err)
@@ -437,7 +431,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 					parentThreadWaiting = false
 				}
 
-				return verifier.iterateChangeStream(ctx, ri, srcChangeStream)
+				return verifier.iterateChangeStream(ctx, ri, srcChangeStream, csSess)
 			},
 		)
 
