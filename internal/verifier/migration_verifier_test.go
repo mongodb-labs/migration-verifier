@@ -1021,19 +1021,6 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexSpecs() {
 		},
 
 		{
-			label: "simple deep",
-			src: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.M{"$foo.bar": 123}},
-			},
-			dst: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.M{"$foo.bar": 123}},
-			},
-			shouldMatch: true,
-		},
-
-		{
 			label: "ignore `ns` field",
 			src: bson.D{
 				{"name", "testIndex"},
@@ -1056,6 +1043,19 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexSpecs() {
 			dst: bson.D{
 				{"name", "testIndex"},
 				{"key", bson.M{"foo": float64(123)}},
+			},
+			shouldMatch: true,
+		},
+
+		{
+			label: "ignore number types, deep",
+			src: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo.bar": float64(123)}},
+			},
+			dst: bson.D{
+				{"name", "testIndex"},
+				{"key", bson.M{"foo.bar": 123}},
 			},
 			shouldMatch: true,
 		},
