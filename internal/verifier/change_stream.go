@@ -116,6 +116,7 @@ func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *C
 				}
 				err := verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType)
 				if err != nil {
+					reader.ChangeStreamErrChan <- err
 					return err
 				}
 			}
