@@ -1387,7 +1387,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	// wait for generation to finish
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status = waitForTasks()
-	// there should be no failures now, since they are are equivalent at this point in time
+	// there should be no failures now, since they are equivalent at this point in time
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	// now insert in the source, this should come up next generation
@@ -1415,7 +1415,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status = waitForTasks()
 
-	// there should be no failures now, since they are are equivalent at this point in time
+	// there should be no failures now, since they are equivalent at this point in time
 	suite.Assert().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	// We could just abandon this verifier, but we might as well shut it down
@@ -1613,6 +1613,7 @@ func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 	// Set up the verifier for testing.
 	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{dbname + ".testColl1"})
+	verifier.SetDstNamespaces([]string{dbname + ".testColl1"})
 	verifier.SetNamespaceMap()
 	verifier.globalFilter = filter
 	// Use a small partition size so that we can test creating multiple partitions.

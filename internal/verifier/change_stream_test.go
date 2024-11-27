@@ -3,7 +3,6 @@ package verifier
 import (
 	"context"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/testutil"
@@ -11,7 +10,6 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -20,20 +18,16 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
 )
 
-func TestChangeStreamFilter(t *testing.T) {
-	verifier := Verifier{
-		nsMap: NewNSMap(),
-	}
-	verifier.SetMetaDBName("metadb")
-	verifier.initializeChangeStreamReaders()
-	assert.Contains(t,
+func (suite *IntegrationTestSuite) TestChangeStreamFilter() {
+	verifier := suite.BuildVerifier()
+	suite.Assert().Contains(
 		verifier.srcChangeStreamReader.GetChangeStreamFilter(),
 		bson.D{
-			{"$match", bson.D{{"ns.db", bson.D{{"$ne", "metadb"}}}}},
+			{"$match", bson.D{{"ns.db", bson.D{{"$ne", metaDBName}}}}},
 		},
 	)
 	verifier.srcChangeStreamReader.namespaces = []string{"foo.bar", "foo.baz", "test.car", "test.chaz"}
-	assert.Contains(t,
+	suite.Assert().Contains(
 		verifier.srcChangeStreamReader.GetChangeStreamFilter(),
 		bson.D{{"$match", bson.D{
 			{"$or", []bson.D{
