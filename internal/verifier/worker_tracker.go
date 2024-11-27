@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/msync"
+	"golang.org/x/exp/maps"
 )
 
 // WorkerTracker holds certain data points about each worker thread
@@ -64,7 +65,7 @@ func (wt *WorkerTracker) Unset(workerNum int) {
 func (wt *WorkerTracker) Load() WorkerStatusMap {
 	var wtmap WorkerStatusMap
 	wt.guard.Load(func(m map[int]WorkerStatus) {
-		wtmap = m
+		wtmap = maps.Clone(m)
 	})
 
 	return wtmap
