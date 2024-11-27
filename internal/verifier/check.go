@@ -346,9 +346,11 @@ func (verifier *Verifier) CreateInitialTasks(ctx context.Context) error {
 			verifier.dstNamespaces = verifier.srcNamespaces
 		}
 		if len(verifier.srcNamespaces) != len(verifier.dstNamespaces) {
-			err := errors.Errorf("Different number of source and destination namespaces")
-			verifier.logger.Error().Msgf("%s", err)
-			return err
+			return errors.Errorf(
+				"source has %d namespace(s), but destination has %d (they must match)",
+				len(verifier.srcNamespaces),
+				len(verifier.dstNamespaces),
+			)
 		}
 	}
 	isPrimary, err := verifier.CheckIsPrimary()
@@ -368,8 +370,11 @@ func (verifier *Verifier) CreateInitialTasks(ctx context.Context) error {
 	for _, src := range verifier.srcNamespaces {
 		_, err := verifier.InsertCollectionVerificationTask(ctx, src)
 		if err != nil {
-			verifier.logger.Error().Msgf("Failed to insert collection verification task: %s", err)
-			return err
+			return errors.Wrapf(
+				err,
+				"failed to insert collection verification task for namespace %#q",
+				src,
+			)
 		}
 	}
 

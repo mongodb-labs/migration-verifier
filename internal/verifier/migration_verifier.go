@@ -607,82 +607,82 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 	)
 
 	if err != nil {
-		task.Status = verificationTaskFailed
-		verifier.logger.Error().
-			Err(err).
-			Int("workerNum", workerNum).
-			Interface("task", task.PrimaryKey).
-			Msg("Failed to fetch and compare documents for document comparison task.")
+		return errors.Wrapf(
+			err,
+			"worker %d failed to process document comparison task %s (namespace: %#q)",
+			workerNum,
+			task.PrimaryKey,
+			task.QueryFilter.Namespace,
+		)
+	}
+
+	task.SourceDocumentCount = docsCount
+	task.SourceByteCount = bytesCount
+
+	if len(problems) == 0 {
+		task.Status = verificationTaskCompleted
 	} else {
-		task.SourceDocumentCount = docsCount
-		task.SourceByteCount = bytesCount
-
-		if len(problems) == 0 {
-			task.Status = verificationTaskCompleted
+		task.Status = verificationTaskFailed
+		// We know we won't change lastGeneration while verification tasks are running, so no mutex needed here.
+		if verifier.lastGeneration {
+			verifier.logger.Error().
+				Int("workerNum", workerNum).
+				Interface("task", task.PrimaryKey).
+				Str("namespace", task.QueryFilter.Namespace).
+				Int("mismatchesCount", len(problems)).
+				Msg("Document(s) mismatched, and this is the final generation.")
 		} else {
-			task.Status = verificationTaskFailed
-			// We know we won't change lastGeneration while verification tasks are running, so no mutex needed here.
-			if verifier.lastGeneration {
-				verifier.logger.Error().
-					Int("workerNum", workerNum).
-					Interface("task", task.PrimaryKey).
-					Msg("Document comparison task failed critical section and is a true error.")
-			} else {
-				verifier.logger.Debug().
-					Int("workerNum", workerNum).
-					Interface("task", task.PrimaryKey).
-					Msg("Document comparison task failed, but it may pass in the next generation.")
+			verifier.logger.Debug().
+				Int("workerNum", workerNum).
+				Interface("task", task.PrimaryKey).
+				Str("namespace", task.QueryFilter.Namespace).
+				Int("mismatchesCount", len(problems)).
+				Msg("Document comparison task failed, but it may pass in the next generation.")
 
-				var mismatches []VerificationResult
-				var missingIds []interface{}
-				var dataSizes []int
+			var mismatches []VerificationResult
+			var missingIds []interface{}
+			var dataSizes []int
 
-				// This stores all IDs for the next generation to check.
-				// Its length should equal len(mismatches) + len(missingIds).
-				var idsToRecheck []interface{}
+			// This stores all IDs for the next generation to check.
+			// Its length should equal len(mismatches) + len(missingIds).
+			var idsToRecheck []interface{}
 
-				for _, mismatch := range problems {
-					idsToRecheck = append(idsToRecheck, mismatch.ID)
-					dataSizes = append(dataSizes, mismatch.dataSize)
+			for _, mismatch := range problems {
+				idsToRecheck = append(idsToRecheck, mismatch.ID)
+				dataSizes = append(dataSizes, mismatch.dataSize)
 
-					if mismatch.Details == Missing {
-						missingIds = append(missingIds, mismatch.ID)
-					} else {
-						mismatches = append(mismatches, mismatch)
-					}
+				if mismatch.Details == Missing {
+					missingIds = append(missingIds, mismatch.ID)
+				} else {
+					mismatches = append(mismatches, mismatch)
 				}
+			}
 
-				// Update ids of the failed task so that only mismatches and
-				// missing are reported. Matching documents are thus hidden
-				// from the progress report.
-				task.Ids = missingIds
-				task.FailedDocs = mismatches
+			// Update ids of the failed task so that only mismatches and
+			// missing are reported. Matching documents are thus hidden
+			// from the progress report.
+			task.Ids = missingIds
+			task.FailedDocs = mismatches
 
-				// Create a task for the next generation to recheck the
-				// mismatched & missing docs.
-				err := verifier.InsertFailedCompareRecheckDocs(ctx, task.QueryFilter.Namespace, idsToRecheck, dataSizes)
-				if err != nil {
-					verifier.logger.Error().
-						Err(err).
-						Int("workerNum", workerNum).
-						Interface("task", task.PrimaryKey).
-						Int("rechecksCount", len(idsToRecheck)).
-						Msg("Failed to enqueue rechecks after document mismatches.")
-				}
+			// Create a task for the next generation to recheck the
+			// mismatched & missing docs.
+			err := verifier.InsertFailedCompareRecheckDocs(ctx, task.QueryFilter.Namespace, idsToRecheck, dataSizes)
+			if err != nil {
+				return errors.Wrapf(
+					err,
+					"failed to enqueue %d recheck(s) of mismatched documents",
+					len(idsToRecheck),
+				)
 			}
 		}
 	}
 
-	updateErr := verifier.UpdateVerificationTask(ctx, task)
-	if updateErr != nil {
-		verifier.logger.Error().
-			Err(updateErr).
-			Int("workerNum", workerNum).
-			Interface("task", task.PrimaryKey).
-			Msg("Failed to update task status.")
-	}
-
-	return err
+	return errors.Wrapf(
+		verifier.UpdateVerificationTask(ctx, task),
+		"failed to persist task %s's new status (%#q)",
+		task.PrimaryKey,
+		task.Status,
+	)
 }
 
 func (verifier *Verifier) logChunkInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) {
@@ -822,7 +822,7 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 func (verifier *Verifier) compareCollectionSpecifications(
 	srcNs, dstNs string,
 	srcSpecOpt, dstSpecOpt option.Option[util.CollectionSpec],
-) ([]VerificationResult, bool) {
+) ([]VerificationResult, bool, error) {
 	srcSpec, hasSrcSpec := srcSpecOpt.Get()
 	dstSpec, hasDstSpec := dstSpecOpt.Get()
 
@@ -830,20 +830,20 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		return []VerificationResult{{
 			NameSpace: srcNs,
 			Cluster:   ClusterSource,
-			Details:   Missing}}, false
+			Details:   Missing}}, false, nil
 	}
 	if !hasDstSpec {
 		return []VerificationResult{{
 			NameSpace: dstNs,
 			Cluster:   ClusterTarget,
-			Details:   Missing}}, false
+			Details:   Missing}}, false, nil
 	}
 	if srcSpec.Type != dstSpec.Type {
 		return []VerificationResult{{
 			NameSpace: srcNs,
 			Cluster:   ClusterTarget,
 			Field:     "Type",
-			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Type, dstSpec.Type)}}, false
+			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Type, dstSpec.Type)}}, false, nil
 		// If the types differ, the rest is not important.
 	}
 	var results []VerificationResult
@@ -857,13 +857,11 @@ func (verifier *Verifier) compareCollectionSpecifications(
 	if !bytes.Equal(srcSpec.Options, dstSpec.Options) {
 		mismatchDetails, err := BsonUnorderedCompareRawDocumentWithDetails(srcSpec.Options, dstSpec.Options)
 		if err != nil {
-			verifier.logger.Error().Msgf("Unable to parse collection options for %s: %+v", srcNs, err)
-			results = append(results, VerificationResult{
-				NameSpace: dstNs,
-				Cluster:   ClusterTarget,
-				Field:     "Options",
-				Details:   "ParseError " + fmt.Sprintf("%v", err)})
-			return results, false
+			return nil, false, errors.Wrapf(
+				err,
+				"failed to compare namespace %#q's specifications",
+				srcNs,
+			)
 		}
 		if mismatchDetails == nil {
 			results = append(results, VerificationResult{
@@ -881,7 +879,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 	// Do not compare data between capped and uncapped collections because the partitioning is different.
 	canCompareData = canCompareData && srcSpec.Options.Lookup("capped").Equal(dstSpec.Options.Lookup("capped"))
 
-	return results, canCompareData
+	return results, canCompareData, nil
 }
 
 func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Raw, dstSpec bson.Raw) (bool, error) {
@@ -1170,7 +1168,14 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		// Fall through here; comparing the collection specifications will produce the correct
 		// failure output.
 	}
-	specificationProblems, verifyData := verifier.compareCollectionSpecifications(srcNs, dstNs, srcSpecOpt, dstSpecOpt)
+	specificationProblems, verifyData, err := verifier.compareCollectionSpecifications(srcNs, dstNs, srcSpecOpt, dstSpecOpt)
+	if err != nil {
+		return errors.Wrapf(
+			err,
+			"failed to compare collection %#q's specifications",
+			srcNs,
+		)
+	}
 	if specificationProblems != nil {
 		err := insertFailedCollection()
 		if err != nil {
