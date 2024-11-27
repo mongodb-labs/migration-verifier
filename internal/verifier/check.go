@@ -127,11 +127,10 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 			if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 {
 				waitForTaskCreation++
 				time.Sleep(verifier.verificationStatusCheckInterval)
-				continue
 			} else {
 				verifier.PrintVerificationSummary(ctx, GenerationComplete)
 				succeeded = true
-				canceler(errors.New("ok"))
+				canceler(errors.Errorf("generation %d succeeded", generation))
 				return nil
 			}
 		}
@@ -438,12 +437,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			}
 
 			continue
-			/*
-				} else if errors.Is(err, context.Canceled) {
-					return nil
-			*/
 		} else if err != nil {
-
 			return errors.Wrap(
 				err,
 				"failed to seek next task",
@@ -467,6 +461,8 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			if err != nil {
 				return err
 			}
+		default:
+			panic("Unknown verification task type: " + task.Type)
 		}
 	}
 }

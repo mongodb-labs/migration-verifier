@@ -1219,7 +1219,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		task.Status = verificationTaskMetadataMismatch
 	}
 
-	// We’ve confirmed that the collection metadata (including indices and shard keys)
+	// We’ve confirmed that the collection metadata (including indices)
 	// matches between soruce & destination. Now we can partition the collection.
 
 	if task.Generation == 0 {
