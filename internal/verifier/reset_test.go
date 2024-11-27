@@ -11,16 +11,16 @@ import (
 )
 
 func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
+	ctx := suite.Context()
+
 	verifier := suite.BuildVerifier()
 
-	created, err := verifier.CheckIsPrimary()
+	created, err := verifier.CheckIsPrimary(ctx)
 	suite.Require().NoError(err)
 	suite.Require().True(created)
 
-	_, err = verifier.InsertCollectionVerificationTask("foo.bar")
+	_, err = verifier.InsertCollectionVerificationTask(ctx, "foo.bar")
 	suite.Require().NoError(err)
-
-	ctx := context.Background()
 
 	err = verifier.doInMetaTransaction(
 		ctx,
@@ -40,28 +40,28 @@ func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
 }
 
 func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
-	ctx := context.Background()
+	ctx := suite.Context()
 
 	verifier := suite.BuildVerifier()
 
 	// Create a primary task, and set it to complete.
-	created, err := verifier.CheckIsPrimary()
+	created, err := verifier.CheckIsPrimary(ctx)
 	suite.Require().NoError(err)
 	suite.Require().True(created)
 
-	suite.Require().NoError(verifier.UpdatePrimaryTaskComplete())
+	suite.Require().NoError(verifier.UpdatePrimaryTaskComplete(ctx))
 
 	ns1 := "foo.bar"
 	ns2 := "qux.quux"
 
 	// Create a collection-verification task, and set it to processing.
-	collTask, err := verifier.InsertCollectionVerificationTask(ns1)
+	collTask, err := verifier.InsertCollectionVerificationTask(ctx, ns1)
 	suite.Require().NoError(err)
 
 	collTask.Status = verificationTaskProcessing
 
 	suite.Require().NoError(
-		verifier.UpdateVerificationTask(collTask),
+		verifier.UpdateVerificationTask(ctx, collTask),
 	)
 
 	// Create three partition tasks with the same namespace as the
@@ -79,6 +79,7 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 		{verificationTaskCompleted, ns2},
 	} {
 		task, err := verifier.InsertPartitionVerificationTask(
+			ctx,
 			&partitions.Partition{
 				Ns: &partitions.Namespace{
 					DB:   strings.Split(taskParts.Namespace, ".")[0],
@@ -92,7 +93,7 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 
 		task.Status = taskParts.Status
 		suite.Require().NoError(
-			verifier.UpdateVerificationTask(task),
+			verifier.UpdateVerificationTask(ctx, task),
 		)
 	}
 

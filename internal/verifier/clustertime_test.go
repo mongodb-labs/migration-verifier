@@ -1,15 +1,13 @@
 package verifier
 
 import (
-	"context"
-
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
 func (suite *IntegrationTestSuite) TestGetNewClusterTime() {
-	ctx := context.Background()
+	ctx := suite.Context()
 	logger, _ := getLoggerAndWriter("stdout")
 
 	sess, err := suite.srcMongoClient.StartSession()
