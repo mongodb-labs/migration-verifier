@@ -208,6 +208,7 @@ func NewVerifier(settings VerifierSettings) *Verifier {
 		eventRecorder: NewEventRecorder(),
 
 		verificationStatusCheckInterval: 15 * time.Second,
+		nsMap:                           NewNSMap(),
 	}
 }
 
@@ -389,7 +390,6 @@ func (verifier *Verifier) SetDstNamespaces(arg []string) {
 }
 
 func (verifier *Verifier) SetNamespaceMap() {
-	verifier.nsMap = NewNSMap()
 	verifier.nsMap.PopulateWithNamespaces(verifier.srcNamespaces, verifier.dstNamespaces)
 }
 

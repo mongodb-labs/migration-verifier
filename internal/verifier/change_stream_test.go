@@ -21,7 +21,9 @@ import (
 )
 
 func TestChangeStreamFilter(t *testing.T) {
-	verifier := Verifier{}
+	verifier := Verifier{
+		nsMap: NewNSMap(),
+	}
 	verifier.SetMetaDBName("metadb")
 	verifier.initializeChangeStreamReaders()
 	assert.Contains(t,
