@@ -115,6 +115,9 @@ github.com/russross/blackfriday/v2
 github.com/samber/lo
 github.com/samber/lo/internal/constraints
 github.com/samber/lo/internal/rand
+# github.com/samber/mo v1.13.0
+## explicit; go 1.18
+github.com/samber/mo
 # github.com/stretchr/testify v1.8.0
 ## explicit; go 1.13
 github.com/stretchr/testify/assert

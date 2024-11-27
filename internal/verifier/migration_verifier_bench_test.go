@@ -81,10 +81,6 @@ func BenchmarkGeneric(t *testing.B) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifier.refetchCollection().Drop(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	println("Starting tasks")
 	for _, namespace := range namespaces {

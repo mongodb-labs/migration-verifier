@@ -1,6 +1,6 @@
 module github.com/10gen/migration-verifier
 
-go 1.20
+go 1.22
 
 require (
 	github.com/cespare/permute/v2 v2.0.0-beta2
@@ -12,6 +12,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/rs/zerolog v1.28.0
 	github.com/samber/lo v1.47.0
+	github.com/samber/mo v1.13.0
 	github.com/stretchr/testify v1.8.0
 	github.com/urfave/cli v1.22.9
 	go.mongodb.org/mongo-driver v1.17.1

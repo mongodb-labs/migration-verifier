@@ -147,6 +147,17 @@ On default settings it used about **200GB of RAM on m6id.metal machine when usin
 
 **This means it does about 1TB/20min but it is HIGHLY dependent on the source and dest machines**
 
+# Tests
+
+This project’s tests run as normal Go tests, to, with `go test`.
+
+`IntegrationTestSuite`'s tests require external clusters. You must provision these yourself.
+(See the project’s GitHub CI setup for one way to simplify it.) Once provisioned, set the relevant
+connection strings in the following environment variables:
+
+- MVTEST_SRC
+- MVTEST_DST
+- MVTEST_META
 
 # How the Verifier Works
 

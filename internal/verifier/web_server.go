@@ -22,7 +22,7 @@ const RequestInProgressErrorDescription = "Another request is currently in progr
 // MigrationVerifierAPI represents the interaction webserver with mongosync
 type MigrationVerifierAPI interface {
 	Check(ctx context.Context, filter map[string]any)
-	WritesOff(ctx context.Context)
+	WritesOff(ctx context.Context) error
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
 }
@@ -214,7 +214,11 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 		return
 	}
 
-	server.Mapi.WritesOff(context.Background())
+	err := server.Mapi.WritesOff(context.Background())
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
 	successResponse(c)
 }
 

@@ -10,8 +10,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func (suite *MultiMetaVersionTestSuite) TestFailedCompareThenReplace() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
+	verifier := suite.BuildVerifier()
 	ctx := context.Background()
 
 	suite.Require().NoError(
@@ -73,7 +73,7 @@ func (suite *MultiMetaVersionTestSuite) TestFailedCompareThenReplace() {
 	)
 }
 
-func (suite *MultiMetaVersionTestSuite) fetchRecheckDocs(ctx context.Context, verifier *Verifier) []RecheckDoc {
+func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifier *Verifier) []RecheckDoc {
 	metaColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue)
 
 	cursor, err := metaColl.Find(ctx, bson.D{})
@@ -86,8 +86,8 @@ func (suite *MultiMetaVersionTestSuite) fetchRecheckDocs(ctx context.Context, ve
 	return results
 }
 
-func (suite *MultiMetaVersionTestSuite) TestLargeIDInsertions() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
+	verifier := suite.BuildVerifier()
 	ctx := context.Background()
 
 	overlyLarge := 7 * 1024 * 1024 // Three of these exceed our 16MB limit, but two do not
@@ -147,8 +147,8 @@ func (suite *MultiMetaVersionTestSuite) TestLargeIDInsertions() {
 	suite.ElementsMatch([]VerificationTask{t1, t2}, actualTasks)
 }
 
-func (suite *MultiMetaVersionTestSuite) TestLargeDataInsertions() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
+	verifier := suite.BuildVerifier()
 	verifier.partitionSizeInBytes = 1024 * 1024
 	ctx := context.Background()
 
@@ -209,8 +209,8 @@ func (suite *MultiMetaVersionTestSuite) TestLargeDataInsertions() {
 	suite.ElementsMatch([]VerificationTask{t1, t2}, actualTasks)
 }
 
-func (suite *MultiMetaVersionTestSuite) TestMultipleNamespaces() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
+	verifier := suite.BuildVerifier()
 	ctx := context.Background()
 
 	id1 := "a"
@@ -260,8 +260,8 @@ func (suite *MultiMetaVersionTestSuite) TestMultipleNamespaces() {
 	suite.ElementsMatch([]VerificationTask{t1, t2, t3, t4}, actualTasks)
 }
 
-func (suite *MultiMetaVersionTestSuite) TestGenerationalClear() {
-	verifier := buildVerifier(suite.T(), suite.srcMongoInstance, suite.dstMongoInstance, suite.metaMongoInstance)
+func (suite *IntegrationTestSuite) TestGenerationalClear() {
+	verifier := suite.BuildVerifier()
 	ctx := context.Background()
 
 	id1 := "a"

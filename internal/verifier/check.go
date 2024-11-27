@@ -25,8 +25,6 @@ var failedStatus = mapset.NewSet(
 	verificationTaskMetadataMismatch,
 )
 
-var verificationStatusCheckInterval time.Duration = 15 * time.Second
-
 // Check is the asynchronous entry point to Check, should only be called by the web server. Use
 // CheckDriver directly for synchronous run.
 // testChan is a pair of channels for coordinating generations in tests.
@@ -42,30 +40,27 @@ func (verifier *Verifier) Check(ctx context.Context, filter map[string]any) {
 	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
 }
 
-func (verifier *Verifier) waitForChangeStream() error {
-	verifier.mux.RLock()
-	csRunning := verifier.changeStreamRunning
-	verifier.mux.RUnlock()
-	if csRunning {
-		verifier.logger.Debug().Msg("Changestream still running, signalling that writes are done and waiting for change stream to exit")
-		verifier.changeStreamEnderChan <- struct{}{}
-		select {
-		case err := <-verifier.changeStreamErrChan:
-			verifier.logger.Warn().Err(err).
-				Msg("Received error from change stream.")
-			return err
-		case <-verifier.changeStreamDoneChan:
-			verifier.logger.Debug().
-				Msg("Received completion signal from change stream.")
-			break
-		}
+func (verifier *Verifier) waitForChangeStream(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-verifier.changeStreamErrChan:
+		verifier.logger.Warn().Err(err).
+			Msg("Received error from change stream.")
+		return err
+	case <-verifier.changeStreamDoneChan:
+		verifier.logger.Debug().
+			Msg("Received completion signal from change stream.")
+		break
 	}
+
 	return nil
 }
 
 func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 	verifier.logger.Debug().Msgf("Starting %d verification workers", verifier.numWorkers)
 	ctx, cancel := context.WithCancel(ctx)
+
 	wg := sync.WaitGroup{}
 	for i := 0; i < verifier.numWorkers; i++ {
 		wg.Add(1)
@@ -92,7 +87,7 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 		select {
 		case err := <-verifier.changeStreamErrChan:
 			cancel()
-			return err
+			return errors.Wrap(err, "change stream failed")
 		case <-ctx.Done():
 			cancel()
 			return nil
@@ -113,7 +108,7 @@ func (verifier *Verifier) CheckWorker(ctx context.Context) error {
 		//wait for task to be created, if none of the tasks found.
 		if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 || verificationStatus.RecheckTasks > 0 {
 			waitForTaskCreation++
-			time.Sleep(verificationStatusCheckInterval)
+			time.Sleep(verifier.verificationStatusCheckInterval)
 		} else {
 			verifier.PrintVerificationSummary(ctx, GenerationComplete)
 			verifier.logger.Debug().Msg("Verification tasks complete")
@@ -174,7 +169,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	verifier.mux.RLock()
 	csRunning := verifier.changeStreamRunning
 	verifier.mux.RUnlock()
-	if !csRunning {
+	if csRunning {
+		verifier.logger.Debug().Msg("Check: Change stream already running.")
+	} else {
 		verifier.logger.Debug().Msg("Change stream not running; starting change stream")
 
 		err = verifier.StartChangeStream(ctx)
@@ -239,10 +236,13 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		// paying attention. Also, this should not matter too much because any failures will be
 		// caught again on the next iteration.
 		if verifier.writesOff {
+			verifier.logger.Debug().
+				Msg("Waiting for change stream to end.")
+
 			// It's necessary to wait for the change stream to finish before incrementing the
 			// generation number, or the last changes will not be checked.
 			verifier.mux.Unlock()
-			err := verifier.waitForChangeStream()
+			err := verifier.waitForChangeStream(ctx)
 			if err != nil {
 				return err
 			}
