@@ -6,12 +6,18 @@ import (
 	"github.com/10gen/migration-verifier/msync"
 )
 
+// WorkerTracker holds certain data points about each worker thread
+// in a check generation. It is thread-safe.
 type WorkerTracker struct {
 	guard *msync.DataGuard[WorkerStatusMap]
 }
 
+// WorkerStatusMap represents the status of each worker,
+// indexed by worker number (which start at 0).
 type WorkerStatusMap = map[int]WorkerStatus
 
+// WorkerStatus details the work that an individual worker thread
+// is doing.
 type WorkerStatus struct {
 	TaskID    any
 	TaskType  verificationTaskType
@@ -19,6 +25,7 @@ type WorkerStatus struct {
 	StartTime time.Time
 }
 
+// NewWorkerTracker creates and returns a WorkerTracker.
 func NewWorkerTracker(workersCount int) *WorkerTracker {
 	wsmap := WorkerStatusMap{}
 	for i := 0; i < workersCount; i++ {
@@ -29,6 +36,7 @@ func NewWorkerTracker(workersCount int) *WorkerTracker {
 	}
 }
 
+// Set updates the worker’s state in the WorkerTracker.
 func (wt *WorkerTracker) Set(workerNum int, task VerificationTask) {
 	wt.guard.Store(func(m WorkerStatusMap) WorkerStatusMap {
 		m[workerNum] = WorkerStatus{
@@ -42,6 +50,7 @@ func (wt *WorkerTracker) Set(workerNum int, task VerificationTask) {
 	})
 }
 
+// Unset tells the WorkerTracker that the worker is now inactive.
 func (wt *WorkerTracker) Unset(workerNum int) {
 	wt.guard.Store(func(m WorkerStatusMap) WorkerStatusMap {
 		m[workerNum] = WorkerStatus{}
@@ -50,6 +59,8 @@ func (wt *WorkerTracker) Unset(workerNum int) {
 	})
 }
 
+// Load duplicates and returns the WorkerTracker’s internal
+// state map.
 func (wt *WorkerTracker) Load() WorkerStatusMap {
 	var wtmap WorkerStatusMap
 	wt.guard.Load(func(m map[int]WorkerStatus) {
