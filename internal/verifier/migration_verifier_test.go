@@ -1553,6 +1553,63 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	<-checkDoneChan
 }
 
+func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
+	ctx := suite.Context()
+	collName := "mycoll"
+
+	srcDB := suite.srcMongoClient.Database(suite.DBNameForTest())
+	dstDB := suite.dstMongoClient.Database(suite.DBNameForTest())
+	suite.Require().NoError(srcDB.CreateCollection(ctx, collName))
+	suite.Require().NoError(dstDB.CreateCollection(ctx, collName))
+
+	verifier := suite.BuildVerifier()
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+
+	// Dry run generation 0 to make sure change stream reader is started.
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	suite.Require().NoError(runner.StartNextGeneration())
+	// Insert two documents in generation 1. They should be batched and become a verify task in generation 2.
+	_, err := dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
+	suite.Require().NoError(err)
+	_, err = dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
+	suite.Require().NoError(err)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	// Run generation 2 and get verification status.
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+	status, err := verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().Equal(
+		1,
+		status.FailedTasks,
+	)
+
+	// Patch up only one of the two mismatched documents in generation 3.
+	suite.Require().NoError(runner.StartNextGeneration())
+	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
+	suite.Require().NoError(err)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+	status, err = verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().Equal(
+		1,
+		status.FailedTasks,
+	)
+
+	// Patch up both of the 2 mismatched documents in generation 4.
+	suite.Require().NoError(runner.StartNextGeneration())
+	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
+	suite.Require().NoError(err)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	// Everything should match by the end of it.
+	status, err = verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().Zero(status.FailedTasks)
+}
+
 func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {
 	ctx := suite.Context()
 
