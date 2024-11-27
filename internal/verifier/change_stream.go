@@ -102,6 +102,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 }
 
 // StartChangeEventHandler starts a goroutine that handles change event batches from the reader.
+// It needs to be started after the reader starts.
 func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *ChangeStreamReader, errGroup *errgroup.Group) {
 	errGroup.Go(func() error {
 		for {

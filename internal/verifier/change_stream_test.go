@@ -41,6 +41,12 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter() {
 	)
 }
 
+func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx context.Context, verifier *Verifier) {
+	err := verifier.srcChangeStreamReader.StartChangeStream(ctx)
+	suite.Require().NoError(err)
+	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader, &errgroup.Group{})
+}
+
 // TestChangeStreamResumability creates a verifier, starts its change stream,
 // terminates that verifier, updates the source cluster, starts a new
 // verifier with change stream, and confirms that things look as they should.
@@ -55,9 +61,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 		verifier1 := suite.BuildVerifier()
 		ctx, cancel := context.WithCancel(suite.Context())
 		defer cancel()
-		verifier1.StartChangeEventHandler(ctx, verifier1.srcChangeStreamReader, &errgroup.Group{})
-		err := verifier1.srcChangeStreamReader.StartChangeStream(ctx)
-		suite.Require().NoError(err)
+		suite.startSrcChangeStreamReaderAndHandler(ctx, verifier1)
 	}()
 
 	ctx, cancel := context.WithCancel(suite.Context())
@@ -81,9 +85,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	newTime := suite.getClusterTime(ctx, suite.srcMongoClient)
 
-	verifier2.StartChangeEventHandler(ctx, verifier2.srcChangeStreamReader, &errgroup.Group{})
-	err = verifier2.srcChangeStreamReader.StartChangeStream(ctx)
-	suite.Require().NoError(err)
+	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier2)
 
 	suite.Require().NotNil(verifier2.srcChangeStreamReader.startAtTs)
 
@@ -156,9 +158,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader, &errgroup.Group{})
-	err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
-	suite.Require().NoError(err)
+	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
 	verifier.srcChangeStreamReader.ChangeStreamWritesOffTsChan <- *origStartTs
 	<-verifier.srcChangeStreamReader.ChangeStreamDoneChan
@@ -177,9 +177,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 
 	origSessionTime := sess.OperationTime()
 	suite.Require().NotNil(origSessionTime)
-	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader, &errgroup.Group{})
-	err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
-	suite.Require().NoError(err)
+	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
 	// srcStartAtTs derives from the change stream’s resume token, which can
 	// postdate our session time but should not precede it.
@@ -229,9 +227,7 @@ func (suite *IntegrationTestSuite) TestNoStartAtTime() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader, &errgroup.Group{})
-	err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
-	suite.Require().NoError(err)
+	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 	suite.Require().NotNil(verifier.srcChangeStreamReader.startAtTs)
 	suite.Require().LessOrEqual(origStartTs.Compare(*verifier.srcChangeStreamReader.startAtTs), 0)
 }
@@ -249,8 +245,7 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 
 	verifier := suite.BuildVerifier()
 
-	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader, &errgroup.Group{})
-	suite.Require().NoError(verifier.srcChangeStreamReader.StartChangeStream(ctx))
+	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
 	_, err := coll1.InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
@@ -474,8 +469,8 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	verifier.SetDstNamespaces([]string{dstDBName + ".dstColl1", dstDBName + ".dstColl2"})
 	verifier.SetNamespaceMap()
 
-	verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader, &errgroup.Group{})
 	suite.Require().NoError(verifier.dstChangeStreamReader.StartChangeStream(ctx))
+	verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader, &errgroup.Group{})
 
 	_, err := coll1.InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
