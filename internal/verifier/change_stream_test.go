@@ -460,8 +460,8 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	ctx := suite.Context()
 
-	srcDBName := suite.DBNameForTest() + "_src"
-	dstDBName := suite.DBNameForTest() + "_dst"
+	srcDBName := suite.DBNameForTest("src")
+	dstDBName := suite.DBNameForTest("dst")
 
 	db := suite.dstMongoClient.Database(dstDBName)
 	coll1 := db.Collection("dstColl1")
