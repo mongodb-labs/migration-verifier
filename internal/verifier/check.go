@@ -139,6 +139,10 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	err := eg.Wait()
 
 	if succeeded {
+		if !errors.Is(err, context.Canceled) {
+			panic("success should mean that err is context.Canceled, not: " + err.Error())
+		}
+
 		err = nil
 	}
 
