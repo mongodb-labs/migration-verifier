@@ -1390,6 +1390,12 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	// there should be no failures now, since they are equivalent at this point in time
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
+	// The next generation should process the recheck task caused by inserting {_id: 2} on the destination.
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+	status = waitForTasks()
+	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+
 	// now insert in the source, this should come up next generation
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 3, "x": 44})
 	suite.Require().NoError(err)
