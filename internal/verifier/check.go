@@ -207,6 +207,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		verifier.phase = Idle
 	}()
 
+	ceHandlerGroup := &errgroup.Group{}
 	for _, csReader := range []*ChangeStreamReader{verifier.srcChangeStreamReader, verifier.dstChangeStreamReader} {
 		if csReader.changeStreamRunning {
 			verifier.logger.Debug().Msgf("Check: %s already running.", csReader)
@@ -217,7 +218,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			if err != nil {
 				return errors.Wrapf(err, "failed to start %s", csReader)
 			}
-			verifier.StartChangeEventHandler(ctx, csReader)
+			verifier.StartChangeEventHandler(ctx, csReader, ceHandlerGroup)
 		}
 	}
 
@@ -293,6 +294,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			if err = verifier.waitForChangeStream(ctx, verifier.dstChangeStreamReader); err != nil {
 				return err
 			}
+			ceHandlerGroup.Wait()
 			verifier.mux.Lock()
 			verifier.lastGeneration = true
 		}

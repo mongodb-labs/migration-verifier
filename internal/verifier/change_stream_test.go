@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"golang.org/x/sync/errgroup"
 	"strings"
 	"time"
 
@@ -54,7 +55,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 		verifier1 := suite.BuildVerifier()
 		ctx, cancel := context.WithCancel(suite.Context())
 		defer cancel()
-		verifier1.StartChangeEventHandler(ctx, verifier1.srcChangeStreamReader)
+		verifier1.StartChangeEventHandler(ctx, verifier1.srcChangeStreamReader, &errgroup.Group{})
 		err := verifier1.srcChangeStreamReader.StartChangeStream(ctx)
 		suite.Require().NoError(err)
 	}()
@@ -80,7 +81,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	newTime := suite.getClusterTime(ctx, suite.srcMongoClient)
 
-	verifier2.StartChangeEventHandler(ctx, verifier2.srcChangeStreamReader)
+	verifier2.StartChangeEventHandler(ctx, verifier2.srcChangeStreamReader, &errgroup.Group{})
 	err = verifier2.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 
@@ -155,7 +156,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
+	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader, &errgroup.Group{})
 	err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
@@ -176,7 +177,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 
 	origSessionTime := sess.OperationTime()
 	suite.Require().NotNil(origSessionTime)
-	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
+	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader, &errgroup.Group{})
 	err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 
@@ -228,7 +229,7 @@ func (suite *IntegrationTestSuite) TestNoStartAtTime() {
 	suite.Require().NoError(err)
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
-	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
+	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader, &errgroup.Group{})
 	err = verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	suite.Require().NotNil(verifier.srcChangeStreamReader.startAtTs)
@@ -248,7 +249,7 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 
 	verifier := suite.BuildVerifier()
 
-	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
+	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader, &errgroup.Group{})
 	suite.Require().NoError(verifier.srcChangeStreamReader.StartChangeStream(ctx))
 
 	_, err := coll1.InsertOne(ctx, bson.D{{"_id", 1}})
@@ -389,6 +390,7 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 		lo.ToAnySlice(docs),
 	)
 	suite.Require().NoError(err)
+	//fmt.Println(fmt.Sprintf("src cluster time %v", suite.getClusterTime(ctx, suite.srcMongoClient)))
 
 	suite.Require().NoError(verifier.WritesOff(ctx))
 
@@ -472,7 +474,7 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	verifier.SetDstNamespaces([]string{dstDBName + ".dstColl1", dstDBName + ".dstColl2"})
 	verifier.SetNamespaceMap()
 
-	verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader)
+	verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader, &errgroup.Group{})
 	suite.Require().NoError(verifier.dstChangeStreamReader.StartChangeStream(ctx))
 
 	_, err := coll1.InsertOne(ctx, bson.D{{"_id", 1}})

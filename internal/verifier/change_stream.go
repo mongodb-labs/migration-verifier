@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/keystring"
@@ -82,7 +83,6 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		watcherClient:               verifier.srcClient,
 		buildInfo:                   *verifier.srcBuildInfo,
 		changeStreamRunning:         false,
-		ChangeEventBatchChan:        make(chan []ParsedEvent),
 		ChangeStreamWritesOffTsChan: make(chan primitive.Timestamp),
 		ChangeStreamErrChan:         make(chan error),
 		ChangeStreamDoneChan:        make(chan struct{}),
@@ -95,7 +95,6 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		watcherClient:               verifier.dstClient,
 		buildInfo:                   *verifier.dstBuildInfo,
 		changeStreamRunning:         false,
-		ChangeEventBatchChan:        make(chan []ParsedEvent),
 		ChangeStreamWritesOffTsChan: make(chan primitive.Timestamp),
 		ChangeStreamErrChan:         make(chan error),
 		ChangeStreamDoneChan:        make(chan struct{}),
@@ -103,20 +102,24 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 }
 
 // StartChangeEventHandler starts a goroutine that handles change event batches from the reader.
-func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *ChangeStreamReader) {
-	go func() {
+func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *ChangeStreamReader, errGroup *errgroup.Group) {
+	errGroup.Go(func() error {
 		for {
 			select {
 			case <-ctx.Done():
-				return
-			case batch := <-reader.ChangeEventBatchChan:
+				return ctx.Err()
+			case batch, more := <-reader.ChangeEventBatchChan:
+				if !more {
+					// Change stream reader has closed the event batch channel because it has finished.
+					return nil
+				}
 				err := verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType)
 				if err != nil {
-					reader.ChangeStreamErrChan <- err
+					return err
 				}
 			}
 		}
-	}()
+	})
 }
 
 // HandleChangeStreamEvents performs the necessary work for change stream events after receiving a batch.
@@ -298,6 +301,8 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 ) error {
 	var lastPersistedTime time.Time
 
+	defer close(csr.ChangeEventBatchChan)
+
 	persistResumeTokenIfNeeded := func() error {
 		if time.Since(lastPersistedTime) <= minChangeStreamPersistInterval {
 			return nil
@@ -328,7 +333,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 		case writesOffTs := <-csr.ChangeStreamWritesOffTsChan:
 			csr.logger.Debug().
 				Interface("writesOffTimestamp", writesOffTs).
-				Msg("Change stream thread received writesOff timestamp. Finalizing change stream.")
+				Msgf("%s thread received writesOff timestamp. Finalizing change stream.", csr)
 
 			gotwritesOffTimestamp = true
 
@@ -476,6 +481,11 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 	// Timestamp and error channels, but the single channel is cleaner since
 	// there's no chance of "nonsense" like both channels returning a payload.
 	initialCreateResultChan := make(chan mo.Result[primitive.Timestamp])
+
+	// Change stream reader closes ChangeEventBatchChan each time after
+	// finish reading change events.
+	// It needs to be re-initialized when a change stream starts.
+	csr.ChangeEventBatchChan = make(chan []ParsedEvent)
 
 	go func() {
 		retryer := retry.New(retry.DefaultDurationLimit)
