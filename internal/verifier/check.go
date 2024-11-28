@@ -448,6 +448,8 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			)
 		}
 
+		verifier.workerTracker.Set(workerNum, *task)
+
 		switch task.Type {
 		case verificationTaskVerifyCollection:
 			err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
