@@ -137,7 +137,7 @@ func (p *Partition) FindCmd(
 // (e.g. use the partitions on the source to read the destination for verification)
 // If the passed-in buildinfo indicates a mongodb version < 5.0, type bracketing is not used.
 // filterAndPredicates is a slice of filter criteria that's used to construct the "filter" field in the find option.
-func (p *Partition) GetFindOptions(buildInfo *util.BuildInfo, filterAndPredicates bson.A) bson.D {
+func (p *Partition) GetFindOptions(buildInfo *util.ClusterInfo, filterAndPredicates bson.A) bson.D {
 	if p == nil {
 		if len(filterAndPredicates) > 0 {
 			return bson.D{{"filter", bson.D{{"$and", filterAndPredicates}}}}

@@ -11,7 +11,12 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// RunForUUIDAndTransientErrors retries f() for the CollectionUUIDMismatch error and for transient errors.
+// RunForUUIDAndTransientErrors should never be used. Its presence here
+// is a vestige of the retryer's origin in mongosync. Since migration-verifier
+// forbids DDL operations, a namespace should be just as stable as its UUID; thus,
+// this function is needless complexity.
+//
+// This function retries f() for the CollectionUUIDMismatch error and for transient errors.
 // This should be used to run a driver operation that optionally specifies the `collectionUUID` parameter
 // for a collection that may have been:
 //
@@ -34,7 +39,7 @@ import (
 // f() is provided with a collection name string, which is the one that should be used in the body
 // of f() when a collection name is needed. The initial value of this string is expectedCollName.
 //
-// RunForUUIDAndTransientErrors always returns the collection's current name. It returns
+// This function always returns the collection's current name. It returns
 // an error if the duration limit is reached, or if f() returns a non-transient error.
 func (r *Retryer) RunForUUIDAndTransientErrors(
 	ctx context.Context, logger *logger.Logger, expectedCollName string, f func(*Info, string) error,
@@ -42,7 +47,12 @@ func (r *Retryer) RunForUUIDAndTransientErrors(
 	return r.runRetryLoop(ctx, logger, expectedCollName, f, true, true)
 }
 
-// RunForUUIDErrorOnly retries f() for the CollectionUUIDMismatch error only. This should primarily
+// RunForUUIDErrorOnly should never be used. Its presence here
+// is a vestige of the retryer's origin in mongosync. Since migration-verifier
+// forbids DDL operations, a namespace should be just as stable as its UUID; thus,
+// this function is needless complexity.
+//
+// This function retries f() for the CollectionUUIDMismatch error only. This should primarily
 // be used to wrap a transaction callback containing an operation that specifies the `collectionUUID`
 // parameter for a collection that may have been:
 //
@@ -57,7 +67,7 @@ func (r *Retryer) RunForUUIDAndTransientErrors(
 // f() is provided with a collection name string, which is the one that should be used in the body
 // of f() where a collection name is needed. The initial value of this string is expectedCollName.
 //
-// RunForUUIDErrorOnly returns the collection's current name in all cases.
+// This function returns the collection's current name in all cases.
 func (r *Retryer) RunForUUIDErrorOnly(
 	ctx context.Context, logger *logger.Logger, expectedCollName string, f func(*Info, string) error,
 ) (string, error) {
