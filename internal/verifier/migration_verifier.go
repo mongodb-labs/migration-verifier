@@ -187,13 +187,18 @@ type VerifierSettings struct {
 }
 
 // NewVerifier creates a new Verifier
-func NewVerifier(settings VerifierSettings) *Verifier {
+func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 	readConcern := settings.ReadConcernSetting
 	if readConcern == "" {
 		readConcern = ReadConcernMajority
 	}
 
+	logger, logWriter := getLoggerAndWriter(logPath)
+
 	return &Verifier{
+		logger: logger,
+		writer: logWriter,
+
 		phase:                       Idle,
 		numWorkers:                  NumWorkers,
 		readPreference:              readpref.Primary(),
@@ -330,10 +335,6 @@ func (verifier *Verifier) SetWorkerSleepDelayMillis(arg time.Duration) {
 // SetPartitionSizeMB sets the verifier’s maximum partition size in MiB.
 func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
 	verifier.partitionSizeInBytes = int64(partitionSizeMB) * 1024 * 1024
-}
-
-func (verifier *Verifier) SetLogger(logPath string) {
-	verifier.logger, verifier.writer = getLoggerAndWriter(logPath)
 }
 
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {

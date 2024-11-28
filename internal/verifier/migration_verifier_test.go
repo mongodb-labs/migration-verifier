@@ -456,7 +456,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 
 func TestVerifierCompareDocs(t *testing.T) {
 	id := rand.Intn(1000)
-	verifier := NewVerifier(VerifierSettings{})
+	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	verifier.SetIgnoreBSONFieldOrder(true)
 
 	type compareTest struct {

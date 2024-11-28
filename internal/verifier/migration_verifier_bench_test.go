@@ -54,7 +54,7 @@ func BenchmarkGeneric(t *testing.B) {
 	fmt.Printf("Running with %s as the meta db name. Specify META_DB_NAME= to change\n", metaDBName)
 	// fmt.Printf("Running with %s as the namespace. Specify META_DB_NAME= to change\n", metaDBName)
 
-	verifier := NewVerifier(VerifierSettings{})
+	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	verifier.SetNumWorkers(numWorkers)
 	verifier.SetGenerationPauseDelayMillis(0)
 	verifier.SetWorkerSleepDelayMillis(0)
@@ -71,7 +71,6 @@ func BenchmarkGeneric(t *testing.B) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier.SetLogger("stderr")
 	verifier.SetMetaDBName(metaDBName)
 	err = verifier.verificationTaskCollection().Drop(context.Background())
 	if err != nil {
