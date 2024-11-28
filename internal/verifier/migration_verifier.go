@@ -311,40 +311,6 @@ func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 	return err
 }
 
-func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri)
-	var err error
-	verifier.srcClient, err = mongo.Connect(ctx, opts)
-	if err != nil {
-		return errors.Wrapf(err, "failed to connect to source %#q", uri)
-	}
-
-	buildInfo, err := util.GetBuildInfo(ctx, verifier.srcClient)
-	if err != nil {
-		return errors.Wrap(err, "failed to read source build info")
-	}
-
-	verifier.srcBuildInfo = &buildInfo
-	return nil
-}
-
-func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri)
-	var err error
-	verifier.dstClient, err = mongo.Connect(ctx, opts)
-	if err != nil {
-		return errors.Wrapf(err, "failed to connect to destination %#q", uri)
-	}
-
-	buildInfo, err := util.GetBuildInfo(ctx, verifier.dstClient)
-	if err != nil {
-		return errors.Wrap(err, "failed to read destination build info")
-	}
-
-	verifier.dstBuildInfo = &buildInfo
-	return nil
-}
-
 func (verifier *Verifier) SetServerPort(port int) {
 	verifier.port = port
 }
