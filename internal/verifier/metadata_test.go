@@ -29,7 +29,7 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 					{"key", key},
 				},
 			).Err(),
-			fmt.Sprintf("%s: should create %#q", label, dbname+"."+collName),
+			fmt.Sprintf("%s: should shard %#q", label, dbname+"."+collName),
 		)
 	}
 
@@ -40,8 +40,8 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 		"sharded_dst",
 	)
 
-	for _, collName := range collections {
-		for c, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
+	for c, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
+		for _, collName := range collections {
 			suite.Require().NoError(
 				client.Database(dbname).CreateCollection(
 					ctx,
@@ -54,6 +54,13 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 	}
 
 	if srcInfo.Topology == util.TopologySharded {
+		suite.Require().NoError(
+			suite.srcMongoClient.Database("admin").RunCommand(
+				ctx,
+				bson.D{{"enableSharding", dbname}},
+			).Err(),
+		)
+
 		shardCollection(
 			suite.srcMongoClient,
 			"idonly",
@@ -75,6 +82,13 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 	}
 
 	if dstInfo.Topology == util.TopologySharded {
+		suite.Require().NoError(
+			suite.dstMongoClient.Database("admin").RunCommand(
+				ctx,
+				bson.D{{"enableSharding", dbname}},
+			).Err(),
+		)
+
 		shardCollection(
 			suite.dstMongoClient,
 			"idonly",
@@ -130,15 +144,7 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 
 	suite.Require().Len(tasks, len(collections))
 
-	if srcInfo.Topology != dstInfo.Topology {
-		for _, task := range tasks {
-			suite.Assert().Equal(
-				verificationTaskCompleted,
-				task.Status,
-				"mismatched topologies, so task should have succeeded: %v", task,
-			)
-		}
-	} else {
+	if srcInfo.Topology == util.TopologySharded && dstInfo.Topology == util.TopologySharded {
 		taskMap := mslices.ToMap(
 			tasks,
 			func(task VerificationTask) string {
@@ -171,5 +177,13 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 		)
 
 		suite.T().Logf("tasks: %+v", tasks)
+	} else {
+		for _, task := range tasks {
+			suite.Assert().Equal(
+				verificationTaskCompleted,
+				task.Status,
+				"mismatched topologies, so task should have succeeded: %v", task,
+			)
+		}
 	}
 }
