@@ -1183,7 +1183,7 @@ func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 	err = suite.dstMongoClient.Database("testDb4").CreateCollection(ctx, "testColl6")
 	suite.Require().NoError(err)
 
-	if suite.GetSrcTopology() != util.TopologySharded {
+	if suite.GetTopology(suite.dstMongoClient) != util.TopologySharded {
 		err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "testColl7")
 		suite.Require().NoError(err)
 	}
@@ -1224,9 +1224,12 @@ func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb1.testView1"}, verifier.dstNamespaces)
 
 	// Collections in admin, config, and local should not be found
-	if suite.GetSrcTopology() != util.TopologySharded {
+	if suite.GetTopology(suite.srcMongoClient) != util.TopologySharded {
 		err = suite.srcMongoClient.Database("local").CreateCollection(ctx, "islocalSrc")
 		suite.Require().NoError(err)
+	}
+
+	if suite.GetTopology(suite.dstMongoClient) != util.TopologySharded {
 		err = suite.dstMongoClient.Database("local").CreateCollection(ctx, "islocalDest")
 		suite.Require().NoError(err)
 	}

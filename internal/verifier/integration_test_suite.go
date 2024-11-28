@@ -134,10 +134,10 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 	}
 }
 
-func (suite *IntegrationTestSuite) GetSrcTopology() util.ClusterTopology {
+func (suite *IntegrationTestSuite) GetTopology(client *mongo.Client) util.ClusterTopology {
 	clusterInfo, err := util.GetClusterInfo(
 		suite.Context(),
-		suite.srcMongoClient,
+		client,
 	)
 	suite.Require().NoError(err, "should fetch src cluster info")
 
