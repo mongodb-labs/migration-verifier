@@ -248,7 +248,7 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 			suite.Assert().Equal(
 				verificationTaskCompleted,
 				task.Status,
-				"mismatched topologies, so task should have succeeded: %v", task,
+				"mismatched topologies, so task should have succeeded: %+v", task,
 			)
 		}
 	}
