@@ -20,9 +20,11 @@ func (verifier *Verifier) verifyShardingIfNeeded(
 	srcColl, dstColl *mongo.Collection,
 ) ([]VerificationResult, error) {
 
-	// If one cluster is sharded and the other is unsharded then there's
-	// nothing to do here.
-	if verifier.srcClusterInfo.Topology != verifier.dstClusterInfo.Topology {
+	// We only need to compare if both clusters are sharded
+	srcSharded := verifier.srcClusterInfo.Topology == util.TopologySharded
+	dstSharded := verifier.dstClusterInfo.Topology == util.TopologySharded
+
+	if !srcSharded || !dstSharded {
 		return nil, nil
 	}
 
