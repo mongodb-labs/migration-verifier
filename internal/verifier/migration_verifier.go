@@ -90,8 +90,8 @@ type Verifier struct {
 	metaClient         *mongo.Client
 	srcClient          *mongo.Client
 	dstClient          *mongo.Client
-	srcClusterInfo     *util.BuildInfo
-	dstClusterInfo     *util.BuildInfo
+	srcClusterInfo     *util.ClusterInfo
+	dstClusterInfo     *util.ClusterInfo
 	numWorkers         int
 	failureDisplaySize int64
 
@@ -439,7 +439,7 @@ func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A)
 	return append(predicates, verifier.globalFilter)
 }
 
-func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, buildInfo *util.BuildInfo,
+func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
 	startAtTs *primitive.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
@@ -452,7 +452,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 			bson.E{"filter", bson.D{{"$and", andPredicates}}},
 		}
 	} else {
-		findOptions = task.QueryFilter.Partition.GetFindOptions(buildInfo, verifier.maybeAppendGlobalFilterToPredicates(andPredicates))
+		findOptions = task.QueryFilter.Partition.GetFindOptions(clusterInfo, verifier.maybeAppendGlobalFilterToPredicates(andPredicates))
 	}
 	if verifier.readPreference.Mode() != readpref.PrimaryMode {
 		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
