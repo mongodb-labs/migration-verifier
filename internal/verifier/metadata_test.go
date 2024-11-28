@@ -103,6 +103,10 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 					{"indexes", []bson.D{
 						{
 							{"name", "foo_1"},
+							{"key", bson.D{{"foo", 1}, {"_id", "1"}}},
+						},
+						{
+							{"name", "foo_1"},
 							{"key", bson.D{{"_id", "1"}, {"foo", 1}}},
 						},
 					}},
@@ -168,6 +172,10 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 						{
 							{"name", "foo_1"},
 							{"key", bson.D{{"foo", 1}, {"_id", "1"}}},
+						},
+						{
+							{"name", "foo_1"},
+							{"key", bson.D{{"_id", "1"}, {"foo", 1}}},
 						},
 					}},
 				},
