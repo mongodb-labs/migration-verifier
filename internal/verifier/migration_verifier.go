@@ -62,9 +62,6 @@ const (
 	// is unworkable.
 	ReadConcernIgnore ReadConcernSetting = "ignore"
 
-	configDBName  = "config"
-	collsCollName = "collections"
-
 	DefaultFailureDisplaySize = 20
 
 	okSymbol    = "\u2705" // white heavy check mark
@@ -736,6 +733,8 @@ func (verifier *Verifier) getShardKeyFields(
 	if !isSharded {
 		return []string{}, nil
 	}
+
+	verifier.logChunkInfo(ctx, namespaceAndUUID)
 
 	els, err := shardKeyRaw.Elements()
 	if err != nil {
