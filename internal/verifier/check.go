@@ -20,7 +20,7 @@ const (
 	GenerationComplete           GenerationStatus = "complete"
 )
 
-var failedStatus = mapset.NewSet(
+var failedStatuses = mapset.NewSet(
 	verificationTaskFailed,
 	verificationTaskMetadataMismatch,
 )
@@ -406,7 +406,7 @@ func FetchFailedAndIncompleteTasks(ctx context.Context, coll *mongo.Collection, 
 		return FailedTasks, IncompleteTasks, err
 	}
 	for _, t := range allTasks {
-		if failedStatus.Contains(t.Status) {
+		if failedStatuses.Contains(t.Status) {
 			FailedTasks = append(FailedTasks, t)
 		} else if t.Status != verificationTaskCompleted {
 			IncompleteTasks = append(IncompleteTasks, t)

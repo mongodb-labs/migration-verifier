@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/util"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -16,13 +16,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
-type TestTopology string
-
 const (
-	metaDBName                   = "VERIFIER_TEST_META"
-	topologyEnvVar               = "MVTEST_TOPOLOGY"
-	TopologyReplset TestTopology = "replset"
-	TopologySharded TestTopology = "sharded"
+	metaDBName = "VERIFIER_TEST_META"
 )
 
 type IntegrationTestSuite struct {
@@ -139,22 +134,14 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 	}
 }
 
-func (suite *IntegrationTestSuite) GetSrcTopology() TestTopology {
-	hello := struct {
-		Msg string
-	}{}
-
-	resp := suite.srcMongoClient.Database("admin").RunCommand(
+func (suite *IntegrationTestSuite) GetSrcTopology() util.ClusterTopology {
+	clusterInfo, err := util.GetClusterInfo(
 		suite.Context(),
-		bson.D{{"hello", 1}},
+		suite.srcMongoClient,
 	)
+	suite.Require().NoError(err, "should fetch src cluster info")
 
-	suite.Require().NoError(
-		resp.Decode(&hello),
-		"should fetch & decode hello",
-	)
-
-	return lo.Ternary(hello.Msg == "isdbgrid", TopologySharded, "")
+	return clusterInfo.Topology
 }
 
 func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
