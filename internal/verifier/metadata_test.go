@@ -76,8 +76,38 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 		shardCollection(
 			suite.srcMongoClient,
 			"id_and_foo",
-			bson.D{{"_id", "hashed"}, {"foo", 1}},
+			bson.D{{"_id", "1"}, {"foo", 1}},
 			"src",
+		)
+	} else {
+		suite.Require().NoError(
+			suite.srcMongoClient.Database(dbname).RunCommand(
+				ctx,
+				bson.D{
+					{"createIndexes", "numtype"},
+					{"indexes", []bson.D{
+						{
+							{"name", "foo_1"},
+							{"key", bson.D{{"foo", 1}}},
+						},
+					}},
+				},
+			).Err(),
+		)
+
+		suite.Require().NoError(
+			suite.srcMongoClient.Database(dbname).RunCommand(
+				ctx,
+				bson.D{
+					{"createIndexes", "id_and_foo"},
+					{"indexes", []bson.D{
+						{
+							{"name", "foo_1"},
+							{"key", bson.D{{"_id", "1"}, {"foo", 1}}},
+						},
+					}},
+				},
+			).Err(),
 		)
 	}
 
@@ -104,14 +134,44 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 		shardCollection(
 			suite.dstMongoClient,
 			"id_and_foo",
-			bson.D{{"foo", 1}, {"_id", "hashed"}},
+			bson.D{{"foo", 1}, {"_id", "1"}},
 			"dst",
 		)
 		shardCollection(
 			suite.dstMongoClient,
 			"sharded_dst",
-			bson.D{{"foo", 1}, {"_id", "hashed"}},
+			bson.D{{"foo", 1}},
 			"dst",
+		)
+	} else {
+		suite.Require().NoError(
+			suite.dstMongoClient.Database(dbname).RunCommand(
+				ctx,
+				bson.D{
+					{"createIndexes", "numtype"},
+					{"indexes", []bson.D{
+						{
+							{"name", "foo_1"},
+							{"key", bson.D{{"foo", float64(1)}}},
+						},
+					}},
+				},
+			).Err(),
+		)
+
+		suite.Require().NoError(
+			suite.dstMongoClient.Database(dbname).RunCommand(
+				ctx,
+				bson.D{
+					{"createIndexes", "id_and_foo"},
+					{"indexes", []bson.D{
+						{
+							{"name", "foo_1"},
+							{"key", bson.D{{"foo", 1}, {"_id", "1"}}},
+						},
+					}},
+				},
+			).Err(),
 		)
 	}
 
