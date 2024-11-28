@@ -76,7 +76,7 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 		shardCollection(
 			suite.srcMongoClient,
 			"id_and_foo",
-			bson.D{{"_id", "1"}, {"foo", 1}},
+			bson.D{{"_id", 1}, {"foo", 1}},
 			"src",
 		)
 	} else {
@@ -102,12 +102,12 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 					{"createIndexes", "id_and_foo"},
 					{"indexes", []bson.D{
 						{
-							{"name", "foo_1"},
-							{"key", bson.D{{"foo", 1}, {"_id", "1"}}},
+							{"name", "foo_1__id_1"},
+							{"key", bson.D{{"foo", 1}, {"_id", 1}}},
 						},
 						{
-							{"name", "foo_1"},
-							{"key", bson.D{{"_id", "1"}, {"foo", 1}}},
+							{"name", "_id_1_foo_1"},
+							{"key", bson.D{{"_id", 1}, {"foo", 1}}},
 						},
 					}},
 				},
@@ -138,7 +138,7 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 		shardCollection(
 			suite.dstMongoClient,
 			"id_and_foo",
-			bson.D{{"foo", 1}, {"_id", "1"}},
+			bson.D{{"foo", 1}, {"_id", 1}},
 			"dst",
 		)
 		shardCollection(
@@ -170,12 +170,12 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 					{"createIndexes", "id_and_foo"},
 					{"indexes", []bson.D{
 						{
-							{"name", "foo_1"},
-							{"key", bson.D{{"foo", 1}, {"_id", "1"}}},
+							{"name", "foo_1__id_1"},
+							{"key", bson.D{{"foo", 1}, {"_id", 1}}},
 						},
 						{
-							{"name", "foo_1"},
-							{"key", bson.D{{"_id", "1"}, {"foo", 1}}},
+							{"name", "_id_1_foo_1"},
+							{"key", bson.D{{"_id", 1}, {"foo", 1}}},
 						},
 					}},
 				},
@@ -243,8 +243,6 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 			taskMap[dbname+".sharded_dst"].Status,
 			"catch dst-only sharded",
 		)
-
-		suite.T().Logf("tasks: %+v", tasks)
 	} else {
 		for _, task := range tasks {
 			suite.Assert().Equal(
