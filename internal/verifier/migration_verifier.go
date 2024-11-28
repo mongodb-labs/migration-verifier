@@ -90,8 +90,8 @@ type Verifier struct {
 	metaClient         *mongo.Client
 	srcClient          *mongo.Client
 	dstClient          *mongo.Client
-	srcBuildInfo       *util.BuildInfo
-	dstBuildInfo       *util.BuildInfo
+	srcClusterInfo     *util.BuildInfo
+	dstClusterInfo     *util.BuildInfo
 	numWorkers         int
 	failureDisplaySize int64
 

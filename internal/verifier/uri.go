@@ -17,14 +17,29 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 		return errors.Wrapf(err, "failed to connect to source %#q", uri)
 	}
 
-	buildInfo, err := util.GetBuildInfo(ctx, verifier.srcClient)
+	clusterInfo, err := util.GetClusterInfo(ctx, verifier.srcClient)
 	if err != nil {
 		return errors.Wrap(err, "failed to read source build info")
 	}
 
-	verifier.srcBuildInfo = &buildInfo
+	verifier.srcClusterInfo = &clusterInfo
 
-	return checkURIAgainstServerVersion(uri, buildInfo)
+	if clusterInfo.Topology == util.TopologySharded {
+		err := RefreshAllMongosInstances(
+			ctx,
+			verifier.logger,
+			opts,
+		)
+
+		if err != nil {
+			return errors.Wrap(
+				err,
+				"failed to refresh source mongos instances",
+			)
+		}
+	}
+
+	return checkURIAgainstServerVersion(uri, clusterInfo)
 }
 
 func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
@@ -35,17 +50,32 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 		return errors.Wrapf(err, "failed to connect to destination %#q", uri)
 	}
 
-	buildInfo, err := util.GetBuildInfo(ctx, verifier.dstClient)
+	clusterInfo, err := util.GetClusterInfo(ctx, verifier.dstClient)
 	if err != nil {
 		return errors.Wrap(err, "failed to read destination build info")
 	}
 
-	verifier.dstBuildInfo = &buildInfo
+	verifier.dstClusterInfo = &clusterInfo
 
-	return checkURIAgainstServerVersion(uri, buildInfo)
+	if clusterInfo.Topology == util.TopologySharded {
+		err := RefreshAllMongosInstances(
+			ctx,
+			verifier.logger,
+			opts,
+		)
+
+		if err != nil {
+			return errors.Wrap(
+				err,
+				"failed to refresh source mongos instances",
+			)
+		}
+	}
+
+	return checkURIAgainstServerVersion(uri, clusterInfo)
 }
 
-func checkURIAgainstServerVersion(uri string, bi util.BuildInfo) error {
+func checkURIAgainstServerVersion(uri string, bi util.ClusterInfo) error {
 	if bi.VersionArray[0] >= 5 {
 		return nil
 	}

@@ -266,7 +266,7 @@ func (verifier *Verifier) getFetcherChannels(
 		cursor, err := verifier.getDocumentsCursor(
 			ctx,
 			verifier.srcClientCollection(task),
-			verifier.srcBuildInfo,
+			verifier.srcClusterInfo,
 			verifier.srcStartAtTs,
 			task,
 		)
@@ -290,7 +290,7 @@ func (verifier *Verifier) getFetcherChannels(
 		cursor, err := verifier.getDocumentsCursor(
 			ctx,
 			verifier.dstClientCollection(task),
-			verifier.dstBuildInfo,
+			verifier.dstClusterInfo,
 			nil, //startAtTs
 			task,
 		)
