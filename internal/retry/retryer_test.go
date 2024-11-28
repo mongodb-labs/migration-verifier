@@ -26,7 +26,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 		suite.NoError(err)
 		suite.Equal(0, attemptNumber)
 
-		_, err = retryer.RunForUUIDErrorOnly(logger, "foo", f)
+		_, err = retryer.RunForUUIDErrorOnly(suite.Context(), logger, "foo", f)
 		suite.NoError(err)
 		suite.Equal(0, attemptNumber)
 
@@ -92,7 +92,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 			}
 			return nil
 		}
-		_, err := retryer.RunForUUIDErrorOnly(logger, "bar", f)
+		_, err := retryer.RunForUUIDErrorOnly(suite.Context(), logger, "bar", f)
 		suite.NoError(err)
 		suite.Equal(attemptLimit/2, attemptNumber)
 	})
@@ -109,7 +109,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 				Raw:  bson.Raw(raw),
 			}
 		}
-		_, err := retryer.RunForUUIDErrorOnly(logger, "bar", f)
+		_, err := retryer.RunForUUIDErrorOnly(suite.Context(), logger, "bar", f)
 		suite.NoError(err)
 		// We only did one retry because the actual collection name matched the
 		// previous attempt.
@@ -130,7 +130,7 @@ func (suite *UnitTestSuite) TestRetryerDurationLimitIsZero() {
 		return cmdErr
 	}
 
-	_, err := retryer.RunForUUIDErrorOnly(suite.Logger(), "bar", f)
+	_, err := retryer.RunForUUIDErrorOnly(suite.Context(), suite.Logger(), "bar", f)
 	suite.Equal(cmdErr, err)
 	suite.Equal(0, attemptNumber)
 }
@@ -280,7 +280,7 @@ func (suite *UnitTestSuite) TestRetryerWithEmptyCollectionName() {
 		return nil
 	}
 
-	name, err := retryer.RunForUUIDErrorOnly(suite.Logger(), "", f)
+	name, err := retryer.RunForUUIDErrorOnly(suite.Context(), suite.Logger(), "", f)
 	suite.NoError(err)
 	suite.Equal("", name)
 }
