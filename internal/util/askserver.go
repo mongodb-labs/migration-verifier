@@ -2,7 +2,6 @@ package util
 
 import (
 	"context"
-	"fmt"
 	"slices"
 
 	"github.com/10gen/migration-verifier/mslices"
@@ -15,15 +14,15 @@ import (
 // ServerThinksTheseMatch runs an aggregation on the server that determines
 // whether the server thinks a & b are equal. This allows you, e.g., to
 // ignore BSON type differences for equivalent numbers.
+//
+// tinker is an optional pipeline that operates on the documents in the
+// pipeline (`a` and `b`, respectively) before they're compared.
 func ServerThinksTheseMatch(
 	ctx context.Context,
 	client *mongo.Client,
 	a, b any,
 	tinker option.Option[mongo.Pipeline],
 ) (bool, error) {
-	fmt.Printf("----------- a: %+v\n\n", a)
-	fmt.Printf("----------- b: %+v\n\n", b)
-
 	pipeline := mongo.Pipeline{
 		{{"$documents", []bson.D{
 			{
