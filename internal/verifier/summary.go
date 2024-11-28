@@ -44,13 +44,7 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 
 		for _, v := range failedTasks {
 			for _, f := range v.FailedDocs {
-				table.Append([]string{
-					fmt.Sprintf("%v", f.ID),
-					fmt.Sprintf("%v", f.Cluster),
-					fmt.Sprintf("%v", f.Field),
-					fmt.Sprintf("%v", f.NameSpace),
-					fmt.Sprintf("%v", f.Details),
-				})
+				table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
 			}
 		}
 		strBuilder.WriteString("\nCollections/Indexes in failed or retry status:\n")
