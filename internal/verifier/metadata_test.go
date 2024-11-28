@@ -8,6 +8,7 @@ import (
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"golang.org/x/exp/maps"
 )
 
 func (suite *IntegrationTestSuite) TestShardingMismatch() {
@@ -33,15 +34,22 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 		)
 	}
 
-	collections := mslices.Of(
-		"idonly",
-		"numtype",
-		"id_and_foo",
-		"sharded_dst",
-	)
+	// Create indexes as needed to ensure that we only
+	// check for sharding mismatches.
+	allIndexes := map[string]map[string]bson.D{
+		"numtype": {
+			"foo_1": {{"foo", 1}},
+		},
+		"id_and_foo": {
+			"foo_1__id_1": {{"foo", 1}, {"_id", 1}},
+			"_id_1_foo_1": {{"_id", 1}, {"foo", 1}},
+		},
+		"idonly":      {},
+		"sharded_dst": {},
+	}
 
 	for c, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
-		for _, collName := range collections {
+		for collName, indexMap := range allIndexes {
 			suite.Require().NoError(
 				client.Database(dbname).CreateCollection(
 					ctx,
@@ -50,6 +58,27 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 				"should create %#q on "+lo.Ternary(c == 0, "source", "destinatinon"),
 				collName,
 			)
+
+			if len(indexMap) > 0 {
+
+				suite.Require().NoError(
+					client.Database(dbname).RunCommand(
+						ctx,
+						bson.D{
+							{"createIndexes", collName},
+							{"indexes", lo.Map(
+								maps.Keys(indexMap),
+								func(idxName string, _ int) bson.D {
+									return bson.D{
+										{"name", idxName},
+										{"key", indexMap[idxName]},
+									}
+								},
+							)},
+						},
+					).Err(),
+				)
+			}
 		}
 	}
 
@@ -78,40 +107,6 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 			"id_and_foo",
 			bson.D{{"_id", 1}, {"foo", 1}},
 			"src",
-		)
-	} else {
-		suite.Require().NoError(
-			suite.srcMongoClient.Database(dbname).RunCommand(
-				ctx,
-				bson.D{
-					{"createIndexes", "numtype"},
-					{"indexes", []bson.D{
-						{
-							{"name", "foo_1"},
-							{"key", bson.D{{"foo", 1}}},
-						},
-					}},
-				},
-			).Err(),
-		)
-
-		suite.Require().NoError(
-			suite.srcMongoClient.Database(dbname).RunCommand(
-				ctx,
-				bson.D{
-					{"createIndexes", "id_and_foo"},
-					{"indexes", []bson.D{
-						{
-							{"name", "foo_1__id_1"},
-							{"key", bson.D{{"foo", 1}, {"_id", 1}}},
-						},
-						{
-							{"name", "_id_1_foo_1"},
-							{"key", bson.D{{"_id", 1}, {"foo", 1}}},
-						},
-					}},
-				},
-			).Err(),
 		)
 	}
 
@@ -144,7 +139,7 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 		shardCollection(
 			suite.dstMongoClient,
 			"sharded_dst",
-			bson.D{{"foo", 1}},
+			bson.D{{"_id", 1}},
 			"dst",
 		)
 	} else {
@@ -186,7 +181,7 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 	verifier := suite.BuildVerifier()
 
 	namespaces := lo.Map(
-		collections,
+		maps.Keys(allIndexes),
 		func(collName string, _ int) string {
 			return dbname + "." + collName
 		},
@@ -210,7 +205,7 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 	var tasks []VerificationTask
 	suite.Require().NoError(cursor.All(ctx, &tasks))
 
-	suite.Require().Len(tasks, len(collections))
+	suite.Require().Len(tasks, len(allIndexes))
 
 	if srcInfo.Topology == util.TopologySharded && dstInfo.Topology == util.TopologySharded {
 		taskMap := mslices.ToMap(
