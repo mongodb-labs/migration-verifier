@@ -503,11 +503,16 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 		}
 	}
 	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
-	verifier.logger.Debug().
-		Interface("task", task.PrimaryKey).
-		Str("findCmd", fmt.Sprintf("%s", findCmd)).
-		Str("options", fmt.Sprintf("%v", *runCommandOptions)).
-		Msg("getDocuments findCmd.")
+
+	// Suppress this log for recheck tasks because the list of IDs can be
+	// quite long.
+	if len(task.Ids) == 0 {
+		verifier.logger.Debug().
+			Interface("task", task.PrimaryKey).
+			Str("findCmd", fmt.Sprintf("%s", findCmd)).
+			Str("options", fmt.Sprintf("%v", *runCommandOptions)).
+			Msg("getDocuments findCmd.")
+	}
 
 	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
 }
@@ -595,16 +600,6 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		Interface("task", task.PrimaryKey).
 		Msg("Processing document comparison task.")
 
-	defer func() {
-		elapsed := time.Since(start)
-
-		verifier.logger.Debug().
-			Int("workerNum", workerNum).
-			Interface("task", task.PrimaryKey).
-			Stringer("timeElapsed", elapsed).
-			Msg("Finished document comparison task.")
-	}()
-
 	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(
 		ctx,
 		task,
@@ -681,12 +676,24 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		}
 	}
 
-	return errors.Wrapf(
-		verifier.UpdateVerificationTask(ctx, task),
-		"failed to persist task %s's new status (%#q)",
-		task.PrimaryKey,
-		task.Status,
-	)
+	err = verifier.UpdateVerificationTask(ctx, task)
+
+	if err != nil {
+		return errors.Wrapf(
+			err,
+			"failed to persist task %s's new status (%#q)",
+			task.PrimaryKey,
+			task.Status,
+		)
+	}
+
+	verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Interface("task", task.PrimaryKey).
+		Stringer("timeElapsed", time.Since(start)).
+		Msg("Finished document comparison task.")
+
+	return nil
 }
 
 func (verifier *Verifier) logChunkInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) {
