@@ -15,7 +15,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 
 	suite.Run("with a function that immediately succeeds", func() {
 		attemptNumber := -1
-		f := func(ri *Info) error {
+		f := func(_ context.Context, ri *Info) error {
 			attemptNumber = ri.GetAttemptNumber()
 			return nil
 		}
@@ -24,7 +24,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 		suite.NoError(err)
 		suite.Equal(0, attemptNumber)
 
-		f2 := func(ri *Info) error {
+		f2 := func(_ context.Context, ri *Info) error {
 			attemptNumber = ri.GetAttemptNumber()
 			return nil
 		}
@@ -36,7 +36,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 
 	suite.Run("with a function that succeeds after two attempts", func() {
 		attemptNumber := -1
-		f := func(ri *Info) error {
+		f := func(_ context.Context, ri *Info) error {
 			attemptNumber = ri.GetAttemptNumber()
 			if attemptNumber < 2 {
 				return mongo.CommandError{
@@ -52,7 +52,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 		suite.Equal(2, attemptNumber)
 
 		attemptNumber = -1
-		f2 := func(ri *Info) error {
+		f2 := func(_ context.Context, ri *Info) error {
 			attemptNumber = ri.GetAttemptNumber()
 			if attemptNumber < 2 {
 				return mongo.CommandError{
@@ -77,7 +77,7 @@ func (suite *UnitTestSuite) TestRetryerDurationLimitIsZero() {
 		Labels: []string{"NetworkError"},
 		Name:   "NetworkError",
 	}
-	f := func(ri *Info) error {
+	f := func(_ context.Context, ri *Info) error {
 		attemptNumber = ri.attemptNumber
 		return cmdErr
 	}
@@ -103,7 +103,7 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	// 1) Not calling IterationSuccess() means f will not be retried, since the
 	// durationLimit is exceeded
 	noSuccessIterations := 0
-	f1 := func(ri *Info) error {
+	f1 := func(_ context.Context, ri *Info) error {
 		// Artificially advance how much time was taken.
 		ri.lastResetTime = ri.lastResetTime.Add(-2 * ri.durationLimit)
 
@@ -126,7 +126,7 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	// 2) Calling IterationSuccess() means f will run more than once because the
 	// duration should be reset.
 	successIterations := 0
-	f2 := func(ri *Info) error {
+	f2 := func(_ context.Context, ri *Info) error {
 		// Artificially advance how much time was taken.
 		ri.lastResetTime = ri.lastResetTime.Add(-2 * ri.durationLimit)
 
@@ -152,7 +152,7 @@ func (suite *UnitTestSuite) TestCancelViaContext() {
 	counter := 0
 	var wg sync.WaitGroup
 	wg.Add(1)
-	f := func(_ *Info) error {
+	f := func(_ context.Context, _ *Info) error {
 		counter++
 		if counter == 1 {
 			return errors.New("not master")
@@ -184,7 +184,7 @@ func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 	}
 
 	var attemptNumber int
-	f := func(ri *Info) error {
+	f := func(_ context.Context, ri *Info) error {
 		attemptNumber = ri.GetAttemptNumber()
 		if attemptNumber == 0 {
 			return customError
