@@ -44,7 +44,7 @@ func GetCollectionUUID(ctx context.Context, logger *logger.Logger, retryer retry
 	opts := options.ListCollections().SetNameOnly(false)
 
 	var collSpecs []*mongo.CollectionSpecification
-	err := retryer.RunForTransientErrorsOnly(
+	err := retryer.Run(
 		ctx,
 		logger,
 		func(ri *retry.Info) error {

@@ -395,7 +395,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 
 		parentThreadWaiting := true
 
-		err := retryer.RunForTransientErrorsOnly(
+		err := retryer.Run(
 			ctx,
 			verifier.logger,
 			func(ri *retry.Info) error {

@@ -738,7 +738,7 @@ func (verifier *Verifier) getShardingInfo(ctx context.Context, namespaceAndUUID 
 //  2. Fetch shard keys.
 //  3. Fetch the size: # of docs, and # of bytes.
 func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, namespace string) ([]*partitions.Partition, []string, types.DocumentCount, types.ByteCount, error) {
-	retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
+	retryer := retry.New(retry.DefaultDurationLimit)
 	dbName, collName := SplitNamespace(namespace)
 	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, verifier.logger, retryer,
 		verifier.srcClientDatabase(dbName), collName)

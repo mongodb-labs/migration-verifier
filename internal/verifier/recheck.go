@@ -133,7 +133,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			}
 
 			retryer := retry.New(retry.DefaultDurationLimit)
-			err := retryer.RunForTransientErrorsOnly(
+			err := retryer.Run(
 				groupCtx,
 				verifier.logger,
 				func(_ *retry.Info) error {
