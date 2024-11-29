@@ -73,7 +73,7 @@ func (suite *UnitTestSuite) TestRetryerDurationLimitIsZero() {
 	retryer := New(0)
 
 	attemptNumber := -1
-	cmdErr := mongo.CommandError{
+	cmdErr := &mongo.CommandError{
 		Labels: []string{"NetworkError"},
 		Name:   "NetworkError",
 	}
@@ -83,8 +83,8 @@ func (suite *UnitTestSuite) TestRetryerDurationLimitIsZero() {
 	}
 
 	err := retryer.Run(suite.Context(), suite.Logger(), f)
-	suite.Equal(cmdErr, err)
-	suite.Equal(0, attemptNumber)
+	suite.Assert().ErrorIs(err, cmdErr)
+	suite.Assert().Equal(0, attemptNumber)
 }
 
 func (suite *UnitTestSuite) TestRetryerDurationReset() {
@@ -95,7 +95,7 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	// to execute. (f will artificially advance the time to greater than the
 	// durationLimit.)
 
-	transientNetworkError := mongo.CommandError{
+	transientNetworkError := &mongo.CommandError{
 		Labels: []string{"NetworkError"},
 		Name:   "NetworkError",
 	}
@@ -105,7 +105,7 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	noSuccessIterations := 0
 	f1 := func(ri *Info) error {
 		// Artificially advance how much time was taken.
-		ri.durationSoFar += 2 * ri.durationLimit
+		ri.lastResetTime = ri.lastResetTime.Add(-2 * ri.durationLimit)
 
 		noSuccessIterations++
 		if noSuccessIterations == 1 {
@@ -116,9 +116,11 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	}
 
 	err := retryer.Run(suite.Context(), logger, f1)
-	// err is not nil and err is not the network error thrown by the function.
-	suite.Error(err)
-	suite.NotEqual(err, transientNetworkError)
+
+	// The error should be the limit-exceeded error, with the
+	// last-noted error being the transient error.
+	suite.Assert().ErrorAs(err, &RetryDurationLimitExceededErr{})
+	suite.Assert().ErrorIs(err, transientNetworkError)
 	suite.Equal(1, noSuccessIterations)
 
 	// 2) Calling IterationSuccess() means f will run more than once because the
@@ -126,7 +128,7 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	successIterations := 0
 	f2 := func(ri *Info) error {
 		// Artificially advance how much time was taken.
-		ri.durationSoFar += 2 * ri.durationLimit
+		ri.lastResetTime = ri.lastResetTime.Add(-2 * ri.durationLimit)
 
 		ri.IterationSuccess()
 
@@ -139,8 +141,8 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	}
 
 	err = retryer.Run(suite.Context(), logger, f2)
-	suite.NoError(err)
-	suite.Equal(2, successIterations)
+	suite.Assert().NoError(err)
+	suite.Assert().Equal(2, successIterations)
 }
 
 func (suite *UnitTestSuite) TestCancelViaContext() {

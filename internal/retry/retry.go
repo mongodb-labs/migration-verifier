@@ -6,9 +6,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/logger"
-	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/pkg/errors"
 )
 
 // Run retries f() whenever a transient error happens, up to the retryer's
@@ -41,48 +39,49 @@ func (r *Retryer) runRetryLoop(
 
 	ri := &Info{
 		durationLimit: r.retryLimit,
+		lastResetTime: time.Now(),
 	}
 	sleepTime := minSleepTime
 
-	for ri.durationSoFar <= ri.durationLimit {
-		retryStartTime := time.Now()
-
-		// Run f() with the current collection name.
+	for {
 		err = f(ri)
 
 		// If f() returned a transient error, sleep and increase the sleep
 		// time for the next retry, maxing out at the maxSleepTime.
-		if r.shouldRetryWithSleep(logger, sleepTime, err) {
-			select {
-			case <-ctx.Done():
-				logger.Error().Err(ctx.Err()).Msg("Context was canceled. Aborting retry loop.")
-				return ctx.Err()
-			case <-time.After(sleepTime):
-				sleepTime *= sleepTimeMultiplier
-				if sleepTime > maxSleepTime {
-					sleepTime = maxSleepTime
-				}
-			}
-
-			ri.attemptNumber++
-
-			if ri.shouldResetDuration {
-				ri.durationSoFar = 0
-				ri.shouldResetDuration = false
-			} else {
-				ri.durationSoFar += time.Since(retryStartTime)
-			}
-			continue
+		if err == nil {
+			return nil
 		}
 
-		return err
-	}
+		if !r.shouldRetryWithSleep(logger, sleepTime, err) {
+			return err
+		}
 
-	return errors.Wrapf(err,
-		"retryable function did not succeed after %d attempt(s) over %s",
-		ri.attemptNumber,
-		reportutils.DurationToHMS(ri.durationSoFar),
-	)
+		select {
+		case <-ctx.Done():
+			logger.Error().Err(ctx.Err()).Msg("Context was canceled. Aborting retry loop.")
+			return ctx.Err()
+		case <-time.After(sleepTime):
+			sleepTime *= sleepTimeMultiplier
+			if sleepTime > maxSleepTime {
+				sleepTime = maxSleepTime
+			}
+		}
+
+		ri.attemptNumber++
+
+		if ri.shouldResetDuration {
+			ri.lastResetTime = time.Now()
+			ri.shouldResetDuration = false
+		}
+
+		if ri.GetDurationSoFar() > ri.durationLimit {
+			return RetryDurationLimitExceededErr{
+				attempts: ri.attemptNumber,
+				duration: ri.GetDurationSoFar(),
+				lastErr:  err,
+			}
+		}
+	}
 }
 
 //

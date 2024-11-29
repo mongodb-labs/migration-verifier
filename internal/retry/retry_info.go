@@ -15,7 +15,7 @@ import (
 type Info struct {
 	attemptNumber int
 
-	durationSoFar time.Duration
+	lastResetTime time.Time
 	durationLimit time.Duration
 
 	// Used to reset the time elapsed for long running operations.
@@ -52,7 +52,7 @@ func (ri *Info) Log(logger *zerolog.Logger, cmdName string, clientType string, d
 	}
 	event.Str("context", msg).
 		Int("attemptNumber", ri.attemptNumber).
-		Str("durationSoFar", reportutils.DurationToHMS(ri.durationSoFar)).
+		Str("durationSoFar", reportutils.DurationToHMS(ri.GetDurationSoFar())).
 		Str("durationLimit", reportutils.DurationToHMS(ri.durationLimit)).
 		Msg("Running retryable function")
 }
@@ -65,7 +65,7 @@ func (ri *Info) GetAttemptNumber() int {
 // GetDurationSoFar returns the Info's current duration so far. This duration
 // applies to the duration of retrying for transient errors only.
 func (ri *Info) GetDurationSoFar() time.Duration {
-	return ri.durationSoFar
+	return time.Since(ri.lastResetTime)
 }
 
 // IterationSuccess is used to tell the retry util to reset its measurement
