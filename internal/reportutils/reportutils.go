@@ -183,5 +183,6 @@ func FindBestUnit[T num16Plus](count T) DataUnit {
 // FmtBytes is a convenience that combines BytesToUnit with FindBestUnit.
 // Use it to format a single count of bytes.
 func FmtBytes[T num16Plus](count T) string {
-	return BytesToUnit(count, FindBestUnit(count))
+	unit := FindBestUnit(count)
+	return BytesToUnit(count, unit) + " " + string(unit)
 }
