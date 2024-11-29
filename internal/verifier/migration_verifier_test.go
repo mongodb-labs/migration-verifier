@@ -1553,8 +1553,22 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	<-checkDoneChan
 }
 
+func (suite *IntegrationTestSuite) waitForRecheckDocs(verifier *Verifier) {
+	suite.Eventually(func() bool {
+		cursor, err := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue).Find(suite.Context(), bson.D{})
+		var docs []bson.D
+		suite.Require().NoError(err)
+		suite.Require().NoError(cursor.All(suite.Context(), &docs))
+		return len(docs) > 0
+	}, 1*time.Minute, 100*time.Millisecond)
+}
+
 func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	defer zerolog.SetGlobalLevel(zerolog.DebugLevel)
+
 	ctx := suite.Context()
+
 	collName := "mycoll"
 
 	srcDB := suite.srcMongoClient.Database(suite.DBNameForTest())
@@ -1574,7 +1588,9 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	suite.Require().NoError(err)
 	_, err = dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
+
 	suite.Require().NoError(runner.AwaitGenerationEnd())
+	suite.waitForRecheckDocs(verifier)
 
 	// Run generation 2 and get verification status.
 	suite.Require().NoError(runner.StartNextGeneration())
@@ -1591,6 +1607,8 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
+	suite.waitForRecheckDocs(verifier)
+
 	status, err = verifier.GetVerificationStatus(ctx)
 	suite.Require().NoError(err)
 	suite.Assert().Equal(
@@ -1603,6 +1621,7 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
+	suite.waitForRecheckDocs(verifier)
 
 	// Everything should match by the end of it.
 	status, err = verifier.GetVerificationStatus(ctx)

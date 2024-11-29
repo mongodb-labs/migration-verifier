@@ -114,6 +114,7 @@ func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *C
 					// Change stream reader has closed the event batch channel because it has finished.
 					return nil
 				}
+				verifier.logger.Trace().Msgf("Verifier is handling a change event batch from %s: %v", reader, batch)
 				err := verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType)
 				if err != nil {
 					reader.ChangeStreamErrChan <- err
@@ -276,6 +277,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
 			return errors.Wrapf(err, "failed to decode change event to %T", changeEventBatch[eventsRead])
 		}
+
+		csr.logger.Trace().Msgf("%s received a change event: %v", csr, changeEventBatch[eventsRead])
 
 		if changeEventBatch[eventsRead].ClusterTime != nil &&
 			(csr.lastChangeEventTime == nil ||
@@ -606,7 +609,7 @@ func (csr *ChangeStreamReader) persistChangeStreamResumeToken(ctx context.Contex
 				Msg("failed to extract resume token timestamp")
 		}
 
-		logEvent.Msg("Persisted change stream resume token.")
+		logEvent.Msgf("Persisted %s's resume token.", csr)
 
 		return nil
 	}
