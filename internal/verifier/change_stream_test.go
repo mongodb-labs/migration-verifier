@@ -2,7 +2,6 @@ package verifier
 
 import (
 	"context"
-	"golang.org/x/sync/errgroup"
 	"strings"
 	"time"
 
@@ -17,6 +16,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
+	"golang.org/x/sync/errgroup"
 )
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter() {

@@ -3,7 +3,6 @@ package verifier
 import (
 	"context"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/keystring"
@@ -17,6 +16,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/sync/errgroup"
 )
 
 const fauxDocSizeForDeleteEvents = 1024
@@ -83,6 +83,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		watcherClient:               verifier.srcClient,
 		buildInfo:                   *verifier.srcBuildInfo,
 		changeStreamRunning:         false,
+		ChangeEventBatchChan:        make(chan []ParsedEvent),
 		ChangeStreamWritesOffTsChan: make(chan primitive.Timestamp),
 		ChangeStreamErrChan:         make(chan error),
 		ChangeStreamDoneChan:        make(chan struct{}),
@@ -95,6 +96,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		watcherClient:               verifier.dstClient,
 		buildInfo:                   *verifier.dstBuildInfo,
 		changeStreamRunning:         false,
+		ChangeEventBatchChan:        make(chan []ParsedEvent),
 		ChangeStreamWritesOffTsChan: make(chan primitive.Timestamp),
 		ChangeStreamErrChan:         make(chan error),
 		ChangeStreamDoneChan:        make(chan struct{}),
@@ -111,7 +113,7 @@ func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *C
 				return ctx.Err()
 			case batch, more := <-reader.ChangeEventBatchChan:
 				if !more {
-					// Change stream reader has closed the event batch channel because it has finished.
+					verifier.logger.Debug().Msgf("Change Event Batch Channel has been closed by %s, returning...", reader)
 					return nil
 				}
 				verifier.logger.Trace().Msgf("Verifier is handling a change event batch from %s: %v", reader, batch)
@@ -279,6 +281,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		}
 
 		csr.logger.Trace().Msgf("%s received a change event: %v", csr, changeEventBatch[eventsRead])
+		fmt.Printf("%d %d\n", changeEventBatch[eventsRead].ClusterTime.T, changeEventBatch[eventsRead].ClusterTime.I)
 
 		if changeEventBatch[eventsRead].ClusterTime != nil &&
 			(csr.lastChangeEventTime == nil ||
@@ -305,8 +308,6 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	cs *mongo.ChangeStream,
 ) error {
 	var lastPersistedTime time.Time
-
-	defer close(csr.ChangeEventBatchChan)
 
 	persistResumeTokenIfNeeded := func() error {
 		if time.Since(lastPersistedTime) <= minChangeStreamPersistInterval {
@@ -357,7 +358,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 					csr.logger.Debug().
 						Interface("currentTimestamp", curTs).
 						Interface("writesOffTimestamp", writesOffTs).
-						Msg("Change stream has reached the writesOff timestamp. Shutting down.")
+						Msgf("%s has reached the writesOff timestamp. Shutting down.", csr)
 
 					break
 				}
@@ -487,12 +488,11 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 	// there's no chance of "nonsense" like both channels returning a payload.
 	initialCreateResultChan := make(chan mo.Result[primitive.Timestamp])
 
-	// Change stream reader closes ChangeEventBatchChan each time after
-	// finish reading change events.
-	// It needs to be re-initialized when a change stream starts.
-	csr.ChangeEventBatchChan = make(chan []ParsedEvent)
-
 	go func() {
+		// Closing ChangeEventBatchChan at the end of change stream goroutine
+		// notifies the verifier's change event handler to exit.
+		defer close(csr.ChangeEventBatchChan)
+
 		retryer := retry.New(retry.DefaultDurationLimit)
 		retryer = retryer.WithErrorCodes(util.CursorKilled)
 

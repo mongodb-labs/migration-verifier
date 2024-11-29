@@ -1,8 +1,9 @@
 package verifier
 
 import (
-	"github.com/stretchr/testify/suite"
 	"testing"
+
+	"github.com/stretchr/testify/suite"
 )
 
 type UnitTestSuite struct {
