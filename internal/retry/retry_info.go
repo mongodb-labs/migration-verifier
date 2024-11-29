@@ -3,6 +3,7 @@ package retry
 import (
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/rs/zerolog"
 )
 
@@ -19,9 +20,6 @@ type Info struct {
 
 	// Used to reset the time elapsed for long running operations.
 	shouldResetDuration bool
-
-	// Mostly useful for testing.
-	numCollectionUUIDRetries int
 }
 
 // Log will log a debug-level message for the current Info values and the provided strings.
@@ -54,8 +52,8 @@ func (ri *Info) Log(logger *zerolog.Logger, cmdName string, clientType string, d
 	}
 	event.Str("context", msg).
 		Int("attemptNumber", ri.attemptNumber).
-		Int("durationSoFar (seconds)", int(ri.durationSoFar.Seconds())).
-		Int("durationLimit (seconds)", int(ri.durationLimit.Seconds())).
+		Str("durationSoFar", reportutils.DurationToHMS(ri.durationSoFar)).
+		Str("durationLimit", reportutils.DurationToHMS(ri.durationLimit)).
 		Msg("Running retryable function")
 }
 
@@ -68,12 +66,6 @@ func (ri *Info) GetAttemptNumber() int {
 // applies to the duration of retrying for transient errors only.
 func (ri *Info) GetDurationSoFar() time.Duration {
 	return ri.durationSoFar
-}
-
-// GetNumCollectionUUIDMismatchRetries returns the number of retries for
-// CollectionUUIDMismatch errors so far. Mostly useful for testing.
-func (ri *Info) GetNumCollectionUUIDMismatchRetries() int {
-	return ri.numCollectionUUIDRetries
 }
 
 // IterationSuccess is used to tell the retry util to reset its measurement

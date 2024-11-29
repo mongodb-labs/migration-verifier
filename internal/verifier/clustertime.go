@@ -31,7 +31,7 @@ func GetNewClusterTime(
 
 	// First we just fetch the latest cluster time among all shards without
 	// updating any shards’ oplogs.
-	err := retryer.RunForTransientErrorsOnly(
+	err := retryer.Run(
 		ctx,
 		logger,
 		func(_ *retry.Info) error {
@@ -53,7 +53,7 @@ func GetNewClusterTime(
 	// fetchClusterTime() will have taught the mongos about the most current
 	// shard’s cluster time. Now we tell that mongos to update all lagging
 	// shards to that time.
-	err = retryer.RunForTransientErrorsOnly(
+	err = retryer.Run(
 		ctx,
 		logger,
 		func(_ *retry.Info) error {
