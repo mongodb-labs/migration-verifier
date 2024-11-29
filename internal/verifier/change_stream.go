@@ -398,7 +398,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 		err := retryer.Run(
 			ctx,
 			verifier.logger,
-			func(ri *retry.Info) error {
+			func(ctx context.Context, ri *retry.Info) error {
 				srcChangeStream, startTs, err := verifier.createChangeStream(ctx)
 				if err != nil {
 					if parentThreadWaiting {

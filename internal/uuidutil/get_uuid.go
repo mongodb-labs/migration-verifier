@@ -47,7 +47,7 @@ func GetCollectionUUID(ctx context.Context, logger *logger.Logger, retryer retry
 	err := retryer.Run(
 		ctx,
 		logger,
-		func(ri *retry.Info) error {
+		func(_ context.Context, ri *retry.Info) error {
 			ri.Log(logger.Logger, "ListCollectionSpecifications", db.Name(), collName, "Getting collection UUID.", "")
 			var driverErr error
 			collSpecs, driverErr = db.ListCollectionSpecifications(ctx, filter, opts)

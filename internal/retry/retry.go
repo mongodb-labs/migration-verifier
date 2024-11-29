@@ -9,6 +9,8 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 )
 
+type RetryCallback = func(context.Context, *Info) error
+
 // Run retries f() whenever a transient error happens, up to the retryer's
 // configured duration limit.
 //
@@ -24,7 +26,7 @@ import (
 // This returns an error if the duration limit is reached, or if f() returns a
 // non-transient error.
 func (r *Retryer) Run(
-	ctx context.Context, logger *logger.Logger, f func(*Info) error,
+	ctx context.Context, logger *logger.Logger, f RetryCallback,
 ) error {
 	return r.runRetryLoop(ctx, logger, f)
 }
@@ -33,7 +35,7 @@ func (r *Retryer) Run(
 func (r *Retryer) runRetryLoop(
 	ctx context.Context,
 	logger *logger.Logger,
-	f func(*Info) error,
+	f RetryCallback,
 ) error {
 	var err error
 
@@ -44,7 +46,7 @@ func (r *Retryer) runRetryLoop(
 	sleepTime := minSleepTime
 
 	for {
-		err = f(ri)
+		err = f(ctx, ri)
 
 		// If f() returned a transient error, sleep and increase the sleep
 		// time for the next retry, maxing out at the maxSleepTime.
