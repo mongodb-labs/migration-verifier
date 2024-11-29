@@ -34,7 +34,7 @@ func GetNewClusterTime(
 	err := retryer.Run(
 		ctx,
 		logger,
-		func(ctx context.Context, _ *retry.Info) error {
+		func(ctx context.Context, _ *retry.FuncInfo) error {
 			var err error
 			clusterTime, err = runAppendOplogNote(
 				ctx,
@@ -56,7 +56,7 @@ func GetNewClusterTime(
 	err = retryer.Run(
 		ctx,
 		logger,
-		func(ctx context.Context, _ *retry.Info) error {
+		func(ctx context.Context, _ *retry.FuncInfo) error {
 			var err error
 			_, err = runAppendOplogNote(
 				ctx,

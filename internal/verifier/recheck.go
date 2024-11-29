@@ -136,7 +136,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			err := retryer.Run(
 				groupCtx,
 				verifier.logger,
-				func(retryCtx context.Context, _ *retry.Info) error {
+				func(retryCtx context.Context, _ *retry.FuncInfo) error {
 					_, err := verifier.verificationDatabase().Collection(recheckQueue).BulkWrite(
 						retryCtx,
 						models,

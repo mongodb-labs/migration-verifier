@@ -324,7 +324,7 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, retryer
 		Capped bool  `bson:"capped"`
 	}{}
 
-	err := retryer.Run(ctx, logger, func(ctx context.Context, ri *retry.Info) error {
+	err := retryer.Run(ctx, logger, func(ctx context.Context, ri *retry.FuncInfo) error {
 		ri.Log(logger.Logger, "collStats", "source", srcDB.Name(), collName, "Retrieving collection size and document count.")
 		request := bson.D{
 			{"aggregate", collName},
@@ -395,7 +395,7 @@ func GetDocumentCountAfterFiltering(ctx context.Context, logger *logger.Logger, 
 	}
 	pipeline = append(pipeline, bson.D{{"$count", "numFilteredDocs"}})
 
-	err := retryer.Run(ctx, logger, func(ctx context.Context, ri *retry.Info) error {
+	err := retryer.Run(ctx, logger, func(ctx context.Context, ri *retry.FuncInfo) error {
 		ri.Log(logger.Logger, "count", "source", srcDB.Name(), collName, "Counting filtered documents.")
 		request := bson.D{
 			{"aggregate", collName},
@@ -488,7 +488,7 @@ func getOuterIDBound(
 	}...)
 
 	// Get one document containing only the smallest or largest _id value in the collection.
-	err := retryer.Run(ctx, subLogger, func(ctx context.Context, ri *retry.Info) error {
+	err := retryer.Run(ctx, subLogger, func(ctx context.Context, ri *retry.FuncInfo) error {
 		ri.Log(subLogger.Logger, "aggregate", "source", srcDB.Name(), collName, fmt.Sprintf("getting %s _id partition bound", minOrMaxBound))
 		cursor, cmdErr :=
 			srcDB.RunCommandCursor(ctx, bson.D{
@@ -577,7 +577,7 @@ func getMidIDBounds(
 	// Get a cursor for the $sample and $bucketAuto aggregation.
 	var midIDBounds []interface{}
 	agRetryer := retryer.WithErrorCodes(util.SampleTooManyDuplicates)
-	err := agRetryer.Run(ctx, logger, func(ctx context.Context, ri *retry.Info) error {
+	err := agRetryer.Run(ctx, logger, func(ctx context.Context, ri *retry.FuncInfo) error {
 		ri.Log(logger.Logger, "aggregate", "source", srcDB.Name(), collName, "Retrieving mid _id partition bounds using $sample.")
 		cursor, cmdErr :=
 			srcDB.RunCommandCursor(ctx, bson.D{
@@ -613,7 +613,7 @@ func getMidIDBounds(
 
 			// Append the copied bound to the other mid _id bounds.
 			midIDBounds = append(midIDBounds, bound)
-			ri.IterationSuccess()
+			ri.NoteSuccess()
 		}
 
 		return cursor.Err()

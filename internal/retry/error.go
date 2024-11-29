@@ -25,3 +25,15 @@ func (rde RetryDurationLimitExceededErr) Error() string {
 func (rde RetryDurationLimitExceededErr) Unwrap() error {
 	return rde.lastErr
 }
+
+// errgroupErr is an internal error type that we return from errgroup
+// callbacks. It allows us to know (reliably) which error is the one
+// that triggers the errgroup's failure
+type errgroupErr struct {
+	funcNum         int
+	errFromCallback error
+}
+
+func (ege errgroupErr) Error() string {
+	return fmt.Sprintf("func %d failed: %v", ege.funcNum, ege.errFromCallback)
+}
