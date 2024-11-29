@@ -59,10 +59,10 @@ func RefreshAllMongosInstances(
 			return err
 		}
 
-		err = r.RunForTransientErrorsOnly(
+		err = r.Run(
 			ctx,
 			l,
-			func(ri *retry.Info) error {
+			func(ctx context.Context, _ *retry.FuncInfo) error {
 				// Query a collection on the config server with linearizable read concern to advance the config
 				// server primary's majority-committed optime. This populates the $configOpTime.
 				opts := options.Database().SetReadConcern(readconcern.Linearizable())
@@ -173,10 +173,10 @@ func runListShards(
 	client *mongo.Client,
 ) (*mongo.SingleResult, error) {
 	var res *mongo.SingleResult
-	err := r.RunForTransientErrorsOnly(
+	err := r.Run(
 		ctx,
 		l,
-		func(_ *retry.Info) error {
+		func(ctx context.Context, _ *retry.FuncInfo) error {
 			res = client.Database("admin").RunCommand(ctx, bson.D{{"listShards", 1}})
 			return res.Err()
 		},

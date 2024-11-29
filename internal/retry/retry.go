@@ -2,17 +2,35 @@ package retry
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math/rand"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/samber/lo"
+	"golang.org/x/sync/errgroup"
 )
 
-type RetryCallback = func(context.Context, *Info) error
+type RetryCallback = func(context.Context, *FuncInfo) error
 
-// Run retries f() whenever a transient error happens, up to the retryer's
-// configured duration limit.
+// Run() runs each given callback in parallel. If none of them fail,
+// then no error is returned.
+//
+// If one of them fails, the other callbacks' contexts are canceled.
+// If the error is non-transient, it's returned. If the error is transient,
+// though, then the retryer reruns each callback.
+//
+// The retryer tracks the last time each callback either a) succeeded or b)
+// was canceled. Whenever a callback fails, the retryer checks how long it
+// has gone since a success/cancellation. If that time period exceeds the
+// retryer's duration limit, then the retry loop ends, and a
+// RetryDurationLimitExceededErr is returned.
+//
+// Note that, if a given callback runs multiple potentially-retryable requests,
+// each successful request should be noted in the callback's FuncInfo.
+// See that struct's documentation for more details.
 //
 // IMPORTANT: This function should generally NOT be used within a transaction
 // callback. It may be used within a transaction callback if and only if:
@@ -26,7 +44,7 @@ type RetryCallback = func(context.Context, *Info) error
 // This returns an error if the duration limit is reached, or if f() returns a
 // non-transient error.
 func (r *Retryer) Run(
-	ctx context.Context, logger *logger.Logger, f RetryCallback,
+	ctx context.Context, logger *logger.Logger, f ...RetryCallback,
 ) error {
 	return r.runRetryLoop(ctx, logger, f)
 }
@@ -35,29 +53,76 @@ func (r *Retryer) Run(
 func (r *Retryer) runRetryLoop(
 	ctx context.Context,
 	logger *logger.Logger,
-	f RetryCallback,
+	funcs []RetryCallback,
 ) error {
 	var err error
 
-	ri := &Info{
+	startTime := time.Now()
+
+	li := &LoopInfo{
 		durationLimit: r.retryLimit,
-		lastResetTime: time.Now(),
 	}
+	funcinfos := lo.RepeatBy(
+		len(funcs),
+		func(_ int) *FuncInfo {
+			return &FuncInfo{
+				lastResetTime: startTime,
+				loopInfo:      li,
+			}
+		},
+	)
 	sleepTime := minSleepTime
 
 	for {
-		err = f(ctx, ri)
+		eg, egCtx := errgroup.WithContext(ctx)
+		for i, curFunc := range funcs {
 
-		// If f() returned a transient error, sleep and increase the sleep
-		// time for the next retry, maxing out at the maxSleepTime.
+			eg.Go(func() error {
+				err := curFunc(egCtx, funcinfos[i])
+
+				if err != nil {
+					return errgroupErr{
+						funcNum:         i,
+						errFromCallback: err,
+					}
+				}
+
+				return nil
+			})
+		}
+		err = eg.Wait()
+
+		// No error? Success!
 		if err == nil {
 			return nil
 		}
 
-		if !r.shouldRetryWithSleep(logger, sleepTime, err) {
-			return err
+		// Let's get the actual error from the function.
+		groupErr := errgroupErr{}
+		if !errors.As(err, &groupErr) {
+			panic(fmt.Sprintf("Error should be a %T, not %T: %v", groupErr, err, err))
 		}
 
+		// Not a transient error? Fail immediately.
+		if !r.shouldRetryWithSleep(logger, sleepTime, groupErr.errFromCallback) {
+			return groupErr.errFromCallback
+		}
+
+		li.attemptNumber++
+
+		// Our error is transient. If we've exhausted the allowed time
+		// then fail.
+		failedFuncInfo := funcinfos[groupErr.funcNum]
+		if failedFuncInfo.GetDurationSoFar() > li.durationLimit {
+			return RetryDurationLimitExceededErr{
+				attempts: li.attemptNumber,
+				duration: failedFuncInfo.GetDurationSoFar(),
+				lastErr:  groupErr.errFromCallback,
+			}
+		}
+
+		// Sleep and increase the sleep time for the next retry,
+		// up to maxSleepTime.
 		select {
 		case <-ctx.Done():
 			logger.Error().Err(ctx.Err()).Msg("Context was canceled. Aborting retry loop.")
@@ -69,18 +134,12 @@ func (r *Retryer) runRetryLoop(
 			}
 		}
 
-		ri.attemptNumber++
+		now := time.Now()
 
-		if ri.shouldResetDuration {
-			ri.lastResetTime = time.Now()
-			ri.shouldResetDuration = false
-		}
-
-		if ri.GetDurationSoFar() > ri.durationLimit {
-			return RetryDurationLimitExceededErr{
-				attempts: ri.attemptNumber,
-				duration: ri.GetDurationSoFar(),
-				lastErr:  err,
+		// Set all of the funcs that did *not* fail as having just succeeded.
+		for i, curInfo := range funcinfos {
+			if i != groupErr.funcNum {
+				curInfo.lastResetTime = now
 			}
 		}
 	}

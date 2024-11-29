@@ -160,7 +160,7 @@ func (verifier *Verifier) GetChangeStreamFilter() (pipeline mongo.Pipeline) {
 // shouldn’t really happen anyway by definition.
 func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 	ctx context.Context,
-	ri *retry.Info,
+	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
 ) error {
 	eventsRead := 0
@@ -188,7 +188,7 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
-	ri.IterationSuccess()
+	ri.NoteSuccess()
 
 	if eventsRead == 0 {
 		return nil
@@ -204,7 +204,7 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 
 func (verifier *Verifier) iterateChangeStream(
 	ctx context.Context,
-	ri *retry.Info,
+	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
 ) error {
 	var lastPersistedTime time.Time
@@ -398,7 +398,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 		err := retryer.Run(
 			ctx,
 			verifier.logger,
-			func(ctx context.Context, ri *retry.Info) error {
+			func(ctx context.Context, ri *retry.FuncInfo) error {
 				srcChangeStream, startTs, err := verifier.createChangeStream(ctx)
 				if err != nil {
 					if parentThreadWaiting {

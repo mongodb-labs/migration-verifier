@@ -3,11 +3,20 @@ package retry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/10gen/migration-verifier/internal/util"
 	"go.mongodb.org/mongo-driver/mongo"
 )
+
+var someNetworkError = &mongo.CommandError{
+	Labels: []string{"NetworkError"},
+	Name:   "NetworkError",
+}
+
+var badError = errors.New("I am fatal!")
 
 func (suite *UnitTestSuite) TestRetryer() {
 	retryer := New(DefaultDurationLimit)
@@ -15,7 +24,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 
 	suite.Run("with a function that immediately succeeds", func() {
 		attemptNumber := -1
-		f := func(_ context.Context, ri *Info) error {
+		f := func(_ context.Context, ri *FuncInfo) error {
 			attemptNumber = ri.GetAttemptNumber()
 			return nil
 		}
@@ -24,7 +33,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 		suite.NoError(err)
 		suite.Equal(0, attemptNumber)
 
-		f2 := func(_ context.Context, ri *Info) error {
+		f2 := func(_ context.Context, ri *FuncInfo) error {
 			attemptNumber = ri.GetAttemptNumber()
 			return nil
 		}
@@ -36,13 +45,10 @@ func (suite *UnitTestSuite) TestRetryer() {
 
 	suite.Run("with a function that succeeds after two attempts", func() {
 		attemptNumber := -1
-		f := func(_ context.Context, ri *Info) error {
+		f := func(_ context.Context, ri *FuncInfo) error {
 			attemptNumber = ri.GetAttemptNumber()
 			if attemptNumber < 2 {
-				return mongo.CommandError{
-					Labels: []string{"NetworkError"},
-					Name:   "NetworkError",
-				}
+				return someNetworkError
 			}
 			return nil
 		}
@@ -52,13 +58,10 @@ func (suite *UnitTestSuite) TestRetryer() {
 		suite.Equal(2, attemptNumber)
 
 		attemptNumber = -1
-		f2 := func(_ context.Context, ri *Info) error {
+		f2 := func(_ context.Context, ri *FuncInfo) error {
 			attemptNumber = ri.GetAttemptNumber()
 			if attemptNumber < 2 {
-				return mongo.CommandError{
-					Labels: []string{"NetworkError"},
-					Name:   "NetworkError",
-				}
+				return someNetworkError
 			}
 			return nil
 		}
@@ -73,17 +76,13 @@ func (suite *UnitTestSuite) TestRetryerDurationLimitIsZero() {
 	retryer := New(0)
 
 	attemptNumber := -1
-	cmdErr := &mongo.CommandError{
-		Labels: []string{"NetworkError"},
-		Name:   "NetworkError",
-	}
-	f := func(_ context.Context, ri *Info) error {
-		attemptNumber = ri.attemptNumber
-		return cmdErr
+	f := func(_ context.Context, ri *FuncInfo) error {
+		attemptNumber = ri.GetAttemptNumber()
+		return someNetworkError
 	}
 
 	err := retryer.Run(suite.Context(), suite.Logger(), f)
-	suite.Assert().ErrorIs(err, cmdErr)
+	suite.Assert().ErrorIs(err, someNetworkError)
 	suite.Assert().Equal(0, attemptNumber)
 }
 
@@ -95,21 +94,16 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	// to execute. (f will artificially advance the time to greater than the
 	// durationLimit.)
 
-	transientNetworkError := &mongo.CommandError{
-		Labels: []string{"NetworkError"},
-		Name:   "NetworkError",
-	}
-
 	// 1) Not calling IterationSuccess() means f will not be retried, since the
 	// durationLimit is exceeded
 	noSuccessIterations := 0
-	f1 := func(_ context.Context, ri *Info) error {
+	f1 := func(_ context.Context, ri *FuncInfo) error {
 		// Artificially advance how much time was taken.
-		ri.lastResetTime = ri.lastResetTime.Add(-2 * ri.durationLimit)
+		ri.lastResetTime = ri.lastResetTime.Add(-2 * ri.loopInfo.durationLimit)
 
 		noSuccessIterations++
 		if noSuccessIterations == 1 {
-			return transientNetworkError
+			return someNetworkError
 		}
 
 		return nil
@@ -120,21 +114,21 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	// The error should be the limit-exceeded error, with the
 	// last-noted error being the transient error.
 	suite.Assert().ErrorAs(err, &RetryDurationLimitExceededErr{})
-	suite.Assert().ErrorIs(err, transientNetworkError)
+	suite.Assert().ErrorIs(err, someNetworkError)
 	suite.Equal(1, noSuccessIterations)
 
 	// 2) Calling IterationSuccess() means f will run more than once because the
 	// duration should be reset.
 	successIterations := 0
-	f2 := func(_ context.Context, ri *Info) error {
+	f2 := func(_ context.Context, ri *FuncInfo) error {
 		// Artificially advance how much time was taken.
-		ri.lastResetTime = ri.lastResetTime.Add(-2 * ri.durationLimit)
+		ri.lastResetTime = ri.lastResetTime.Add(-2 * ri.loopInfo.durationLimit)
 
-		ri.IterationSuccess()
+		ri.NoteSuccess()
 
 		successIterations++
 		if successIterations == 1 {
-			return transientNetworkError
+			return someNetworkError
 		}
 
 		return nil
@@ -152,7 +146,7 @@ func (suite *UnitTestSuite) TestCancelViaContext() {
 	counter := 0
 	var wg sync.WaitGroup
 	wg.Add(1)
-	f := func(_ context.Context, _ *Info) error {
+	f := func(_ context.Context, _ *FuncInfo) error {
 		counter++
 		if counter == 1 {
 			return errors.New("not master")
@@ -184,7 +178,7 @@ func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 	}
 
 	var attemptNumber int
-	f := func(_ context.Context, ri *Info) error {
+	f := func(_ context.Context, ri *FuncInfo) error {
 		attemptNumber = ri.GetAttemptNumber()
 		if attemptNumber == 0 {
 			return customError
@@ -222,4 +216,116 @@ func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 		suite.Equal(42, util.GetErrorCode(err))
 		suite.Equal(0, attemptNumber)
 	})
+}
+
+func (suite *UnitTestSuite) TestMulti_NonTransient() {
+	ctx := suite.Context()
+	logger := suite.Logger()
+
+	retryer := New(DefaultDurationLimit)
+
+	err := retryer.Run(
+		ctx,
+		logger,
+		func(ctx context.Context, _ *FuncInfo) error {
+			timer := time.NewTimer(10 * time.Second)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		},
+		func(_ context.Context, _ *FuncInfo) error {
+			return badError
+		},
+	)
+
+	suite.Assert().ErrorIs(err, badError)
+}
+
+func (suite *UnitTestSuite) TestMulti_Transient() {
+	ctx := suite.Context()
+	logger := suite.Logger()
+
+	for _, finalErr := range []error{nil, badError} {
+		suite.Run(
+			fmt.Sprintf("final error: %v", finalErr),
+			func() {
+				retryer := New(DefaultDurationLimit)
+				cb1Attempts := 0
+				cb2Attempts := 0
+
+				err := retryer.Run(
+					ctx,
+					logger,
+
+					// This one succeeds every time.
+					func(ctx context.Context, _ *FuncInfo) error {
+						cb1Attempts++
+
+						return nil
+					},
+					func(_ context.Context, _ *FuncInfo) error {
+						cb2Attempts++
+
+						switch cb2Attempts {
+						case 1, 2:
+							return someNetworkError
+						default:
+							return finalErr
+						}
+					},
+				)
+
+				if finalErr == nil {
+					suite.Assert().NoError(err)
+				} else {
+					suite.Assert().ErrorIs(err, finalErr)
+				}
+
+				suite.Assert().Greater(cb2Attempts, 1)
+				suite.Assert().Equal(cb2Attempts, cb1Attempts, "both should be retried each time")
+			},
+		)
+	}
+}
+
+// TestMulti_LongRunningSuccess verifies that a long-running
+// success won’t spuriously fail because another thread keeps
+// restarting.
+func (suite *UnitTestSuite) TestMulti_LongRunningSuccess() {
+	ctx := suite.Context()
+	logger := suite.Logger()
+
+	startTime := time.Now()
+	retryerLimit := 2 * time.Second
+	retryer := New(retryerLimit)
+
+	succeedPastTime := startTime.Add(retryerLimit + 1*time.Second)
+
+	err := retryer.Run(
+		ctx,
+		logger,
+		func(ctx context.Context, fi *FuncInfo) error {
+			fi.NoteSuccess()
+
+			if time.Now().Before(succeedPastTime) {
+				time.Sleep(1 * time.Second)
+				return someNetworkError
+			}
+
+			return nil
+		},
+		func(ctx context.Context, fi *FuncInfo) error {
+			if time.Now().Before(succeedPastTime) {
+				<-ctx.Done()
+				return ctx.Err()
+			}
+
+			return nil
+		},
+	)
+
+	suite.Assert().NoError(err)
 }
