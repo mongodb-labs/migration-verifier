@@ -281,7 +281,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		}
 
 		csr.logger.Trace().Msgf("%s received a change event: %v", csr, changeEventBatch[eventsRead])
-		fmt.Printf("%d %d\n", changeEventBatch[eventsRead].ClusterTime.T, changeEventBatch[eventsRead].ClusterTime.I)
 
 		if changeEventBatch[eventsRead].ClusterTime != nil &&
 			(csr.lastChangeEventTime == nil ||
