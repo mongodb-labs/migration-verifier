@@ -76,11 +76,11 @@ const (
 	notOkSymbol = "\u2757" // heavy exclamation mark symbol
 )
 
-type clusterType string
+type whichCluster string
 
 const (
-	srcReaderType clusterType = "source"
-	dstReaderType clusterType = "destination"
+	src whichCluster = "source"
+	dst whichCluster = "destination"
 )
 
 var timeFormat = time.RFC3339
@@ -202,13 +202,13 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		logger: logger,
 		writer: logWriter,
 
-		phase:                       Idle,
-		numWorkers:                  NumWorkers,
-		readPreference:              readpref.Primary(),
-		partitionSizeInBytes:        400 * 1024 * 1024,
-		failureDisplaySize:          DefaultFailureDisplaySize,
+		phase:                Idle,
+		numWorkers:           NumWorkers,
+		readPreference:       readpref.Primary(),
+		partitionSizeInBytes: 400 * 1024 * 1024,
+		failureDisplaySize:   DefaultFailureDisplaySize,
 
-		readConcernSetting:          readConcern,
+		readConcernSetting: readConcern,
 
 		// This will get recreated once gen0 starts, but we want it
 		// here in case the change streams gets an event before then.

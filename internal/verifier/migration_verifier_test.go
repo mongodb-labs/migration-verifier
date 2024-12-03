@@ -153,7 +153,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
 				ID: "heyhey",
 			},
 		}},
-		srcReaderType,
+		src,
 	)
 	suite.Require().NoError(err)
 
@@ -169,7 +169,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
 				ID: "hoohoo",
 			},
 		}},
-		srcReaderType,
+		src,
 	)
 	suite.Require().NoError(err)
 
@@ -413,19 +413,19 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		},
 	}
 
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, srcReaderType)
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
 	suite.Require().NoError(err)
 	event.OpType = "insert"
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, srcReaderType)
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
 	suite.Require().NoError(err)
 	event.OpType = "replace"
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, srcReaderType)
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
 	suite.Require().NoError(err)
 	event.OpType = "update"
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, srcReaderType)
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
 	suite.Require().NoError(err)
 	event.OpType = "flibbity"
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, srcReaderType)
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
 	badEventErr := UnknownEventError{}
 	suite.Require().ErrorAs(err, &badEventErr)
 	suite.Assert().Equal("flibbity", badEventErr.Event.OpType)

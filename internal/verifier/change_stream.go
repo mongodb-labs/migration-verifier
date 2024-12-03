@@ -54,7 +54,7 @@ func (uee UnknownEventError) Error() string {
 }
 
 type ChangeStreamReader struct {
-	readerType clusterType
+	readerType whichCluster
 
 	lastChangeEventTime *primitive.Timestamp
 	logger              *logger.Logger
@@ -75,7 +75,7 @@ type ChangeStreamReader struct {
 
 func (verifier *Verifier) initializeChangeStreamReaders() {
 	verifier.srcChangeStreamReader = &ChangeStreamReader{
-		readerType:           srcReaderType,
+		readerType:           src,
 		logger:               verifier.logger,
 		namespaces:           verifier.srcNamespaces,
 		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
@@ -88,7 +88,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		DoneChan:             make(chan struct{}),
 	}
 	verifier.dstChangeStreamReader = &ChangeStreamReader{
-		readerType:           dstReaderType,
+		readerType:           dst,
 		logger:               verifier.logger,
 		namespaces:           verifier.dstNamespaces,
 		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
@@ -125,7 +125,7 @@ func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *C
 }
 
 // HandleChangeStreamEvents performs the necessary work for change stream events after receiving a batch.
-func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []ParsedEvent, eventOrigin clusterType) error {
+func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []ParsedEvent, eventOrigin whichCluster) error {
 	if len(batch) == 0 {
 		return nil
 	}
@@ -153,7 +153,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 			// Recheck Docs are keyed by source namespaces.
 			// We need to retrieve the source namespaces if change events are from the destination.
 			switch eventOrigin {
-			case dstReaderType:
+			case dst:
 				if verifier.nsMap.Len() == 0 {
 					// Namespace is not remapped. Source namespace is the same as the destination.
 					srcDBName = changeEvent.Ns.DB
@@ -166,7 +166,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 					}
 					srcDBName, srcCollName = SplitNamespace(srcNs)
 				}
-			case srcReaderType:
+			case src:
 				srcDBName = changeEvent.Ns.DB
 				srcCollName = changeEvent.Ns.Coll
 			default:
@@ -574,9 +574,9 @@ func (csr *ChangeStreamReader) String() string {
 
 func (csr *ChangeStreamReader) resumeTokenDocID() string {
 	switch csr.readerType {
-	case srcReaderType:
+	case src:
 		return "srcResumeToken"
-	case dstReaderType:
+	case dst:
 		return "dstResumeToken"
 	default:
 		panic("unknown readerType: " + csr.readerType)
