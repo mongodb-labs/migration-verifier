@@ -25,3 +25,26 @@ func (s *mySuite) Test_Of() {
 
 	s.Assert().Equal(1, b[0], "should copy slice")
 }
+
+func (s *mySuite) Test_ToMap() {
+	type stuff struct {
+		Name string
+	}
+
+	mySlice := []stuff{{"foo"}, {"bar"}, {"bar"}}
+
+	myMap := ToMap(
+		mySlice,
+		func(el stuff) string {
+			return el.Name
+		},
+	)
+
+	s.Assert().Equal(
+		map[string]stuff{
+			"foo": {"foo"},
+			"bar": {"bar"},
+		},
+		myMap,
+	)
+}
