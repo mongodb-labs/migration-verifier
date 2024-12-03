@@ -1521,6 +1521,8 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		}
 	} else {
 		switch genstatus {
+		case Gen0MetadataAnalysisComplete:
+			fallthrough
 		case GenerationInProgress:
 			statusLine = "This generation has nothing to compare."
 		case GenerationComplete:
