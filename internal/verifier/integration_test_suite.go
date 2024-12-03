@@ -118,7 +118,6 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 
 	suite.contextCanceller(errors.Errorf("tearing down test %#q", suite.T().Name()))
 	suite.testContext, suite.contextCanceller = nil, nil
-
 	ctx := context.Background()
 	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient} {
 		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
@@ -171,6 +170,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		"should set metadata connection string",
 	)
 	verifier.SetMetaDBName(metaDBName)
+	verifier.initializeChangeStreamReaders()
 
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))
 	suite.Require().NoError(verifier.dstClientCollection(&task).Drop(ctx))

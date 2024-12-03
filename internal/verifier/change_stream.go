@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/keystring"
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
@@ -52,8 +53,79 @@ func (uee UnknownEventError) Error() string {
 	return fmt.Sprintf("received event with unknown optype: %+v", uee.Event)
 }
 
+type ChangeStreamReader struct {
+	readerType whichCluster
+
+	lastChangeEventTime *primitive.Timestamp
+	logger              *logger.Logger
+	namespaces          []string
+
+	metaDB        *mongo.Database
+	watcherClient *mongo.Client
+	clusterInfo   util.ClusterInfo
+
+	changeStreamRunning  bool
+	changeEventBatchChan chan []ParsedEvent
+	writesOffTsChan      chan primitive.Timestamp
+	errChan              chan error
+	doneChan             chan struct{}
+
+	startAtTs *primitive.Timestamp
+}
+
+func (verifier *Verifier) initializeChangeStreamReaders() {
+	verifier.srcChangeStreamReader = &ChangeStreamReader{
+		readerType:           src,
+		logger:               verifier.logger,
+		namespaces:           verifier.srcNamespaces,
+		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
+		watcherClient:        verifier.srcClient,
+		clusterInfo:          *verifier.srcClusterInfo,
+		changeStreamRunning:  false,
+		changeEventBatchChan: make(chan []ParsedEvent),
+		writesOffTsChan:      make(chan primitive.Timestamp),
+		errChan:              make(chan error),
+		doneChan:             make(chan struct{}),
+	}
+	verifier.dstChangeStreamReader = &ChangeStreamReader{
+		readerType:           dst,
+		logger:               verifier.logger,
+		namespaces:           verifier.dstNamespaces,
+		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
+		watcherClient:        verifier.dstClient,
+		clusterInfo:          *verifier.dstClusterInfo,
+		changeStreamRunning:  false,
+		changeEventBatchChan: make(chan []ParsedEvent),
+		writesOffTsChan:      make(chan primitive.Timestamp),
+		errChan:              make(chan error),
+		doneChan:             make(chan struct{}),
+	}
+}
+
+// StartChangeEventHandler starts a goroutine that handles change event batches from the reader.
+// It needs to be started after the reader starts.
+func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *ChangeStreamReader) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case batch, more := <-reader.changeEventBatchChan:
+			if !more {
+				verifier.logger.Debug().Msgf("Change Event Batch Channel has been closed by %s, returning...", reader)
+				return nil
+			}
+			verifier.logger.Trace().Msgf("Verifier is handling a change event batch from %s: %v", reader, batch)
+			err := verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType)
+			if err != nil {
+				reader.errChan <- err
+				return err
+			}
+		}
+	}
+}
+
 // HandleChangeStreamEvents performs the necessary work for change stream events after receiving a batch.
-func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []ParsedEvent) error {
+func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []ParsedEvent, eventOrigin whichCluster) error {
 	if len(batch) == 0 {
 		return nil
 	}
@@ -64,11 +136,6 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 	dataSizes := make([]int, len(batch))
 
 	for i, changeEvent := range batch {
-		if changeEvent.ClusterTime != nil &&
-			(verifier.lastChangeEventTime == nil ||
-				verifier.lastChangeEventTime.Before(*changeEvent.ClusterTime)) {
-			verifier.lastChangeEventTime = changeEvent.ClusterTime
-		}
 		switch changeEvent.OpType {
 		case "delete":
 			fallthrough
@@ -80,8 +147,34 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 			if err := verifier.eventRecorder.AddEvent(&changeEvent); err != nil {
 				return errors.Wrapf(err, "failed to augment stats with change event (%+v)", changeEvent)
 			}
-			dbNames[i] = changeEvent.Ns.DB
-			collNames[i] = changeEvent.Ns.Coll
+
+			var srcDBName, srcCollName string
+
+			// Recheck Docs are keyed by source namespaces.
+			// We need to retrieve the source namespaces if change events are from the destination.
+			switch eventOrigin {
+			case dst:
+				if verifier.nsMap.Len() == 0 {
+					// Namespace is not remapped. Source namespace is the same as the destination.
+					srcDBName = changeEvent.Ns.DB
+					srcCollName = changeEvent.Ns.Coll
+				} else {
+					dstNs := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
+					srcNs, exist := verifier.nsMap.GetSrcNamespace(dstNs)
+					if !exist {
+						return errors.Errorf("no source namespace corresponding to the destination namepsace %s", dstNs)
+					}
+					srcDBName, srcCollName = SplitNamespace(srcNs)
+				}
+			case src:
+				srcDBName = changeEvent.Ns.DB
+				srcCollName = changeEvent.Ns.Coll
+			default:
+				return errors.Errorf("unknown event origin: %s", eventOrigin)
+			}
+
+			dbNames[i] = srcDBName
+			collNames[i] = srcCollName
 			docIDs[i] = changeEvent.DocKey.ID
 
 			if changeEvent.FullDocument == nil {
@@ -116,17 +209,16 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 // and omit fullDocument, but $bsonSize was new in MongoDB 4.4, and we still
 // want to verify migrations from 4.2. fullDocument is unlikely to be a
 // bottleneck anyway.
-func (verifier *Verifier) GetChangeStreamFilter() (pipeline mongo.Pipeline) {
-
-	if len(verifier.srcNamespaces) == 0 {
+func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline) {
+	if len(csr.namespaces) == 0 {
 		pipeline = mongo.Pipeline{
 			{{"$match", bson.D{
-				{"ns.db", bson.D{{"$ne", verifier.metaDBName}}},
+				{"ns.db", bson.D{{"$ne", csr.metaDB.Name()}}},
 			}}},
 		}
 	} else {
 		filter := []bson.D{}
-		for _, ns := range verifier.srcNamespaces {
+		for _, ns := range csr.namespaces {
 			db, coll := SplitNamespace(ns)
 			filter = append(filter, bson.D{
 				{"ns", bson.D{
@@ -158,7 +250,7 @@ func (verifier *Verifier) GetChangeStreamFilter() (pipeline mongo.Pipeline) {
 // the verifier will enqueue rechecks from those post-writesOff events. This
 // is unideal but shouldn’t impede correctness since post-writesOff events
 // shouldn’t really happen anyway by definition.
-func (verifier *Verifier) readAndHandleOneChangeEventBatch(
+func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	ctx context.Context,
 	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
@@ -185,6 +277,15 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 			return errors.Wrapf(err, "failed to decode change event to %T", changeEventBatch[eventsRead])
 		}
 
+		// This only logs in tests.
+		csr.logger.Trace().Interface("event", changeEventBatch[eventsRead]).Msgf("%s received a change event", csr)
+
+		if changeEventBatch[eventsRead].ClusterTime != nil &&
+			(csr.lastChangeEventTime == nil ||
+				csr.lastChangeEventTime.Before(*changeEventBatch[eventsRead].ClusterTime)) {
+			csr.lastChangeEventTime = changeEventBatch[eventsRead].ClusterTime
+		}
+
 		eventsRead++
 	}
 
@@ -194,15 +295,11 @@ func (verifier *Verifier) readAndHandleOneChangeEventBatch(
 		return nil
 	}
 
-	err := verifier.HandleChangeStreamEvents(ctx, changeEventBatch)
-	if err != nil {
-		return errors.Wrap(err, "failed to handle change events")
-	}
-
+	csr.changeEventBatchChan <- changeEventBatch
 	return nil
 }
 
-func (verifier *Verifier) iterateChangeStream(
+func (csr *ChangeStreamReader) iterateChangeStream(
 	ctx context.Context,
 	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
@@ -214,7 +311,7 @@ func (verifier *Verifier) iterateChangeStream(
 			return nil
 		}
 
-		err := verifier.persistChangeStreamResumeToken(ctx, cs)
+		err := csr.persistChangeStreamResumeToken(ctx, cs)
 		if err == nil {
 			lastPersistedTime = time.Now()
 		}
@@ -232,17 +329,18 @@ func (verifier *Verifier) iterateChangeStream(
 		case <-ctx.Done():
 			return ctx.Err()
 
-		// If the changeStreamEnderChan has a message, the user has indicated that
-		// source writes are ended. This means we should exit rather than continue
-		// reading the change stream since there should be no more events.
-		case writesOffTs := <-verifier.changeStreamWritesOffTsChan:
-			verifier.logger.Debug().
+		// If the ChangeStreamEnderChan has a message, the user has indicated that
+		// source writes are ended and the migration tool is finished / committed.
+		// This means we should exit rather than continue reading the change stream
+		// since there should be no more events.
+		case writesOffTs := <-csr.writesOffTsChan:
+			csr.logger.Debug().
 				Interface("writesOffTimestamp", writesOffTs).
-				Msg("Change stream thread received writesOff timestamp. Finalizing change stream.")
+				Msgf("%s thread received writesOff timestamp. Finalizing change stream.", csr)
 
 			gotwritesOffTimestamp = true
 
-			// Read all change events until the source reports no events.
+			// Read change events until the stream reaches the writesOffTs.
 			// (i.e., the `getMore` call returns empty)
 			for {
 				var curTs primitive.Timestamp
@@ -254,15 +352,15 @@ func (verifier *Verifier) iterateChangeStream(
 				// writesOffTs never refers to a real event,
 				// so we can stop once curTs >= writesOffTs.
 				if !curTs.Before(writesOffTs) {
-					verifier.logger.Debug().
+					csr.logger.Debug().
 						Interface("currentTimestamp", curTs).
 						Interface("writesOffTimestamp", writesOffTs).
-						Msg("Change stream has reached the writesOff timestamp. Shutting down.")
+						Msgf("%s has reached the writesOff timestamp. Shutting down.", csr)
 
 					break
 				}
 
-				err = verifier.readAndHandleOneChangeEventBatch(ctx, ri, cs)
+				err = csr.readAndHandleOneChangeEventBatch(ctx, ri, cs)
 
 				if err != nil {
 					return err
@@ -270,7 +368,7 @@ func (verifier *Verifier) iterateChangeStream(
 			}
 
 		default:
-			err = verifier.readAndHandleOneChangeEventBatch(ctx, ri, cs)
+			err = csr.readAndHandleOneChangeEventBatch(ctx, ri, cs)
 
 			if err == nil {
 				err = persistResumeTokenIfNeeded()
@@ -282,24 +380,22 @@ func (verifier *Verifier) iterateChangeStream(
 		}
 
 		if gotwritesOffTimestamp {
-			verifier.mux.Lock()
-			verifier.changeStreamRunning = false
-			if verifier.lastChangeEventTime != nil {
-				verifier.srcStartAtTs = verifier.lastChangeEventTime
+			csr.changeStreamRunning = false
+			if csr.lastChangeEventTime != nil {
+				csr.startAtTs = csr.lastChangeEventTime
 			}
-			verifier.mux.Unlock()
 			// since we have started Recheck, we must signal that we have
 			// finished the change stream changes so that Recheck can continue.
-			verifier.changeStreamDoneChan <- struct{}{}
+			csr.doneChan <- struct{}{}
 			break
 		}
 	}
 
-	infoLog := verifier.logger.Info()
-	if verifier.lastChangeEventTime == nil {
+	infoLog := csr.logger.Info()
+	if csr.lastChangeEventTime == nil {
 		infoLog = infoLog.Str("lastEventTime", "none")
 	} else {
-		infoLog = infoLog.Interface("lastEventTime", *verifier.lastChangeEventTime)
+		infoLog = infoLog.Interface("lastEventTime", *csr.lastChangeEventTime)
 	}
 
 	infoLog.Msg("Change stream is done.")
@@ -307,34 +403,34 @@ func (verifier *Verifier) iterateChangeStream(
 	return nil
 }
 
-func (verifier *Verifier) createChangeStream(
+func (csr *ChangeStreamReader) createChangeStream(
 	ctx context.Context,
 ) (*mongo.ChangeStream, primitive.Timestamp, error) {
-	pipeline := verifier.GetChangeStreamFilter()
+	pipeline := csr.GetChangeStreamFilter()
 	opts := options.ChangeStream().
 		SetMaxAwaitTime(1 * time.Second).
 		SetFullDocument(options.UpdateLookup)
 
-	if verifier.srcClusterInfo.VersionArray[0] >= 6 {
+	if csr.clusterInfo.VersionArray[0] >= 6 {
 		opts = opts.SetCustomPipeline(bson.M{"showExpandedEvents": true})
 	}
 
-	savedResumeToken, err := verifier.loadChangeStreamResumeToken(ctx)
+	savedResumeToken, err := csr.loadChangeStreamResumeToken(ctx)
 	if err != nil {
 		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
 	}
 
-	csStartLogEvent := verifier.logger.Info()
+	csStartLogEvent := csr.logger.Info()
 
 	if savedResumeToken != nil {
 		logEvent := csStartLogEvent.
-			Stringer("resumeToken", savedResumeToken)
+			Stringer(csr.resumeTokenDocID(), savedResumeToken)
 
 		ts, err := extractTimestampFromResumeToken(savedResumeToken)
 		if err == nil {
 			logEvent = addTimestampToLogEvent(ts, logEvent)
 		} else {
-			verifier.logger.Warn().
+			csr.logger.Warn().
 				Err(err).
 				Msg("Failed to extract timestamp from persisted resume token.")
 		}
@@ -343,25 +439,25 @@ func (verifier *Verifier) createChangeStream(
 
 		opts = opts.SetStartAfter(savedResumeToken)
 	} else {
-		csStartLogEvent.Msg("Starting change stream from current source cluster time.")
+		csStartLogEvent.Msgf("Starting change stream from current %s cluster time.", csr.readerType)
 	}
 
-	sess, err := verifier.srcClient.StartSession()
+	sess, err := csr.watcherClient.StartSession()
 	if err != nil {
 		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to start session")
 	}
 	sctx := mongo.NewSessionContext(ctx, sess)
-	srcChangeStream, err := verifier.srcClient.Watch(sctx, pipeline, opts)
+	changeStream, err := csr.watcherClient.Watch(sctx, pipeline, opts)
 	if err != nil {
 		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
 
-	err = verifier.persistChangeStreamResumeToken(ctx, srcChangeStream)
+	err = csr.persistChangeStreamResumeToken(ctx, changeStream)
 	if err != nil {
 		return nil, primitive.Timestamp{}, err
 	}
 
-	startTs, err := extractTimestampFromResumeToken(srcChangeStream.ResumeToken())
+	startTs, err := extractTimestampFromResumeToken(changeStream.ResumeToken())
 	if err != nil {
 		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
 	}
@@ -378,11 +474,11 @@ func (verifier *Verifier) createChangeStream(
 		startTs = clusterTime
 	}
 
-	return srcChangeStream, startTs, nil
+	return changeStream, startTs, nil
 }
 
 // StartChangeStream starts the change stream.
-func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
+func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 	// This channel holds the first change stream creation's result, whether
 	// success or failure. Rather than using a Result we could make separate
 	// Timestamp and error channels, but the single channel is cleaner since
@@ -390,6 +486,10 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 	initialCreateResultChan := make(chan mo.Result[primitive.Timestamp])
 
 	go func() {
+		// Closing changeEventBatchChan at the end of change stream goroutine
+		// notifies the verifier's change event handler to exit.
+		defer close(csr.changeEventBatchChan)
+
 		retryer := retry.New(retry.DefaultDurationLimit)
 		retryer = retryer.WithErrorCodes(util.CursorKilled)
 
@@ -397,9 +497,9 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 
 		err := retryer.Run(
 			ctx,
-			verifier.logger,
+			csr.logger,
 			func(ctx context.Context, ri *retry.FuncInfo) error {
-				srcChangeStream, startTs, err := verifier.createChangeStream(ctx)
+				changeStream, startTs, err := csr.createChangeStream(ctx)
 				if err != nil {
 					if parentThreadWaiting {
 						initialCreateResultChan <- mo.Err[primitive.Timestamp](err)
@@ -409,7 +509,7 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 					return err
 				}
 
-				defer srcChangeStream.Close(ctx)
+				defer changeStream.Close(ctx)
 
 				if parentThreadWaiting {
 					initialCreateResultChan <- mo.Ok(startTs)
@@ -417,15 +517,15 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 					parentThreadWaiting = false
 				}
 
-				return verifier.iterateChangeStream(ctx, ri, srcChangeStream)
+				return csr.iterateChangeStream(ctx, ri, changeStream)
 			},
 		)
 
 		if err != nil {
 			// NB: This failure always happens after the initial change stream
 			// creation.
-			verifier.changeStreamErrChan <- err
-			close(verifier.changeStreamErrChan)
+			csr.errChan <- err
+			close(csr.errChan)
 		}
 	}()
 
@@ -436,11 +536,9 @@ func (verifier *Verifier) StartChangeStream(ctx context.Context) error {
 		return err
 	}
 
-	verifier.srcStartAtTs = &startTs
+	csr.startAtTs = &startTs
 
-	verifier.mux.Lock()
-	verifier.changeStreamRunning = true
-	verifier.mux.Unlock()
+	csr.changeStreamRunning = true
 
 	return nil
 }
@@ -451,16 +549,16 @@ func addTimestampToLogEvent(ts primitive.Timestamp, event *zerolog.Event) *zerol
 		Time("time", time.Unix(int64(ts.T), int64(0)))
 }
 
-func (v *Verifier) getChangeStreamMetadataCollection() *mongo.Collection {
-	return v.metaClient.Database(v.metaDBName).Collection(metadataChangeStreamCollectionName)
+func (csr *ChangeStreamReader) getChangeStreamMetadataCollection() *mongo.Collection {
+	return csr.metaDB.Collection(metadataChangeStreamCollectionName)
 }
 
-func (verifier *Verifier) loadChangeStreamResumeToken(ctx context.Context) (bson.Raw, error) {
-	coll := verifier.getChangeStreamMetadataCollection()
+func (csr *ChangeStreamReader) loadChangeStreamResumeToken(ctx context.Context) (bson.Raw, error) {
+	coll := csr.getChangeStreamMetadataCollection()
 
 	token, err := coll.FindOne(
 		ctx,
-		bson.D{{"_id", "resumeToken"}},
+		bson.D{{"_id", csr.resumeTokenDocID()}},
 	).Raw()
 
 	if errors.Is(err, mongo.ErrNoDocuments) {
@@ -470,13 +568,28 @@ func (verifier *Verifier) loadChangeStreamResumeToken(ctx context.Context) (bson
 	return token, err
 }
 
-func (verifier *Verifier) persistChangeStreamResumeToken(ctx context.Context, cs *mongo.ChangeStream) error {
+func (csr *ChangeStreamReader) String() string {
+	return fmt.Sprintf("%s change stream reader", csr.readerType)
+}
+
+func (csr *ChangeStreamReader) resumeTokenDocID() string {
+	switch csr.readerType {
+	case src:
+		return "srcResumeToken"
+	case dst:
+		return "dstResumeToken"
+	default:
+		panic("unknown readerType: " + csr.readerType)
+	}
+}
+
+func (csr *ChangeStreamReader) persistChangeStreamResumeToken(ctx context.Context, cs *mongo.ChangeStream) error {
 	token := cs.ResumeToken()
 
-	coll := verifier.getChangeStreamMetadataCollection()
+	coll := csr.getChangeStreamMetadataCollection()
 	_, err := coll.ReplaceOne(
 		ctx,
-		bson.D{{"_id", "resumeToken"}},
+		bson.D{{"_id", csr.resumeTokenDocID()}},
 		token,
 		options.Replace().SetUpsert(true),
 	)
@@ -484,16 +597,16 @@ func (verifier *Verifier) persistChangeStreamResumeToken(ctx context.Context, cs
 	if err == nil {
 		ts, err := extractTimestampFromResumeToken(token)
 
-		logEvent := verifier.logger.Debug()
+		logEvent := csr.logger.Debug()
 
 		if err == nil {
 			logEvent = addTimestampToLogEvent(ts, logEvent)
 		} else {
-			verifier.logger.Warn().Err(err).
+			csr.logger.Warn().Err(err).
 				Msg("failed to extract resume token timestamp")
 		}
 
-		logEvent.Msg("Persisted change stream resume token.")
+		logEvent.Msgf("Persisted %s's resume token.", csr)
 
 		return nil
 	}

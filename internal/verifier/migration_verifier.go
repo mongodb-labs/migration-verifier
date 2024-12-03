@@ -70,6 +70,13 @@ const (
 	notOkSymbol = "\u2757" // heavy exclamation mark symbol
 )
 
+type whichCluster string
+
+const (
+	src whichCluster = "source"
+	dst whichCluster = "destination"
+)
+
 var timeFormat = time.RFC3339
 
 // Verifier is the main state for the migration verifier
@@ -115,17 +122,13 @@ type Verifier struct {
 
 	srcNamespaces []string
 	dstNamespaces []string
-	nsMap         map[string]string
+	nsMap         *NSMap
 	metaDBName    string
-	srcStartAtTs  *primitive.Timestamp
 
-	mux                         sync.RWMutex
-	changeStreamRunning         bool
-	changeStreamWritesOffTsChan chan primitive.Timestamp
-	changeStreamErrChan         chan error
-	changeStreamDoneChan        chan struct{}
-	lastChangeEventTime         *primitive.Timestamp
-	writesOffTimestamp          *primitive.Timestamp
+	mux sync.RWMutex
+
+	srcChangeStreamReader *ChangeStreamReader
+	dstChangeStreamReader *ChangeStreamReader
 
 	readConcernSetting ReadConcernSetting
 
@@ -193,15 +196,13 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		logger: logger,
 		writer: logWriter,
 
-		phase:                       Idle,
-		numWorkers:                  NumWorkers,
-		readPreference:              readpref.Primary(),
-		partitionSizeInBytes:        400 * 1024 * 1024,
-		failureDisplaySize:          DefaultFailureDisplaySize,
-		changeStreamWritesOffTsChan: make(chan primitive.Timestamp),
-		changeStreamErrChan:         make(chan error),
-		changeStreamDoneChan:        make(chan struct{}),
-		readConcernSetting:          readConcern,
+		phase:                Idle,
+		numWorkers:           NumWorkers,
+		readPreference:       readpref.Primary(),
+		partitionSizeInBytes: 400 * 1024 * 1024,
+		failureDisplaySize:   DefaultFailureDisplaySize,
+
+		readConcernSetting: readConcern,
 
 		// This will get recreated once gen0 starts, but we want it
 		// here in case the change streams gets an event before then.
@@ -210,6 +211,7 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		workerTracker: NewWorkerTracker(NumWorkers),
 
 		verificationStatusCheckInterval: 15 * time.Second,
+		nsMap:                           NewNSMap(),
 	}
 }
 
@@ -242,35 +244,50 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 		Msg("WritesOff called.")
 
 	verifier.mux.Lock()
+	if verifier.writesOff {
+		verifier.mux.Unlock()
+		return errors.New("writesOff already set")
+	}
 	verifier.writesOff = true
 
-	if verifier.writesOffTimestamp == nil {
-		verifier.logger.Debug().Msg("Change stream still running. Signalling that writes are done.")
+	verifier.logger.Debug().Msg("Signalling that writes are done.")
 
-		finalTs, err := GetNewClusterTime(
-			ctx,
-			verifier.logger,
-			verifier.srcClient,
-		)
+	srcFinalTs, err := GetNewClusterTime(
+		ctx,
+		verifier.logger,
+		verifier.srcClient,
+	)
 
-		if err != nil {
-			return errors.Wrapf(err, "failed to fetch source's cluster time")
-		}
-
-		verifier.writesOffTimestamp = &finalTs
-
+	if err != nil {
 		verifier.mux.Unlock()
+		return errors.Wrapf(err, "failed to fetch source's cluster time")
+	}
 
-		// This has to happen outside the lock because the change stream
-		// might be inserting docs into the recheck queue, which happens
-		// under the lock.
-		select {
-		case verifier.changeStreamWritesOffTsChan <- finalTs:
-		case err := <-verifier.changeStreamErrChan:
-			return errors.Wrap(err, "tried to send writes-off timestamp to change stream, but change stream already failed")
-		}
-	} else {
+	dstFinalTs, err := GetNewClusterTime(
+		ctx,
+		verifier.logger,
+		verifier.dstClient,
+	)
+
+	if err != nil {
 		verifier.mux.Unlock()
+		return errors.Wrapf(err, "failed to fetch destination's cluster time")
+	}
+	verifier.mux.Unlock()
+
+	// This has to happen outside the lock because the change streams
+	// might be inserting docs into the recheck queue, which happens
+	// under the lock.
+	select {
+	case verifier.srcChangeStreamReader.writesOffTsChan <- srcFinalTs:
+	case err := <-verifier.srcChangeStreamReader.errChan:
+		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.srcChangeStreamReader)
+	}
+
+	select {
+	case verifier.dstChangeStreamReader.writesOffTsChan <- dstFinalTs:
+	case err := <-verifier.dstChangeStreamReader.errChan:
+		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.dstChangeStreamReader)
 	}
 
 	return nil
@@ -340,13 +357,7 @@ func (verifier *Verifier) SetDstNamespaces(arg []string) {
 }
 
 func (verifier *Verifier) SetNamespaceMap() {
-	verifier.nsMap = make(map[string]string)
-	if len(verifier.dstNamespaces) == 0 {
-		return
-	}
-	for i, ns := range verifier.srcNamespaces {
-		verifier.nsMap[ns] = verifier.dstNamespaces[i]
-	}
+	verifier.nsMap.PopulateWithNamespaces(verifier.srcNamespaces, verifier.dstNamespaces)
 }
 
 func (verifier *Verifier) SetMetaDBName(arg string) {

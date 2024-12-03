@@ -95,9 +95,9 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 	generation int) (*VerificationTask, error) {
 
 	dstNamespace := srcNamespace
-	if len(verifier.nsMap) != 0 {
+	if verifier.nsMap.Len() != 0 {
 		var ok bool
-		dstNamespace, ok = verifier.nsMap[srcNamespace]
+		dstNamespace, ok = verifier.nsMap.GetDstNamespace(srcNamespace)
 		if !ok {
 			return nil, fmt.Errorf("Could not find Namespace %s", srcNamespace)
 		}
@@ -169,9 +169,9 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 	srcNamespace string,
 ) error {
 	dstNamespace := srcNamespace
-	if len(verifier.nsMap) != 0 {
+	if verifier.nsMap.Len() != 0 {
 		var ok bool
-		dstNamespace, ok = verifier.nsMap[srcNamespace]
+		dstNamespace, ok = verifier.nsMap.GetDstNamespace(srcNamespace)
 		if !ok {
 			return fmt.Errorf("Could not find Namespace %s", srcNamespace)
 		}

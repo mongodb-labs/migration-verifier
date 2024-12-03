@@ -154,6 +154,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
 				ID: "heyhey",
 			},
 		}},
+		src,
 	)
 	suite.Require().NoError(err)
 
@@ -169,6 +170,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
 				ID: "hoohoo",
 			},
 		}},
+		src,
 	)
 	suite.Require().NoError(err)
 
@@ -412,19 +414,19 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		},
 	}
 
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
 	suite.Require().NoError(err)
 	event.OpType = "insert"
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
 	suite.Require().NoError(err)
 	event.OpType = "replace"
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
 	suite.Require().NoError(err)
 	event.OpType = "update"
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
 	suite.Require().NoError(err)
 	event.OpType = "flibbity"
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event})
+	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
 	badEventErr := UnknownEventError{}
 	suite.Require().ErrorAs(err, &badEventErr)
 	suite.Assert().Equal("flibbity", badEventErr.Event.OpType)
@@ -1337,7 +1339,8 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	dbname1 := suite.DBNameForTest("1")
 	dbname2 := suite.DBNameForTest("2")
 
-	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	defer zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
 	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})
@@ -1389,7 +1392,13 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	// wait for generation to finish
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status = waitForTasks()
-	// there should be no failures now, since they are are equivalent at this point in time
+	// there should be no failures now, since they are equivalent at this point in time
+	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+
+	// The next generation should process the recheck task caused by inserting {_id: 2} on the destination.
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+	status = waitForTasks()
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	// now insert in the source, this should come up next generation
@@ -1417,7 +1426,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status = waitForTasks()
 
-	// there should be no failures now, since they are are equivalent at this point in time
+	// there should be no failures now, since they are equivalent at this point in time
 	suite.Assert().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	// We could just abandon this verifier, but we might as well shut it down
@@ -1549,6 +1558,81 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	<-checkDoneChan
 }
 
+func (suite *IntegrationTestSuite) waitForRecheckDocs(verifier *Verifier) {
+	suite.Eventually(func() bool {
+		cursor, err := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue).Find(suite.Context(), bson.D{})
+		var docs []bson.D
+		suite.Require().NoError(err)
+		suite.Require().NoError(cursor.All(suite.Context(), &docs))
+		return len(docs) > 0
+	}, 1*time.Minute, 100*time.Millisecond)
+}
+
+func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	defer zerolog.SetGlobalLevel(zerolog.DebugLevel)
+
+	ctx := suite.Context()
+
+	collName := "mycoll"
+
+	srcDB := suite.srcMongoClient.Database(suite.DBNameForTest())
+	dstDB := suite.dstMongoClient.Database(suite.DBNameForTest())
+	suite.Require().NoError(srcDB.CreateCollection(ctx, collName))
+	suite.Require().NoError(dstDB.CreateCollection(ctx, collName))
+
+	verifier := suite.BuildVerifier()
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+
+	// Dry run generation 0 to make sure change stream reader is started.
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	// Insert two documents in generation 1. They should be batched and become a verify task in generation 2.
+	suite.Require().NoError(runner.StartNextGeneration())
+	_, err := dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
+	suite.Require().NoError(err)
+	_, err = dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
+	suite.Require().NoError(err)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+	suite.waitForRecheckDocs(verifier)
+
+	// Run generation 2 and get verification status.
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+	status, err := verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().Equal(
+		1,
+		status.FailedTasks,
+	)
+
+	// Patch up only one of the two mismatched documents in generation 3.
+	suite.Require().NoError(runner.StartNextGeneration())
+	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
+	suite.Require().NoError(err)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+	suite.waitForRecheckDocs(verifier)
+
+	status, err = verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().Equal(
+		1,
+		status.FailedTasks,
+	)
+
+	// Patch up the other mismatched document in generation 4.
+	suite.Require().NoError(runner.StartNextGeneration())
+	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
+	suite.Require().NoError(err)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+	suite.waitForRecheckDocs(verifier)
+
+	// Everything should match by the end of it.
+	status, err = verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().Zero(status.FailedTasks)
+}
+
 func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {
 	ctx := suite.Context()
 
@@ -1615,6 +1699,7 @@ func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 	// Set up the verifier for testing.
 	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{dbname + ".testColl1"})
+	verifier.SetDstNamespaces([]string{dbname + ".testColl1"})
 	verifier.SetNamespaceMap()
 	verifier.globalFilter = filter
 	// Use a small partition size so that we can test creating multiple partitions.
