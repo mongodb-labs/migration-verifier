@@ -43,7 +43,9 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter() {
 func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx context.Context, verifier *Verifier) {
 	err := verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
-	go verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
+	go func() {
+		suite.Require().NoError(verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader))
+	}()
 }
 
 // TestChangeStreamResumability creates a verifier, starts its change stream,
@@ -468,7 +470,9 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	verifier.SetNamespaceMap()
 
 	suite.Require().NoError(verifier.dstChangeStreamReader.StartChangeStream(ctx))
-	go verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader)
+	go func() {
+		suite.Require().NoError(verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader))
+	}()
 
 	_, err := coll1.InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
