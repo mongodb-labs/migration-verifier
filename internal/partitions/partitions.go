@@ -119,7 +119,7 @@ const (
 func PartitionCollectionWithSize(
 	ctx context.Context,
 	uuidEntry *uuidutil.NamespaceAndUUID,
-	retryer retry.Retryer,
+	retryer *retry.Retryer,
 	srcClient *mongo.Client,
 	replicatorList []Replicator,
 	subLogger *logger.Logger,
@@ -137,7 +137,7 @@ func PartitionCollectionWithSize(
 	partitions, docCount, byteCount, err := PartitionCollectionWithParameters(
 		ctx,
 		uuidEntry,
-		&retryer,
+		retryer,
 		srcClient,
 		replicatorList,
 		defaultSampleRate,
@@ -153,7 +153,7 @@ func PartitionCollectionWithSize(
 		return PartitionCollectionWithParameters(
 			ctx,
 			uuidEntry,
-			&retryer,
+			retryer,
 			srcClient,
 			replicatorList,
 			defaultSampleRate,

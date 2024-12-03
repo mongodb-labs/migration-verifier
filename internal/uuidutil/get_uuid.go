@@ -27,7 +27,7 @@ type NamespaceAndUUID struct {
 	CollName string
 }
 
-func GetCollectionNamespaceAndUUID(ctx context.Context, logger *logger.Logger, retryer retry.Retryer, db *mongo.Database, collName string) (*NamespaceAndUUID, error) {
+func GetCollectionNamespaceAndUUID(ctx context.Context, logger *logger.Logger, retryer *retry.Retryer, db *mongo.Database, collName string) (*NamespaceAndUUID, error) {
 	binaryUUID, uuidErr := GetCollectionUUID(ctx, logger, retryer, db, collName)
 	if uuidErr != nil {
 		return nil, uuidErr
@@ -39,7 +39,7 @@ func GetCollectionNamespaceAndUUID(ctx context.Context, logger *logger.Logger, r
 	}, nil
 }
 
-func GetCollectionUUID(ctx context.Context, logger *logger.Logger, retryer retry.Retryer, db *mongo.Database, collName string) (*primitive.Binary, error) {
+func GetCollectionUUID(ctx context.Context, logger *logger.Logger, retryer *retry.Retryer, db *mongo.Database, collName string) (*primitive.Binary, error) {
 	filter := bson.D{{"name", collName}}
 	opts := options.ListCollections().SetNameOnly(false)
 
