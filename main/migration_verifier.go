@@ -199,7 +199,10 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		verifierSettings.ReadConcernSetting = verifier.ReadConcernIgnore
 	}
 
-	v := verifier.NewVerifier(verifierSettings)
+	logPath := cCtx.String(logPath)
+
+	v := verifier.NewVerifier(verifierSettings, logPath)
+
 	err := v.SetSrcURI(ctx, cCtx.String(srcURI))
 	if err != nil {
 		return nil, err
@@ -232,8 +235,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 
 	v.SetStartClean(cCtx.Bool(startClean))
-	logPath := cCtx.String(logPath)
-	v.SetLogger(logPath)
+
 	if cCtx.Bool(verifyAll) {
 		if len(cCtx.StringSlice(srcNamespace)) > 0 || len(cCtx.StringSlice(dstNamespace)) > 0 {
 			return nil, errors.Errorf("Setting both verifyAll and explicit namespaces is not supported")

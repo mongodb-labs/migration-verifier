@@ -148,7 +148,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	qfilter := QueryFilter{Namespace: "keyhole.dealers"}
 	task := VerificationTask{QueryFilter: qfilter}
 
-	verifier := NewVerifier(VerifierSettings{})
+	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	//verifier.SetStartClean(true)
 	verifier.SetNumWorkers(3)
 	verifier.SetGenerationPauseDelayMillis(0)
@@ -170,7 +170,6 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		verifier.SetMetaURI(ctx, suite.metaConnStr),
 		"should set metadata connection string",
 	)
-	verifier.SetLogger("stderr")
 	verifier.SetMetaDBName(metaDBName)
 
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))

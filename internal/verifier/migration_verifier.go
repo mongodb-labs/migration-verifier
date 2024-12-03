@@ -181,13 +181,18 @@ type VerifierSettings struct {
 }
 
 // NewVerifier creates a new Verifier
-func NewVerifier(settings VerifierSettings) *Verifier {
+func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 	readConcern := settings.ReadConcernSetting
 	if readConcern == "" {
 		readConcern = ReadConcernMajority
 	}
 
+	logger, logWriter := getLoggerAndWriter(logPath)
+
 	return &Verifier{
+		logger: logger,
+		writer: logWriter,
+
 		phase:                       Idle,
 		numWorkers:                  NumWorkers,
 		readPreference:              readpref.Primary(),
@@ -305,40 +310,6 @@ func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 	return err
 }
 
-func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri)
-	var err error
-	verifier.srcClient, err = mongo.Connect(ctx, opts)
-	if err != nil {
-		return errors.Wrapf(err, "failed to connect to source %#q", uri)
-	}
-
-	buildInfo, err := util.GetClusterInfo(ctx, verifier.srcClient)
-	if err != nil {
-		return errors.Wrap(err, "failed to read source cluster info")
-	}
-
-	verifier.srcClusterInfo = &buildInfo
-	return nil
-}
-
-func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri)
-	var err error
-	verifier.dstClient, err = mongo.Connect(ctx, opts)
-	if err != nil {
-		return errors.Wrapf(err, "failed to connect to destination %#q", uri)
-	}
-
-	buildInfo, err := util.GetClusterInfo(ctx, verifier.dstClient)
-	if err != nil {
-		return errors.Wrap(err, "failed to read destination cluster info")
-	}
-
-	verifier.dstClusterInfo = &buildInfo
-	return nil
-}
-
 func (verifier *Verifier) SetServerPort(port int) {
 	verifier.port = port
 }
@@ -358,10 +329,6 @@ func (verifier *Verifier) SetWorkerSleepDelayMillis(arg time.Duration) {
 // SetPartitionSizeMB sets the verifier’s maximum partition size in MiB.
 func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
 	verifier.partitionSizeInBytes = int64(partitionSizeMB) * 1024 * 1024
-}
-
-func (verifier *Verifier) SetLogger(logPath string) {
-	verifier.logger, verifier.writer = getLoggerAndWriter(logPath)
 }
 
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {
@@ -467,7 +434,11 @@ func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A)
 	return append(predicates, verifier.globalFilter)
 }
 
+<<<<<<< HEAD
 func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, buildInfo *util.ClusterInfo,
+=======
+func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
+>>>>>>> main
 	startAtTs *primitive.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
@@ -480,7 +451,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 			bson.E{"filter", bson.D{{"$and", andPredicates}}},
 		}
 	} else {
-		findOptions = task.QueryFilter.Partition.GetFindOptions(buildInfo, verifier.maybeAppendGlobalFilterToPredicates(andPredicates))
+		findOptions = task.QueryFilter.Partition.GetFindOptions(clusterInfo, verifier.maybeAppendGlobalFilterToPredicates(andPredicates))
 	}
 	if verifier.readPreference.Mode() != readpref.PrimaryMode {
 		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
@@ -497,11 +468,16 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 		}
 	}
 	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
-	verifier.logger.Debug().
-		Interface("task", task.PrimaryKey).
-		Str("findCmd", fmt.Sprintf("%s", findCmd)).
-		Str("options", fmt.Sprintf("%v", *runCommandOptions)).
-		Msg("getDocuments findCmd.")
+
+	// Suppress this log for recheck tasks because the list of IDs can be
+	// quite long.
+	if len(task.Ids) == 0 {
+		verifier.logger.Debug().
+			Interface("task", task.PrimaryKey).
+			Str("findCmd", fmt.Sprintf("%s", findCmd)).
+			Str("options", fmt.Sprintf("%v", *runCommandOptions)).
+			Msg("getDocuments findCmd.")
+	}
 
 	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
 }
@@ -589,16 +565,6 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		Interface("task", task.PrimaryKey).
 		Msg("Processing document comparison task.")
 
-	defer func() {
-		elapsed := time.Since(start)
-
-		verifier.logger.Debug().
-			Int("workerNum", workerNum).
-			Interface("task", task.PrimaryKey).
-			Stringer("timeElapsed", elapsed).
-			Msg("Finished document comparison task.")
-	}()
-
 	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(
 		ctx,
 		task,
@@ -675,12 +641,24 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		}
 	}
 
-	return errors.Wrapf(
-		verifier.UpdateVerificationTask(ctx, task),
-		"failed to persist task %s's new status (%#q)",
-		task.PrimaryKey,
-		task.Status,
-	)
+	err = verifier.UpdateVerificationTask(ctx, task)
+
+	if err != nil {
+		return errors.Wrapf(
+			err,
+			"failed to persist task %s's new status (%#q)",
+			task.PrimaryKey,
+			task.Status,
+		)
+	}
+
+	verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Interface("task", task.PrimaryKey).
+		Stringer("timeElapsed", time.Since(start)).
+		Msg("Finished document comparison task.")
+
+	return nil
 }
 
 func (verifier *Verifier) logChunkInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) {

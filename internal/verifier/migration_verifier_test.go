@@ -457,7 +457,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 
 func TestVerifierCompareDocs(t *testing.T) {
 	id := rand.Intn(1000)
-	verifier := NewVerifier(VerifierSettings{})
+	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	verifier.SetIgnoreBSONFieldOrder(true)
 
 	type compareTest struct {
@@ -575,7 +575,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 				{{"_id", id}, {"sharded", 123}},
 			},
 			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
-				assert.Empty(t, mismatchedIds)
+				assert.Empty(t, mismatchedIds, "should be no problems")
 			},
 		},
 	}
@@ -1495,7 +1495,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	status := waitForTasks()
 	suite.Require().Greater(status.CompletedTasks, 1)
 	suite.Require().Greater(status.TotalTasks, 1)
-	suite.Require().Equal(status.FailedTasks, 0)
+	suite.Require().Zero(status.FailedTasks, "there should be no failed tasks")
 
 	// Insert another document that is not in the filter.
 	// This should trigger a recheck despite being outside the filter.
