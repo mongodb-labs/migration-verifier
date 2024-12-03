@@ -41,8 +41,12 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 		Run(
 			givenCtx,
 			verifier.logger,
-			readSrcCallback,
-			readDstCallback,
+			func(ctx context.Context, fi *retry.FuncInfo) error {
+				return readSrcCallback(ctx, fi)
+			},
+			func(ctx context.Context, fi *retry.FuncInfo) error {
+				return readDstCallback(ctx, fi)
+			},
 			func(ctx context.Context, _ *retry.FuncInfo) error {
 				var err error
 				results, docCount, byteCount, err = verifier.compareDocsFromChannels(

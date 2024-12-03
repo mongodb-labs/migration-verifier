@@ -44,9 +44,9 @@ type RetryCallback = func(context.Context, *FuncInfo) error
 // This returns an error if the duration limit is reached, or if f() returns a
 // non-transient error.
 func (r *Retryer) Run(
-	ctx context.Context, logger *logger.Logger, f ...RetryCallback,
+	ctx context.Context, logger *logger.Logger, funcs ...RetryCallback,
 ) error {
-	return r.runRetryLoop(ctx, logger, f)
+	return r.runRetryLoop(ctx, logger, funcs)
 }
 
 // runRetryLoop contains the core logic for the retry loops.
@@ -80,8 +80,17 @@ func (r *Retryer) runRetryLoop(
 
 		eg, egCtx := errgroup.WithContext(ctx)
 		for i, curFunc := range funcs {
+			if curFunc == nil {
+				panic("curFunc should be non-nil")
+			}
 
 			eg.Go(func() error {
+				if curFunc == nil {
+					panic("curFunc should be non-nil")
+				}
+				if funcinfos[i] == nil {
+					panic(fmt.Sprintf("funcinfos[%d] should be non-nil", i))
+				}
 				err := curFunc(egCtx, funcinfos[i])
 
 				if err != nil {
