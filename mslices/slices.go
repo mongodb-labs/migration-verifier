@@ -9,3 +9,14 @@ package mslices
 func Of[T any](pieces ...T) []T {
 	return append([]T{}, pieces...)
 }
+
+// ToMap outputs a map that “indexes” the given slice.
+func ToMap[S ~[]E, E any, K comparable](s S, cb func(el E) K) map[K]E {
+	theMap := make(map[K]E, len(s))
+
+	for _, el := range s {
+		theMap[cb(el)] = el
+	}
+
+	return theMap
+}

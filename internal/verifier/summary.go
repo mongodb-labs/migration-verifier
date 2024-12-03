@@ -45,7 +45,7 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 
 	if len(failedTasks) != 0 {
 		table := tablewriter.NewWriter(strBuilder)
-		table.SetHeader([]string{"Index", "Cluster", "Type", "Field", "Namespace", "Details"})
+		table.SetHeader([]string{"Index", "Cluster", "Field", "Namespace", "Details"})
 
 		for _, v := range failedTasks {
 			for _, f := range v.FailedDocs {

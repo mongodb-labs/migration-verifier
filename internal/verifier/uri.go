@@ -19,7 +19,7 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.srcClient)
 	if err != nil {
-		return errors.Wrap(err, "failed to read source build info")
+		return errors.Wrap(err, "failed to read source cluster info")
 	}
 
 	verifier.srcClusterInfo = &clusterInfo
