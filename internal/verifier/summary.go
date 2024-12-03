@@ -30,8 +30,13 @@ const changeEventsTableMaxSize = 10
 func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context, strBuilder *strings.Builder) (bool, bool, error) {
 	generation, _ := verifier.getGeneration()
 
-	failedTasks, incompleteTasks, err :=
-		FetchFailedAndIncompleteTasks(ctx, verifier.verificationTaskCollection(), verificationTaskVerifyCollection, generation)
+	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
+		ctx,
+		verifier.logger,
+		verifier.verificationTaskCollection(),
+		verificationTaskVerifyCollection,
+		generation,
+	)
 	if err != nil {
 		return false, false, err
 	}
@@ -59,7 +64,13 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (bool, bool, error) {
 	generation, _ := verifier.getGeneration()
 
-	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(ctx, verifier.verificationTaskCollection(), verificationTaskVerifyDocuments, generation)
+	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
+		ctx,
+		verifier.logger,
+		verifier.verificationTaskCollection(),
+		verificationTaskVerifyDocuments,
+		generation,
+	)
 
 	if err != nil {
 		return false, false, err

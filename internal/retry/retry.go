@@ -15,6 +15,17 @@ import (
 
 type RetryCallback = func(context.Context, *FuncInfo) error
 
+// Retry is a convenience that creates a retryer and executes it.
+// See RunForTransientErrorsOnly for argument details.
+func Retry(
+	ctx context.Context,
+	logger *logger.Logger,
+	callbacks ...RetryCallback,
+) error {
+	retryer := New(DefaultDurationLimit)
+	return retryer.Run(ctx, logger, callbacks...)
+}
+
 // Run() runs each given callback in parallel. If none of them fail,
 // then no error is returned.
 //

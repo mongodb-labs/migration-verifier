@@ -15,7 +15,7 @@ func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
 
 	verifier := suite.BuildVerifier()
 
-	created, err := verifier.CheckIsPrimary(ctx)
+	created, err := verifier.CreatePrimaryTaskIfNeeded(ctx)
 	suite.Require().NoError(err)
 	suite.Require().True(created)
 
@@ -45,7 +45,7 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	verifier := suite.BuildVerifier()
 
 	// Create a primary task, and set it to complete.
-	created, err := verifier.CheckIsPrimary(ctx)
+	created, err := verifier.CreatePrimaryTaskIfNeeded(ctx)
 	suite.Require().NoError(err)
 	suite.Require().True(created)
 

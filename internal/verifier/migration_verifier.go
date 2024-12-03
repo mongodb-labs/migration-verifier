@@ -1239,26 +1239,36 @@ func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*Verificat
 	taskCollection := verifier.verificationTaskCollection()
 	generation, _ := verifier.getGeneration()
 
-	aggregation := []bson.M{
-		{
-			"$match": bson.M{
-				"type":       bson.M{"$ne": "primary"},
-				"generation": generation,
-			},
-		},
-		{
-			"$group": bson.M{
-				"_id":   "$status",
-				"count": bson.M{"$sum": 1},
-			},
-		},
-	}
-	cursor, err := taskCollection.Aggregate(ctx, aggregation)
-	if err != nil {
-		return nil, err
-	}
 	var results []bson.Raw
-	err = cursor.All(ctx, &results)
+
+	err := retry.Retry(
+		ctx,
+		verifier.logger,
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			cursor, err := taskCollection.Aggregate(
+				ctx,
+				[]bson.M{
+					{
+						"$match": bson.M{
+							"type":       bson.M{"$ne": "primary"},
+							"generation": generation,
+						},
+					},
+					{
+						"$group": bson.M{
+							"_id":   "$status",
+							"count": bson.M{"$sum": 1},
+						},
+					},
+				},
+			)
+			if err != nil {
+				return err
+			}
+
+			return cursor.All(ctx, &results)
+		},
+	)
 	if err != nil {
 		return nil, err
 	}

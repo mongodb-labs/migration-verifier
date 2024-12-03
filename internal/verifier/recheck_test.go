@@ -118,7 +118,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 
 	verifier.generation++
 	verifier.mux.Lock()
-	err = verifier.GenerateRecheckTasks(ctx)
+	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -180,7 +180,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 
 	verifier.generation++
 	verifier.mux.Lock()
-	err = verifier.GenerateRecheckTasks(ctx)
+	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -230,7 +230,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 
 	verifier.generation++
 	verifier.mux.Lock()
-	err = verifier.GenerateRecheckTasks(ctx)
+	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -308,21 +308,21 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 	verifier.mux.Lock()
 
 	verifier.generation = 2
-	err = verifier.ClearRecheckDocs(ctx)
+	err = verifier.ClearRecheckDocsWhileLocked(ctx)
 	suite.Require().NoError(err)
 
 	results = suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]interface{}{d1, d2, d5, d6}, results)
 
 	verifier.generation = 1
-	err = verifier.ClearRecheckDocs(ctx)
+	err = verifier.ClearRecheckDocsWhileLocked(ctx)
 	suite.Require().NoError(err)
 
 	results = suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]interface{}{d5, d6}, results)
 
 	verifier.generation = 3
-	err = verifier.ClearRecheckDocs(ctx)
+	err = verifier.ClearRecheckDocsWhileLocked(ctx)
 	suite.Require().NoError(err)
 
 	results = suite.fetchRecheckDocs(ctx, verifier)
