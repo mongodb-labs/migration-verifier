@@ -16,7 +16,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"golang.org/x/sync/errgroup"
 )
 
 const fauxDocSizeForDeleteEvents = 1024
@@ -65,66 +64,64 @@ type ChangeStreamReader struct {
 	watcherClient *mongo.Client
 	buildInfo     util.BuildInfo
 
-	changeStreamRunning         bool
-	ChangeEventBatchChan        chan []ParsedEvent
-	ChangeStreamWritesOffTsChan chan primitive.Timestamp
-	ChangeStreamErrChan         chan error
-	ChangeStreamDoneChan        chan struct{}
+	changeStreamRunning  bool
+	ChangeEventBatchChan chan []ParsedEvent
+	WritesOffTsChan      chan primitive.Timestamp
+	ErrChan              chan error
+	DoneChan             chan struct{}
 
 	startAtTs *primitive.Timestamp
 }
 
 func (verifier *Verifier) initializeChangeStreamReaders() {
 	verifier.srcChangeStreamReader = &ChangeStreamReader{
-		readerType:                  srcReaderType,
-		logger:                      verifier.logger,
-		namespaces:                  verifier.srcNamespaces,
-		metaDB:                      verifier.metaClient.Database(verifier.metaDBName),
-		watcherClient:               verifier.srcClient,
-		buildInfo:                   *verifier.srcBuildInfo,
-		changeStreamRunning:         false,
-		ChangeEventBatchChan:        make(chan []ParsedEvent),
-		ChangeStreamWritesOffTsChan: make(chan primitive.Timestamp),
-		ChangeStreamErrChan:         make(chan error),
-		ChangeStreamDoneChan:        make(chan struct{}),
+		readerType:           srcReaderType,
+		logger:               verifier.logger,
+		namespaces:           verifier.srcNamespaces,
+		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
+		watcherClient:        verifier.srcClient,
+		buildInfo:            *verifier.srcBuildInfo,
+		changeStreamRunning:  false,
+		ChangeEventBatchChan: make(chan []ParsedEvent),
+		WritesOffTsChan:      make(chan primitive.Timestamp),
+		ErrChan:              make(chan error),
+		DoneChan:             make(chan struct{}),
 	}
 	verifier.dstChangeStreamReader = &ChangeStreamReader{
-		readerType:                  dstReaderType,
-		logger:                      verifier.logger,
-		namespaces:                  verifier.dstNamespaces,
-		metaDB:                      verifier.metaClient.Database(verifier.metaDBName),
-		watcherClient:               verifier.dstClient,
-		buildInfo:                   *verifier.dstBuildInfo,
-		changeStreamRunning:         false,
-		ChangeEventBatchChan:        make(chan []ParsedEvent),
-		ChangeStreamWritesOffTsChan: make(chan primitive.Timestamp),
-		ChangeStreamErrChan:         make(chan error),
-		ChangeStreamDoneChan:        make(chan struct{}),
+		readerType:           dstReaderType,
+		logger:               verifier.logger,
+		namespaces:           verifier.dstNamespaces,
+		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
+		watcherClient:        verifier.dstClient,
+		buildInfo:            *verifier.dstBuildInfo,
+		changeStreamRunning:  false,
+		ChangeEventBatchChan: make(chan []ParsedEvent),
+		WritesOffTsChan:      make(chan primitive.Timestamp),
+		ErrChan:              make(chan error),
+		DoneChan:             make(chan struct{}),
 	}
 }
 
 // StartChangeEventHandler starts a goroutine that handles change event batches from the reader.
 // It needs to be started after the reader starts.
-func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *ChangeStreamReader, errGroup *errgroup.Group) {
-	errGroup.Go(func() error {
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case batch, more := <-reader.ChangeEventBatchChan:
-				if !more {
-					verifier.logger.Debug().Msgf("Change Event Batch Channel has been closed by %s, returning...", reader)
-					return nil
-				}
-				verifier.logger.Trace().Msgf("Verifier is handling a change event batch from %s: %v", reader, batch)
-				err := verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType)
-				if err != nil {
-					reader.ChangeStreamErrChan <- err
-					return err
-				}
+func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *ChangeStreamReader) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case batch, more := <-reader.ChangeEventBatchChan:
+			if !more {
+				verifier.logger.Debug().Msgf("Change Event Batch Channel has been closed by %s, returning...", reader)
+				return nil
+			}
+			verifier.logger.Trace().Msgf("Verifier is handling a change event batch from %s: %v", reader, batch)
+			err := verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType)
+			if err != nil {
+				reader.ErrChan <- err
+				return err
 			}
 		}
-	})
+	}
 }
 
 // HandleChangeStreamEvents performs the necessary work for change stream events after receiving a batch.
@@ -280,7 +277,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			return errors.Wrapf(err, "failed to decode change event to %T", changeEventBatch[eventsRead])
 		}
 
-		csr.logger.Trace().Msgf("%s received a change event: %v", csr, changeEventBatch[eventsRead])
+		// This only logs in tests.
+		csr.logger.Trace().Interface("event", changeEventBatch[eventsRead]).Msgf("%s received a change event", csr)
 
 		if changeEventBatch[eventsRead].ClusterTime != nil &&
 			(csr.lastChangeEventTime == nil ||
@@ -335,7 +333,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 		// source writes are ended and the migration tool is finished / committed.
 		// This means we should exit rather than continue reading the change stream
 		// since there should be no more events.
-		case writesOffTs := <-csr.ChangeStreamWritesOffTsChan:
+		case writesOffTs := <-csr.WritesOffTsChan:
 			csr.logger.Debug().
 				Interface("writesOffTimestamp", writesOffTs).
 				Msgf("%s thread received writesOff timestamp. Finalizing change stream.", csr)
@@ -388,7 +386,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			}
 			// since we have started Recheck, we must signal that we have
 			// finished the change stream changes so that Recheck can continue.
-			csr.ChangeStreamDoneChan <- struct{}{}
+			csr.DoneChan <- struct{}{}
 			break
 		}
 	}
@@ -526,8 +524,8 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 		if err != nil {
 			// NB: This failure always happens after the initial change stream
 			// creation.
-			csr.ChangeStreamErrChan <- err
-			close(csr.ChangeStreamErrChan)
+			csr.ErrChan <- err
+			close(csr.ErrChan)
 		}
 	}()
 

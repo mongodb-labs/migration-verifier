@@ -16,7 +16,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
-	"golang.org/x/sync/errgroup"
 )
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter() {
@@ -44,7 +43,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter() {
 func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx context.Context, verifier *Verifier) {
 	err := verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
-	verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader, &errgroup.Group{})
+	go verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
 }
 
 // TestChangeStreamResumability creates a verifier, starts its change stream,
@@ -160,8 +159,8 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	suite.Require().NotNil(origStartTs)
 	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
-	verifier.srcChangeStreamReader.ChangeStreamWritesOffTsChan <- *origStartTs
-	<-verifier.srcChangeStreamReader.ChangeStreamDoneChan
+	verifier.srcChangeStreamReader.WritesOffTsChan <- *origStartTs
+	<-verifier.srcChangeStreamReader.DoneChan
 	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
 }
 
@@ -206,8 +205,8 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 		"session time after events should exceed the original",
 	)
 
-	verifier.srcChangeStreamReader.ChangeStreamWritesOffTsChan <- *postEventsSessionTime
-	<-verifier.srcChangeStreamReader.ChangeStreamDoneChan
+	verifier.srcChangeStreamReader.WritesOffTsChan <- *postEventsSessionTime
+	<-verifier.srcChangeStreamReader.DoneChan
 
 	suite.Assert().Equal(
 		*postEventsSessionTime,
@@ -469,7 +468,7 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	verifier.SetNamespaceMap()
 
 	suite.Require().NoError(verifier.dstChangeStreamReader.StartChangeStream(ctx))
-	verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader, &errgroup.Group{})
+	go verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader)
 
 	_, err := coll1.InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)

@@ -270,18 +270,18 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 		return errors.Wrapf(err, "failed to fetch destination's cluster time")
 	}
 
-	// This has to happen outside the lock because the change stream
+	// This has to happen outside the lock because the change streams
 	// might be inserting docs into the recheck queue, which happens
 	// under the lock.
 	select {
-	case verifier.srcChangeStreamReader.ChangeStreamWritesOffTsChan <- srcFinalTs:
-	case err := <-verifier.srcChangeStreamReader.ChangeStreamErrChan:
+	case verifier.srcChangeStreamReader.WritesOffTsChan <- srcFinalTs:
+	case err := <-verifier.srcChangeStreamReader.ErrChan:
 		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.srcChangeStreamReader)
 	}
 
 	select {
-	case verifier.dstChangeStreamReader.ChangeStreamWritesOffTsChan <- dstFinalTs:
-	case err := <-verifier.dstChangeStreamReader.ChangeStreamErrChan:
+	case verifier.dstChangeStreamReader.WritesOffTsChan <- dstFinalTs:
+	case err := <-verifier.dstChangeStreamReader.ErrChan:
 		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.dstChangeStreamReader)
 	}
 

@@ -44,11 +44,11 @@ func (verifier *Verifier) waitForChangeStream(ctx context.Context, csr *ChangeSt
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case err := <-csr.ChangeStreamErrChan:
+	case err := <-csr.ErrChan:
 		verifier.logger.Warn().Err(err).
 			Msgf("Received error from %s.", csr)
 		return err
-	case <-csr.ChangeStreamDoneChan:
+	case <-csr.DoneChan:
 		verifier.logger.Debug().
 			Msgf("Received completion signal from %s.", csr)
 		break
@@ -82,9 +82,9 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	// If the change stream fails, everything should stop.
 	eg.Go(func() error {
 		select {
-		case err := <-verifier.srcChangeStreamReader.ChangeStreamErrChan:
+		case err := <-verifier.srcChangeStreamReader.ErrChan:
 			return errors.Wrapf(err, "%s failed", verifier.srcChangeStreamReader)
-		case err := <-verifier.dstChangeStreamReader.ChangeStreamErrChan:
+		case err := <-verifier.dstChangeStreamReader.ErrChan:
 			return errors.Wrapf(err, "%s failed", verifier.dstChangeStreamReader)
 		case <-ctx.Done():
 			return nil
@@ -207,7 +207,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		verifier.phase = Idle
 	}()
 
-	ceHandlerGroup := &errgroup.Group{}
+	ceHandlerGroup, groupCtx := errgroup.WithContext(ctx)
 	for _, csReader := range []*ChangeStreamReader{verifier.srcChangeStreamReader, verifier.dstChangeStreamReader} {
 		if csReader.changeStreamRunning {
 			verifier.logger.Debug().Msgf("Check: %s already running.", csReader)
@@ -218,7 +218,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			if err != nil {
 				return errors.Wrapf(err, "failed to start %s", csReader)
 			}
-			verifier.StartChangeEventHandler(ctx, csReader, ceHandlerGroup)
+			ceHandlerGroup.Go(func() error {
+				return verifier.StartChangeEventHandler(groupCtx, csReader)
+			})
 		}
 	}
 
