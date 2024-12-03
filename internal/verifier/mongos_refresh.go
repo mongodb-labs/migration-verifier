@@ -89,7 +89,7 @@ func RefreshAllMongosInstances(
 					if mmongo.ErrorHasCode(err, UnauthorizedErrCode) {
 						return errors.New(
 							"missing privileges to refresh mongos instances on the source; please restart " +
-								"mongosync with a source URI that includes the `clusterManager` role",
+								"migration-verifier with a URI that includes the `clusterManager` role",
 						)
 					}
 					return errors.Wrap(
