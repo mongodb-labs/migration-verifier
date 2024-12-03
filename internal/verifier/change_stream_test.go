@@ -385,7 +385,6 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 		lo.ToAnySlice(docs),
 	)
 	suite.Require().NoError(err)
-	//fmt.Println(fmt.Sprintf("src cluster time %v", suite.getClusterTime(ctx, suite.srcMongoClient)))
 
 	suite.Require().NoError(verifier.WritesOff(ctx))
 
