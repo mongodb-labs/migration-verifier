@@ -6,10 +6,8 @@ _This Repository is NOT an officially supported MongoDB product. This tool reduc
 
 
 ```
-go build main/migration_verifier.go
+./build.sh
 ```
-
-
 
 # Operational UX Once Running 
 
