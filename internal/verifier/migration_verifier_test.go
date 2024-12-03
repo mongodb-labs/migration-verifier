@@ -1584,12 +1584,11 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
 	// Insert two documents in generation 1. They should be batched and become a verify task in generation 2.
+	suite.Require().NoError(runner.StartNextGeneration())
 	_, err := dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 	_, err = dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
-	suite.Require().NoError(runner.StartNextGeneration())
-
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	suite.waitForRecheckDocs(verifier)
 
@@ -1604,10 +1603,9 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	)
 
 	// Patch up only one of the two mismatched documents in generation 3.
+	suite.Require().NoError(runner.StartNextGeneration())
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
-
-	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	suite.waitForRecheckDocs(verifier)
 
@@ -1618,10 +1616,10 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 		status.FailedTasks,
 	)
 
-	// Patch up both of the 2 mismatched documents in generation 4.
+	// Patch up the other mismatched document in generation 4.
+	suite.Require().NoError(runner.StartNextGeneration())
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
-	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	suite.waitForRecheckDocs(verifier)
 
