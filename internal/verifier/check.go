@@ -44,11 +44,11 @@ func (verifier *Verifier) waitForChangeStream(ctx context.Context, csr *ChangeSt
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case err := <-csr.ErrChan:
+	case err := <-csr.errChan:
 		verifier.logger.Warn().Err(err).
 			Msgf("Received error from %s.", csr)
 		return err
-	case <-csr.DoneChan:
+	case <-csr.doneChan:
 		verifier.logger.Debug().
 			Msgf("Received completion signal from %s.", csr)
 		break
@@ -82,9 +82,9 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	// If the change stream fails, everything should stop.
 	eg.Go(func() error {
 		select {
-		case err := <-verifier.srcChangeStreamReader.ErrChan:
+		case err := <-verifier.srcChangeStreamReader.errChan:
 			return errors.Wrapf(err, "%s failed", verifier.srcChangeStreamReader)
-		case err := <-verifier.dstChangeStreamReader.ErrChan:
+		case err := <-verifier.dstChangeStreamReader.errChan:
 			return errors.Wrapf(err, "%s failed", verifier.dstChangeStreamReader)
 		case <-ctx.Done():
 			return nil

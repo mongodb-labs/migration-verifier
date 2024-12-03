@@ -65,10 +65,10 @@ type ChangeStreamReader struct {
 	clusterInfo   util.ClusterInfo
 
 	changeStreamRunning  bool
-	ChangeEventBatchChan chan []ParsedEvent
-	WritesOffTsChan      chan primitive.Timestamp
-	ErrChan              chan error
-	DoneChan             chan struct{}
+	changeEventBatchChan chan []ParsedEvent
+	writesOffTsChan      chan primitive.Timestamp
+	errChan              chan error
+	doneChan             chan struct{}
 
 	startAtTs *primitive.Timestamp
 }
@@ -82,10 +82,10 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		watcherClient:        verifier.srcClient,
 		clusterInfo:          *verifier.srcClusterInfo,
 		changeStreamRunning:  false,
-		ChangeEventBatchChan: make(chan []ParsedEvent),
-		WritesOffTsChan:      make(chan primitive.Timestamp),
-		ErrChan:              make(chan error),
-		DoneChan:             make(chan struct{}),
+		changeEventBatchChan: make(chan []ParsedEvent),
+		writesOffTsChan:      make(chan primitive.Timestamp),
+		errChan:              make(chan error),
+		doneChan:             make(chan struct{}),
 	}
 	verifier.dstChangeStreamReader = &ChangeStreamReader{
 		readerType:           dst,
@@ -95,10 +95,10 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		watcherClient:        verifier.dstClient,
 		clusterInfo:          *verifier.dstClusterInfo,
 		changeStreamRunning:  false,
-		ChangeEventBatchChan: make(chan []ParsedEvent),
-		WritesOffTsChan:      make(chan primitive.Timestamp),
-		ErrChan:              make(chan error),
-		DoneChan:             make(chan struct{}),
+		changeEventBatchChan: make(chan []ParsedEvent),
+		writesOffTsChan:      make(chan primitive.Timestamp),
+		errChan:              make(chan error),
+		doneChan:             make(chan struct{}),
 	}
 }
 
@@ -109,7 +109,7 @@ func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *C
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case batch, more := <-reader.ChangeEventBatchChan:
+		case batch, more := <-reader.changeEventBatchChan:
 			if !more {
 				verifier.logger.Debug().Msgf("Change Event Batch Channel has been closed by %s, returning...", reader)
 				return nil
@@ -117,7 +117,7 @@ func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *C
 			verifier.logger.Trace().Msgf("Verifier is handling a change event batch from %s: %v", reader, batch)
 			err := verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType)
 			if err != nil {
-				reader.ErrChan <- err
+				reader.errChan <- err
 				return err
 			}
 		}
@@ -295,7 +295,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		return nil
 	}
 
-	csr.ChangeEventBatchChan <- changeEventBatch
+	csr.changeEventBatchChan <- changeEventBatch
 	return nil
 }
 
@@ -333,7 +333,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 		// source writes are ended and the migration tool is finished / committed.
 		// This means we should exit rather than continue reading the change stream
 		// since there should be no more events.
-		case writesOffTs := <-csr.WritesOffTsChan:
+		case writesOffTs := <-csr.writesOffTsChan:
 			csr.logger.Debug().
 				Interface("writesOffTimestamp", writesOffTs).
 				Msgf("%s thread received writesOff timestamp. Finalizing change stream.", csr)
@@ -386,7 +386,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			}
 			// since we have started Recheck, we must signal that we have
 			// finished the change stream changes so that Recheck can continue.
-			csr.DoneChan <- struct{}{}
+			csr.doneChan <- struct{}{}
 			break
 		}
 	}
@@ -486,9 +486,9 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 	initialCreateResultChan := make(chan mo.Result[primitive.Timestamp])
 
 	go func() {
-		// Closing ChangeEventBatchChan at the end of change stream goroutine
+		// Closing changeEventBatchChan at the end of change stream goroutine
 		// notifies the verifier's change event handler to exit.
-		defer close(csr.ChangeEventBatchChan)
+		defer close(csr.changeEventBatchChan)
 
 		retryer := retry.New(retry.DefaultDurationLimit)
 		retryer = retryer.WithErrorCodes(util.CursorKilled)
@@ -524,8 +524,8 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 		if err != nil {
 			// NB: This failure always happens after the initial change stream
 			// creation.
-			csr.ErrChan <- err
-			close(csr.ErrChan)
+			csr.errChan <- err
+			close(csr.errChan)
 		}
 	}()
 

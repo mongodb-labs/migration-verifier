@@ -255,7 +255,6 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 		return errors.New("writesOff already set")
 	}
 	verifier.writesOff = true
-	verifier.mux.Unlock()
 
 	verifier.logger.Debug().Msg("Signalling that writes are done.")
 
@@ -266,6 +265,7 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	)
 
 	if err != nil {
+		verifier.mux.Unlock()
 		return errors.Wrapf(err, "failed to fetch source's cluster time")
 	}
 
@@ -276,21 +276,23 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	)
 
 	if err != nil {
+		verifier.mux.Unlock()
 		return errors.Wrapf(err, "failed to fetch destination's cluster time")
 	}
+	verifier.mux.Unlock()
 
 	// This has to happen outside the lock because the change streams
 	// might be inserting docs into the recheck queue, which happens
 	// under the lock.
 	select {
-	case verifier.srcChangeStreamReader.WritesOffTsChan <- srcFinalTs:
-	case err := <-verifier.srcChangeStreamReader.ErrChan:
+	case verifier.srcChangeStreamReader.writesOffTsChan <- srcFinalTs:
+	case err := <-verifier.srcChangeStreamReader.errChan:
 		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.srcChangeStreamReader)
 	}
 
 	select {
-	case verifier.dstChangeStreamReader.WritesOffTsChan <- dstFinalTs:
-	case err := <-verifier.dstChangeStreamReader.ErrChan:
+	case verifier.dstChangeStreamReader.writesOffTsChan <- dstFinalTs:
+	case err := <-verifier.dstChangeStreamReader.errChan:
 		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.dstChangeStreamReader)
 	}
 
