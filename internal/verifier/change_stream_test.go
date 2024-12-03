@@ -475,7 +475,11 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 
 	suite.Require().NoError(verifier.dstChangeStreamReader.StartChangeStream(ctx))
 	go func() {
-		suite.Require().NoError(verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader))
+		err := verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader)
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		suite.Require().NoError(err)
 	}()
 
 	_, err := coll1.InsertOne(ctx, bson.D{{"_id", 1}})
