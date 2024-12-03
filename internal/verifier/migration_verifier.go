@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	_ "net/http/pprof"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,7 +22,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/mbson"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
@@ -35,7 +33,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
-	"golang.org/x/exp/maps"
 )
 
 // ReadConcernSetting describes the verifier’s handling of read
@@ -65,9 +62,6 @@ const (
 	// which is important for deployments where majority read concern
 	// is unworkable.
 	ReadConcernIgnore ReadConcernSetting = "ignore"
-
-	configDBName  = "config"
-	collsCollName = "collections"
 
 	DefaultFailureDisplaySize = 20
 
@@ -694,42 +688,44 @@ func (verifier *Verifier) logChunkInfo(ctx context.Context, namespaceAndUUID *uu
 	}
 }
 
-func (verifier *Verifier) getShardingInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) ([]string, error) {
-	uuid := namespaceAndUUID.UUID
-	namespace := namespaceAndUUID.DBName + "." + namespaceAndUUID.CollName
-	configCollectionsColl := verifier.srcClientDatabase(configDBName).Collection(collsCollName)
-	cursor, err := configCollectionsColl.Find(ctx, bson.D{{"uuid", uuid}})
+func (verifier *Verifier) getShardKeyFields(
+	ctx context.Context,
+	namespaceAndUUID *uuidutil.NamespaceAndUUID,
+) ([]string, error) {
+	coll := verifier.srcClient.Database(namespaceAndUUID.DBName).
+		Collection(namespaceAndUUID.CollName)
+
+	shardKeyOpt, err := util.GetShardKey(ctx, coll)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to read sharding info for %s: %v", namespace, err)
-	}
-	defer cursor.Close(ctx)
-	collectionSharded := false
-
-	shardKeys := []string{}
-
-	for cursor.Next(ctx) {
-		collectionSharded = true
-		var result struct {
-			Key bson.M
-		}
-
-		if err = cursor.Decode(&result); err != nil {
-			return nil, fmt.Errorf("Failed to decode sharding info for %s: %v", namespace, err)
-		}
-
-		verifier.logger.Debug().Msgf("Collection %s is sharded with shard key %v", namespace, result.Key)
-
-		shardKeys = maps.Keys(result.Key)
-		sort.Strings(shardKeys)
-	}
-	if err = cursor.Err(); err != nil {
-		verifier.logger.Error().Msgf("Error reading sharding info for %s: %v", namespace, err)
-	}
-	if collectionSharded {
-		verifier.logChunkInfo(ctx, namespaceAndUUID)
+		return nil, errors.Wrapf(
+			err,
+			"failed to fetch %#q's shard key",
+			FullName(coll),
+		)
 	}
 
-	return shardKeys, nil
+	shardKeyRaw, isSharded := shardKeyOpt.Get()
+	if !isSharded {
+		return []string{}, nil
+	}
+
+	verifier.logChunkInfo(ctx, namespaceAndUUID)
+
+	els, err := shardKeyRaw.Elements()
+	if err != nil {
+		return nil, errors.Wrapf(
+			err,
+			"failed to parse %#q's shard key",
+			FullName(coll),
+		)
+	}
+
+	return lo.Map(
+		els,
+		func(el bson.RawElement, _ int) string {
+			return el.Key()
+		},
+	), nil
 }
 
 // partitionAndInspectNamespace does a few preliminary tasks for the
@@ -745,7 +741,7 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
-	shardKeys, err := verifier.getShardingInfo(ctx, namespaceAndUUID)
+	shardKeys, err := verifier.getShardKeyFields(ctx, namespaceAndUUID)
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
@@ -860,7 +856,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 	return results, canCompareData, nil
 }
 
-func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Raw, dstSpec bson.Raw) (bool, error) {
+func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec, dstSpec bson.Raw) (bool, error) {
 	// If the byte buffers match, then we’re done.
 	if bytes.Equal(srcSpec, dstSpec) {
 		return true, nil
@@ -874,56 +870,21 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec bson.Ra
 		"background",
 	}
 
-	// Next check to see if the only differences are type differences.
-	// (We can safely use $documents here since this is against the metadata
-	// cluster, which we can require to be v5+.)
-	db := verifier.metaClient.Database(verifier.metaDBName)
-	cursor, err := db.Aggregate(
+	return util.ServerThinksTheseMatch(
 		ctx,
-		mongo.Pipeline{
-			{{"$documents", []bson.D{
-				{
-					{"spec", bson.D{{"$literal", srcSpec}}},
-					{"dstSpec", bson.D{{"$literal", dstSpec}}},
-				},
-			}}},
-
+		verifier.metaClient,
+		srcSpec,
+		dstSpec,
+		option.Some(mongo.Pipeline{
 			{{"$unset", lo.Reduce(
 				fieldsToRemove,
 				func(cur []string, field string, _ int) []string {
-					return append(cur, "spec."+field, "dstSpec."+field)
+					return append(cur, "a."+field, "b."+field)
 				},
 				[]string{},
 			)}},
-
-			// Now check to be sure that those specs match.
-			{{"$match", bson.D{
-				{"$expr", bson.D{
-					{"$eq", mslices.Of("$spec", "$dstSpec")},
-				}},
-			}}},
-		},
+		}),
 	)
-
-	if err != nil {
-		return false, errors.Wrap(err, "failed to check index specification match in metadata")
-	}
-	var docs []bson.Raw
-	err = cursor.All(ctx, &docs)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to parse index specification match’s result")
-	}
-
-	count := len(docs)
-
-	switch count {
-	case 0:
-		return false, nil
-	case 1:
-		return true, nil
-	}
-
-	return false, errors.Errorf("weirdly received %d matching index docs (should be 0 or 1)", count)
 }
 
 func (verifier *Verifier) ProcessCollectionVerificationTask(
@@ -983,19 +944,19 @@ func getIndexesMap(
 		var name string
 		has, err := mbson.RawLookup(spec, &name, "name")
 
-		if !has {
-			return nil, errors.Errorf(
-				"%#q has an unnamed index (%+v)",
-				FullName(coll),
-				spec,
-			)
-		}
-
 		if err != nil {
 			return nil, errors.Wrapf(
 				err,
 				"failed to extract %#q from %#q's index specification (%+v)",
 				"name",
+				FullName(coll),
+				spec,
+			)
+		}
+
+		if !has {
+			return nil, errors.Errorf(
+				"%#q has an unnamed index (%+v)",
 				FullName(coll),
 				spec,
 			)
@@ -1192,6 +1153,27 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			}
 		}
 		task.FailedDocs = append(task.FailedDocs, indexProblems...)
+		task.Status = verificationTaskMetadataMismatch
+	}
+
+	shardingProblems, err := verifier.verifyShardingIfNeeded(ctx, srcColl, dstColl)
+	if err != nil {
+		return errors.Wrapf(
+			err,
+			"failed to compare namespace %#q's sharding",
+			srcNs,
+		)
+	}
+	if len(shardingProblems) > 0 {
+		// don't insert a failed collection unless we did not insert one above
+		if len(specificationProblems)+len(indexProblems) == 0 {
+			err = insertFailedCollection()
+			if err != nil {
+				return err
+			}
+		}
+
+		task.FailedDocs = append(task.FailedDocs, shardingProblems...)
 		task.Status = verificationTaskMetadataMismatch
 	}
 
