@@ -315,7 +315,7 @@ func (verifier *Verifier) createChangeStream(
 		SetMaxAwaitTime(1 * time.Second).
 		SetFullDocument(options.UpdateLookup)
 
-	if verifier.srcBuildInfo.VersionArray[0] >= 6 {
+	if verifier.srcClusterInfo.VersionArray[0] >= 6 {
 		opts = opts.SetCustomPipeline(bson.M{"showExpandedEvents": true})
 	}
 

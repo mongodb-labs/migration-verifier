@@ -90,8 +90,8 @@ type Verifier struct {
 	metaClient         *mongo.Client
 	srcClient          *mongo.Client
 	dstClient          *mongo.Client
-	srcBuildInfo       *util.BuildInfo
-	dstBuildInfo       *util.BuildInfo
+	srcClusterInfo     *util.ClusterInfo
+	dstClusterInfo     *util.ClusterInfo
 	numWorkers         int
 	failureDisplaySize int64
 
@@ -187,13 +187,18 @@ type VerifierSettings struct {
 }
 
 // NewVerifier creates a new Verifier
-func NewVerifier(settings VerifierSettings) *Verifier {
+func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 	readConcern := settings.ReadConcernSetting
 	if readConcern == "" {
 		readConcern = ReadConcernMajority
 	}
 
+	logger, logWriter := getLoggerAndWriter(logPath)
+
 	return &Verifier{
+		logger: logger,
+		writer: logWriter,
+
 		phase:                       Idle,
 		numWorkers:                  NumWorkers,
 		readPreference:              readpref.Primary(),
@@ -311,40 +316,6 @@ func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 	return err
 }
 
-func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri)
-	var err error
-	verifier.srcClient, err = mongo.Connect(ctx, opts)
-	if err != nil {
-		return errors.Wrapf(err, "failed to connect to source %#q", uri)
-	}
-
-	buildInfo, err := util.GetBuildInfo(ctx, verifier.srcClient)
-	if err != nil {
-		return errors.Wrap(err, "failed to read source build info")
-	}
-
-	verifier.srcBuildInfo = &buildInfo
-	return nil
-}
-
-func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri)
-	var err error
-	verifier.dstClient, err = mongo.Connect(ctx, opts)
-	if err != nil {
-		return errors.Wrapf(err, "failed to connect to destination %#q", uri)
-	}
-
-	buildInfo, err := util.GetBuildInfo(ctx, verifier.dstClient)
-	if err != nil {
-		return errors.Wrap(err, "failed to read destination build info")
-	}
-
-	verifier.dstBuildInfo = &buildInfo
-	return nil
-}
-
 func (verifier *Verifier) SetServerPort(port int) {
 	verifier.port = port
 }
@@ -364,10 +335,6 @@ func (verifier *Verifier) SetWorkerSleepDelayMillis(arg time.Duration) {
 // SetPartitionSizeMB sets the verifier’s maximum partition size in MiB.
 func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
 	verifier.partitionSizeInBytes = int64(partitionSizeMB) * 1024 * 1024
-}
-
-func (verifier *Verifier) SetLogger(logPath string) {
-	verifier.logger, verifier.writer = getLoggerAndWriter(logPath)
 }
 
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {
@@ -473,7 +440,7 @@ func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A)
 	return append(predicates, verifier.globalFilter)
 }
 
-func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, buildInfo *util.BuildInfo,
+func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
 	startAtTs *primitive.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
@@ -486,7 +453,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 			bson.E{"filter", bson.D{{"$and", andPredicates}}},
 		}
 	} else {
-		findOptions = task.QueryFilter.Partition.GetFindOptions(buildInfo, verifier.maybeAppendGlobalFilterToPredicates(andPredicates))
+		findOptions = task.QueryFilter.Partition.GetFindOptions(clusterInfo, verifier.maybeAppendGlobalFilterToPredicates(andPredicates))
 	}
 	if verifier.readPreference.Mode() != readpref.PrimaryMode {
 		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)

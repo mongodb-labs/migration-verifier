@@ -137,7 +137,7 @@ func (p *Partition) FindCmd(
 // (e.g. use the partitions on the source to read the destination for verification)
 // If the passed-in buildinfo indicates a mongodb version < 5.0, type bracketing is not used.
 // filterAndPredicates is a slice of filter criteria that's used to construct the "filter" field in the find option.
-func (p *Partition) GetFindOptions(buildInfo *util.BuildInfo, filterAndPredicates bson.A) bson.D {
+func (p *Partition) GetFindOptions(clusterInfo *util.ClusterInfo, filterAndPredicates bson.A) bson.D {
 	if p == nil {
 		if len(filterAndPredicates) > 0 {
 			return bson.D{{"filter", bson.D{{"$and", filterAndPredicates}}}}
@@ -158,11 +158,11 @@ func (p *Partition) GetFindOptions(buildInfo *util.BuildInfo, filterAndPredicate
 		// For non-capped collections, the cursor should use the ID filter and the _id index.
 		// Get the bounded query filter from the partition to be used in the Find command.
 		allowTypeBracketing := false
-		if buildInfo != nil {
+		if clusterInfo != nil {
 			allowTypeBracketing = true
 
-			if buildInfo.VersionArray != nil {
-				allowTypeBracketing = buildInfo.VersionArray[0] < 5
+			if clusterInfo.VersionArray != nil {
+				allowTypeBracketing = clusterInfo.VersionArray[0] < 5
 			}
 		}
 		if !allowTypeBracketing {

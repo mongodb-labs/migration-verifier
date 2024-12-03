@@ -416,7 +416,7 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 
 func (suite *IntegrationTestSuite) TestCreateForbidden() {
 	ctx := suite.Context()
-	buildInfo, err := util.GetBuildInfo(ctx, suite.srcMongoClient)
+	buildInfo, err := util.GetClusterInfo(ctx, suite.srcMongoClient)
 	suite.Require().NoError(err)
 
 	if buildInfo.VersionArray[0] < 6 {
