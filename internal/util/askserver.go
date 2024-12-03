@@ -17,6 +17,9 @@ import (
 //
 // tinker is an optional pipeline that operates on the documents in the
 // pipeline (`a` and `b`, respectively) before they're compared.
+//
+// In migration-verifier the client is generally expected to be for
+// the metadata cluster.
 func ServerThinksTheseMatch(
 	ctx context.Context,
 	client *mongo.Client,
