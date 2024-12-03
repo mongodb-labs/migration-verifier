@@ -1336,6 +1336,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	dbname2 := suite.DBNameForTest("2")
 
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	defer zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
 	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})

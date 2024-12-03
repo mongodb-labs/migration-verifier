@@ -44,7 +44,11 @@ func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx cont
 	err := verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	go func() {
-		suite.Require().NoError(verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader))
+		err := verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		suite.Require().NoError(err)
 	}()
 }
 
