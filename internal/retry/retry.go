@@ -74,6 +74,10 @@ func (r *Retryer) runRetryLoop(
 	sleepTime := minSleepTime
 
 	for {
+		if beforeFunc, hasBefore := r.before.Get(); hasBefore {
+			beforeFunc()
+		}
+
 		eg, egCtx := errgroup.WithContext(ctx)
 		for i, curFunc := range funcs {
 

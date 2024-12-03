@@ -25,7 +25,8 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	types.ByteCount,
 	error,
 ) {
-	srcChannel, dstChannel, readSrcCallback, readDstCallback := verifier.getFetcherChannelsAndCallbacks(task)
+	var srcChannel, dstChannel <-chan bson.Raw
+	var readSrcCallback, readDstCallback func(context.Context, *retry.FuncInfo) error
 
 	results := []VerificationResult{}
 	var docCount types.DocumentCount
@@ -33,23 +34,27 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 
 	retryer := retry.New(retry.DefaultDurationLimit)
 
-	err := retryer.Run(
-		givenCtx,
-		verifier.logger,
-		readSrcCallback,
-		readDstCallback,
-		func(ctx context.Context, _ *retry.FuncInfo) error {
-			var err error
-			results, docCount, byteCount, err = verifier.compareDocsFromChannels(
-				ctx,
-				task,
-				srcChannel,
-				dstChannel,
-			)
+	err := retryer.
+		WithBefore(func() {
+			srcChannel, dstChannel, readSrcCallback, readDstCallback = verifier.getFetcherChannelsAndCallbacks(task)
+		}).
+		Run(
+			givenCtx,
+			verifier.logger,
+			readSrcCallback,
+			readDstCallback,
+			func(ctx context.Context, _ *retry.FuncInfo) error {
+				var err error
+				results, docCount, byteCount, err = verifier.compareDocsFromChannels(
+					ctx,
+					task,
+					srcChannel,
+					dstChannel,
+				)
 
-			return err
-		},
-	)
+				return err
+			},
+		)
 
 	return results, docCount, byteCount, err
 }
