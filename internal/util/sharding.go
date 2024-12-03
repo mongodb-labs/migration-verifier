@@ -7,7 +7,6 @@ import (
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
 )
 
 const (
@@ -27,7 +26,14 @@ func GetShardKey(
 		Database(configDBName).
 		Collection(collsCollName)
 
-	rawResult, err := configCollectionsColl.FindOne(ctx, bson.D{{"_id", namespace}}).Raw()
+	decoded := struct {
+		Key option.Option[bson.Raw]
+	}{}
+
+	err := configCollectionsColl.
+		FindOne(ctx, bson.D{{"_id", namespace}}).
+		Decode(&decoded)
+
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return option.None[bson.Raw](), nil
 	} else if err != nil {
@@ -38,29 +44,11 @@ func GetShardKey(
 		)
 	}
 
-	keyAsVal, err := rawResult.LookupErr("key")
-	if errors.Is(err, bsoncore.ErrElementNotFound) {
+	key, hasKey := decoded.Key.Get()
+
+	if !hasKey {
 		return option.None[bson.Raw](), nil
-	} else if err != nil {
-		return option.None[bson.Raw](), errors.Wrapf(
-			err,
-			"failed to find %#q in %#q's %#q entry",
-			"key",
-			namespace,
-			FullName(configCollectionsColl),
-		)
 	}
 
-	keyAsRaw, isDoc := keyAsVal.DocumentOK()
-	if !isDoc {
-		return option.None[bson.Raw](), errors.Errorf(
-			"%#q in %#q's %#q entry is of type %#q, not an object",
-			"key",
-			namespace,
-			FullName(configCollectionsColl),
-			keyAsVal.Type,
-		)
-	}
-
-	return option.Some(keyAsRaw), nil
+	return option.Some(key), nil
 }
