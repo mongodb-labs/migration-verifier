@@ -148,7 +148,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 		err = nil
 	}
 
-	if err != nil {
+	if err == nil {
 		verifier.logger.Debug().
 			Int("generation", generation).
 			Msgf("Check finished.")
@@ -443,11 +443,6 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			duration := verifier.workerSleepDelayMillis * time.Millisecond
 
 			if duration > 0 {
-				verifier.logger.Debug().
-					Int("workerNum", workerNum).
-					Stringer("duration", duration).
-					Msg("No tasks found. Sleeping.")
-
 				time.Sleep(duration)
 			}
 
@@ -459,9 +454,13 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			)
 		}
 
+		verifier.workerTracker.Set(workerNum, *task)
+
 		switch task.Type {
 		case verificationTaskVerifyCollection:
 			err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
+			verifier.workerTracker.Unset(workerNum)
+
 			if err != nil {
 				return err
 			}
@@ -473,6 +472,8 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			}
 		case verificationTaskVerifyDocuments:
 			err := verifier.ProcessVerifyTask(ctx, workerNum, task)
+			verifier.workerTracker.Unset(workerNum)
+
 			if err != nil {
 				return err
 			}

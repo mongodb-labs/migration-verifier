@@ -5,6 +5,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
@@ -24,31 +25,31 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	types.ByteCount,
 	error,
 ) {
-	// This function spawns three threads: one to read from the source,
-	// another to read from the destination, and a third one to receive the
-	// docs from the other 2 threads and compare them. It’s done this way,
-	// rather than fetch-everything-then-compare, to minimize memory usage.
-	errGroup, groupCtx := errgroup.WithContext(givenCtx)
-
-	srcChannel, dstChannel := verifier.getFetcherChannels(groupCtx, errGroup, task)
+	srcChannel, dstChannel, readSrcCallback, readDstCallback := verifier.getFetcherChannelsAndCallbacks(task)
 
 	results := []VerificationResult{}
 	var docCount types.DocumentCount
 	var byteCount types.ByteCount
 
-	errGroup.Go(func() error {
-		var err error
-		results, docCount, byteCount, err = verifier.compareDocsFromChannels(
-			groupCtx,
-			task,
-			srcChannel,
-			dstChannel,
-		)
+	retryer := retry.New(retry.DefaultDurationLimit)
 
-		return err
-	})
+	err := retryer.Run(
+		givenCtx,
+		verifier.logger,
+		readSrcCallback,
+		readDstCallback,
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			var err error
+			results, docCount, byteCount, err = verifier.compareDocsFromChannels(
+				ctx,
+				task,
+				srcChannel,
+				dstChannel,
+			)
 
-	err := errGroup.Wait()
+			return err
+		},
+	)
 
 	return results, docCount, byteCount, err
 }
@@ -64,8 +65,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 	error,
 ) {
 	results := []VerificationResult{}
-	var docCount types.DocumentCount
-	var byteCount types.ByteCount
+	var srcDocCount types.DocumentCount
+	var srcByteCount types.ByteCount
 
 	mapKeyFieldNames := make([]string, 1+len(task.QueryFilter.ShardKeys))
 	mapKeyFieldNames[0] = "_id"
@@ -142,67 +143,95 @@ func (verifier *Verifier) compareDocsFromChannels(
 		}
 	}()
 
-	// We always read src & dst back & forth. This ensures that, if one side
+	// We always read src & dst together. This ensures that, if one side
 	// lags the other significantly, we won’t keep caching the faster side’s
 	// documents and thus consume more & more memory.
 	for !srcClosed || !dstClosed {
+		simpleTimerReset(readTimer, readTimeout)
+
+		var srcDoc, dstDoc bson.Raw
+
+		eg, egCtx := errgroup.WithContext(ctx)
+
 		if !srcClosed {
-			simpleTimerReset(readTimer, readTimeout)
-
-			select {
-			case <-ctx.Done():
-				return nil, 0, 0, ctx.Err()
-			case <-readTimer.C:
-				return nil, 0, 0, errors.Errorf(
-					"failed to read from source after %s",
-					readTimeout,
-				)
-			case doc, alive := <-srcChannel:
-				if !alive {
-					srcClosed = true
-					break
-				}
-				docCount++
-				byteCount += types.ByteCount(len(doc))
-
-				err := handleNewDoc(doc, true)
-
-				if err != nil {
-					return nil, 0, 0, errors.Wrapf(
-						err,
-						"comparer thread failed to handle source doc with ID %v",
-						doc.Lookup("_id"),
+			eg.Go(func() error {
+				var alive bool
+				select {
+				case <-egCtx.Done():
+					return egCtx.Err()
+				case <-readTimer.C:
+					return errors.Errorf(
+						"failed to read from source after %s",
+						readTimeout,
 					)
+				case srcDoc, alive = <-srcChannel:
+					if !alive {
+						srcClosed = true
+						break
+					}
+
+					srcDocCount++
+					srcByteCount += types.ByteCount(len(srcDoc))
 				}
-			}
+
+				return nil
+			})
 		}
 
 		if !dstClosed {
-			simpleTimerReset(readTimer, readTimeout)
-
-			select {
-			case <-ctx.Done():
-				return nil, 0, 0, ctx.Err()
-			case <-readTimer.C:
-				return nil, 0, 0, errors.Errorf(
-					"failed to read from destination after %s",
-					readTimeout,
-				)
-			case doc, alive := <-dstChannel:
-				if !alive {
-					dstClosed = true
-					break
-				}
-
-				err := handleNewDoc(doc, false)
-
-				if err != nil {
-					return nil, 0, 0, errors.Wrapf(
-						err,
-						"comparer thread failed to handle destination doc with ID %v",
-						doc.Lookup("_id"),
+			eg.Go(func() error {
+				var alive bool
+				select {
+				case <-egCtx.Done():
+					return egCtx.Err()
+				case <-readTimer.C:
+					return errors.Errorf(
+						"failed to read from destination after %s",
+						readTimeout,
 					)
+				case dstDoc, alive = <-dstChannel:
+					if !alive {
+						dstClosed = true
+						break
+					}
 				}
+
+				return nil
+			})
+		}
+
+		if err := eg.Wait(); err != nil {
+			return nil, 0, 0, errors.Wrap(
+				err,
+				"failed to read documents",
+			)
+		}
+
+		if srcDoc != nil {
+			err := handleNewDoc(srcDoc, true)
+
+			if err != nil {
+				return nil, 0, 0, errors.Wrapf(
+					err,
+					"comparer thread failed to handle %#q's source doc (task: %s) with ID %v",
+					namespace,
+					task.PrimaryKey,
+					srcDoc.Lookup("_id"),
+				)
+			}
+		}
+
+		if dstDoc != nil {
+			err := handleNewDoc(dstDoc, false)
+
+			if err != nil {
+				return nil, 0, 0, errors.Wrapf(
+					err,
+					"comparer thread failed to handle %#q's destination doc (task: %s) with ID %v",
+					namespace,
+					task.PrimaryKey,
+					dstDoc.Lookup("_id"),
+				)
 			}
 		}
 	}
@@ -243,7 +272,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 		)
 	}
 
-	return results, docCount, byteCount, nil
+	return results, srcDocCount, srcByteCount, nil
 }
 
 func simpleTimerReset(t *time.Timer, dur time.Duration) {
@@ -254,26 +283,31 @@ func simpleTimerReset(t *time.Timer, dur time.Duration) {
 	t.Reset(dur)
 }
 
-func (verifier *Verifier) getFetcherChannels(
-	ctx context.Context,
-	errGroup *errgroup.Group,
+func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 	task *VerificationTask,
-) (<-chan bson.Raw, <-chan bson.Raw) {
+) (
+	<-chan bson.Raw,
+	<-chan bson.Raw,
+	func(context.Context, *retry.FuncInfo) error,
+	func(context.Context, *retry.FuncInfo) error,
+) {
 	srcChannel := make(chan bson.Raw)
 	dstChannel := make(chan bson.Raw)
 
-	errGroup.Go(func() error {
+	readSrcCallback := func(ctx context.Context, state *retry.FuncInfo) error {
 		cursor, err := verifier.getDocumentsCursor(
 			ctx,
 			verifier.srcClientCollection(task),
-			verifier.srcBuildInfo,
+			verifier.srcClusterInfo,
 			verifier.srcChangeStreamReader.startAtTs,
 			task,
 		)
 
 		if err == nil {
+			state.NoteSuccess()
+
 			err = errors.Wrap(
-				iterateCursorToChannel(ctx, cursor, srcChannel),
+				iterateCursorToChannel(ctx, state, cursor, srcChannel),
 				"failed to read source documents",
 			)
 		} else {
@@ -284,20 +318,22 @@ func (verifier *Verifier) getFetcherChannels(
 		}
 
 		return err
-	})
+	}
 
-	errGroup.Go(func() error {
+	readDstCallback := func(ctx context.Context, state *retry.FuncInfo) error {
 		cursor, err := verifier.getDocumentsCursor(
 			ctx,
 			verifier.dstClientCollection(task),
-			verifier.dstBuildInfo,
+			verifier.dstClusterInfo,
 			verifier.dstChangeStreamReader.startAtTs,
 			task,
 		)
 
 		if err == nil {
+			state.NoteSuccess()
+
 			err = errors.Wrap(
-				iterateCursorToChannel(ctx, cursor, dstChannel),
+				iterateCursorToChannel(ctx, state, cursor, dstChannel),
 				"failed to read destination documents",
 			)
 		} else {
@@ -308,13 +344,19 @@ func (verifier *Verifier) getFetcherChannels(
 		}
 
 		return err
-	})
+	}
 
-	return srcChannel, dstChannel
+	return srcChannel, dstChannel, readSrcCallback, readDstCallback
 }
 
-func iterateCursorToChannel(ctx context.Context, cursor *mongo.Cursor, writer chan<- bson.Raw) error {
+func iterateCursorToChannel(
+	ctx context.Context,
+	state *retry.FuncInfo,
+	cursor *mongo.Cursor,
+	writer chan<- bson.Raw,
+) error {
 	for cursor.Next(ctx) {
+		state.NoteSuccess()
 		writer <- slices.Clone(cursor.Current)
 	}
 

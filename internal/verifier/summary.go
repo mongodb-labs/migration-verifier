@@ -15,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/olekukonko/tablewriter"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/exp/maps"
 )
 
@@ -423,5 +424,50 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 	}
 
 	builder.WriteString("\nMost frequently-changing namespaces:\n")
+	table.Render()
+}
+
+func (verifier *Verifier) printWorkerStatus(builder *strings.Builder) {
+
+	table := tablewriter.NewWriter(builder)
+	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed"})
+
+	wsmap := verifier.workerTracker.Load()
+
+	activeThreadCount := 0
+	for w := 0; w <= verifier.numWorkers; w++ {
+		if wsmap[w].TaskID == nil {
+			continue
+		}
+
+		activeThreadCount++
+
+		var taskIdStr string
+
+		switch id := wsmap[w].TaskID.(type) {
+		case primitive.ObjectID:
+			theBytes, _ := id.MarshalText()
+
+			taskIdStr = string(theBytes)
+		default:
+			taskIdStr = fmt.Sprintf("%s", wsmap[w].TaskID)
+		}
+
+		table.Append(
+			[]string{
+				strconv.Itoa(w),
+				wsmap[w].Namespace,
+				taskIdStr,
+				reportutils.DurationToHMS(time.Since(wsmap[w].StartTime)),
+			},
+		)
+	}
+
+	builder.WriteString(fmt.Sprintf(
+		"\nActive worker threads (%d of %d):\n",
+		activeThreadCount,
+		verifier.numWorkers,
+	))
+
 	table.Render()
 }

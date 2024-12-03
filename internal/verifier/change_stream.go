@@ -62,7 +62,7 @@ type ChangeStreamReader struct {
 
 	metaDB        *mongo.Database
 	watcherClient *mongo.Client
-	buildInfo     util.BuildInfo
+	clusterInfo   util.ClusterInfo
 
 	changeStreamRunning  bool
 	ChangeEventBatchChan chan []ParsedEvent
@@ -80,7 +80,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		namespaces:           verifier.srcNamespaces,
 		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
 		watcherClient:        verifier.srcClient,
-		buildInfo:            *verifier.srcBuildInfo,
+		clusterInfo:          *verifier.srcClusterInfo,
 		changeStreamRunning:  false,
 		ChangeEventBatchChan: make(chan []ParsedEvent),
 		WritesOffTsChan:      make(chan primitive.Timestamp),
@@ -93,7 +93,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		namespaces:           verifier.dstNamespaces,
 		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
 		watcherClient:        verifier.dstClient,
-		buildInfo:            *verifier.dstBuildInfo,
+		clusterInfo:          *verifier.dstClusterInfo,
 		changeStreamRunning:  false,
 		ChangeEventBatchChan: make(chan []ParsedEvent),
 		WritesOffTsChan:      make(chan primitive.Timestamp),
@@ -252,7 +252,7 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 // shouldn’t really happen anyway by definition.
 func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	ctx context.Context,
-	ri *retry.Info,
+	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
 ) error {
 	eventsRead := 0
@@ -289,7 +289,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
-	ri.IterationSuccess()
+	ri.NoteSuccess()
 
 	if eventsRead == 0 {
 		return nil
@@ -301,7 +301,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 func (csr *ChangeStreamReader) iterateChangeStream(
 	ctx context.Context,
-	ri *retry.Info,
+	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
 ) error {
 	var lastPersistedTime time.Time
@@ -411,7 +411,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 		SetMaxAwaitTime(1 * time.Second).
 		SetFullDocument(options.UpdateLookup)
 
-	if csr.buildInfo.VersionArray[0] >= 6 {
+	if csr.clusterInfo.VersionArray[0] >= 6 {
 		opts = opts.SetCustomPipeline(bson.M{"showExpandedEvents": true})
 	}
 
@@ -495,10 +495,10 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 
 		parentThreadWaiting := true
 
-		err := retryer.RunForTransientErrorsOnly(
+		err := retryer.Run(
 			ctx,
 			csr.logger,
-			func(ri *retry.Info) error {
+			func(ctx context.Context, ri *retry.FuncInfo) error {
 				changeStream, startTs, err := csr.createChangeStream(ctx)
 				if err != nil {
 					if parentThreadWaiting {

@@ -133,12 +133,12 @@ func (verifier *Verifier) insertRecheckDocs(
 			}
 
 			retryer := retry.New(retry.DefaultDurationLimit)
-			err := retryer.RunForTransientErrorsOnly(
+			err := retryer.Run(
 				groupCtx,
 				verifier.logger,
-				func(_ *retry.Info) error {
+				func(retryCtx context.Context, _ *retry.FuncInfo) error {
 					_, err := verifier.verificationDatabase().Collection(recheckQueue).BulkWrite(
-						groupCtx,
+						retryCtx,
 						models,
 						options.BulkWrite().SetOrdered(false),
 					)

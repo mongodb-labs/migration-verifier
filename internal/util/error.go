@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/mmongo"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -184,62 +186,83 @@ func isNetworkError(err error) bool {
 	return mongo.IsNetworkError(err)
 }
 
+// The below list was copied from mongosync.
+// (Not every error code is known to happen in migration-verifier.)
+var transientErrorCodes = mapset.NewSet(
+	6, // HostUnreachable
+	7, // HostNotFound
+
+	// CursorNotFound sometimes happens due to inconsistencies
+	// in the server’s sharding abstraction. See REP-2440.
+	43, // CursorNotFound
+
+	50, // MaxTimeMSExpired
+	63, // OBSOLETE_StaleShardVersion
+	64, // WriteConcernFailed
+
+	// This seems to be possible if a shard is unavailable due
+	// to an election. See REP-2926.
+	70, // ShardNotFound
+
+	89,    // NetworkTimeout
+	90,    // CallbackCanceled
+	91,    // ShutdownInProgress
+	112,   // WriteConflict
+	117,   // ConflictingOperationInProgress
+	133,   // FailedToSatisfyReadPreference
+	134,   // ReadConcernMajorityNotAvailableYet
+	136,   // CappedPositionLost
+	175,   // QueryPlanKilled
+	187,   // LinearizableReadConcernError
+	189,   // PrimarySteppedDown
+	202,   // NetworkInterfaceExceededTimeLimit
+	211,   // KeyNotFound
+	251,   // NoSuchTransaction
+	262,   // ExceededTimeLimit
+	282,   // TransactionCoordinatorReachedAbortDecision
+	290,   // TransactionExceededLifetimeLimitSeconds
+	314,   // ObjectIsBusy
+	317,   // ConnectionPoolExpired
+	358,   // InternalTransactionNotSupported
+	365,   // TemporarilyUnavailable
+	384,   // ConnectionError
+	402,   // ResourceExhausted
+	406,   // MigrationBlockingOperationCoordinatorCleaningUp
+	407,   // PooledConnectionAcquisitionExceededTimeLimit
+	412,   // UpdatesStillPending
+	9001,  // SocketException
+	10107, // NotWritablePrimary
+	11600, // InterruptedAtShutdown
+	11601, // Interrupted
+	11602, // InterruptedDueToReplStateChange
+	12586, // BackgroundOperationInProgressForDatabase
+	12587, // BackgroundOperationInProgressForNamespace
+	13388, // StaleConfig
+	13435, // NotPrimaryNoSecondaryOk
+	13436, // NotPrimaryOrSecondary
+
+	50915, // BackupCursorOpenConflictWithCheckpoint
+	91331, // RemoteCommandFailed
+)
+
 // hasTransientErrorCode returns true if the error has one of a set of known-to-be-transient
 // Mongo server error codes.
 func hasTransientErrorCode(err error) bool {
-	switch GetErrorCode(err) {
-	case 6, 7, 64, 89, 91, 112, 136, 175, 189, 202, 262, 290, 314, 317,
-		9001, 10107, 11600, 11601, 11602, 13388, 13435, 13436:
-		// These error codes are either listed as retryable in the remote command retry
-		// scheduler, or have been added here deliberately, since they have been observed to be
-		// issued when applyOps/find/getMore is interrupted while the server is being shut
-		// down.
-		//
-		// There is a list of error codes at
-		// https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.yml. The
-		// list below includes all codes that are in the NetworkError and RetriableError
-		// categories, except 358 (InternalTransactionNotSupported) and 50915
-		// (BackupCursorOpenConflictWithCheckpoint), as these do not apply to any operations
-		// performed by mongosync.
-		//
-		// 6      HostUnreachable
-		// 7      HostNotFound
-		// 64     WriteConcernFailed
-		// 89     NetworkTimeout
-		// 91     ShutdownInProgress
-		// 112    WriteConflict
-		// 136    CappedPositionLost - XXX - there was some discussion over whether this should be included
-		// 175    QueryPlanKilled, e.g. when a collection is dropped/renamed while a cursor is open on it
-		// 189    PrimarySteppedDown
-		// 202    NetworkInterfaceExceededTimeLimit
-		// 262    ExceededTimeLimit
-		// 290    TransactionExceededLifetimeLimitSeconds
-		// 314    ObjectIsBusy
-		// 317    ConnectionPoolExpired
-		// 9001   SocketException
-		// 10107  NotWritablePrimary
-		// 11600  InterruptedAtShutdown
-		// 11601  Interrupted
-		// 11602  InterruptedDueToReplStateChange
-		// 13388  StaleConfig
-		// 13435  NotPrimaryNoSecondaryOk
-		// 13436  NotPrimaryOrSecondary
-		return true
-	case 0:
+	if GetErrorCode(err) == 0 {
 		// The server may send "not master" without an error code.
 		if strings.Contains(err.Error(), "not master") {
 			return true
 		}
-	// These codes only apply to DDL operations. However, we decided that
-	// there's no harm in including them in the default list. See REP-1289 for
-	// more details.
-	case 63, 117, 12586, 12587:
-		// 63	  OBSOLETE_StaleShardVersion
-		// 117	  ConflictingOperationInProgress
-		// 12586  BackgroundOperationInProgressForDatabase
-		// 12587  BackgroundOperationInProgressForNamespace
-		return true
 	}
+
+	// Now check whether any of the transient error codes appears
+	// in the error.
+	for code := range transientErrorCodes.Iter() {
+		if mmongo.ErrorHasCode(err, code) {
+			return true
+		}
+	}
+
 	return false
 }
 
@@ -271,22 +294,17 @@ func IsCollectionUUIDMismatchError(err error) bool {
 	return GetErrorCode(err) == 361
 }
 
-// IsServerError returns true if the error implements the ServerError interface in driver.
-func IsServerError(err error) bool {
-	// Get the cause of the err.
-	cause := errors.Cause(err)
-	_, ok := cause.(mongo.ServerError)
-
-	return ok
-}
-
 // IsCommandNotSupportedOnViewError returns true if this is a CommandNotSupportedOnView error.
 func IsCommandNotSupportedOnViewError(err error) bool {
 	return GetErrorCode(err) == 166
 }
 
-// GetErrorCode returns the error code corresponding to the provided error.
+// GetErrorCode returns the provided error’s top-level error code.
 // It returns 0 if the error is nil or not one of the supported error types.
+//
+// CAUTION: Server errors can contain multiple errors, and inspecting just
+// the top-level error code often doesn’t achieve proper error handling.
+// Instead consider mongo.ServerError.HasErrorCode().
 func GetErrorCode(err error) int {
 	switch e := errors.Cause(err).(type) {
 	case mongo.CommandError:

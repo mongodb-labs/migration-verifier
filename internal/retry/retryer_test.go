@@ -5,11 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/10gen/migration-verifier/internal/util"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
+
+var someNetworkError = &mongo.CommandError{
+	Labels: []string{"NetworkError"},
+	Name:   "NetworkError",
+}
+
+var badError = errors.New("I am fatal!")
 
 func (suite *UnitTestSuite) TestRetryer() {
 	retryer := New(DefaultDurationLimit)
@@ -17,103 +24,51 @@ func (suite *UnitTestSuite) TestRetryer() {
 
 	suite.Run("with a function that immediately succeeds", func() {
 		attemptNumber := -1
-		f := func(ri *Info, _ string) error {
+		f := func(_ context.Context, ri *FuncInfo) error {
 			attemptNumber = ri.GetAttemptNumber()
 			return nil
 		}
 
-		_, err := retryer.RunForUUIDAndTransientErrors(suite.Context(), logger, "foo", f)
+		err := retryer.Run(suite.Context(), logger, f)
 		suite.NoError(err)
 		suite.Equal(0, attemptNumber)
 
-		_, err = retryer.RunForUUIDErrorOnly(suite.Context(), logger, "foo", f)
-		suite.NoError(err)
-		suite.Equal(0, attemptNumber)
-
-		f2 := func(ri *Info) error {
+		f2 := func(_ context.Context, ri *FuncInfo) error {
 			attemptNumber = ri.GetAttemptNumber()
 			return nil
 		}
 
-		err = retryer.RunForTransientErrorsOnly(suite.Context(), logger, f2)
+		err = retryer.Run(suite.Context(), logger, f2)
 		suite.NoError(err)
 		suite.Equal(0, attemptNumber)
 	})
 
 	suite.Run("with a function that succeeds after two attempts", func() {
 		attemptNumber := -1
-		f := func(ri *Info, _ string) error {
+		f := func(_ context.Context, ri *FuncInfo) error {
 			attemptNumber = ri.GetAttemptNumber()
 			if attemptNumber < 2 {
-				return mongo.CommandError{
-					Labels: []string{"NetworkError"},
-					Name:   "NetworkError",
-				}
+				return someNetworkError
 			}
 			return nil
 		}
 
-		_, err := retryer.RunForUUIDAndTransientErrors(suite.Context(), logger, "foo", f)
+		err := retryer.Run(suite.Context(), logger, f)
 		suite.NoError(err)
 		suite.Equal(2, attemptNumber)
 
 		attemptNumber = -1
-		f2 := func(ri *Info) error {
+		f2 := func(_ context.Context, ri *FuncInfo) error {
 			attemptNumber = ri.GetAttemptNumber()
 			if attemptNumber < 2 {
-				return mongo.CommandError{
-					Labels: []string{"NetworkError"},
-					Name:   "NetworkError",
-				}
+				return someNetworkError
 			}
 			return nil
 		}
 
-		err = retryer.RunForTransientErrorsOnly(suite.Context(), logger, f2)
+		err = retryer.Run(suite.Context(), logger, f2)
 		suite.NoError(err)
 		suite.Equal(2, attemptNumber)
-	})
-
-	suite.Run("with a UUID vs name mismatch error", func() {
-		attemptLimit := 4
-		attemptNumber := -1
-		f := func(ri *Info, _ string) error {
-			attemptNumber = ri.GetNumCollectionUUIDMismatchRetries()
-			if attemptNumber < attemptLimit/2 {
-				// The actual name needs to change each time we retry or we'll
-				// abort early.
-				raw, err := bson.Marshal(bson.D{{"actualCollection", fmt.Sprintf("foo%d", attemptNumber)}})
-				suite.NoError(err)
-				return mongo.CommandError{
-					Name: "UUIDMismatchError",
-					Code: 361,
-					Raw:  bson.Raw(raw),
-				}
-			}
-			return nil
-		}
-		_, err := retryer.RunForUUIDErrorOnly(suite.Context(), logger, "bar", f)
-		suite.NoError(err)
-		suite.Equal(attemptLimit/2, attemptNumber)
-	})
-
-	suite.Run("the mismatch error returns the same name as was used", func() {
-		attemptNumber := -1
-		f := func(ri *Info, _ string) error {
-			attemptNumber = ri.GetNumCollectionUUIDMismatchRetries()
-			raw, err := bson.Marshal(bson.D{{"actualCollection", "foo"}})
-			suite.NoError(err)
-			return mongo.CommandError{
-				Name: "UUIDMismatchError",
-				Code: 361,
-				Raw:  bson.Raw(raw),
-			}
-		}
-		_, err := retryer.RunForUUIDErrorOnly(suite.Context(), logger, "bar", f)
-		suite.NoError(err)
-		// We only did one retry because the actual collection name matched the
-		// previous attempt.
-		suite.Equal(1, attemptNumber)
 	})
 }
 
@@ -121,18 +76,14 @@ func (suite *UnitTestSuite) TestRetryerDurationLimitIsZero() {
 	retryer := New(0)
 
 	attemptNumber := -1
-	cmdErr := mongo.CommandError{
-		Labels: []string{"NetworkError"},
-		Name:   "NetworkError",
-	}
-	f := func(ri *Info, _ string) error {
-		attemptNumber = ri.attemptNumber
-		return cmdErr
+	f := func(_ context.Context, ri *FuncInfo) error {
+		attemptNumber = ri.GetAttemptNumber()
+		return someNetworkError
 	}
 
-	_, err := retryer.RunForUUIDErrorOnly(suite.Context(), suite.Logger(), "bar", f)
-	suite.Equal(cmdErr, err)
-	suite.Equal(0, attemptNumber)
+	err := retryer.Run(suite.Context(), suite.Logger(), f)
+	suite.Assert().ErrorIs(err, someNetworkError)
+	suite.Assert().Equal(0, attemptNumber)
 }
 
 func (suite *UnitTestSuite) TestRetryerDurationReset() {
@@ -143,52 +94,49 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	// to execute. (f will artificially advance the time to greater than the
 	// durationLimit.)
 
-	transientNetworkError := mongo.CommandError{
-		Labels: []string{"NetworkError"},
-		Name:   "NetworkError",
-	}
-
 	// 1) Not calling IterationSuccess() means f will not be retried, since the
 	// durationLimit is exceeded
 	noSuccessIterations := 0
-	f1 := func(ri *Info, _ string) error {
+	f1 := func(_ context.Context, ri *FuncInfo) error {
 		// Artificially advance how much time was taken.
-		ri.durationSoFar += 2 * ri.durationLimit
+		ri.lastResetTime = ri.lastResetTime.Add(-2 * ri.loopInfo.durationLimit)
 
 		noSuccessIterations++
 		if noSuccessIterations == 1 {
-			return transientNetworkError
+			return someNetworkError
 		}
 
 		return nil
 	}
 
-	_, err := retryer.RunForUUIDAndTransientErrors(suite.Context(), logger, "foo", f1)
-	// err is not nil and err is not the network error thrown by the function.
-	suite.Error(err)
-	suite.NotEqual(err, transientNetworkError)
+	err := retryer.Run(suite.Context(), logger, f1)
+
+	// The error should be the limit-exceeded error, with the
+	// last-noted error being the transient error.
+	suite.Assert().ErrorAs(err, &RetryDurationLimitExceededErr{})
+	suite.Assert().ErrorIs(err, someNetworkError)
 	suite.Equal(1, noSuccessIterations)
 
 	// 2) Calling IterationSuccess() means f will run more than once because the
 	// duration should be reset.
 	successIterations := 0
-	f2 := func(ri *Info, _ string) error {
+	f2 := func(_ context.Context, ri *FuncInfo) error {
 		// Artificially advance how much time was taken.
-		ri.durationSoFar += 2 * ri.durationLimit
+		ri.lastResetTime = ri.lastResetTime.Add(-2 * ri.loopInfo.durationLimit)
 
-		ri.IterationSuccess()
+		ri.NoteSuccess()
 
 		successIterations++
 		if successIterations == 1 {
-			return transientNetworkError
+			return someNetworkError
 		}
 
 		return nil
 	}
 
-	_, err = retryer.RunForUUIDAndTransientErrors(suite.Context(), logger, "foo", f2)
-	suite.NoError(err)
-	suite.Equal(2, successIterations)
+	err = retryer.Run(suite.Context(), logger, f2)
+	suite.Assert().NoError(err)
+	suite.Assert().Equal(2, successIterations)
 }
 
 func (suite *UnitTestSuite) TestCancelViaContext() {
@@ -198,7 +146,7 @@ func (suite *UnitTestSuite) TestCancelViaContext() {
 	counter := 0
 	var wg sync.WaitGroup
 	wg.Add(1)
-	f := func(_ *Info, _ string) error {
+	f := func(_ context.Context, _ *FuncInfo) error {
 		counter++
 		if counter == 1 {
 			return errors.New("not master")
@@ -212,7 +160,7 @@ func (suite *UnitTestSuite) TestCancelViaContext() {
 	// retry code will see the cancel before the timer it sets expires.
 	cancel()
 	go func() {
-		_, err := retryer.RunForUUIDAndTransientErrors(ctx, logger, "foo", f)
+		err := retryer.Run(ctx, logger, f)
 		suite.ErrorIs(err, context.Canceled)
 		suite.Equal(1, counter)
 		wg.Done()
@@ -230,7 +178,7 @@ func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 	}
 
 	var attemptNumber int
-	f := func(ri *Info, _ string) error {
+	f := func(_ context.Context, ri *FuncInfo) error {
 		attemptNumber = ri.GetAttemptNumber()
 		if attemptNumber == 0 {
 			return customError
@@ -240,7 +188,7 @@ func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 
 	suite.Run("with no additional error codes", func() {
 		retryer := New(DefaultDurationLimit)
-		_, err := retryer.RunForUUIDAndTransientErrors(suite.Context(), logger, "foo", f)
+		err := retryer.Run(suite.Context(), logger, f)
 		suite.Equal(42, util.GetErrorCode(err))
 		suite.Equal(0, attemptNumber)
 	})
@@ -248,7 +196,7 @@ func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 	suite.Run("with one additional error code", func() {
 		retryer := New(DefaultDurationLimit)
 		retryer = retryer.WithErrorCodes(42)
-		_, err := retryer.RunForUUIDAndTransientErrors(suite.Context(), logger, "foo", f)
+		err := retryer.Run(suite.Context(), logger, f)
 		suite.NoError(err)
 		suite.Equal(1, attemptNumber)
 	})
@@ -256,7 +204,7 @@ func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 	suite.Run("with multiple additional error codes", func() {
 		retryer := New(DefaultDurationLimit)
 		retryer = retryer.WithErrorCodes(42, 43, 44)
-		_, err := retryer.RunForUUIDAndTransientErrors(suite.Context(), logger, "foo", f)
+		err := retryer.Run(suite.Context(), logger, f)
 		suite.NoError(err)
 		suite.Equal(1, attemptNumber)
 	})
@@ -264,76 +212,120 @@ func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 	suite.Run("with multiple additional error codes that don't match error", func() {
 		retryer := New(DefaultDurationLimit)
 		retryer = retryer.WithErrorCodes(41, 43, 44)
-		_, err := retryer.RunForUUIDAndTransientErrors(suite.Context(), logger, "foo", f)
+		err := retryer.Run(suite.Context(), logger, f)
 		suite.Equal(42, util.GetErrorCode(err))
 		suite.Equal(0, attemptNumber)
 	})
 }
 
-func (suite *UnitTestSuite) TestRetryerWithEmptyCollectionName() {
+func (suite *UnitTestSuite) TestMulti_NonTransient() {
+	ctx := suite.Context()
+	logger := suite.Logger()
+
 	retryer := New(DefaultDurationLimit)
-	emptyCollNameError := errors.New("Empty collection name")
-	f := func(_ *Info, collName string) error {
-		if collName == "" {
-			return emptyCollNameError
-		}
-		return nil
-	}
 
-	name, err := retryer.RunForUUIDErrorOnly(suite.Context(), suite.Logger(), "", f)
-	suite.NoError(err)
-	suite.Equal("", name)
+	err := retryer.Run(
+		ctx,
+		logger,
+		func(ctx context.Context, _ *FuncInfo) error {
+			timer := time.NewTimer(10 * time.Second)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		},
+		func(_ context.Context, _ *FuncInfo) error {
+			return badError
+		},
+	)
+
+	suite.Assert().ErrorIs(err, badError)
 }
 
-// Test fix for REP-4197
-func (suite *UnitTestSuite) TestV50RetryerWithUUIDNotSupportedError() {
-	retryer := New(0)
+func (suite *UnitTestSuite) TestMulti_Transient() {
+	ctx := suite.Context()
+	logger := suite.Logger()
 
-	attemptNumber := 0
-	cmdErr := mongo.CommandError{
-		Message: "(Location4928902) collectionUUID is not supported on a mongos",
-	}
-	f := func(ri *Info, _ string) error {
-		attemptNumber = ri.attemptNumber
-		if attemptNumber == 0 {
-			return cmdErr
-		} else {
-			return nil
-		}
-	}
+	for _, finalErr := range []error{nil, badError} {
+		suite.Run(
+			fmt.Sprintf("final error: %v", finalErr),
+			func() {
+				retryer := New(DefaultDurationLimit)
+				cb1Attempts := 0
+				cb2Attempts := 0
 
-	r := retryer.SetRetryOnUUIDNotSupported()
-	r.aggregateDisallowsUUIDs = false
-	_, err := r.RunForUUIDAndTransientErrors(suite.Context(), suite.Logger(), "bar", f)
-	// The aggregateDisallowsUUIDs will be set to True in the retry
-	suite.True(r.aggregateDisallowsUUIDs)
-	suite.NoError(err)
-	suite.Equal(1, attemptNumber)
+				err := retryer.Run(
+					ctx,
+					logger,
+
+					// This one succeeds every time.
+					func(ctx context.Context, _ *FuncInfo) error {
+						cb1Attempts++
+
+						return nil
+					},
+					func(_ context.Context, _ *FuncInfo) error {
+						cb2Attempts++
+
+						switch cb2Attempts {
+						case 1, 2:
+							return someNetworkError
+						default:
+							return finalErr
+						}
+					},
+				)
+
+				if finalErr == nil {
+					suite.Assert().NoError(err)
+				} else {
+					suite.Assert().ErrorIs(err, finalErr)
+				}
+
+				suite.Assert().Greater(cb2Attempts, 1)
+				suite.Assert().Equal(cb2Attempts, cb1Attempts, "both should be retried each time")
+			},
+		)
+	}
 }
 
-func (suite *UnitTestSuite) TestPreV50RetryerWithUUIDNotSupportedError() {
-	retryer := New(0)
+// TestMulti_LongRunningSuccess verifies that a long-running
+// success won’t spuriously fail because another thread keeps
+// restarting.
+func (suite *UnitTestSuite) TestMulti_LongRunningSuccess() {
+	ctx := suite.Context()
+	logger := suite.Logger()
 
-	attemptNumber := 0
-	cmdErr := mongo.CommandError{
-		Message: "(FailedToParse) unrecognized field 'collectionUUID",
-		Name:    "FailedToParseError",
-		Code:    9,
-	}
-	f := func(ri *Info, _ string) error {
-		attemptNumber = ri.attemptNumber
-		if attemptNumber == 0 {
-			return cmdErr
-		} else {
+	startTime := time.Now()
+	retryerLimit := 2 * time.Second
+	retryer := New(retryerLimit)
+
+	succeedPastTime := startTime.Add(retryerLimit + 1*time.Second)
+
+	err := retryer.Run(
+		ctx,
+		logger,
+		func(ctx context.Context, fi *FuncInfo) error {
+			fi.NoteSuccess()
+
+			if time.Now().Before(succeedPastTime) {
+				time.Sleep(1 * time.Second)
+				return someNetworkError
+			}
+
 			return nil
-		}
-	}
+		},
+		func(ctx context.Context, fi *FuncInfo) error {
+			if time.Now().Before(succeedPastTime) {
+				<-ctx.Done()
+				return ctx.Err()
+			}
 
-	r := retryer.SetRetryOnUUIDNotSupported()
-	r.aggregateDisallowsUUIDs = false
-	_, err := r.RunForUUIDAndTransientErrors(suite.Context(), suite.Logger(), "bar", f)
-	// The aggregateDisallowsUUIDs will be set to True in the retry
-	suite.True(r.aggregateDisallowsUUIDs)
-	suite.NoError(err)
-	suite.Equal(1, attemptNumber)
+			return nil
+		},
+	)
+
+	suite.Assert().NoError(err)
 }

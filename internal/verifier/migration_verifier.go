@@ -97,8 +97,8 @@ type Verifier struct {
 	metaClient         *mongo.Client
 	srcClient          *mongo.Client
 	dstClient          *mongo.Client
-	srcBuildInfo       *util.BuildInfo
-	dstBuildInfo       *util.BuildInfo
+	srcClusterInfo     *util.ClusterInfo
+	dstClusterInfo     *util.ClusterInfo
 	numWorkers         int
 	failureDisplaySize int64
 
@@ -145,6 +145,8 @@ type Verifier struct {
 
 	pprofInterval time.Duration
 
+	workerTracker *WorkerTracker
+
 	verificationStatusCheckInterval time.Duration
 }
 
@@ -188,24 +190,31 @@ type VerifierSettings struct {
 }
 
 // NewVerifier creates a new Verifier
-func NewVerifier(settings VerifierSettings) *Verifier {
+func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 	readConcern := settings.ReadConcernSetting
 	if readConcern == "" {
 		readConcern = ReadConcernMajority
 	}
 
-	return &Verifier{
-		phase:                Idle,
-		numWorkers:           NumWorkers,
-		readPreference:       readpref.Primary(),
-		partitionSizeInBytes: 400 * 1024 * 1024,
-		failureDisplaySize:   DefaultFailureDisplaySize,
+	logger, logWriter := getLoggerAndWriter(logPath)
 
-		readConcernSetting: readConcern,
+	return &Verifier{
+		logger: logger,
+		writer: logWriter,
+
+		phase:                       Idle,
+		numWorkers:                  NumWorkers,
+		readPreference:              readpref.Primary(),
+		partitionSizeInBytes:        400 * 1024 * 1024,
+		failureDisplaySize:          DefaultFailureDisplaySize,
+
+		readConcernSetting:          readConcern,
 
 		// This will get recreated once gen0 starts, but we want it
 		// here in case the change streams gets an event before then.
 		eventRecorder: NewEventRecorder(),
+
+		workerTracker: NewWorkerTracker(NumWorkers),
 
 		verificationStatusCheckInterval: 15 * time.Second,
 		nsMap:                           NewNSMap(),
@@ -322,40 +331,6 @@ func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 	return err
 }
 
-func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri)
-	var err error
-	verifier.srcClient, err = mongo.Connect(ctx, opts)
-	if err != nil {
-		return errors.Wrapf(err, "failed to connect to source %#q", uri)
-	}
-
-	buildInfo, err := util.GetBuildInfo(ctx, verifier.srcClient)
-	if err != nil {
-		return errors.Wrap(err, "failed to read source build info")
-	}
-
-	verifier.srcBuildInfo = &buildInfo
-	return nil
-}
-
-func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri)
-	var err error
-	verifier.dstClient, err = mongo.Connect(ctx, opts)
-	if err != nil {
-		return errors.Wrapf(err, "failed to connect to destination %#q", uri)
-	}
-
-	buildInfo, err := util.GetBuildInfo(ctx, verifier.dstClient)
-	if err != nil {
-		return errors.Wrap(err, "failed to read destination build info")
-	}
-
-	verifier.dstBuildInfo = &buildInfo
-	return nil
-}
-
 func (verifier *Verifier) SetServerPort(port int) {
 	verifier.port = port
 }
@@ -375,10 +350,6 @@ func (verifier *Verifier) SetWorkerSleepDelayMillis(arg time.Duration) {
 // SetPartitionSizeMB sets the verifier’s maximum partition size in MiB.
 func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
 	verifier.partitionSizeInBytes = int64(partitionSizeMB) * 1024 * 1024
-}
-
-func (verifier *Verifier) SetLogger(logPath string) {
-	verifier.logger, verifier.writer = getLoggerAndWriter(logPath)
 }
 
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {
@@ -478,7 +449,7 @@ func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A)
 	return append(predicates, verifier.globalFilter)
 }
 
-func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, buildInfo *util.BuildInfo,
+func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
 	startAtTs *primitive.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
@@ -491,7 +462,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 			bson.E{"filter", bson.D{{"$and", andPredicates}}},
 		}
 	} else {
-		findOptions = task.QueryFilter.Partition.GetFindOptions(buildInfo, verifier.maybeAppendGlobalFilterToPredicates(andPredicates))
+		findOptions = task.QueryFilter.Partition.GetFindOptions(clusterInfo, verifier.maybeAppendGlobalFilterToPredicates(andPredicates))
 	}
 	if verifier.readPreference.Mode() != readpref.PrimaryMode {
 		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
@@ -508,11 +479,16 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 		}
 	}
 	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
-	verifier.logger.Debug().
-		Interface("task", task.PrimaryKey).
-		Str("findCmd", fmt.Sprintf("%s", findCmd)).
-		Str("options", fmt.Sprintf("%v", *runCommandOptions)).
-		Msg("getDocuments findCmd.")
+
+	// Suppress this log for recheck tasks because the list of IDs can be
+	// quite long.
+	if len(task.Ids) == 0 {
+		verifier.logger.Debug().
+			Interface("task", task.PrimaryKey).
+			Str("findCmd", fmt.Sprintf("%s", findCmd)).
+			Str("options", fmt.Sprintf("%v", *runCommandOptions)).
+			Msg("getDocuments findCmd.")
+	}
 
 	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
 }
@@ -600,16 +576,6 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		Interface("task", task.PrimaryKey).
 		Msg("Processing document comparison task.")
 
-	defer func() {
-		elapsed := time.Since(start)
-
-		verifier.logger.Debug().
-			Int("workerNum", workerNum).
-			Interface("task", task.PrimaryKey).
-			Stringer("timeElapsed", elapsed).
-			Msg("Finished document comparison task.")
-	}()
-
 	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(
 		ctx,
 		task,
@@ -686,12 +652,24 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		}
 	}
 
-	return errors.Wrapf(
-		verifier.UpdateVerificationTask(ctx, task),
-		"failed to persist task %s's new status (%#q)",
-		task.PrimaryKey,
-		task.Status,
-	)
+	err = verifier.UpdateVerificationTask(ctx, task)
+
+	if err != nil {
+		return errors.Wrapf(
+			err,
+			"failed to persist task %s's new status (%#q)",
+			task.PrimaryKey,
+			task.Status,
+		)
+	}
+
+	verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Interface("task", task.PrimaryKey).
+		Stringer("timeElapsed", time.Since(start)).
+		Msg("Finished document comparison task.")
+
+	return nil
 }
 
 func (verifier *Verifier) logChunkInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) {
@@ -769,7 +747,7 @@ func (verifier *Verifier) getShardingInfo(ctx context.Context, namespaceAndUUID 
 //  2. Fetch shard keys.
 //  3. Fetch the size: # of docs, and # of bytes.
 func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, namespace string) ([]*partitions.Partition, []string, types.DocumentCount, types.ByteCount, error) {
-	retryer := retry.New(retry.DefaultDurationLimit).SetRetryOnUUIDNotSupported()
+	retryer := retry.New(retry.DefaultDurationLimit)
 	dbName, collName := SplitNamespace(namespace)
 	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, verifier.logger, retryer,
 		verifier.srcClientDatabase(dbName), collName)
@@ -1524,6 +1502,14 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	verifier.printChangeEventStatistics(strBuilder)
 
+	// Only print the worker status table if debug logging is enabled.
+	if verifier.logger.Debug().Enabled() {
+		switch genstatus {
+		case Gen0MetadataAnalysisComplete, GenerationInProgress:
+			verifier.printWorkerStatus(strBuilder)
+		}
+	}
+
 	var statusLine string
 
 	if hasTasks {
@@ -1544,6 +1530,8 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		}
 	} else {
 		switch genstatus {
+		case Gen0MetadataAnalysisComplete:
+			fallthrough
 		case GenerationInProgress:
 			statusLine = "This generation has nothing to compare."
 		case GenerationComplete:
