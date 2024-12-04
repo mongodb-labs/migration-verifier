@@ -137,7 +137,7 @@ func RefreshAllMongosInstances(
 func getAnyExistingShardConnectionStr(
 	ctx context.Context,
 	l *logger.Logger,
-	r retry.Retryer,
+	r *retry.Retryer,
 	client *mongo.Client,
 ) (string, error) {
 	res, err := runListShards(ctx, l, r, client)
@@ -169,7 +169,7 @@ func getAnyExistingShardConnectionStr(
 func runListShards(
 	ctx context.Context,
 	l *logger.Logger,
-	r retry.Retryer,
+	r *retry.Retryer,
 	client *mongo.Client,
 ) (*mongo.SingleResult, error) {
 	var res *mongo.SingleResult
