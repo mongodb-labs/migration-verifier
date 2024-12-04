@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
@@ -18,25 +19,178 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
 )
 
-func (suite *IntegrationTestSuite) TestChangeStreamFilter() {
+func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
+	ctx := suite.Context()
+
 	verifier := suite.BuildVerifier()
-	suite.Assert().Contains(
-		verifier.srcChangeStreamReader.GetChangeStreamFilter(),
-		bson.D{
-			{"$match", bson.D{{"ns.db", bson.D{{"$ne", metaDBName}}}}},
-		},
+
+	filter := verifier.srcChangeStreamReader.GetChangeStreamFilter()
+
+	_, err := suite.srcMongoClient.
+		Database("realUserDatabase").
+		Collection("foo").
+		InsertOne(ctx, bson.D{{"id", 123}})
+	suite.Require().NoError(err)
+
+	cs, err := suite.srcMongoClient.Watch(ctx, filter)
+	suite.Require().NoError(err)
+
+	defer cs.Close(ctx)
+
+	dbsToIgnore := []string{
+		metaDBName,
+		"mongosync_reserved_for_internal_use",
+		"mongosync_internal_foo",
+	}
+	for _, dbname := range dbsToIgnore {
+		_, err := suite.srcMongoClient.
+			Database(dbname).
+			Collection("foo").
+			InsertOne(ctx, bson.D{})
+		suite.Require().NoError(err)
+	}
+
+	_, err = suite.srcMongoClient.
+		Database("realUserDatabase").
+		Collection("foo").
+		UpdateOne(
+			ctx,
+			bson.D{{"id", 123}},
+			bson.D{{"$set", bson.D{{"foo", 123}}}})
+	suite.Require().NoError(err)
+
+	timedCtx, cancel := context.WithTimeoutCause(
+		ctx,
+		time.Minute,
+		errors.New("should have gotten an event"),
 	)
-	verifier.srcChangeStreamReader.namespaces = []string{"foo.bar", "foo.baz", "test.car", "test.chaz"}
-	suite.Assert().Contains(
-		verifier.srcChangeStreamReader.GetChangeStreamFilter(),
-		bson.D{{"$match", bson.D{
-			{"$or", []bson.D{
-				{{"ns", bson.D{{"db", "foo"}, {"coll", "bar"}}}},
-				{{"ns", bson.D{{"db", "foo"}, {"coll", "baz"}}}},
-				{{"ns", bson.D{{"db", "test"}, {"coll", "car"}}}},
-				{{"ns", bson.D{{"db", "test"}, {"coll", "chaz"}}}},
-			}},
-		}}},
+	defer cancel()
+	cs.Next(timedCtx) // No need to check this since we check cs.Err()
+	suite.Require().NoError(cs.Err())
+
+	event := bson.M{}
+	suite.Require().NoError(cs.Decode(&event))
+
+	suite.Assert().Equal(
+		"update",
+		event["operationType"],
+		"only the update should show in the change stream (event: %v)",
+		event,
+	)
+	suite.Assert().NotContains(
+		event,
+		"updateDescription",
+		"update description should be filtered out",
+	)
+
+	/*
+	   suite.Assert().Contains(
+
+	   	,
+	   	bson.D{
+	   		{"$match", bson.D{{"ns.db", bson.D{{"$ne", metaDBName}}}}},
+	   	},
+
+	   )
+	   verifier.srcChangeStreamReader.namespaces = []string{"foo.bar", "foo.baz", "test.car", "test.chaz"}
+	   suite.Assert().Contains(
+
+	   	verifier.srcChangeStreamReader.GetChangeStreamFilter(),
+	   	bson.D{{"$match", bson.D{
+	   		{"$or", []bson.D{
+	   			{{"ns", bson.D{{"db", "foo"}, {"coll", "bar"}}}},
+	   			{{"ns", bson.D{{"db", "foo"}, {"coll", "baz"}}}},
+	   			{{"ns", bson.D{{"db", "test"}, {"coll", "car"}}}},
+	   			{{"ns", bson.D{{"db", "test"}, {"coll", "chaz"}}}},
+	   		}},
+	   	}}},
+
+	   )
+	*/
+}
+
+func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+	verifier.srcChangeStreamReader.namespaces = []string{
+		"foo.bar",
+		"foo.baz",
+		"test.car",
+		"test.chaz",
+	}
+
+	filter := verifier.srcChangeStreamReader.GetChangeStreamFilter()
+
+	cs, err := suite.srcMongoClient.Watch(ctx, filter)
+	suite.Require().NoError(err)
+
+	defer cs.Close(ctx)
+
+	dbsToIgnore := []string{
+		metaDBName,
+		"mongosync_reserved_for_internal_use",
+		"mongosync_internal_foo",
+	}
+	for _, dbname := range dbsToIgnore {
+		_, err := suite.srcMongoClient.
+			Database(dbname).
+			Collection("foo").
+			InsertOne(ctx, bson.D{})
+		suite.Require().NoError(err)
+	}
+
+	sess, err := suite.srcMongoClient.StartSession()
+	suite.Require().NoError(err)
+	sctx := mongo.NewSessionContext(ctx, sess)
+
+	for _, ns := range verifier.srcChangeStreamReader.namespaces {
+		dbAndColl := strings.Split(ns, ".")
+
+		_, err := suite.srcMongoClient.
+			Database(dbAndColl[0]).
+			Collection(dbAndColl[1]).
+			InsertOne(sctx, bson.D{})
+		suite.Require().NoError(err)
+	}
+
+	changeStreamStopTime := sess.OperationTime()
+
+	suite.T().Logf("Insert op time: %v", changeStreamStopTime)
+
+	events := []bson.M{}
+
+	for {
+		gotEvent := cs.TryNext(ctx)
+		suite.Require().NoError(cs.Err())
+		csOpTime, err := extractTimestampFromResumeToken(cs.ResumeToken())
+		suite.Require().NoError(err, "should get timestamp from resume token")
+
+		if gotEvent {
+			var newEvent bson.M
+			suite.Require().NoError(cs.Decode(&newEvent))
+			events = append(events, newEvent)
+		}
+
+		suite.T().Logf("Change stream op time (got event? %v): %v", gotEvent, csOpTime)
+		if csOpTime.After(*changeStreamStopTime) {
+			break
+		}
+	}
+
+	suite.Assert().Len(
+		events,
+		len(verifier.srcChangeStreamReader.namespaces),
+		"should have 1 event per in-filter namespace",
+	)
+	suite.Assert().True(
+		lo.EveryBy(
+			events,
+			func(evt bson.M) bool {
+				return evt["operationType"] == "insert"
+			},
+		),
+		"each event should be insert: %v", events,
 	)
 }
 
@@ -579,4 +733,50 @@ func (suite *IntegrationTestSuite) TestLargeEvents() {
 
 	suite.Require().NoError(verifier.WritesOff(ctx))
 	suite.Require().NoError(verifierRunner.Await())
+}
+
+// TestDropMongosyncDB verifies that writes to Mongosync's
+// metadata don’t affect migration-verifier.
+func (suite *IntegrationTestSuite) TestDropMongosyncDB() {
+	ctx := suite.Context()
+
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
+	verifier := suite.BuildVerifier()
+
+	dbs := []string{
+		"mongosync_reserved_for_internal_use",
+		"mongosync_internal_foo",
+	}
+
+	for _, dbname := range dbs {
+		suite.Require().NoError(
+			suite.dstMongoClient.
+				Database(dbname).
+				CreateCollection(ctx, "foo"),
+		)
+	}
+
+	verifier.SetVerifyAll(true)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	for _, dbname := range dbs {
+		_, err := suite.dstMongoClient.
+			Database(dbname).
+			Collection("foo").
+			InsertOne(ctx, bson.D{})
+		suite.Require().NoError(err)
+
+		suite.Require().NoError(
+			suite.dstMongoClient.
+				Database(dbname).
+				Drop(ctx),
+		)
+	}
+
+	suite.Require().NoError(verifier.WritesOff(ctx))
+
+	suite.Require().NoError(runner.Await())
 }
