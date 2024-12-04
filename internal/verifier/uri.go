@@ -57,8 +57,20 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 
 	verifier.dstClusterInfo = &clusterInfo
 
-	// We needn't refresh mongoses on the destination,
-	// regardless of server version.
+	if clusterInfo.VersionArray[0] < 5 && clusterInfo.Topology == util.TopologySharded {
+		err := RefreshAllMongosInstances(
+			ctx,
+			verifier.logger,
+			opts,
+		)
+
+		if err != nil {
+			return errors.Wrap(
+				err,
+				"failed to refresh destination mongos instances",
+			)
+		}
+	}
 
 	return checkURIAgainstServerVersion(uri, clusterInfo)
 }
