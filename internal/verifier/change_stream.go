@@ -9,6 +9,8 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/msync"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/mo"
@@ -71,6 +73,8 @@ type ChangeStreamReader struct {
 	doneChan             chan struct{}
 
 	startAtTs *primitive.Timestamp
+
+	lag *msync.TypedAtomic[option.Option[time.Duration]]
 }
 
 func (verifier *Verifier) initializeChangeStreamReaders() {
@@ -86,6 +90,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		writesOffTsChan:      make(chan primitive.Timestamp),
 		errChan:              make(chan error),
 		doneChan:             make(chan struct{}),
+		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
 	}
 	verifier.dstChangeStreamReader = &ChangeStreamReader{
 		readerType:           dst,
@@ -99,6 +104,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		writesOffTsChan:      make(chan primitive.Timestamp),
 		errChan:              make(chan error),
 		doneChan:             make(chan struct{}),
+		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
 	}
 }
 
@@ -257,6 +263,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	ctx context.Context,
 	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
+	sess mongo.Session,
 ) error {
 	eventsRead := 0
 	var changeEventBatch []ParsedEvent
@@ -298,6 +305,17 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		return nil
 	}
 
+	var curTs primitive.Timestamp
+	curTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
+	if err == nil {
+		lagSecs := curTs.T - sess.OperationTime().T
+		csr.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
+	} else {
+		csr.logger.Warn().
+			Err(err).
+			Msgf("Failed to extract timestamp from %s's resume token to compute change stream lag.", csr)
+	}
+
 	csr.changeEventBatchChan <- changeEventBatch
 	return nil
 }
@@ -306,6 +324,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	ctx context.Context,
 	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
+	sess mongo.Session,
 ) error {
 	var lastPersistedTime time.Time
 
@@ -363,7 +382,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 					break
 				}
 
-				err = csr.readAndHandleOneChangeEventBatch(ctx, ri, cs)
+				err = csr.readAndHandleOneChangeEventBatch(ctx, ri, cs, sess)
 
 				if err != nil {
 					return err
@@ -371,7 +390,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			}
 
 		default:
-			err = csr.readAndHandleOneChangeEventBatch(ctx, ri, cs)
+			err = csr.readAndHandleOneChangeEventBatch(ctx, ri, cs, sess)
 
 			if err == nil {
 				err = persistResumeTokenIfNeeded()
@@ -408,7 +427,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 func (csr *ChangeStreamReader) createChangeStream(
 	ctx context.Context,
-) (*mongo.ChangeStream, primitive.Timestamp, error) {
+) (*mongo.ChangeStream, mongo.Session, primitive.Timestamp, error) {
 	pipeline := csr.GetChangeStreamFilter()
 	opts := options.ChangeStream().
 		SetMaxAwaitTime(1 * time.Second).
@@ -420,7 +439,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 	savedResumeToken, err := csr.loadChangeStreamResumeToken(ctx)
 	if err != nil {
-		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
+		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
 	}
 
 	csStartLogEvent := csr.logger.Info()
@@ -447,22 +466,22 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 	sess, err := csr.watcherClient.StartSession()
 	if err != nil {
-		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to start session")
+		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to start session")
 	}
 	sctx := mongo.NewSessionContext(ctx, sess)
 	changeStream, err := csr.watcherClient.Watch(sctx, pipeline, opts)
 	if err != nil {
-		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to open change stream")
+		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
 
 	err = csr.persistChangeStreamResumeToken(ctx, changeStream)
 	if err != nil {
-		return nil, primitive.Timestamp{}, err
+		return nil, nil, primitive.Timestamp{}, err
 	}
 
 	startTs, err := extractTimestampFromResumeToken(changeStream.ResumeToken())
 	if err != nil {
-		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
+		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
 	}
 
 	// With sharded clusters the resume token might lead the cluster time
@@ -470,14 +489,14 @@ func (csr *ChangeStreamReader) createChangeStream(
 	// otherwise we will get errors.
 	clusterTime, err := getClusterTimeFromSession(sess)
 	if err != nil {
-		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to read cluster time from session")
+		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to read cluster time from session")
 	}
 
 	if startTs.After(clusterTime) {
 		startTs = clusterTime
 	}
 
-	return changeStream, startTs, nil
+	return changeStream, sess, startTs, nil
 }
 
 // StartChangeStream starts the change stream.
@@ -502,7 +521,7 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 			ctx,
 			csr.logger,
 			func(ctx context.Context, ri *retry.FuncInfo) error {
-				changeStream, startTs, err := csr.createChangeStream(ctx)
+				changeStream, sess, startTs, err := csr.createChangeStream(ctx)
 				if err != nil {
 					if parentThreadWaiting {
 						initialCreateResultChan <- mo.Err[primitive.Timestamp](err)
@@ -520,7 +539,7 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 					parentThreadWaiting = false
 				}
 
-				return csr.iterateChangeStream(ctx, ri, changeStream)
+				return csr.iterateChangeStream(ctx, ri, changeStream, sess)
 			},
 		)
 
@@ -544,6 +563,10 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 	csr.changeStreamRunning = true
 
 	return nil
+}
+
+func (csr *ChangeStreamReader) GetLag() option.Option[time.Duration] {
+	return csr.lag.Load()
 }
 
 func addTimestampToLogEvent(ts primitive.Timestamp, event *zerolog.Event) *zerolog.Event {
