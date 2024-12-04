@@ -53,6 +53,10 @@ func TestIntegration(t *testing.T) {
 		metaConnStr: envVals["MVTEST_META"],
 	}
 
+	oldLogLevel := zerolog.GlobalLevel()
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	defer zerolog.SetGlobalLevel(oldLogLevel)
+
 	suite.Run(t, testSuite)
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -27,6 +28,8 @@ type IntegrationTestSuite struct {
 	testContext                                     context.Context
 	contextCanceller                                context.CancelCauseFunc
 	initialDbNames                                  mapset.Set[string]
+
+	zerologGlobalLogLevel zerolog.Level
 }
 
 var _ suite.TestingSuite = &IntegrationTestSuite{}
@@ -111,10 +114,13 @@ func (suite *IntegrationTestSuite) SetupTest() {
 	}
 
 	suite.testContext, suite.contextCanceller = ctx, canceller
+	suite.zerologGlobalLogLevel = zerolog.GlobalLevel()
 }
 
 func (suite *IntegrationTestSuite) TearDownTest() {
 	suite.T().Logf("Tearing down test %#q", suite.T().Name())
+
+	zerolog.SetGlobalLevel(suite.zerologGlobalLogLevel)
 
 	suite.contextCanceller(errors.Errorf("tearing down test %#q", suite.T().Name()))
 	suite.testContext, suite.contextCanceller = nil, nil
