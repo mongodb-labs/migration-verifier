@@ -13,9 +13,14 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/option"
+	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -121,7 +126,16 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 			To:        dstNamespace,
 		},
 	}
-	_, err := verifier.verificationTaskCollection().InsertOne(ctx, verificationTask)
+
+	err := retry.Retry(
+		ctx,
+		verifier.logger,
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			_, err := verifier.verificationTaskCollection().InsertOne(ctx, verificationTask)
+			return err
+		},
+	)
+
 	return &verificationTask, err
 }
 
@@ -146,7 +160,8 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 	dstNamespace string,
 ) (*VerificationTask, error) {
 	srcNamespace := strings.Join([]string{partition.Ns.DB, partition.Ns.Coll}, ".")
-	verificationTask := VerificationTask{
+
+	task := VerificationTask{
 		PrimaryKey: primitive.NewObjectID(),
 		Generation: verifier.generation,
 		Status:     verificationTaskAdded,
@@ -158,8 +173,18 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 			To:        dstNamespace,
 		},
 	}
-	_, err := verifier.verificationTaskCollection().InsertOne(ctx, verificationTask)
-	return &verificationTask, err
+
+	err := retry.Retry(
+		ctx,
+		verifier.logger,
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			_, err := verifier.verificationTaskCollection().InsertOne(ctx, &task)
+
+			return err
+		},
+	)
+
+	return &task, err
 }
 
 func (verifier *Verifier) InsertDocumentRecheckTask(
@@ -167,17 +192,17 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 	ids []interface{},
 	dataSize types.ByteCount,
 	srcNamespace string,
-) error {
+) (*VerificationTask, error) {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
 		var ok bool
 		dstNamespace, ok = verifier.nsMap.GetDstNamespace(srcNamespace)
 		if !ok {
-			return fmt.Errorf("Could not find Namespace %s", srcNamespace)
+			return nil, fmt.Errorf("Could not find Namespace %s", srcNamespace)
 		}
 	}
 
-	verificationTask := VerificationTask{
+	task := VerificationTask{
 		PrimaryKey: primitive.NewObjectID(),
 		Generation: verifier.generation,
 		Ids:        ids,
@@ -191,97 +216,158 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 		SourceByteCount:     dataSize,
 	}
 
-	_, err := verifier.verificationTaskCollection().InsertOne(ctx, &verificationTask)
-	return err
+	err := retry.Retry(ctx, verifier.logger, func(ctx context.Context, _ *retry.FuncInfo) error {
+		_, err := verifier.verificationTaskCollection().InsertOne(ctx, &task)
+
+		return err
+	})
+
+	return &task, err
 }
 
-func (verifier *Verifier) FindNextVerifyTaskAndUpdate(ctx context.Context) (*VerificationTask, error) {
-	var verificationTask = VerificationTask{}
-	filter := bson.M{
-		"$and": bson.A{
-			bson.M{"generation": verifier.generation},
-			bson.M{"type": bson.M{
-				"$in": bson.A{
-					verificationTaskVerifyDocuments,
-					verificationTaskVerifyCollection,
+func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
+	ctx context.Context,
+) (option.Option[VerificationTask], error) {
+	task := &VerificationTask{}
+
+	err := retry.Retry(
+		ctx,
+		verifier.logger,
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+
+			err := verifier.verificationTaskCollection().FindOneAndUpdate(
+				ctx,
+				bson.M{
+					"$and": []bson.M{
+						{"generation": verifier.generation},
+						{"type": bson.M{
+							"$in": mslices.Of(
+								verificationTaskVerifyDocuments,
+								verificationTaskVerifyCollection,
+							),
+						}},
+						{"status": verificationTaskAdded},
+					},
 				},
-			}},
-			bson.M{"status": verificationTaskAdded},
+				bson.M{
+					"$set": bson.M{
+						"status":     verificationTaskProcessing,
+						"begin_time": time.Now(),
+					},
+				},
+				options.FindOneAndUpdate().
+					SetReturnDocument(options.After).
+
+					// We want “verifyCollection” tasks before “verify”(-document) ones.
+					SetSort(bson.M{"type": -1}),
+			).Decode(task)
+
+			if err != nil {
+				task = nil
+				if errors.Is(err, mongo.ErrNoDocuments) {
+					err = nil
+				}
+			}
+
+			return err
 		},
-	}
+	)
 
-	coll := verifier.verificationTaskCollection()
-	opts := options.FindOneAndUpdate()
-	opts.SetReturnDocument(options.After)
-	updates := bson.M{
-		"$set": bson.M{
-			"status":     verificationTaskProcessing,
-			"begin_time": time.Now(),
-		},
-	}
-
-	// We want “verifyCollection” tasks before “verify”(-document) ones.
-	opts.SetSort(bson.M{"type": -1})
-
-	err := coll.FindOneAndUpdate(ctx, filter, updates, opts).Decode(&verificationTask)
-	return &verificationTask, err
+	return option.FromPointer(task), err
 }
 
 func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *VerificationTask) error {
-	updateFields := bson.M{
-		"$set": bson.M{
-			"status":                 task.Status,
-			"failed_docs":            task.FailedDocs,
-			"source_documents_count": task.SourceDocumentCount,
-			"source_bytes_count":     task.SourceByteCount,
-			"_ids":                   task.Ids,
-		},
-	}
-	result, err := verifier.verificationTaskCollection().UpdateOne(ctx, bson.M{"_id": task.PrimaryKey}, updateFields)
-	if err != nil {
-		return err
-	}
-	if result.MatchedCount == 0 {
-		return TaskError{Code: ErrorUpdateTask, Message: fmt.Sprintf(`no matched task updated: "%v"`, task.PrimaryKey)}
-	}
+	return retry.Retry(
+		ctx,
+		verifier.logger,
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			result, err := verifier.verificationTaskCollection().UpdateOne(
+				ctx,
+				bson.M{"_id": task.PrimaryKey},
+				bson.M{
+					"$set": bson.M{
+						"status":                 task.Status,
+						"failed_docs":            task.FailedDocs,
+						"source_documents_count": task.SourceDocumentCount,
+						"source_bytes_count":     task.SourceByteCount,
+						"_ids":                   task.Ids,
+					},
+				},
+			)
+			if err != nil {
+				return err
+			}
+			if result.MatchedCount == 0 {
+				return TaskError{
+					Code:    ErrorUpdateTask,
+					Message: fmt.Sprintf(`no matched task updated: "%v"`, task.PrimaryKey),
+				}
+			}
 
-	return err
+			return err
+		},
+	)
 }
 
-func (verifier *Verifier) CheckIsPrimary(ctx context.Context) (bool, error) {
+func (verifier *Verifier) CreatePrimaryTaskIfNeeded(ctx context.Context) (bool, error) {
 	ownerSetId := primitive.NewObjectID()
-	filter := bson.M{"type": verificationTaskPrimary}
-	opts := options.Update()
-	opts.SetUpsert(true)
-	update := bson.M{
-		"$setOnInsert": bson.M{
-			"_id":    ownerSetId,
-			"type":   verificationTaskPrimary,
-			"status": verificationTaskAdded,
-		},
-	}
-	result, err := verifier.verificationTaskCollection().UpdateOne(ctx, filter, update, opts)
-	if err != nil {
-		return false, err
-	}
 
-	isPrimary := result.UpsertedID == ownerSetId
-	return isPrimary, nil
+	var created bool
+
+	err := retry.Retry(
+		ctx,
+		verifier.logger,
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			result, err := verifier.verificationTaskCollection().UpdateOne(
+				ctx,
+				bson.M{"type": verificationTaskPrimary},
+				bson.M{
+					"$setOnInsert": bson.M{
+						"_id":    ownerSetId,
+						"type":   verificationTaskPrimary,
+						"status": verificationTaskAdded,
+					},
+				},
+				options.Update().SetUpsert(true),
+			)
+			if err != nil {
+				return err
+			}
+
+			created = result.UpsertedID == ownerSetId
+
+			return nil
+		},
+	)
+
+	return created, err
 }
 
 func (verifier *Verifier) UpdatePrimaryTaskComplete(ctx context.Context) error {
-	updateFields := bson.M{
-		"$set": bson.M{
-			"status": verificationTaskCompleted,
-		},
-	}
-	result, err := verifier.verificationTaskCollection().UpdateMany(ctx, bson.M{"type": verificationTaskPrimary}, updateFields)
-	if err != nil {
-		return err
-	}
-	if result.MatchedCount == 0 {
-		return TaskError{Code: ErrorUpdateTask, Message: `no primary task found`}
-	}
+	return retry.Retry(
+		ctx,
+		verifier.logger,
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			result, err := verifier.verificationTaskCollection().UpdateMany(
+				ctx,
+				bson.M{"type": verificationTaskPrimary},
+				bson.M{
+					"$set": bson.M{
+						"status": verificationTaskCompleted,
+					},
+				},
+			)
+			if err != nil {
+				return err
+			}
+			if result.MatchedCount == 0 {
+				return TaskError{
+					Code:    ErrorUpdateTask,
+					Message: `no primary task found`,
+				}
+			}
 
-	return err
+			return nil
+		},
+	)
 }
