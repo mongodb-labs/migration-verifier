@@ -40,7 +40,9 @@ func ListAllUserCollections(ctx context.Context, logger *logger.Logger, client *
 	if err != nil {
 		return nil, err
 	}
-	logger.Debug().Msgf("All user databases: %+v", dbNames)
+	logger.Debug().
+		Strs("databases", dbNames).
+		Msg("All user databases.")
 
 	collectionNamespaces := []string{}
 	for _, dbName := range dbNames {
@@ -53,7 +55,11 @@ func ListAllUserCollections(ctx context.Context, logger *logger.Logger, client *
 		if err != nil {
 			return nil, err
 		}
-		logger.Debug().Msgf("Collections for database %s: %+v", dbName, specifications)
+		logger.Debug().
+			Str("database", dbName).
+			Interface("specifications", specifications).
+			Msg("Found database members.")
+
 		for _, spec := range specifications {
 			collectionNamespaces = append(collectionNamespaces, dbName+"."+spec.Name)
 		}
