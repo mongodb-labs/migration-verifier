@@ -242,7 +242,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	var prevDBName, prevCollName string
 	var idAccum []interface{}
 	var idLenAccum int
-	var dataSizeAccum int64
+	var totalDocs types.DocumentCount
+	var dataSizeAccum, totalRecheckData int64
 
 	maxDocsPerTask := rechecksCount / int64(verifier.numWorkers)
 
@@ -334,6 +335,9 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		idLenAccum += idLen
 		dataSizeAccum += int64(doc.DataSize)
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
+
+		totalRecheckData += int64(doc.DataSize)
+		totalDocs++
 	}
 
 	err = cursor.Err()
@@ -341,5 +345,15 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		return err
 	}
 
-	return persistBufferedRechecks()
+	err = persistBufferedRechecks()
+
+	if err == nil && totalDocs > 0 {
+		verifier.logger.Info().
+			Int("generation", 1+prevGeneration).
+			Int64("totalDocs", int64(totalDocs)).
+			Str("totalData", reportutils.FmtBytes(totalRecheckData)).
+			Msg("Scheduled documents for recheck in the new generation.")
+	}
+
+	return err
 }

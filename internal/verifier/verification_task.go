@@ -18,6 +18,7 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -85,6 +86,16 @@ type VerificationTask struct {
 	// ByteCount is like DocumentCount: set when the verifier is done
 	// with the task.
 	SourceByteCount types.ByteCount `bson:"source_bytes_count"`
+}
+
+func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
+	if len(t.Ids) > 0 {
+		evt.Int("documentCount", len(t.Ids))
+	} else {
+		evt.
+			Interface("minDocID", t.QueryFilter.Partition.Key.Lower).
+			Interface("maxDocID", t.QueryFilter.Partition.Upper)
+	}
 }
 
 // VerificationRange stores ID ranges for tasks that can be re-used between runs

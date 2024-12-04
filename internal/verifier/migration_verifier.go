@@ -567,10 +567,14 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, task *VerificationTask) error {
 	start := time.Now()
 
-	verifier.logger.Debug().
+	debugLog := verifier.logger.Debug().
 		Int("workerNum", workerNum).
 		Interface("task", task.PrimaryKey).
-		Msg("Processing document comparison task.")
+		Str("namespace", task.QueryFilter.Namespace)
+
+	task.augmentLogWithDetails(debugLog)
+
+	debugLog.Msg("Processing document comparison task.")
 
 	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(
 		ctx,
@@ -662,6 +666,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
 		Interface("task", task.PrimaryKey).
+		Str("namespace", task.QueryFilter.Namespace).
 		Stringer("timeElapsed", time.Since(start)).
 		Msg("Finished document comparison task.")
 
