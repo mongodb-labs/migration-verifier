@@ -349,6 +349,7 @@ func (suite *IntegrationTestSuite) TestCursorKilledResilience() {
 
 	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
 		ctx,
+		verifier.logger,
 		verifier.verificationTaskCollection(),
 		verificationTaskVerifyDocuments,
 		verifier.generation,
@@ -398,6 +399,7 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 	generation := verifier.generation
 	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
 		ctx,
+		verifier.logger,
 		verifier.verificationTaskCollection(),
 		verificationTaskVerifyDocuments,
 		generation,

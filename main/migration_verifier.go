@@ -43,6 +43,9 @@ const (
 	pprofInterval         = "pprofInterval"
 )
 
+// This gets set at build time.
+var Revision = "Unknown; build with build.sh."
+
 func main() {
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 
@@ -154,9 +157,10 @@ func main() {
 	}
 
 	app := &cli.App{
-		Name:  "migration-verifier",
-		Usage: "verify migration correctness",
-		Flags: flags,
+		Name:    "migration-verifier",
+		Usage:   "verify migration correctness",
+		Version: Revision,
+		Flags:   flags,
 		Before: func(cCtx *cli.Context) error {
 			confFile := cCtx.String(configFileFlag)
 
@@ -202,6 +206,10 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	logPath := cCtx.String(logPath)
 
 	v := verifier.NewVerifier(verifierSettings, logPath)
+
+	v.GetLogger().Info().
+		Str("revision", Revision).
+		Msg("migration-verifier started.")
 
 	err := v.SetSrcURI(ctx, cCtx.String(srcURI))
 	if err != nil {

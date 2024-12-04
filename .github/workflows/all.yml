@@ -83,7 +83,7 @@ jobs:
         run: yes | m stable && dirname $(readlink $(which mongod)) > .metapath
 
       - name: Build
-        run: go build main/migration_verifier.go
+        run: ./build.sh
 
       - name: Start clusters
         run: |-

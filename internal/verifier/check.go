@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/retry"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
@@ -34,7 +36,10 @@ func (verifier *Verifier) Check(ctx context.Context, filter map[string]any) {
 	go func() {
 		err := verifier.CheckDriver(ctx, filter)
 		if err != nil {
-			verifier.logger.Fatal().Err(err).Msgf("Fatal error in generation %d", verifier.generation)
+			verifier.logger.Fatal().
+				Int("generation", verifier.generation).
+				Err(err).
+				Msg("Fatal error.")
 		}
 	}()
 	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
@@ -185,19 +190,31 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			return err
 		}
 	}
-	err = verifier.AddMetaIndexes(ctx)
-	if err != nil {
-		return err
-	}
-
-	err = verifier.doInMetaTransaction(
+	err = retry.Retry(
 		ctx,
-		func(ctx context.Context, sCtx mongo.SessionContext) error {
-			return verifier.ResetInProgressTasks(sCtx)
+		verifier.logger,
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			err = verifier.AddMetaIndexes(ctx)
+			if err != nil {
+				return err
+			}
+
+			err = verifier.doInMetaTransaction(
+				ctx,
+				func(ctx context.Context, sCtx mongo.SessionContext) error {
+					return verifier.ResetInProgressTasks(sCtx)
+				},
+			)
+			if err != nil {
+				return errors.Wrap(err, "failed to reset any in-progress tasks")
+			}
+
+			return nil
 		},
 	)
+
 	if err != nil {
-		return errors.Wrap(err, "failed to reset any in-progress tasks")
+		return err
 	}
 
 	verifier.logger.Debug().Msg("Starting Check")
@@ -304,13 +321,23 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		}
 		verifier.generation++
 		verifier.phase = Recheck
-		err = verifier.GenerateRecheckTasks(ctx)
+
+		// Generation of recheck tasks can partial-fail. The following will
+		// cause a full redo in that case, which is inefficient but simple.
+		// Such failures seem unlikely anyhow.
+		err = retry.Retry(
+			ctx,
+			verifier.logger,
+			func(ctx context.Context, _ *retry.FuncInfo) error {
+				return verifier.GenerateRecheckTasksWhileLocked(ctx)
+			},
+		)
 		if err != nil {
 			verifier.mux.Unlock()
 			return err
 		}
 
-		err = verifier.ClearRecheckDocs(ctx)
+		err = verifier.ClearRecheckDocsWhileLocked(ctx)
 		if err != nil {
 			verifier.logger.Warn().
 				Err(err).
@@ -367,7 +394,7 @@ func (verifier *Verifier) CreateInitialTasks(ctx context.Context) error {
 			)
 		}
 	}
-	isPrimary, err := verifier.CheckIsPrimary(ctx)
+	isPrimary, err := verifier.CreatePrimaryTaskIfNeeded(ctx)
 	if err != nil {
 		return err
 	}
@@ -401,30 +428,44 @@ func (verifier *Verifier) CreateInitialTasks(ctx context.Context) error {
 	return nil
 }
 
-func FetchFailedAndIncompleteTasks(ctx context.Context, coll *mongo.Collection, taskType verificationTaskType, generation int) ([]VerificationTask, []VerificationTask, error) {
+func FetchFailedAndIncompleteTasks(
+	ctx context.Context,
+	logger *logger.Logger,
+	coll *mongo.Collection,
+	taskType verificationTaskType,
+	generation int,
+) ([]VerificationTask, []VerificationTask, error) {
 	var FailedTasks, allTasks, IncompleteTasks []VerificationTask
 
-	cur, err := coll.Find(ctx, bson.D{
-		bson.E{Key: "type", Value: taskType},
-		bson.E{Key: "generation", Value: generation},
-	})
-	if err != nil {
-		return FailedTasks, IncompleteTasks, err
-	}
+	err := retry.Retry(
+		ctx,
+		logger,
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			cur, err := coll.Find(ctx, bson.D{
+				bson.E{Key: "type", Value: taskType},
+				bson.E{Key: "generation", Value: generation},
+			})
+			if err != nil {
+				return err
+			}
 
-	err = cur.All(ctx, &allTasks)
-	if err != nil {
-		return FailedTasks, IncompleteTasks, err
-	}
-	for _, t := range allTasks {
-		if failedStatuses.Contains(t.Status) {
-			FailedTasks = append(FailedTasks, t)
-		} else if t.Status != verificationTaskCompleted {
-			IncompleteTasks = append(IncompleteTasks, t)
-		}
-	}
+			err = cur.All(ctx, &allTasks)
+			if err != nil {
+				return err
+			}
+			for _, t := range allTasks {
+				if failedStatuses.Contains(t.Status) {
+					FailedTasks = append(FailedTasks, t)
+				} else if t.Status != verificationTaskCompleted {
+					IncompleteTasks = append(IncompleteTasks, t)
+				}
+			}
 
-	return FailedTasks, IncompleteTasks, nil
+			return nil
+		},
+	)
+
+	return FailedTasks, IncompleteTasks, err
 }
 
 // work is the logic for an individual worker thread.
@@ -438,8 +479,16 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 		Msg("Worker finished.")
 
 	for {
-		task, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
-		if errors.Is(err, mongo.ErrNoDocuments) {
+		taskOpt, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
+		if err != nil {
+			return errors.Wrap(
+				err,
+				"failed to seek next task",
+			)
+		}
+
+		task, gotTask := taskOpt.Get()
+		if !gotTask {
 			duration := verifier.workerSleepDelayMillis * time.Millisecond
 
 			if duration > 0 {
@@ -447,18 +496,13 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			}
 
 			continue
-		} else if err != nil {
-			return errors.Wrap(
-				err,
-				"failed to seek next task",
-			)
 		}
 
-		verifier.workerTracker.Set(workerNum, *task)
+		verifier.workerTracker.Set(workerNum, task)
 
 		switch task.Type {
 		case verificationTaskVerifyCollection:
-			err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
+			err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, &task)
 			verifier.workerTracker.Unset(workerNum)
 
 			if err != nil {
@@ -471,7 +515,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 				}
 			}
 		case verificationTaskVerifyDocuments:
-			err := verifier.ProcessVerifyTask(ctx, workerNum, task)
+			err := verifier.ProcessVerifyTask(ctx, workerNum, &task)
 			verifier.workerTracker.Unset(workerNum)
 
 			if err != nil {

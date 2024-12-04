@@ -24,7 +24,7 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 
 	verifier.srcClusterInfo = &clusterInfo
 
-	if clusterInfo.Topology == util.TopologySharded {
+	if clusterInfo.VersionArray[0] < 5 && clusterInfo.Topology == util.TopologySharded {
 		err := RefreshAllMongosInstances(
 			ctx,
 			verifier.logger,
@@ -57,7 +57,7 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 
 	verifier.dstClusterInfo = &clusterInfo
 
-	if clusterInfo.Topology == util.TopologySharded {
+	if clusterInfo.VersionArray[0] < 5 && clusterInfo.Topology == util.TopologySharded {
 		err := RefreshAllMongosInstances(
 			ctx,
 			verifier.logger,
@@ -67,7 +67,7 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 		if err != nil {
 			return errors.Wrap(
 				err,
-				"failed to refresh source mongos instances",
+				"failed to refresh destination mongos instances",
 			)
 		}
 	}

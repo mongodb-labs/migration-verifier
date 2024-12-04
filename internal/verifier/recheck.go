@@ -16,10 +16,9 @@ import (
 )
 
 const (
-	recheckQueue                  = "recheckQueue"
-	maxBSONObjSize                = 16 * 1024 * 1024
-	recheckInserterThreadsSoftMax = 100
-	maxIdsPerRecheckTask          = 12 * 1024 * 1024
+	recheckQueue         = "recheckQueue"
+	maxBSONObjSize       = 16 * 1024 * 1024
+	maxIdsPerRecheckTask = 12 * 1024 * 1024
 )
 
 // RecheckPrimaryKey stores the implicit type of recheck to perform
@@ -97,7 +96,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	generation, _ := verifier.getGenerationWhileLocked()
 
 	docIDIndexes := lo.Range(len(documentIDs))
-	indexesPerThread := splitToChunks(docIDIndexes, recheckInserterThreadsSoftMax)
+	indexesPerThread := splitToChunks(docIDIndexes, verifier.numWorkers)
 
 	eg, groupCtx := errgroup.WithContext(ctx)
 
@@ -114,21 +113,18 @@ func (verifier *Verifier) insertRecheckDocs(
 					DocumentID:        documentIDs[i],
 				}
 
-				// The filter must exclude DataSize; otherwise, if a failed comparison
-				// and a change event happen on the same document for the same
-				// generation, the 2nd insert will fail because a) its filter won’t
-				// match anything, and b) it’ll try to insert a new document with the
-				// same _id as the one that the 1st insert already created.
-				filterDoc := bson.D{{"_id", pk}}
-
-				recheckDoc := RecheckDoc{
-					PrimaryKey: pk,
-					DataSize:   dataSizes[i],
-				}
-
 				models[m] = mongo.NewReplaceOneModel().
-					SetFilter(filterDoc).
-					SetReplacement(recheckDoc).
+
+					// The filter must exclude DataSize; otherwise, if a failed comparison
+					// and a change event happen on the same document for the same
+					// generation, the 2nd insert will fail because a) its filter won’t
+					// match anything, and b) it’ll try to insert a new document with the
+					// same _id as the one that the 1st insert already created.
+					SetFilter(bson.D{{"_id", pk}}).
+					SetReplacement(RecheckDoc{
+						PrimaryKey: pk,
+						DataSize:   dataSizes[i],
+					}).
 					SetUpsert(true)
 			}
 
@@ -170,18 +166,29 @@ func (verifier *Verifier) insertRecheckDocs(
 	return nil
 }
 
-// ClearRecheckDocs deletes the previous generation’s recheck
+// ClearRecheckDocsWhileLocked deletes the previous generation’s recheck
 // documents from the verifier’s metadata.
 //
 // The verifier **MUST** be locked when this function is called (or panic).
-func (verifier *Verifier) ClearRecheckDocs(ctx context.Context) error {
+func (verifier *Verifier) ClearRecheckDocsWhileLocked(ctx context.Context) error {
 	prevGeneration := verifier.getPreviousGenerationWhileLocked()
 
-	verifier.logger.Debug().Msgf("Deleting generation %d’s %s documents", prevGeneration, recheckQueue)
+	verifier.logger.Debug().
+		Int("previousGeneration", prevGeneration).
+		Msg("Deleting previous generation's enqueued rechecks.")
 
-	_, err := verifier.verificationDatabase().Collection(recheckQueue).DeleteMany(
-		ctx, bson.D{{"_id.generation", prevGeneration}})
-	return err
+	return retry.Retry(
+		ctx,
+		verifier.logger,
+		func(ctx context.Context, i *retry.FuncInfo) error {
+			_, err := verifier.verificationDatabase().Collection(recheckQueue).DeleteMany(
+				ctx,
+				bson.D{{"_id.generation", prevGeneration}},
+			)
+
+			return err
+		},
+	)
 }
 
 func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
@@ -193,12 +200,15 @@ func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
 	return generation - 1
 }
 
-// GenerateRecheckTasks fetches the previous generation’s recheck
+// GenerateRecheckTasksWhileLocked fetches the previous generation’s recheck
 // documents from the verifier’s metadata and creates current-generation
 // document-verification tasks from them.
 //
+// Note that this function DOES NOT retry on failure, so callers should wrap
+// calls to this function in a retryer.
+//
 // The verifier **MUST** be locked when this function is called (or panic).
-func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
+func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) error {
 	prevGeneration := verifier.getPreviousGenerationWhileLocked()
 
 	findFilter := bson.D{{"_id.generation", prevGeneration}}
