@@ -213,7 +213,10 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 	if len(csr.namespaces) == 0 {
 		pipeline = mongo.Pipeline{
 			{{"$match", bson.D{
-				{"ns.db", bson.D{{"$ne", csr.metaDB.Name()}}},
+				{"ns.db", bson.D{{"$nin", bson.A{
+					primitive.Regex{Pattern: MongosyncMetaDBsPattern},
+					csr.metaDB.Name(),
+				}}}},
 			}}},
 		}
 	} else {
