@@ -203,13 +203,13 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 	ids []interface{},
 	dataSize types.ByteCount,
 	srcNamespace string,
-) (VerificationTask, error) {
+) (*VerificationTask, error) {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
 		var ok bool
 		dstNamespace, ok = verifier.nsMap.GetDstNamespace(srcNamespace)
 		if !ok {
-			return VerificationTask{}, fmt.Errorf("Could not find Namespace %s", srcNamespace)
+			return nil, fmt.Errorf("Could not find Namespace %s", srcNamespace)
 		}
 	}
 
@@ -233,7 +233,7 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 		return err
 	})
 
-	return task, err
+	return &task, err
 }
 
 func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
