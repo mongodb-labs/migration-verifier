@@ -14,6 +14,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/rs/zerolog"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -80,6 +81,16 @@ type VerificationTask struct {
 	// ByteCount is like DocumentCount: set when the verifier is done
 	// with the task.
 	SourceByteCount types.ByteCount `bson:"source_bytes_count"`
+}
+
+func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
+	if len(t.Ids) > 0 {
+		evt.Int("documentCount", len(t.Ids))
+	} else {
+		evt.
+			Interface("minDocID", t.QueryFilter.Partition.Key.Lower).
+			Interface("maxDocID", t.QueryFilter.Partition.Upper)
+	}
 }
 
 // VerificationRange stores ID ranges for tasks that can be re-used between runs
@@ -167,13 +178,13 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 	ids []interface{},
 	dataSize types.ByteCount,
 	srcNamespace string,
-) error {
+) (VerificationTask, error) {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
 		var ok bool
 		dstNamespace, ok = verifier.nsMap.GetDstNamespace(srcNamespace)
 		if !ok {
-			return fmt.Errorf("Could not find Namespace %s", srcNamespace)
+			return VerificationTask{}, fmt.Errorf("Could not find Namespace %s", srcNamespace)
 		}
 	}
 
@@ -192,7 +203,7 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 	}
 
 	_, err := verifier.verificationTaskCollection().InsertOne(ctx, &verificationTask)
-	return err
+	return verificationTask, err
 }
 
 func (verifier *Verifier) FindNextVerifyTaskAndUpdate(ctx context.Context) (*VerificationTask, error) {
