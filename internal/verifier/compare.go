@@ -7,6 +7,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -38,6 +39,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 		WithBefore(func() {
 			srcChannel, dstChannel, readSrcCallback, readDstCallback = verifier.getFetcherChannelsAndCallbacks(task)
 		}).
+		WithErrorCodes(util.CursorKilled).
 		Run(
 			givenCtx,
 			verifier.logger,
