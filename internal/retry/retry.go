@@ -83,14 +83,11 @@ func (r *Retryer) runRetryLoop(
 			if curFunc == nil {
 				panic("curFunc should be non-nil")
 			}
+			if funcinfos[i] == nil {
+				panic(fmt.Sprintf("funcinfos[%d] should be non-nil", i))
+			}
 
 			eg.Go(func() error {
-				if curFunc == nil {
-					panic("curFunc should be non-nil")
-				}
-				if funcinfos[i] == nil {
-					panic(fmt.Sprintf("funcinfos[%d] should be non-nil", i))
-				}
 				err := curFunc(egCtx, funcinfos[i])
 
 				if err != nil {

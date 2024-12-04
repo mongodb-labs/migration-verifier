@@ -39,6 +39,11 @@ func (r *Retryer) WithErrorCodes(codes ...int) *Retryer {
 	return &r2
 }
 
+// WithBefore sets a callback that always runs before any retryer callback.
+//
+// This is useful if there are multiple callbacks and you need to reset some
+// condition before each retryer iteration. (In the single-callback case it’s
+// largely redundant.)
 func (r *Retryer) WithBefore(todo func()) *Retryer {
 	r2 := *r
 	r2.before = option.Some(todo)
