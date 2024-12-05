@@ -33,22 +33,30 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	var docCount types.DocumentCount
 	var byteCount types.ByteCount
 
-	retryer := retry.New(retry.DefaultDurationLimit)
+	retryer := retry.New().WithDescription(
+		"reading task %v's documents (namespace: %s)",
+		task.PrimaryKey,
+		task.QueryFilter.Namespace,
+	)
 
 	err := retryer.
 		WithBefore(func() {
 			srcChannel, dstChannel, readSrcCallback, readDstCallback = verifier.getFetcherChannelsAndCallbacks(task)
 		}).
 		WithErrorCodes(util.CursorKilled).
-		Run(
-			givenCtx,
-			verifier.logger,
+		WithCallback(
 			func(ctx context.Context, fi *retry.FuncInfo) error {
 				return readSrcCallback(ctx, fi)
 			},
+			"reading from source",
+		).
+		WithCallback(
 			func(ctx context.Context, fi *retry.FuncInfo) error {
 				return readDstCallback(ctx, fi)
 			},
+			"reading from destination",
+		).
+		WithCallback(
 			func(ctx context.Context, _ *retry.FuncInfo) error {
 				var err error
 				results, docCount, byteCount, err = verifier.compareDocsFromChannels(
@@ -60,7 +68,8 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 
 				return err
 			},
-		)
+			"comparing documents",
+		).Run(givenCtx, verifier.logger)
 
 	return results, docCount, byteCount, err
 }

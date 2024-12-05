@@ -190,9 +190,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			return err
 		}
 	}
-	err = retry.Retry(
-		ctx,
-		verifier.logger,
+	err = retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			err = verifier.AddMetaIndexes(ctx)
 			if err != nil {
@@ -211,7 +209,8 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 
 			return nil
 		},
-	)
+		"setting up verifier metadata",
+	).Run(ctx, verifier.logger)
 
 	if err != nil {
 		return err
@@ -325,13 +324,12 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		// Generation of recheck tasks can partial-fail. The following will
 		// cause a full redo in that case, which is inefficient but simple.
 		// Such failures seem unlikely anyhow.
-		err = retry.Retry(
-			ctx,
-			verifier.logger,
+		err = retry.New().WithCallback(
 			func(ctx context.Context, _ *retry.FuncInfo) error {
 				return verifier.GenerateRecheckTasksWhileLocked(ctx)
 			},
-		)
+			"generating recheck tasks",
+		).Run(ctx, verifier.logger)
 		if err != nil {
 			verifier.mux.Unlock()
 			return err
@@ -437,9 +435,7 @@ func FetchFailedAndIncompleteTasks(
 ) ([]VerificationTask, []VerificationTask, error) {
 	var FailedTasks, allTasks, IncompleteTasks []VerificationTask
 
-	err := retry.Retry(
-		ctx,
-		logger,
+	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			cur, err := coll.Find(ctx, bson.D{
 				bson.E{Key: "type", Value: taskType},
@@ -463,7 +459,9 @@ func FetchFailedAndIncompleteTasks(
 
 			return nil
 		},
-	)
+		"fetching generation %d's failed & incomplete tasks",
+		generation,
+	).Run(ctx, logger)
 
 	return FailedTasks, IncompleteTasks, err
 }

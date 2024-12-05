@@ -128,10 +128,8 @@ func (verifier *Verifier) insertRecheckDocs(
 					SetUpsert(true)
 			}
 
-			retryer := retry.New(retry.DefaultDurationLimit)
-			err := retryer.Run(
-				groupCtx,
-				verifier.logger,
+			retryer := retry.New()
+			err := retryer.WithCallback(
 				func(retryCtx context.Context, _ *retry.FuncInfo) error {
 					_, err := verifier.verificationDatabase().Collection(recheckQueue).BulkWrite(
 						retryCtx,
@@ -141,7 +139,9 @@ func (verifier *Verifier) insertRecheckDocs(
 
 					return err
 				},
-			)
+				"persisting %d recheck(s)",
+				len(models),
+			).Run(groupCtx, verifier.logger)
 
 			return errors.Wrapf(err, "failed to persist %d recheck(s) for generation %d", len(models), generation)
 		})
@@ -177,9 +177,7 @@ func (verifier *Verifier) ClearRecheckDocsWhileLocked(ctx context.Context) error
 		Int("previousGeneration", prevGeneration).
 		Msg("Deleting previous generation's enqueued rechecks.")
 
-	return retry.Retry(
-		ctx,
-		verifier.logger,
+	return retry.New().WithCallback(
 		func(ctx context.Context, i *retry.FuncInfo) error {
 			_, err := verifier.verificationDatabase().Collection(recheckQueue).DeleteMany(
 				ctx,
@@ -188,7 +186,9 @@ func (verifier *Verifier) ClearRecheckDocsWhileLocked(ctx context.Context) error
 
 			return err
 		},
-	)
+		"deleting generation %d's enqueued rechecks",
+		prevGeneration,
+	).Run(ctx, verifier.logger)
 }
 
 func (verifier *Verifier) getPreviousGenerationWhileLocked() int {

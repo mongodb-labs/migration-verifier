@@ -1,30 +1,31 @@
 package retry
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/10gen/migration-verifier/option"
 )
+
+type retryCallbackInfo struct {
+	callback    RetryCallback
+	description string
+}
 
 // Retryer handles retrying operations that fail because of network failures.
 type Retryer struct {
 	retryLimit           time.Duration
 	retryRandomly        bool
 	before               option.Option[func()]
+	callbacks            []retryCallbackInfo
+	description          option.Option[string]
 	additionalErrorCodes []int
 }
 
 // New returns a new retryer.
-func New(retryLimit time.Duration) *Retryer {
-	return NewWithRandomlyRetries(retryLimit, false)
-}
-
-// NewWithRandomlyRetries returns a new retryer, but allows the option of setting the
-// retryRandomly field.
-func NewWithRandomlyRetries(retryLimit time.Duration, retryRandomly bool) *Retryer {
+func New() *Retryer {
 	return &Retryer{
-		retryLimit:    retryLimit,
-		retryRandomly: retryRandomly,
+		retryLimit: DefaultDurationLimit,
 	}
 }
 
@@ -39,6 +40,13 @@ func (r *Retryer) WithErrorCodes(codes ...int) *Retryer {
 	return &r2
 }
 
+func (r *Retryer) WithRetryLimit(limit time.Duration) *Retryer {
+	r2 := *r
+	r2.retryLimit = limit
+
+	return &r2
+}
+
 // WithBefore sets a callback that always runs before any retryer callback.
 //
 // This is useful if there are multiple callbacks and you need to reset some
@@ -47,6 +55,30 @@ func (r *Retryer) WithErrorCodes(codes ...int) *Retryer {
 func (r *Retryer) WithBefore(todo func()) *Retryer {
 	r2 := *r
 	r2.before = option.Some(todo)
+
+	return &r2
+}
+
+func (r *Retryer) WithDescription(msg string, args ...any) *Retryer {
+	r2 := *r
+	r2.description = option.Some(fmt.Sprintf(msg, args...))
+
+	return &r2
+}
+
+func (r *Retryer) WithCallback(
+	callback RetryCallback,
+	msg string, args ...any,
+) *Retryer {
+	r2 := *r
+
+	r2.callbacks = append(
+		r2.callbacks,
+		retryCallbackInfo{
+			callback:    callback,
+			description: fmt.Sprintf(msg, args...),
+		},
+	)
 
 	return &r2
 }
