@@ -1268,7 +1268,11 @@ func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*Verificat
 	).Run(ctx, verifier.logger)
 
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(
+			err,
+			"failed to count generation %d's tasks by status",
+			generation,
+		)
 	}
 
 	verificationStatus := VerificationStatus{}

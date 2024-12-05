@@ -123,6 +123,10 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 				)
 			}
 
+			verifier.logger.Debug().
+				Interface("taskCountsByStatus", verificationStatus).
+				Send()
+
 			if waitForTaskCreation%2 == 0 {
 				if generation > 0 || verifier.gen0PendingCollectionTasks.Load() == 0 {
 					verifier.PrintVerificationSummary(ctx, GenerationInProgress)
