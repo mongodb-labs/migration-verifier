@@ -34,7 +34,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	var byteCount types.ByteCount
 
 	retryer := retry.New().WithDescription(
-		"reading task %v's documents (namespace: %s)",
+		"comparing task %v's documents (namespace: %s)",
 		task.PrimaryKey,
 		task.QueryFilter.Namespace,
 	)
