@@ -612,7 +612,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 				Interface("task", task.PrimaryKey).
 				Str("namespace", task.QueryFilter.Namespace).
 				Int("mismatchesCount", len(problems)).
-				Msg("Document comparison task failed, but it may pass in the next generation.")
+				Msg("Discrepancies found. Will recheck in the next generation.")
 
 			var mismatches []VerificationResult
 			var missingIds []interface{}
