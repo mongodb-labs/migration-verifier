@@ -58,7 +58,10 @@ func (r *Retryer) runRetryLoop(
 	var err error
 
 	if len(r.callbacks) == 0 {
-		return errors.Errorf("retryer (%s) run with no callbacks", r.description)
+		return errors.Errorf(
+			"retryer (%s) run with no callbacks",
+			r.description.OrElse("no description"),
+		)
 	}
 
 	startTime := time.Now()
@@ -141,8 +144,16 @@ func (r *Retryer) runRetryLoop(
 		}
 		err = eg.Wait()
 
+		li.attemptsSoFar++
+
 		// No error? Success!
 		if err == nil {
+			if li.attemptsSoFar > 1 {
+				r.addDescriptionToEvent(logger.Info()).
+					Int("attempts", li.attemptsSoFar).
+					Msg("Retried operation succeeded.")
+			}
+
 			return nil
 		}
 
@@ -158,8 +169,6 @@ func (r *Retryer) runRetryLoop(
 		if !r.shouldRetryWithSleep(logger, sleepTime, *failedFuncInfo, groupErr.errFromCallback) {
 			return groupErr.errFromCallback
 		}
-
-		li.attemptsSoFar++
 
 		// Our error is transient. If we've exhausted the allowed time
 		// then fail.
