@@ -166,7 +166,7 @@ func (r *Retryer) runRetryLoop(
 		failedFuncInfo := funcinfos[groupErr.funcNum]
 
 		// Not a transient error? Fail immediately.
-		if !r.shouldRetryWithSleep(logger, sleepTime, *failedFuncInfo, groupErr.errFromCallback) {
+		if !r.shouldRetryWithSleep(logger, sleepTime, r.callbacks[groupErr.funcNum], groupErr.errFromCallback) {
 			return groupErr.errFromCallback
 		}
 
@@ -235,7 +235,7 @@ func (r *Retryer) addDescriptionToEvent(event *zerolog.Event) *zerolog.Event {
 func (r *Retryer) shouldRetryWithSleep(
 	logger *logger.Logger,
 	sleepTime time.Duration,
-	funcinfo FuncInfo,
+	cbInfo retryCallbackInfo,
 	err error,
 ) bool {
 	if err == nil {
@@ -250,26 +250,39 @@ func (r *Retryer) shouldRetryWithSleep(
 	)
 
 	event := logger.WithLevel(
-		lo.Ternary(isTransient, zerolog.InfoLevel, zerolog.WarnLevel),
+		lo.Ternary(
+			// If it’s transient, surface it as info.
+			isTransient,
+			zerolog.InfoLevel,
+
+			lo.Ternary(
+				// Context cancellation is unimportant, so debug.
+				errors.Is(err, context.Canceled),
+				zerolog.DebugLevel,
+
+				// Other non-retryables are serious, so warn.
+				zerolog.WarnLevel,
+			),
+		),
 	)
 
 	if loopDesc, hasLoopDesc := r.description.Get(); hasLoopDesc {
 		event.Str("operationDescription", loopDesc)
 	}
 
-	event.Str("callbackDescription", funcinfo.description).
+	event.Str("callbackDescription", cbInfo.description).
 		Int("error code", util.GetErrorCode(err)).
 		Err(err)
 
 	if isTransient {
 		event.
 			Stringer("delay", sleepTime).
-			Msg("Pausing before retrying after transient error.")
+			Msg("Got retryable error. Pausing, then will retry.")
 
 		return true
 	}
 
-	event.Msg("Non-transient error occurred.")
+	event.Msg("Non-retryable error occurred.")
 
 	return false
 }
