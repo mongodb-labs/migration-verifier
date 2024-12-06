@@ -307,6 +307,8 @@ func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, ve
 }
 
 func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
 	sess, err := suite.srcMongoClient.StartSession()
