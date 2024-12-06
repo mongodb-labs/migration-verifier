@@ -125,12 +125,12 @@ func (r *Retryer) runRetryLoop(
 							if funcinfos[i].lastReset.Load() == lastReset {
 								event := logger.Warn().
 									Str("callbackDescription", curCbInfo.description).
-									Time("since", lastReset.time)
+									Time("noSuccessSince", lastReset.time).
+									Uint64("successesSoFar", lastReset.resetsSoFar)
 
 								if successDesc, hasDesc := lastReset.description.Get(); hasDesc {
 									event.
-										Str("successDescription", successDesc).
-										Uint64("successesSoFar", lastReset.resetsSoFar)
+										Str("lastSuccessDescription", successDesc)
 								}
 
 								event.
