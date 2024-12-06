@@ -279,15 +279,19 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	// might be inserting docs into the recheck queue, which happens
 	// under the lock.
 	select {
-	case verifier.srcChangeStreamReader.writesOffTsChan <- srcFinalTs:
-	case err := <-verifier.srcChangeStreamReader.errChan:
+	case <-verifier.srcChangeStreamReader.error.Ready():
+		err := verifier.srcChangeStreamReader.error.Get().MustGet()
 		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.srcChangeStreamReader)
+	default:
+		verifier.srcChangeStreamReader.writesOffTs.Set(srcFinalTs)
 	}
 
 	select {
-	case verifier.dstChangeStreamReader.writesOffTsChan <- dstFinalTs:
-	case err := <-verifier.dstChangeStreamReader.errChan:
+	case <-verifier.dstChangeStreamReader.error.Ready():
+		err := verifier.dstChangeStreamReader.error.Get().MustGet()
 		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.dstChangeStreamReader)
+	default:
+		verifier.dstChangeStreamReader.writesOffTs.Set(dstFinalTs)
 	}
 
 	return nil

@@ -319,7 +319,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	suite.Require().NotNil(origStartTs)
 	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
-	verifier.srcChangeStreamReader.writesOffTsChan <- *origStartTs
+	verifier.srcChangeStreamReader.writesOffTs.Set(*origStartTs)
 	<-verifier.srcChangeStreamReader.doneChan
 	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
 }
@@ -365,7 +365,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 		"session time after events should exceed the original",
 	)
 
-	verifier.srcChangeStreamReader.writesOffTsChan <- *postEventsSessionTime
+	verifier.srcChangeStreamReader.writesOffTs.Set(*postEventsSessionTime)
 	<-verifier.srcChangeStreamReader.doneChan
 
 	suite.Assert().Equal(

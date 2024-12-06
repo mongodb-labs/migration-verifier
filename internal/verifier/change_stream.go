@@ -66,8 +66,8 @@ type ChangeStreamReader struct {
 
 	changeStreamRunning  bool
 	changeEventBatchChan chan []ParsedEvent
-	writesOffTsChan      chan primitive.Timestamp
-	errChan              chan error
+	writesOffTs          *util.Eventual[primitive.Timestamp]
+	error                *util.Eventual[error]
 	doneChan             chan struct{}
 
 	startAtTs *primitive.Timestamp
@@ -83,8 +83,8 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		clusterInfo:          *verifier.srcClusterInfo,
 		changeStreamRunning:  false,
 		changeEventBatchChan: make(chan []ParsedEvent),
-		writesOffTsChan:      make(chan primitive.Timestamp),
-		errChan:              make(chan error),
+		writesOffTs:          util.NewEventual[primitive.Timestamp](),
+		error:                util.NewEventual[error](),
 		doneChan:             make(chan struct{}),
 	}
 	verifier.dstChangeStreamReader = &ChangeStreamReader{
@@ -96,8 +96,8 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		clusterInfo:          *verifier.dstClusterInfo,
 		changeStreamRunning:  false,
 		changeEventBatchChan: make(chan []ParsedEvent),
-		writesOffTsChan:      make(chan primitive.Timestamp),
-		errChan:              make(chan error),
+		writesOffTs:          util.NewEventual[primitive.Timestamp](),
+		error:                util.NewEventual[error](),
 		doneChan:             make(chan struct{}),
 	}
 }
@@ -117,7 +117,6 @@ func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *C
 			verifier.logger.Trace().Msgf("Verifier is handling a change event batch from %s: %v", reader, batch)
 			err := verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType)
 			if err != nil {
-				reader.errChan <- err
 				return err
 			}
 		}
@@ -336,7 +335,9 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 		// source writes are ended and the migration tool is finished / committed.
 		// This means we should exit rather than continue reading the change stream
 		// since there should be no more events.
-		case writesOffTs := <-csr.writesOffTsChan:
+		case <-csr.writesOffTs.Ready():
+			writesOffTs := csr.writesOffTs.Get().MustGet()
+
 			csr.logger.Debug().
 				Interface("writesOffTimestamp", writesOffTs).
 				Msgf("%s thread received writesOff timestamp. Finalizing change stream.", csr)
@@ -389,7 +390,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			}
 			// since we have started Recheck, we must signal that we have
 			// finished the change stream changes so that Recheck can continue.
-			csr.doneChan <- struct{}{}
+			close(csr.doneChan)
 			break
 		}
 	}
@@ -525,10 +526,7 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 		)
 
 		if err != nil {
-			// NB: This failure always happens after the initial change stream
-			// creation.
-			csr.errChan <- err
-			close(csr.errChan)
+			csr.error.Set(err)
 		}
 	}()
 
