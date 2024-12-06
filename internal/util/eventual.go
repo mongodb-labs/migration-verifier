@@ -40,7 +40,8 @@ func (e *Eventual[T]) Get() option.Option[T] {
 	return e.val
 }
 
-// Set
+// Set sets the Eventual’s value. It may be called only once;
+// if called again it will panic.
 func (e *Eventual[T]) Set(val T) {
 	e.mux.Lock()
 	defer e.mux.Unlock()
