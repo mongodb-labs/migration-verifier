@@ -138,14 +138,14 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 		},
 	}
 
-	err := retry.Retry(
-		ctx,
-		verifier.logger,
+	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			_, err := verifier.verificationTaskCollection().InsertOne(ctx, verificationTask)
 			return err
 		},
-	)
+		"persisting namespace %#q's verification task",
+		srcNamespace,
+	).Run(ctx, verifier.logger)
 
 	return &verificationTask, err
 }
@@ -185,15 +185,17 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 		},
 	}
 
-	err := retry.Retry(
-		ctx,
-		verifier.logger,
+	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			_, err := verifier.verificationTaskCollection().InsertOne(ctx, &task)
 
 			return err
 		},
-	)
+		"persisting partition verification task for %#q (%v to %v)",
+		task.QueryFilter.Namespace,
+		task.QueryFilter.Partition.Key.Lower,
+		task.QueryFilter.Partition.Upper,
+	).Run(ctx, verifier.logger)
 
 	return &task, err
 }
@@ -227,11 +229,16 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 		SourceByteCount:     dataSize,
 	}
 
-	err := retry.Retry(ctx, verifier.logger, func(ctx context.Context, _ *retry.FuncInfo) error {
-		_, err := verifier.verificationTaskCollection().InsertOne(ctx, &task)
+	err := retry.New().WithCallback(
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			_, err := verifier.verificationTaskCollection().InsertOne(ctx, &task)
 
-		return err
-	})
+			return err
+		},
+		"persisting recheck task for namespace %#q (%d document(s))",
+		task.QueryFilter.Namespace,
+		len(ids),
+	).Run(ctx, verifier.logger)
 
 	return &task, err
 }
@@ -241,9 +248,7 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 ) (option.Option[VerificationTask], error) {
 	task := &VerificationTask{}
 
-	err := retry.Retry(
-		ctx,
-		verifier.logger,
+	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 
 			err := verifier.verificationTaskCollection().FindOneAndUpdate(
@@ -282,15 +287,15 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 
 			return err
 		},
-	)
+		"finding next task to do in generation %d",
+		verifier.generation,
+	).Run(ctx, verifier.logger)
 
 	return option.FromPointer(task), err
 }
 
 func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *VerificationTask) error {
-	return retry.Retry(
-		ctx,
-		verifier.logger,
+	return retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			result, err := verifier.verificationTaskCollection().UpdateOne(
 				ctx,
@@ -317,7 +322,10 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *Veri
 
 			return err
 		},
-	)
+		"updating task %v (namespace %#q)",
+		task.PrimaryKey,
+		task.QueryFilter.Namespace,
+	).Run(ctx, verifier.logger)
 }
 
 func (verifier *Verifier) CreatePrimaryTaskIfNeeded(ctx context.Context) (bool, error) {
@@ -325,9 +333,7 @@ func (verifier *Verifier) CreatePrimaryTaskIfNeeded(ctx context.Context) (bool, 
 
 	var created bool
 
-	err := retry.Retry(
-		ctx,
-		verifier.logger,
+	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			result, err := verifier.verificationTaskCollection().UpdateOne(
 				ctx,
@@ -349,15 +355,14 @@ func (verifier *Verifier) CreatePrimaryTaskIfNeeded(ctx context.Context) (bool, 
 
 			return nil
 		},
-	)
+		"ensuring primary task's existence",
+	).Run(ctx, verifier.logger)
 
 	return created, err
 }
 
 func (verifier *Verifier) UpdatePrimaryTaskComplete(ctx context.Context) error {
-	return retry.Retry(
-		ctx,
-		verifier.logger,
+	return retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			result, err := verifier.verificationTaskCollection().UpdateMany(
 				ctx,
@@ -380,5 +385,6 @@ func (verifier *Verifier) UpdatePrimaryTaskComplete(ctx context.Context) error {
 
 			return nil
 		},
-	)
+		"noting completion of primary task",
+	).Run(ctx, verifier.logger)
 }

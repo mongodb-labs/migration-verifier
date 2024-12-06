@@ -33,8 +33,6 @@ func RefreshAllMongosInstances(
 		Strs("hosts", hosts).
 		Msgf("Refreshing all %d mongos instance(s) on the source.", len(hosts))
 
-	r := retry.New(retry.DefaultDurationLimit)
-
 	for _, host := range hosts {
 		singleHostClientOpts := *clientOpts
 
@@ -52,16 +50,13 @@ func RefreshAllMongosInstances(
 		shardConnStr, err := getAnyExistingShardConnectionStr(
 			ctx,
 			l,
-			r,
 			singleHostClient,
 		)
 		if err != nil {
 			return err
 		}
 
-		err = r.Run(
-			ctx,
-			l,
+		err = retry.New().WithCallback(
 			func(ctx context.Context, _ *retry.FuncInfo) error {
 				// Query a collection on the config server with linearizable read concern to advance the config
 				// server primary's majority-committed optime. This populates the $configOpTime.
@@ -112,7 +107,9 @@ func RefreshAllMongosInstances(
 				}
 
 				return nil
-			})
+			},
+			"refreshing mongos shard cache",
+		).Run(ctx, l)
 
 		if err != nil {
 			return err
@@ -137,10 +134,9 @@ func RefreshAllMongosInstances(
 func getAnyExistingShardConnectionStr(
 	ctx context.Context,
 	l *logger.Logger,
-	r *retry.Retryer,
 	client *mongo.Client,
 ) (string, error) {
-	res, err := runListShards(ctx, l, r, client)
+	res, err := runListShards(ctx, l, client)
 	if err != nil {
 		return "", err
 	}
@@ -169,17 +165,15 @@ func getAnyExistingShardConnectionStr(
 func runListShards(
 	ctx context.Context,
 	l *logger.Logger,
-	r *retry.Retryer,
 	client *mongo.Client,
 ) (*mongo.SingleResult, error) {
 	var res *mongo.SingleResult
-	err := r.Run(
-		ctx,
-		l,
+	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			res = client.Database("admin").RunCommand(ctx, bson.D{{"listShards", 1}})
 			return res.Err()
 		},
-	)
+		"listing shards",
+	).Run(ctx, l)
 	return res, err
 }

@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/reportutils"
+	"github.com/10gen/migration-verifier/msync"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/rs/zerolog"
 )
 
@@ -13,14 +15,15 @@ import (
 // The attempt number is 0-indexed (0 means this is the first attempt).
 // The duration tracks the duration of retrying for transient errors only.
 type LoopInfo struct {
-	attemptNumber int
+	attemptsSoFar int
 	durationLimit time.Duration
 }
 
 type FuncInfo struct {
-	loopInfo *LoopInfo
-
-	lastResetTime time.Time
+	loopInfo        *LoopInfo
+	description     string
+	loopDescription option.Option[string]
+	lastResetTime   *msync.TypedAtomic[time.Time]
 }
 
 // Log will log a debug-level message for the current Info values and the provided strings.
@@ -60,13 +63,13 @@ func (fi *FuncInfo) Log(logger *zerolog.Logger, cmdName string, clientType strin
 
 // GetAttemptNumber returns the Info's current attempt number (0-indexed).
 func (fi *FuncInfo) GetAttemptNumber() int {
-	return fi.loopInfo.attemptNumber
+	return fi.loopInfo.attemptsSoFar
 }
 
 // GetDurationSoFar returns the Info's current duration so far. This duration
 // applies to the duration of retrying for transient errors only.
 func (fi *FuncInfo) GetDurationSoFar() time.Duration {
-	return time.Since(fi.lastResetTime)
+	return time.Since(fi.lastResetTime.Load())
 }
 
 // NoteSuccess is used to tell the retry util to reset its measurement
@@ -76,5 +79,5 @@ func (fi *FuncInfo) GetDurationSoFar() time.Duration {
 // Call this after every successful command in a multi-command callback.
 // (It’s useless--but harmless--in a single-command callback.)
 func (i *FuncInfo) NoteSuccess() {
-	i.lastResetTime = time.Now()
+	i.lastResetTime.Store(time.Now())
 }
