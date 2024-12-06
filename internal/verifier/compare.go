@@ -324,7 +324,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 		)
 
 		if err == nil {
-			state.NoteSuccess()
+			state.NoteSuccess("opened src find cursor")
 
 			err = errors.Wrap(
 				iterateCursorToChannel(ctx, state, cursor, srcChannel),
@@ -350,7 +350,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 		)
 
 		if err == nil {
-			state.NoteSuccess()
+			state.NoteSuccess("opened dst find cursor")
 
 			err = errors.Wrap(
 				iterateCursorToChannel(ctx, state, cursor, dstChannel),
@@ -376,7 +376,7 @@ func iterateCursorToChannel(
 	writer chan<- bson.Raw,
 ) error {
 	for cursor.Next(ctx) {
-		state.NoteSuccess()
+		state.NoteSuccess("received a document")
 		writer <- slices.Clone(cursor.Current)
 	}
 

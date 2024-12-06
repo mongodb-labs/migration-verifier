@@ -69,11 +69,14 @@ func (r *Retryer) runRetryLoop(
 	li := &LoopInfo{
 		durationLimit: r.retryLimit,
 	}
-	funcinfos := lo.RepeatBy(
-		len(r.callbacks),
-		func(_ int) *FuncInfo {
+	funcinfos := lo.Map(
+		r.callbacks,
+		func(cb retryCallbackInfo, _ int) *FuncInfo {
 			return &FuncInfo{
-				lastResetTime:   msync.NewTypedAtomic(startTime),
+				lastReset: msync.NewTypedAtomic(lastResetInfo{
+					time: startTime,
+				}),
+				description:     cb.description,
 				loopDescription: r.description,
 				loopInfo:        li,
 			}
@@ -113,17 +116,25 @@ func (r *Retryer) runRetryLoop(
 					defer ticker.Stop()
 
 					for {
-						lastSuccessTime := funcinfos[i].lastResetTime.Load()
+						lastReset := funcinfos[i].lastReset.Load()
 
 						select {
 						case <-cbDoneChan:
 							return
 						case <-ticker.C:
-							if funcinfos[i].lastResetTime.Load() == lastSuccessTime {
-								logger.Warn().
+							if funcinfos[i].lastReset.Load() == lastReset {
+								event := logger.Warn().
 									Str("callbackDescription", curCbInfo.description).
-									Time("lastSuccessAt", lastSuccessTime).
-									Str("elapsedTime", reportutils.DurationToHMS(time.Since(lastSuccessTime))).
+									Time("since", lastReset.time)
+
+								if successDesc, hasDesc := lastReset.description.Get(); hasDesc {
+									event.
+										Str("successDescription", successDesc).
+										Uint64("successesSoFar", lastReset.resetsSoFar)
+								}
+
+								event.
+									Str("elapsedTime", reportutils.DurationToHMS(time.Since(lastReset.time))).
 									Msg("Operation has not reported success for a while.")
 							}
 						}
@@ -164,9 +175,11 @@ func (r *Retryer) runRetryLoop(
 		}
 
 		failedFuncInfo := funcinfos[groupErr.funcNum]
+		descriptions := failedFuncInfo.GetDescriptions()
+		cbErr := groupErr.errFromCallback
 
 		// Not a transient error? Fail immediately.
-		if !r.shouldRetryWithSleep(logger, sleepTime, r.callbacks[groupErr.funcNum], groupErr.errFromCallback) {
+		if !r.shouldRetryWithSleep(logger, sleepTime, descriptions, cbErr) {
 			return groupErr.errFromCallback
 		}
 
@@ -201,7 +214,7 @@ func (r *Retryer) runRetryLoop(
 		// Set all of the funcs that did *not* fail as having just succeeded.
 		for i, curInfo := range funcinfos {
 			if i != groupErr.funcNum {
-				curInfo.lastResetTime.Store(now)
+				curInfo.lastReset.Store(lastResetInfo{time: now})
 			}
 		}
 	}
@@ -235,7 +248,7 @@ func (r *Retryer) addDescriptionToEvent(event *zerolog.Event) *zerolog.Event {
 func (r *Retryer) shouldRetryWithSleep(
 	logger *logger.Logger,
 	sleepTime time.Duration,
-	cbInfo retryCallbackInfo,
+	descriptions []string,
 	err error,
 ) bool {
 	if err == nil {
@@ -266,11 +279,7 @@ func (r *Retryer) shouldRetryWithSleep(
 		),
 	)
 
-	if loopDesc, hasLoopDesc := r.description.Get(); hasLoopDesc {
-		event.Str("operationDescription", loopDesc)
-	}
-
-	event.Str("callbackDescription", cbInfo.description).
+	event.Strs("description", descriptions).
 		Int("error code", util.GetErrorCode(err)).
 		Err(err)
 

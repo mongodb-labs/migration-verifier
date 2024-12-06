@@ -299,7 +299,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
-	ri.NoteSuccess()
+	ri.NoteSuccess("received a batch of change events")
 
 	if eventsRead == 0 {
 		return nil
