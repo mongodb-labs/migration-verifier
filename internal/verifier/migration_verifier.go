@@ -612,7 +612,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 				Interface("task", task.PrimaryKey).
 				Str("namespace", task.QueryFilter.Namespace).
 				Int("mismatchesCount", len(problems)).
-				Msg("Document comparison task failed, but it may pass in the next generation.")
+				Msg("Discrepancies found. Will recheck in the next generation.")
 
 			var mismatches []VerificationResult
 			var missingIds []interface{}
@@ -750,9 +750,8 @@ func (verifier *Verifier) getShardKeyFields(
 //  2. Fetch shard keys.
 //  3. Fetch the size: # of docs, and # of bytes.
 func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, namespace string) ([]*partitions.Partition, []string, types.DocumentCount, types.ByteCount, error) {
-	retryer := retry.New(retry.DefaultDurationLimit)
 	dbName, collName := SplitNamespace(namespace)
-	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, verifier.logger, retryer,
+	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, verifier.logger,
 		verifier.srcClientDatabase(dbName), collName)
 	if err != nil {
 		return nil, nil, 0, 0, err
@@ -767,7 +766,7 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 	replicator1 := partitions.Replicator{ID: "verifier"}
 	replicators := []partitions.Replicator{replicator1}
 	partitionList, srcDocs, srcBytes, err := partitions.PartitionCollectionWithSize(
-		ctx, namespaceAndUUID, retryer, verifier.srcClient, replicators, verifier.logger, verifier.partitionSizeInBytes, verifier.globalFilter)
+		ctx, namespaceAndUUID, verifier.srcClient, replicators, verifier.logger, verifier.partitionSizeInBytes, verifier.globalFilter)
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
@@ -1239,9 +1238,7 @@ func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*Verificat
 
 	var results []bson.Raw
 
-	err := retry.Retry(
-		ctx,
-		verifier.logger,
+	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			cursor, err := taskCollection.Aggregate(
 				ctx,
@@ -1266,9 +1263,16 @@ func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*Verificat
 
 			return cursor.All(ctx, &results)
 		},
-	)
+		"counting generation %d's (non-primary) tasks by status",
+		generation,
+	).Run(ctx, verifier.logger)
+
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(
+			err,
+			"failed to count generation %d's tasks by status",
+			generation,
+		)
 	}
 
 	verificationStatus := VerificationStatus{}
@@ -1497,6 +1501,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	if err != nil {
 		verifier.logger.Err(err).Msgf("Failed to report per-namespace statistics")
+		return
 	}
 
 	verifier.printChangeEventStatistics(strBuilder)

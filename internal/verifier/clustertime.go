@@ -25,15 +25,11 @@ func GetNewClusterTime(
 	logger *logger.Logger,
 	client *mongo.Client,
 ) (primitive.Timestamp, error) {
-	retryer := retry.New(retry.DefaultDurationLimit)
-
 	var clusterTime primitive.Timestamp
 
 	// First we just fetch the latest cluster time among all shards without
 	// updating any shards’ oplogs.
-	err := retryer.Run(
-		ctx,
-		logger,
+	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			var err error
 			clusterTime, err = runAppendOplogNote(
@@ -44,7 +40,8 @@ func GetNewClusterTime(
 			)
 			return err
 		},
-	)
+		"appending oplog note to get cluster time",
+	).Run(ctx, logger)
 
 	if err != nil {
 		return primitive.Timestamp{}, err
@@ -53,9 +50,7 @@ func GetNewClusterTime(
 	// fetchClusterTime() will have taught the mongos about the most current
 	// shard’s cluster time. Now we tell that mongos to update all lagging
 	// shards to that time.
-	err = retryer.Run(
-		ctx,
-		logger,
+	err = retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			var err error
 			_, err = runAppendOplogNote(
@@ -66,7 +61,8 @@ func GetNewClusterTime(
 			)
 			return err
 		},
-	)
+		"appending oplog note to synchronize cluster",
+	).Run(ctx, logger)
 	if err != nil {
 		// This isn't serious enough even for info-level.
 		logger.Debug().Err(err).

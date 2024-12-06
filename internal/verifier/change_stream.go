@@ -493,14 +493,11 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 		// notifies the verifier's change event handler to exit.
 		defer close(csr.changeEventBatchChan)
 
-		retryer := retry.New(retry.DefaultDurationLimit)
-		retryer = retryer.WithErrorCodes(util.CursorKilled)
+		retryer := retry.New().WithErrorCodes(util.CursorKilled)
 
 		parentThreadWaiting := true
 
-		err := retryer.Run(
-			ctx,
-			csr.logger,
+		err := retryer.WithCallback(
 			func(ctx context.Context, ri *retry.FuncInfo) error {
 				changeStream, startTs, err := csr.createChangeStream(ctx)
 				if err != nil {
@@ -522,7 +519,8 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 
 				return csr.iterateChangeStream(ctx, ri, changeStream)
 			},
-		)
+			"running %s", csr,
+		).Run(ctx, csr.logger)
 
 		if err != nil {
 			// NB: This failure always happens after the initial change stream

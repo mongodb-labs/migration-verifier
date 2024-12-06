@@ -19,7 +19,7 @@ var someNetworkError = &mongo.CommandError{
 var badError = errors.New("I am fatal!")
 
 func (suite *UnitTestSuite) TestRetryer() {
-	retryer := New(DefaultDurationLimit)
+	retryer := New()
 	logger := suite.Logger()
 
 	suite.Run("with a function that immediately succeeds", func() {
@@ -29,7 +29,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 			return nil
 		}
 
-		err := retryer.Run(suite.Context(), logger, f)
+		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
 		suite.NoError(err)
 		suite.Equal(0, attemptNumber)
 
@@ -38,7 +38,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 			return nil
 		}
 
-		err = retryer.Run(suite.Context(), logger, f2)
+		err = retryer.WithCallback(f2, "f2").Run(suite.Context(), logger)
 		suite.NoError(err)
 		suite.Equal(0, attemptNumber)
 	})
@@ -53,7 +53,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 			return nil
 		}
 
-		err := retryer.Run(suite.Context(), logger, f)
+		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
 		suite.NoError(err)
 		suite.Equal(2, attemptNumber)
 
@@ -66,14 +66,14 @@ func (suite *UnitTestSuite) TestRetryer() {
 			return nil
 		}
 
-		err = retryer.Run(suite.Context(), logger, f2)
+		err = retryer.WithCallback(f2, "f2").Run(suite.Context(), logger)
 		suite.NoError(err)
 		suite.Equal(2, attemptNumber)
 	})
 }
 
 func (suite *UnitTestSuite) TestRetryerDurationLimitIsZero() {
-	retryer := New(0)
+	retryer := New().WithRetryLimit(0)
 
 	attemptNumber := -1
 	f := func(_ context.Context, ri *FuncInfo) error {
@@ -81,13 +81,13 @@ func (suite *UnitTestSuite) TestRetryerDurationLimitIsZero() {
 		return someNetworkError
 	}
 
-	err := retryer.Run(suite.Context(), suite.Logger(), f)
+	err := retryer.WithCallback(f, "f").Run(suite.Context(), suite.Logger())
 	suite.Assert().ErrorIs(err, someNetworkError)
 	suite.Assert().Equal(0, attemptNumber)
 }
 
 func (suite *UnitTestSuite) TestRetryerDurationReset() {
-	retryer := New(DefaultDurationLimit)
+	retryer := New()
 	logger := suite.Logger()
 
 	// In this test, the given function f takes longer than the durationLimit
@@ -99,7 +99,9 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	noSuccessIterations := 0
 	f1 := func(_ context.Context, ri *FuncInfo) error {
 		// Artificially advance how much time was taken.
-		ri.lastResetTime = ri.lastResetTime.Add(-2 * ri.loopInfo.durationLimit)
+		ri.lastResetTime.Store(
+			ri.lastResetTime.Load().Add(-2 * ri.loopInfo.durationLimit),
+		)
 
 		noSuccessIterations++
 		if noSuccessIterations == 1 {
@@ -109,7 +111,7 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 		return nil
 	}
 
-	err := retryer.Run(suite.Context(), logger, f1)
+	err := retryer.WithCallback(f1, "f1").Run(suite.Context(), logger)
 
 	// The error should be the limit-exceeded error, with the
 	// last-noted error being the transient error.
@@ -122,7 +124,9 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	successIterations := 0
 	f2 := func(_ context.Context, ri *FuncInfo) error {
 		// Artificially advance how much time was taken.
-		ri.lastResetTime = ri.lastResetTime.Add(-2 * ri.loopInfo.durationLimit)
+		ri.lastResetTime.Store(
+			ri.lastResetTime.Load().Add(-2 * ri.loopInfo.durationLimit),
+		)
 
 		ri.NoteSuccess()
 
@@ -134,13 +138,13 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 		return nil
 	}
 
-	err = retryer.Run(suite.Context(), logger, f2)
+	err = retryer.WithCallback(f2, "f2").Run(suite.Context(), logger)
 	suite.Assert().NoError(err)
 	suite.Assert().Equal(2, successIterations)
 }
 
 func (suite *UnitTestSuite) TestCancelViaContext() {
-	retryer := New(DefaultDurationLimit)
+	retryer := New()
 	logger := suite.Logger()
 
 	counter := 0
@@ -160,7 +164,7 @@ func (suite *UnitTestSuite) TestCancelViaContext() {
 	// retry code will see the cancel before the timer it sets expires.
 	cancel()
 	go func() {
-		err := retryer.Run(ctx, logger, f)
+		err := retryer.WithCallback(f, "f").Run(ctx, logger)
 		suite.ErrorIs(err, context.Canceled)
 		suite.Equal(1, counter)
 		wg.Done()
@@ -187,32 +191,32 @@ func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 	}
 
 	suite.Run("with no additional error codes", func() {
-		retryer := New(DefaultDurationLimit)
-		err := retryer.Run(suite.Context(), logger, f)
+		retryer := New()
+		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
 		suite.Equal(42, util.GetErrorCode(err))
 		suite.Equal(0, attemptNumber)
 	})
 
 	suite.Run("with one additional error code", func() {
-		retryer := New(DefaultDurationLimit)
+		retryer := New()
 		retryer = retryer.WithErrorCodes(42)
-		err := retryer.Run(suite.Context(), logger, f)
+		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
 		suite.NoError(err)
 		suite.Equal(1, attemptNumber)
 	})
 
 	suite.Run("with multiple additional error codes", func() {
-		retryer := New(DefaultDurationLimit)
+		retryer := New()
 		retryer = retryer.WithErrorCodes(42, 43, 44)
-		err := retryer.Run(suite.Context(), logger, f)
+		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
 		suite.NoError(err)
 		suite.Equal(1, attemptNumber)
 	})
 
 	suite.Run("with multiple additional error codes that don't match error", func() {
-		retryer := New(DefaultDurationLimit)
+		retryer := New()
 		retryer = retryer.WithErrorCodes(41, 43, 44)
-		err := retryer.Run(suite.Context(), logger, f)
+		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
 		suite.Equal(42, util.GetErrorCode(err))
 		suite.Equal(0, attemptNumber)
 	})
@@ -222,11 +226,7 @@ func (suite *UnitTestSuite) TestMulti_NonTransient() {
 	ctx := suite.Context()
 	logger := suite.Logger()
 
-	retryer := New(DefaultDurationLimit)
-
-	err := retryer.Run(
-		ctx,
-		logger,
+	err := New().WithCallback(
 		func(ctx context.Context, _ *FuncInfo) error {
 			timer := time.NewTimer(10 * time.Second)
 			select {
@@ -236,10 +236,13 @@ func (suite *UnitTestSuite) TestMulti_NonTransient() {
 				return nil
 			}
 		},
+		"slow",
+	).WithCallback(
 		func(_ context.Context, _ *FuncInfo) error {
 			return badError
 		},
-	)
+		"fails quickly",
+	).Run(ctx, logger)
 
 	suite.Assert().ErrorIs(err, badError)
 }
@@ -252,20 +255,17 @@ func (suite *UnitTestSuite) TestMulti_Transient() {
 		suite.Run(
 			fmt.Sprintf("final error: %v", finalErr),
 			func() {
-				retryer := New(DefaultDurationLimit)
 				cb1Attempts := 0
 				cb2Attempts := 0
 
-				err := retryer.Run(
-					ctx,
-					logger,
-
-					// This one succeeds every time.
+				err := New().WithCallback(
 					func(ctx context.Context, _ *FuncInfo) error {
 						cb1Attempts++
 
 						return nil
 					},
+					"succeeds every time",
+				).WithCallback(
 					func(_ context.Context, _ *FuncInfo) error {
 						cb2Attempts++
 
@@ -276,7 +276,8 @@ func (suite *UnitTestSuite) TestMulti_Transient() {
 							return finalErr
 						}
 					},
-				)
+					"fails variously",
+				).Run(ctx, logger)
 
 				if finalErr == nil {
 					suite.Assert().NoError(err)
@@ -300,13 +301,11 @@ func (suite *UnitTestSuite) TestMulti_LongRunningSuccess() {
 
 	startTime := time.Now()
 	retryerLimit := 2 * time.Second
-	retryer := New(retryerLimit)
+	retryer := New().WithRetryLimit(retryerLimit)
 
 	succeedPastTime := startTime.Add(retryerLimit + 1*time.Second)
 
-	err := retryer.Run(
-		ctx,
-		logger,
+	err := retryer.WithCallback(
 		func(ctx context.Context, fi *FuncInfo) error {
 			fi.NoteSuccess()
 
@@ -317,6 +316,8 @@ func (suite *UnitTestSuite) TestMulti_LongRunningSuccess() {
 
 			return nil
 		},
+		"quick success, then fail; all success after a bit",
+	).WithCallback(
 		func(ctx context.Context, fi *FuncInfo) error {
 			if time.Now().Before(succeedPastTime) {
 				<-ctx.Done()
@@ -325,7 +326,8 @@ func (suite *UnitTestSuite) TestMulti_LongRunningSuccess() {
 
 			return nil
 		},
-	)
+		"long-running: hangs then succeeds",
+	).Run(ctx, logger)
 
 	suite.Assert().NoError(err)
 }

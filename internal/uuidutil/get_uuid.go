@@ -27,8 +27,8 @@ type NamespaceAndUUID struct {
 	CollName string
 }
 
-func GetCollectionNamespaceAndUUID(ctx context.Context, logger *logger.Logger, retryer *retry.Retryer, db *mongo.Database, collName string) (*NamespaceAndUUID, error) {
-	binaryUUID, uuidErr := GetCollectionUUID(ctx, logger, retryer, db, collName)
+func GetCollectionNamespaceAndUUID(ctx context.Context, logger *logger.Logger, db *mongo.Database, collName string) (*NamespaceAndUUID, error) {
+	binaryUUID, uuidErr := GetCollectionUUID(ctx, logger, db, collName)
 	if uuidErr != nil {
 		return nil, uuidErr
 	}
@@ -39,20 +39,21 @@ func GetCollectionNamespaceAndUUID(ctx context.Context, logger *logger.Logger, r
 	}, nil
 }
 
-func GetCollectionUUID(ctx context.Context, logger *logger.Logger, retryer *retry.Retryer, db *mongo.Database, collName string) (*primitive.Binary, error) {
+func GetCollectionUUID(ctx context.Context, logger *logger.Logger, db *mongo.Database, collName string) (*primitive.Binary, error) {
 	filter := bson.D{{"name", collName}}
 	opts := options.ListCollections().SetNameOnly(false)
 
 	var collSpecs []*mongo.CollectionSpecification
-	err := retryer.Run(
-		ctx,
-		logger,
+	err := retry.New().WithCallback(
 		func(_ context.Context, ri *retry.FuncInfo) error {
 			ri.Log(logger.Logger, "ListCollectionSpecifications", db.Name(), collName, "Getting collection UUID.", "")
 			var driverErr error
 			collSpecs, driverErr = db.ListCollectionSpecifications(ctx, filter, opts)
 			return driverErr
-		})
+		},
+		"getting namespace %#q's specification",
+		db.Name()+"."+collName,
+	).Run(ctx, logger)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to list collections specification")
 	}
