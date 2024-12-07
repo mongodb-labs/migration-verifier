@@ -172,7 +172,6 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 			events = append(events, newEvent)
 		}
 
-		suite.T().Logf("Change stream op time (got event? %v): %v", gotEvent, csOpTime)
 		if csOpTime.After(*changeStreamStopTime) {
 			break
 		}
