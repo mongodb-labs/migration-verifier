@@ -324,7 +324,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 		)
 
 		if err == nil {
-			state.NoteSuccess()
+			state.NoteSuccess("opened src find cursor")
 
 			err = errors.Wrap(
 				iterateCursorToChannel(ctx, state, cursor, srcChannel),
@@ -350,7 +350,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 		)
 
 		if err == nil {
-			state.NoteSuccess()
+			state.NoteSuccess("opened dst find cursor")
 
 			err = errors.Wrap(
 				iterateCursorToChannel(ctx, state, cursor, dstChannel),
@@ -375,12 +375,17 @@ func iterateCursorToChannel(
 	cursor *mongo.Cursor,
 	writer chan<- bson.Raw,
 ) error {
-	for cursor.Next(ctx) {
-		state.NoteSuccess()
-		writer <- slices.Clone(cursor.Current)
-	}
+	defer close(writer)
 
-	close(writer)
+	for cursor.Next(ctx) {
+		state.NoteSuccess("received a document")
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case writer <- slices.Clone(cursor.Current):
+		}
+	}
 
 	return errors.Wrap(cursor.Err(), "failed to iterate cursor")
 }

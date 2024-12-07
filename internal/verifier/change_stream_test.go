@@ -172,7 +172,6 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 			events = append(events, newEvent)
 		}
 
-		suite.T().Logf("Change stream op time (got event? %v): %v", gotEvent, csOpTime)
 		if csOpTime.After(*changeStreamStopTime) {
 			break
 		}
@@ -307,6 +306,8 @@ func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, ve
 }
 
 func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
 	sess, err := suite.srcMongoClient.StartSession()
@@ -319,7 +320,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	suite.Require().NotNil(origStartTs)
 	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
-	verifier.srcChangeStreamReader.writesOffTsChan <- *origStartTs
+	verifier.srcChangeStreamReader.writesOffTs.Set(*origStartTs)
 	<-verifier.srcChangeStreamReader.doneChan
 	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
 }
@@ -365,7 +366,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 		"session time after events should exceed the original",
 	)
 
-	verifier.srcChangeStreamReader.writesOffTsChan <- *postEventsSessionTime
+	verifier.srcChangeStreamReader.writesOffTs.Set(*postEventsSessionTime)
 	<-verifier.srcChangeStreamReader.doneChan
 
 	suite.Assert().Equal(

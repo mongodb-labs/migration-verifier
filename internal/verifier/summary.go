@@ -399,43 +399,59 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 
 	builder.WriteString(fmt.Sprintf("\nChange events this generation: %s\n", eventsDescr))
 
-	if totalEvents == 0 {
-		return
+	if totalEvents > 0 {
+
+		reverseSortedNamespaces := maps.Keys(nsTotals)
+		sort.Slice(
+			reverseSortedNamespaces,
+			func(i, j int) bool {
+				return nsTotals[reverseSortedNamespaces[i]] > nsTotals[reverseSortedNamespaces[j]]
+			},
+		)
+
+		// Only report the busiest namespaces.
+		if len(reverseSortedNamespaces) > changeEventsTableMaxSize {
+			reverseSortedNamespaces = reverseSortedNamespaces[:changeEventsTableMaxSize]
+		}
+
+		table := tablewriter.NewWriter(builder)
+		table.SetHeader([]string{"Namespace", "Insert", "Update", "Replace", "Delete", "Total"})
+
+		for _, ns := range reverseSortedNamespaces {
+			curNsStats := nsStats[ns]
+
+			table.Append(
+				append(
+					[]string{ns},
+					strconv.Itoa(curNsStats.Insert),
+					strconv.Itoa(curNsStats.Update),
+					strconv.Itoa(curNsStats.Replace),
+					strconv.Itoa(curNsStats.Delete),
+					strconv.Itoa(curNsStats.Total()),
+				),
+			)
+		}
+
+		builder.WriteString("\nMost frequently-changing namespaces:\n")
+		table.Render()
 	}
 
-	reverseSortedNamespaces := maps.Keys(nsTotals)
-	sort.Slice(
-		reverseSortedNamespaces,
-		func(i, j int) bool {
-			return nsTotals[reverseSortedNamespaces[i]] > nsTotals[reverseSortedNamespaces[j]]
-		},
-	)
-
-	// Only report the busiest namespaces.
-	if len(reverseSortedNamespaces) > changeEventsTableMaxSize {
-		reverseSortedNamespaces = reverseSortedNamespaces[:changeEventsTableMaxSize]
-	}
-
-	table := tablewriter.NewWriter(builder)
-	table.SetHeader([]string{"Namespace", "Insert", "Update", "Replace", "Delete", "Total"})
-
-	for _, ns := range reverseSortedNamespaces {
-		curNsStats := nsStats[ns]
-
-		table.Append(
-			append(
-				[]string{ns},
-				strconv.Itoa(curNsStats.Insert),
-				strconv.Itoa(curNsStats.Update),
-				strconv.Itoa(curNsStats.Replace),
-				strconv.Itoa(curNsStats.Delete),
-				strconv.Itoa(curNsStats.Total()),
-			),
+	srcLag, hasSrcLag := verifier.srcChangeStreamReader.GetLag().Get()
+	if hasSrcLag {
+		builder.WriteString(
+			fmt.Sprintf("\nSource change stream lag: %s\n", reportutils.DurationToHMS(srcLag)),
 		)
 	}
 
-	builder.WriteString("\nMost frequently-changing namespaces:\n")
-	table.Render()
+	dstLag, hasDstLag := verifier.dstChangeStreamReader.GetLag().Get()
+	if hasDstLag {
+		if !hasSrcLag {
+			builder.WriteString("\n")
+		}
+		builder.WriteString(
+			fmt.Sprintf("Destination change stream lag: %s\n", reportutils.DurationToHMS(dstLag)),
+		)
+	}
 }
 
 func (verifier *Verifier) printWorkerStatus(builder *strings.Builder) {
