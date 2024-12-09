@@ -68,6 +68,8 @@ const (
 	okSymbol    = "\u2705" // white heavy check mark
 	infoSymbol  = "\u24d8" // circled Latin small letter I
 	notOkSymbol = "\u2757" // heavy exclamation mark symbol
+
+	clientAppName = "Migration Verifier"
 )
 
 type whichCluster string
@@ -221,7 +223,7 @@ func (verifier *Verifier) ConfigureReadConcern(setting ReadConcernSetting) {
 }
 
 func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
-	appName := "Migration Verifier"
+	appName := clientAppName
 	opts := &options.ClientOptions{
 		AppName: &appName,
 	}
