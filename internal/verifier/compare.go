@@ -384,6 +384,7 @@ func iterateCursorToChannel(
 		case <-ctx.Done():
 			return ctx.Err()
 		case writer <- slices.Clone(cursor.Current):
+			state.NoteSuccess("sent document to compare thread")
 		}
 	}
 
