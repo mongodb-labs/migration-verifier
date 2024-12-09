@@ -79,6 +79,8 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 
 func (suite *IntegrationTestSuite) SetupTest() {
 	ctx, canceller := context.WithCancelCause(context.Background())
+	suite.testContext, suite.contextCanceller = ctx, canceller
+	suite.zerologGlobalLogLevel = zerolog.GlobalLevel()
 
 	dbname := suite.DBNameForTest()
 
@@ -112,9 +114,6 @@ func (suite *IntegrationTestSuite) SetupTest() {
 			suite.initialDbNames.Add(dbName)
 		}
 	}
-
-	suite.testContext, suite.contextCanceller = ctx, canceller
-	suite.zerologGlobalLogLevel = zerolog.GlobalLevel()
 }
 
 func (suite *IntegrationTestSuite) TearDownTest() {
