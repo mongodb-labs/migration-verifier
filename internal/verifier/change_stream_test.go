@@ -283,7 +283,7 @@ func (suite *IntegrationTestSuite) getClusterTime(ctx context.Context, client *m
 	sctx := mongo.NewSessionContext(ctx, sess)
 	suite.Require().NoError(sess.Client().Ping(sctx, nil))
 
-	newTime, err := getClusterTimeFromSession(sess)
+	newTime, err := util.GetClusterTimeFromSession(sess)
 	suite.Require().NoError(err, "should fetch cluster time")
 
 	return newTime
@@ -306,21 +306,39 @@ func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, ve
 func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
-	verifier := suite.BuildVerifier()
-	ctx := suite.Context()
-	sess, err := suite.srcMongoClient.StartSession()
-	suite.Require().NoError(err)
-	sctx := mongo.NewSessionContext(ctx, sess)
-	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
-		sctx, bson.D{{"_id", 0}})
-	suite.Require().NoError(err)
-	origStartTs := sess.OperationTime()
-	suite.Require().NotNil(origStartTs)
-	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
-	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
-	verifier.srcChangeStreamReader.writesOffTs.Set(*origStartTs)
-	<-verifier.srcChangeStreamReader.doneChan
-	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
+	// Each of these takes ~1s, so don’t do too many of them.
+	for range 5 {
+		verifier := suite.BuildVerifier()
+		ctx := suite.Context()
+		sess, err := suite.srcMongoClient.StartSession()
+		suite.Require().NoError(err)
+		sctx := mongo.NewSessionContext(ctx, sess)
+		_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
+			sctx, bson.D{})
+		suite.Require().NoError(err, "should insert doc")
+
+		insertTs, err := util.GetClusterTimeFromSession(sess)
+		suite.Require().NoError(err, "should get cluster time")
+
+		suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
+
+		startAtTs := verifier.srcChangeStreamReader.startAtTs
+		suite.Require().NotNil(startAtTs)
+
+		suite.Require().False(
+			startAtTs.After(insertTs),
+			"change stream should start no later than the last operation",
+		)
+
+		verifier.srcChangeStreamReader.writesOffTs.Set(insertTs)
+
+		<-verifier.srcChangeStreamReader.doneChan
+
+		suite.Require().False(
+			verifier.srcChangeStreamReader.startAtTs.Before(*startAtTs),
+			"new startAtTs should be no earlier than last one",
+		)
+	}
 }
 
 func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {

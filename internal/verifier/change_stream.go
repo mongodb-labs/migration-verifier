@@ -47,6 +47,8 @@ const (
 	metadataChangeStreamCollectionName = "changeStream"
 )
 
+var maxChangeStreamAwaitTime = time.Second
+
 type UnknownEventError struct {
 	Event *ParsedEvent
 }
@@ -293,6 +295,9 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			(csr.lastChangeEventTime == nil ||
 				csr.lastChangeEventTime.Before(*changeEventBatch[eventsRead].ClusterTime)) {
 			csr.lastChangeEventTime = changeEventBatch[eventsRead].ClusterTime
+			csr.logger.Trace().
+				Interface("event", changeEventBatch[eventsRead]).
+				Msg("Updated lastChangeEventTime.")
 		}
 
 		eventsRead++
@@ -431,7 +436,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 ) (*mongo.ChangeStream, mongo.Session, primitive.Timestamp, error) {
 	pipeline := csr.GetChangeStreamFilter()
 	opts := options.ChangeStream().
-		SetMaxAwaitTime(1 * time.Second).
+		SetMaxAwaitTime(maxChangeStreamAwaitTime).
 		SetFullDocument(options.UpdateLookup)
 
 	if csr.clusterInfo.VersionArray[0] >= 6 {
@@ -488,10 +493,16 @@ func (csr *ChangeStreamReader) createChangeStream(
 	// With sharded clusters the resume token might lead the cluster time
 	// by 1 increment. In that case we need the actual cluster time;
 	// otherwise we will get errors.
-	clusterTime, err := getClusterTimeFromSession(sess)
+	clusterTime, err := util.GetClusterTimeFromSession(sess)
 	if err != nil {
 		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to read cluster time from session")
 	}
+
+	csr.logger.Debug().
+		Interface("resumeTokenTimestamp", startTs).
+		Interface("clusterTime", clusterTime).
+		Stringer("changeStreamReader", csr).
+		Msg("Using earlier time as start timestamp.")
 
 	if startTs.After(clusterTime) {
 		startTs = clusterTime
@@ -658,20 +669,4 @@ func extractTimestampFromResumeToken(resumeToken bson.Raw) (primitive.Timestamp,
 	}
 
 	return resumeTokenTime, nil
-}
-
-func getClusterTimeFromSession(sess mongo.Session) (primitive.Timestamp, error) {
-	ctStruct := struct {
-		ClusterTime struct {
-			ClusterTime primitive.Timestamp `bson:"clusterTime"`
-		} `bson:"$clusterTime"`
-	}{}
-
-	clusterTimeRaw := sess.ClusterTime()
-	err := bson.Unmarshal(sess.ClusterTime(), &ctStruct)
-	if err != nil {
-		return primitive.Timestamp{}, errors.Wrapf(err, "failed to find clusterTime in session cluster time document (%v)", clusterTimeRaw)
-	}
-
-	return ctStruct.ClusterTime.ClusterTime, nil
 }
