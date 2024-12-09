@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -99,8 +100,11 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	noSuccessIterations := 0
 	f1 := func(_ context.Context, ri *FuncInfo) error {
 		// Artificially advance how much time was taken.
-		ri.lastResetTime.Store(
-			ri.lastResetTime.Load().Add(-2 * ri.loopInfo.durationLimit),
+		ri.lastReset.Store(
+			lastResetInfo{
+				time:        ri.lastReset.Load().time.Add(-2 * ri.loopInfo.durationLimit),
+				description: option.Some("artificially rewinding time"),
+			},
 		)
 
 		noSuccessIterations++
@@ -123,12 +127,7 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	// duration should be reset.
 	successIterations := 0
 	f2 := func(_ context.Context, ri *FuncInfo) error {
-		// Artificially advance how much time was taken.
-		ri.lastResetTime.Store(
-			ri.lastResetTime.Load().Add(-2 * ri.loopInfo.durationLimit),
-		)
-
-		ri.NoteSuccess()
+		ri.NoteSuccess("immediate success")
 
 		successIterations++
 		if successIterations == 1 {
@@ -307,7 +306,7 @@ func (suite *UnitTestSuite) TestMulti_LongRunningSuccess() {
 
 	err := retryer.WithCallback(
 		func(ctx context.Context, fi *FuncInfo) error {
-			fi.NoteSuccess()
+			fi.NoteSuccess("success right away")
 
 			if time.Now().Before(succeedPastTime) {
 				time.Sleep(1 * time.Second)
