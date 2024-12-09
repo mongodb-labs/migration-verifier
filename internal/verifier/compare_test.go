@@ -55,10 +55,17 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 
 		var done atomic.Bool
 		go func() {
-			verifier.FetchAndCompareDocuments(
+			_, _, _, err := verifier.FetchAndCompareDocuments(
 				cancelableCtx,
 				&task,
 			)
+			if err != nil {
+				s.Assert().ErrorIs(
+					err,
+					context.Canceled,
+					"only failure should be context cancellation",
+				)
+			}
 			done.Store(true)
 		}()
 
