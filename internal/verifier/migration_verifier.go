@@ -68,6 +68,8 @@ const (
 	okSymbol    = "\u2705" // white heavy check mark
 	infoSymbol  = "\u24d8" // circled Latin small letter I
 	notOkSymbol = "\u2757" // heavy exclamation mark symbol
+
+	clientAppName = "Migration Verifier"
 )
 
 type whichCluster string
@@ -221,7 +223,7 @@ func (verifier *Verifier) ConfigureReadConcern(setting ReadConcernSetting) {
 }
 
 func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
-	appName := "Migration Verifier"
+	appName := clientAppName
 	opts := &options.ClientOptions{
 		AppName: &appName,
 	}
@@ -279,15 +281,19 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	// might be inserting docs into the recheck queue, which happens
 	// under the lock.
 	select {
-	case verifier.srcChangeStreamReader.writesOffTsChan <- srcFinalTs:
-	case err := <-verifier.srcChangeStreamReader.errChan:
+	case <-verifier.srcChangeStreamReader.error.Ready():
+		err := verifier.srcChangeStreamReader.error.Get()
 		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.srcChangeStreamReader)
+	default:
+		verifier.srcChangeStreamReader.writesOffTs.Set(srcFinalTs)
 	}
 
 	select {
-	case verifier.dstChangeStreamReader.writesOffTsChan <- dstFinalTs:
-	case err := <-verifier.dstChangeStreamReader.errChan:
+	case <-verifier.dstChangeStreamReader.error.Ready():
+		err := verifier.dstChangeStreamReader.error.Get()
 		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.dstChangeStreamReader)
+	default:
+		verifier.dstChangeStreamReader.writesOffTs.Set(dstFinalTs)
 	}
 
 	return nil

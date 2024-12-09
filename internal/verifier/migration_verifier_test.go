@@ -1622,6 +1622,8 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	suite.Assert().Equal(
 		1,
 		status.FailedTasks,
+		"failed tasks as expected (status=%+v)",
+		status,
 	)
 
 	// Patch up the other mismatched document in generation 4.

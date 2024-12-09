@@ -375,12 +375,17 @@ func iterateCursorToChannel(
 	cursor *mongo.Cursor,
 	writer chan<- bson.Raw,
 ) error {
+	defer close(writer)
+
 	for cursor.Next(ctx) {
 		state.NoteSuccess()
-		writer <- slices.Clone(cursor.Current)
-	}
 
-	close(writer)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case writer <- slices.Clone(cursor.Current):
+		}
+	}
 
 	return errors.Wrap(cursor.Err(), "failed to iterate cursor")
 }
