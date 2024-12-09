@@ -1,11 +1,9 @@
 package retry
 
 import (
-	"slices"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/reportutils"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/rs/zerolog"
@@ -21,20 +19,11 @@ type LoopInfo struct {
 	durationLimit time.Duration
 }
 
-type lastResetInfo struct {
-	time time.Time
-
-	// These go into logs to facilitate debugging.
-	description option.Option[string]
-	resetsSoFar uint64
-}
-
 type FuncInfo struct {
 	loopInfo        *LoopInfo
 	description     string
 	loopDescription option.Option[string]
-
-	lastReset *msync.TypedAtomic[lastResetInfo]
+	lastResetTime   *msync.TypedAtomic[time.Time]
 }
 
 // Log will log a debug-level message for the current Info values and the provided strings.
@@ -80,7 +69,7 @@ func (fi *FuncInfo) GetAttemptNumber() int {
 // GetDurationSoFar returns the Info's current duration so far. This duration
 // applies to the duration of retrying for transient errors only.
 func (fi *FuncInfo) GetDurationSoFar() time.Duration {
-	return time.Since(fi.lastReset.Load().time)
+	return time.Since(fi.lastResetTime.Load())
 }
 
 // NoteSuccess is used to tell the retry util to reset its measurement
@@ -89,21 +78,6 @@ func (fi *FuncInfo) GetDurationSoFar() time.Duration {
 //
 // Call this after every successful command in a multi-command callback.
 // (It’s useless--but harmless--in a single-command callback.)
-func (i *FuncInfo) NoteSuccess(description string) {
-	totalResets := i.lastReset.Load().resetsSoFar
-
-	i.lastReset.Store(lastResetInfo{
-		description: option.Some(description),
-		time:        time.Now(),
-		resetsSoFar: 1 + totalResets,
-	})
-}
-
-func (i *FuncInfo) GetDescriptions() []string {
-	descriptions := mslices.Of(i.description)
-	if loopDesc, hasDesc := i.loopDescription.Get(); hasDesc {
-		descriptions = slices.Insert(descriptions, 0, loopDesc)
-	}
-
-	return descriptions
+func (i *FuncInfo) NoteSuccess() {
+	i.lastResetTime.Store(time.Now())
 }

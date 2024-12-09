@@ -621,7 +621,7 @@ func getMidIDBounds(
 
 					// Append the copied bound to the other mid _id bounds.
 					midIDBounds = append(midIDBounds, bound)
-					ri.NoteSuccess("received an ID partition")
+					ri.NoteSuccess()
 				}
 
 				return cursor.Err()
