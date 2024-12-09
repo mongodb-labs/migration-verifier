@@ -1242,11 +1242,6 @@ func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*Verificat
 	taskCollection := verifier.verificationTaskCollection()
 	generation, _ := verifier.getGeneration()
 
-	// XXX REMOVE ME
-	verifier.logger.Debug().
-		Int("generation", generation).
-		Msg("Running GetVerificationStatus().")
-
 	var results []bson.Raw
 
 	err := retry.New().WithCallback(
