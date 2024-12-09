@@ -127,13 +127,7 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	// duration should be reset.
 	successIterations := 0
 	f2 := func(_ context.Context, ri *FuncInfo) error {
-		// Artificially advance how much time was taken.
-		ri.lastReset.Store(
-			lastResetInfo{
-				time:        ri.lastReset.Load().time.Add(-2 * ri.loopInfo.durationLimit),
-				description: option.Some("artificially rewinding time"),
-			},
-		)
+		ri.NoteSuccess("immediate success")
 
 		successIterations++
 		if successIterations == 1 {
