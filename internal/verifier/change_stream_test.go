@@ -313,8 +313,10 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 		sess, err := suite.srcMongoClient.StartSession()
 		suite.Require().NoError(err)
 		sctx := mongo.NewSessionContext(ctx, sess)
-		_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
-			sctx, bson.D{})
+		_, err = suite.srcMongoClient.
+			Database(suite.DBNameForTest()).
+			Collection("testColl").
+			InsertOne(sctx, bson.D{})
 		suite.Require().NoError(err, "should insert doc")
 
 		insertTs, err := util.GetClusterTimeFromSession(sess)
