@@ -15,8 +15,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readconcern"
 )
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
@@ -285,7 +283,7 @@ func (suite *IntegrationTestSuite) getClusterTime(ctx context.Context, client *m
 	sctx := mongo.NewSessionContext(ctx, sess)
 	suite.Require().NoError(sess.Client().Ping(sctx, nil))
 
-	newTime, err := getClusterTimeFromSession(sess)
+	newTime, err := util.GetClusterTimeFromSession(sess)
 	suite.Require().NoError(err, "should fetch cluster time")
 
 	return newTime
@@ -306,21 +304,43 @@ func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, ve
 }
 
 func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
-	verifier := suite.BuildVerifier()
-	ctx := suite.Context()
-	sess, err := suite.srcMongoClient.StartSession()
-	suite.Require().NoError(err)
-	sctx := mongo.NewSessionContext(ctx, sess)
-	_, err = suite.srcMongoClient.Database("testDb").Collection("testColl").InsertOne(
-		sctx, bson.D{{"_id", 0}})
-	suite.Require().NoError(err)
-	origStartTs := sess.OperationTime()
-	suite.Require().NotNil(origStartTs)
-	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
-	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
-	verifier.srcChangeStreamReader.writesOffTsChan <- *origStartTs
-	<-verifier.srcChangeStreamReader.doneChan
-	suite.Require().Equal(verifier.srcChangeStreamReader.startAtTs, origStartTs)
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
+	// Each of these takes ~1s, so don’t do too many of them.
+	for range 5 {
+		verifier := suite.BuildVerifier()
+		ctx := suite.Context()
+		sess, err := suite.srcMongoClient.StartSession()
+		suite.Require().NoError(err)
+		sctx := mongo.NewSessionContext(ctx, sess)
+		_, err = suite.srcMongoClient.
+			Database(suite.DBNameForTest()).
+			Collection("testColl").
+			InsertOne(sctx, bson.D{})
+		suite.Require().NoError(err, "should insert doc")
+
+		insertTs, err := util.GetClusterTimeFromSession(sess)
+		suite.Require().NoError(err, "should get cluster time")
+
+		suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
+
+		startAtTs := verifier.srcChangeStreamReader.startAtTs
+		suite.Require().NotNil(startAtTs)
+
+		suite.Require().False(
+			startAtTs.After(insertTs),
+			"change stream should start no later than the last operation",
+		)
+
+		verifier.srcChangeStreamReader.writesOffTs.Set(insertTs)
+
+		<-verifier.srcChangeStreamReader.doneChan
+
+		suite.Require().False(
+			verifier.srcChangeStreamReader.startAtTs.Before(*startAtTs),
+			"new startAtTs should be no earlier than last one",
+		)
+	}
 }
 
 func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
@@ -364,7 +384,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 		"session time after events should exceed the original",
 	)
 
-	verifier.srcChangeStreamReader.writesOffTsChan <- *postEventsSessionTime
+	verifier.srcChangeStreamReader.writesOffTs.Set(*postEventsSessionTime)
 	<-verifier.srcChangeStreamReader.doneChan
 
 	suite.Assert().Equal(
@@ -426,6 +446,52 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 	)
 }
 
+func (suite *IntegrationTestSuite) TestWritesOffCursorKilledResilience() {
+	ctx := suite.Context()
+
+	coll := suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection("mycoll")
+
+	suite.Require().NoError(
+		coll.Database().CreateCollection(
+			ctx,
+			coll.Name(),
+		),
+	)
+
+	suite.Require().NoError(
+		suite.dstMongoClient.
+			Database(coll.Database().Name()).
+			CreateCollection(
+				ctx,
+				coll.Name(),
+			),
+	)
+
+	for range 100 {
+		verifier := suite.BuildVerifier()
+
+		docs := lo.RepeatBy(1_000, func(_ int) bson.D { return bson.D{} })
+		_, err := coll.InsertMany(
+			ctx,
+			lo.ToAnySlice(docs),
+		)
+		suite.Require().NoError(err)
+
+		suite.Require().NoError(verifier.WritesOff(ctx))
+
+		suite.Require().NoError(
+			testutil.KillApplicationChangeStreams(
+				suite.Context(),
+				suite.T(),
+				suite.srcMongoClient,
+				clientAppName,
+			),
+		)
+	}
+}
+
 func (suite *IntegrationTestSuite) TestCursorKilledResilience() {
 	ctx := suite.Context()
 
@@ -443,54 +509,16 @@ func (suite *IntegrationTestSuite) TestCursorKilledResilience() {
 	// wait for generation 0 to end
 	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
 
-	const mvName = "Migration Verifier"
-
-	// Kill verifier’s change stream.
-	cursor, err := suite.srcMongoClient.Database(
-		"admin",
-		options.Database().SetReadConcern(readconcern.Local()),
-	).Aggregate(
-		ctx,
-		mongo.Pipeline{
-			{
-				{"$currentOp", bson.D{
-					{"idleCursors", true},
-				}},
-			},
-			{
-				{"$match", bson.D{
-					{"clientMetadata.application.name", mvName},
-					{"command.collection", "$cmd.aggregate"},
-					{"cursor.originatingCommand.pipeline.0.$_internalChangeStreamOplogMatch",
-						bson.D{{"$type", "object"}},
-					},
-				}},
-			},
-		},
+	suite.Require().NoError(
+		testutil.KillApplicationChangeStreams(
+			suite.Context(),
+			suite.T(),
+			suite.srcMongoClient,
+			clientAppName,
+		),
 	)
-	suite.Require().NoError(err)
 
-	var ops []bson.Raw
-	suite.Require().NoError(cursor.All(ctx, &ops))
-
-	for _, cursorRaw := range ops {
-		opId, err := cursorRaw.LookupErr("opid")
-		suite.Require().NoError(err, "should get opid from op")
-
-		suite.T().Logf("Killing change stream op %+v", opId)
-
-		suite.Require().NoError(
-			suite.srcMongoClient.Database("admin").RunCommand(
-				ctx,
-				bson.D{
-					{"killOp", 1},
-					{"op", opId},
-				},
-			).Err(),
-		)
-	}
-
-	_, err = coll.InsertOne(
+	_, err := coll.InsertOne(
 		ctx,
 		bson.D{{"_id", "after kill"}},
 	)

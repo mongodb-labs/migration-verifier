@@ -44,6 +44,7 @@ type DocKey struct {
 
 const (
 	minChangeStreamPersistInterval     = time.Second * 10
+	maxChangeStreamAwaitTime           = time.Second
 	metadataChangeStreamCollectionName = "changeStream"
 )
 
@@ -68,8 +69,8 @@ type ChangeStreamReader struct {
 
 	changeStreamRunning  bool
 	changeEventBatchChan chan []ParsedEvent
-	writesOffTsChan      chan primitive.Timestamp
-	errChan              chan error
+	writesOffTs          *util.Eventual[primitive.Timestamp]
+	error                *util.Eventual[error]
 	doneChan             chan struct{}
 
 	startAtTs *primitive.Timestamp
@@ -87,8 +88,8 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		clusterInfo:          *verifier.srcClusterInfo,
 		changeStreamRunning:  false,
 		changeEventBatchChan: make(chan []ParsedEvent),
-		writesOffTsChan:      make(chan primitive.Timestamp),
-		errChan:              make(chan error),
+		writesOffTs:          util.NewEventual[primitive.Timestamp](),
+		error:                util.NewEventual[error](),
 		doneChan:             make(chan struct{}),
 		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
 	}
@@ -101,8 +102,8 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		clusterInfo:          *verifier.dstClusterInfo,
 		changeStreamRunning:  false,
 		changeEventBatchChan: make(chan []ParsedEvent),
-		writesOffTsChan:      make(chan primitive.Timestamp),
-		errChan:              make(chan error),
+		writesOffTs:          util.NewEventual[primitive.Timestamp](),
+		error:                util.NewEventual[error](),
 		doneChan:             make(chan struct{}),
 		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
 	}
@@ -123,7 +124,6 @@ func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *C
 			verifier.logger.Trace().Msgf("Verifier is handling a change event batch from %s: %v", reader, batch)
 			err := verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType)
 			if err != nil {
-				reader.errChan <- err
 				return err
 			}
 		}
@@ -268,6 +268,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	eventsRead := 0
 	var changeEventBatch []ParsedEvent
 
+	latestEvent := option.None[ParsedEvent]()
+
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
 		gotEvent := cs.TryNext(ctx)
 
@@ -293,7 +295,9 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		if changeEventBatch[eventsRead].ClusterTime != nil &&
 			(csr.lastChangeEventTime == nil ||
 				csr.lastChangeEventTime.Before(*changeEventBatch[eventsRead].ClusterTime)) {
+
 			csr.lastChangeEventTime = changeEventBatch[eventsRead].ClusterTime
+			latestEvent = option.Some(changeEventBatch[eventsRead])
 		}
 
 		eventsRead++
@@ -303,6 +307,12 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	if eventsRead == 0 {
 		return nil
+	}
+
+	if event, has := latestEvent.Get(); has {
+		csr.logger.Trace().
+			Interface("event", event).
+			Msg("Updated lastChangeEventTime.")
 	}
 
 	var curTs primitive.Timestamp
@@ -355,7 +365,9 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 		// source writes are ended and the migration tool is finished / committed.
 		// This means we should exit rather than continue reading the change stream
 		// since there should be no more events.
-		case writesOffTs := <-csr.writesOffTsChan:
+		case <-csr.writesOffTs.Ready():
+			writesOffTs := csr.writesOffTs.Get()
+
 			csr.logger.Debug().
 				Interface("writesOffTimestamp", writesOffTs).
 				Msgf("%s thread received writesOff timestamp. Finalizing change stream.", csr)
@@ -408,7 +420,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			}
 			// since we have started Recheck, we must signal that we have
 			// finished the change stream changes so that Recheck can continue.
-			csr.doneChan <- struct{}{}
+			close(csr.doneChan)
 			break
 		}
 	}
@@ -430,7 +442,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 ) (*mongo.ChangeStream, mongo.Session, primitive.Timestamp, error) {
 	pipeline := csr.GetChangeStreamFilter()
 	opts := options.ChangeStream().
-		SetMaxAwaitTime(1 * time.Second).
+		SetMaxAwaitTime(maxChangeStreamAwaitTime).
 		SetFullDocument(options.UpdateLookup)
 
 	if csr.clusterInfo.VersionArray[0] >= 6 {
@@ -487,10 +499,16 @@ func (csr *ChangeStreamReader) createChangeStream(
 	// With sharded clusters the resume token might lead the cluster time
 	// by 1 increment. In that case we need the actual cluster time;
 	// otherwise we will get errors.
-	clusterTime, err := getClusterTimeFromSession(sess)
+	clusterTime, err := util.GetClusterTimeFromSession(sess)
 	if err != nil {
 		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to read cluster time from session")
 	}
+
+	csr.logger.Debug().
+		Interface("resumeTokenTimestamp", startTs).
+		Interface("clusterTime", clusterTime).
+		Stringer("changeStreamReader", csr).
+		Msg("Using earlier time as start timestamp.")
 
 	if startTs.After(clusterTime) {
 		startTs = clusterTime
@@ -542,10 +560,7 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 		).Run(ctx, csr.logger)
 
 		if err != nil {
-			// NB: This failure always happens after the initial change stream
-			// creation.
-			csr.errChan <- err
-			close(csr.errChan)
+			csr.error.Set(err)
 		}
 	}()
 
@@ -660,20 +675,4 @@ func extractTimestampFromResumeToken(resumeToken bson.Raw) (primitive.Timestamp,
 	}
 
 	return resumeTokenTime, nil
-}
-
-func getClusterTimeFromSession(sess mongo.Session) (primitive.Timestamp, error) {
-	ctStruct := struct {
-		ClusterTime struct {
-			ClusterTime primitive.Timestamp `bson:"clusterTime"`
-		} `bson:"$clusterTime"`
-	}{}
-
-	clusterTimeRaw := sess.ClusterTime()
-	err := bson.Unmarshal(sess.ClusterTime(), &ctStruct)
-	if err != nil {
-		return primitive.Timestamp{}, errors.Wrapf(err, "failed to find clusterTime in session cluster time document (%v)", clusterTimeRaw)
-	}
-
-	return ctStruct.ClusterTime.ClusterTime, nil
 }
