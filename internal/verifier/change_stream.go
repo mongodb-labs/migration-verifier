@@ -318,7 +318,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	var curTs primitive.Timestamp
 	curTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
 	if err == nil {
-		lagSecs := curTs.T - sess.OperationTime().T
+		lagSecs := int32(sess.OperationTime().T) - int32(curTs.T)
 		csr.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
 	} else {
 		csr.logger.Warn().
@@ -570,6 +570,10 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	csr.logger.Debug().
+		Interface("startTimestamp", startTs).
+		Msgf("Started %s", csr)
 
 	csr.startAtTs = &startTs
 
