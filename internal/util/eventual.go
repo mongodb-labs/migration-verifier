@@ -6,12 +6,12 @@ import (
 	"github.com/10gen/migration-verifier/option"
 )
 
-// Eventual represents a value that isn’t available when this struct is created
-// but can be awaited via a channel.
+// Eventual solves the “one writer, many readers” problem: a value gets
+// written once, then the readers will see that the value is `Ready()` and
+// can then `Get()` it.
 //
-// This is much like how context.Context’s Done() and Err() methods work.
-// It’s useful to await a value’s readiness via channel but then read it
-// multiple times.
+// It’s like how `context.Context`’s `Done()` and `Err()` methods work, but
+// generalized to any data type.
 type Eventual[T any] struct {
 	ready chan struct{}
 	val   option.Option[T]
@@ -47,9 +47,11 @@ func (e *Eventual[T]) Set(val T) {
 	defer e.mux.Unlock()
 
 	if e.val.IsSome() {
-		panic("Double set on eventual!")
+		panic("Tried to set an eventual twice!")
 	}
 
+	// NB: This *must* happen before the close(), or else a fast reader may
+	// not see this value.
 	e.val = option.Some(val)
 
 	close(e.ready)
