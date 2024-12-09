@@ -2,17 +2,14 @@ package util
 
 import (
 	"time"
-
-	"github.com/10gen/migration-verifier/option"
 )
 
 func (s *UnitTestSuite) TestEventual() {
 	eventual := NewEventual[int]()
 
-	s.Assert().Equal(
-		option.None[int](),
-		eventual.Get(),
-		"Get() should return empty",
+	s.Assert().Panics(
+		func() { eventual.Get() },
+		"Get() should panic before the value is set",
 	)
 
 	select {
@@ -30,7 +27,7 @@ func (s *UnitTestSuite) TestEventual() {
 	}
 
 	s.Assert().Equal(
-		option.Some(123),
+		123,
 		eventual.Get(),
 		"Get() should return the value",
 	)

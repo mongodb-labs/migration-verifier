@@ -366,7 +366,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 		// This means we should exit rather than continue reading the change stream
 		// since there should be no more events.
 		case <-csr.writesOffTs.Ready():
-			writesOffTs := csr.writesOffTs.Get().MustGet()
+			writesOffTs := csr.writesOffTs.Get()
 
 			csr.logger.Debug().
 				Interface("writesOffTimestamp", writesOffTs).

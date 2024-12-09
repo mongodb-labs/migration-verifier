@@ -282,7 +282,7 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	// under the lock.
 	select {
 	case <-verifier.srcChangeStreamReader.error.Ready():
-		err := verifier.srcChangeStreamReader.error.Get().MustGet()
+		err := verifier.srcChangeStreamReader.error.Get()
 		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.srcChangeStreamReader)
 	default:
 		verifier.srcChangeStreamReader.writesOffTs.Set(srcFinalTs)
@@ -290,7 +290,7 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 
 	select {
 	case <-verifier.dstChangeStreamReader.error.Ready():
-		err := verifier.dstChangeStreamReader.error.Get().MustGet()
+		err := verifier.dstChangeStreamReader.error.Get()
 		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.dstChangeStreamReader)
 	default:
 		verifier.dstChangeStreamReader.writesOffTs.Set(dstFinalTs)

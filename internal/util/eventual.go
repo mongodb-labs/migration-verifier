@@ -31,13 +31,18 @@ func (e *Eventual[T]) Ready() <-chan struct{} {
 	return e.ready
 }
 
-// Get returns an option that contains the Eventual’s value, or
-// empty if the value isn’t ready yet.
-func (e *Eventual[T]) Get() option.Option[T] {
+// Get returns the Eventual’s value if it’s ready.
+// It panics otherwise.
+func (e *Eventual[T]) Get() T {
 	e.mux.RLock()
 	defer e.mux.RUnlock()
 
-	return e.val
+	val, has := e.val.Get()
+	if has {
+		return val
+	}
+
+	panic("Eventual's Get() called before value was ready.")
 }
 
 // Set sets the Eventual’s value. It may be called only once;
