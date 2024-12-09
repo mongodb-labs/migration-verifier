@@ -44,10 +44,9 @@ type DocKey struct {
 
 const (
 	minChangeStreamPersistInterval     = time.Second * 10
+	maxChangeStreamAwaitTime           = time.Second
 	metadataChangeStreamCollectionName = "changeStream"
 )
-
-var maxChangeStreamAwaitTime = time.Second
 
 type UnknownEventError struct {
 	Event *ParsedEvent
@@ -269,6 +268,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	eventsRead := 0
 	var changeEventBatch []ParsedEvent
 
+	latestEvent := option.None[ParsedEvent]()
+
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
 		gotEvent := cs.TryNext(ctx)
 
@@ -294,10 +295,9 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		if changeEventBatch[eventsRead].ClusterTime != nil &&
 			(csr.lastChangeEventTime == nil ||
 				csr.lastChangeEventTime.Before(*changeEventBatch[eventsRead].ClusterTime)) {
+
 			csr.lastChangeEventTime = changeEventBatch[eventsRead].ClusterTime
-			csr.logger.Trace().
-				Interface("event", changeEventBatch[eventsRead]).
-				Msg("Updated lastChangeEventTime.")
+			latestEvent = option.Some(changeEventBatch[eventsRead])
 		}
 
 		eventsRead++
@@ -307,6 +307,12 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	if eventsRead == 0 {
 		return nil
+	}
+
+	if event, has := latestEvent.Get(); has {
+		csr.logger.Trace().
+			Interface("event", event).
+			Msg("Updated lastChangeEventTime.")
 	}
 
 	var curTs primitive.Timestamp
