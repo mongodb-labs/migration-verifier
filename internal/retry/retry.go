@@ -124,7 +124,7 @@ func (r *Retryer) runRetryLoop(
 						case <-ticker.C:
 							if funcinfos[i].lastReset.Load() == lastReset {
 								event := logger.Warn().
-									Str("callbackDescription", curCbInfo.description).
+									Strs("description", funcinfos[i].GetDescriptions()).
 									Time("noSuccessSince", lastReset.time).
 									Uint64("successesSoFar", lastReset.resetsSoFar)
 
