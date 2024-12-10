@@ -571,10 +571,6 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 		return err
 	}
 
-	csr.logger.Debug().
-		Interface("startTimestamp", startTs).
-		Msgf("Started %s", csr)
-
 	csr.startAtTs = &startTs
 
 	csr.changeStreamRunning = true

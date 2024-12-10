@@ -303,6 +303,44 @@ func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, ve
 	return recheckDocs
 }
 
+func (suite *IntegrationTestSuite) TestChangeStreamLag() {
+	ctx := suite.Context()
+
+	db := suite.srcMongoClient.
+		Database(suite.DBNameForTest())
+
+	suite.Require().NoError(
+		db.CreateCollection(ctx, "mycoll"),
+	)
+
+	verifier := suite.BuildVerifier()
+
+	verifier.SetSrcNamespaces([]string{db.Name() + ".mycoll"})
+	verifier.SetDstNamespaces([]string{db.Name() + ".mycoll"})
+	verifier.SetNamespaceMap()
+
+	verifierRunner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(
+		verifierRunner.AwaitGenerationEnd(),
+	)
+
+	_, err := db.Collection("mycoll").InsertOne(ctx, bson.D{})
+	suite.Require().NoError(err)
+
+	suite.Require().NoError(
+		verifierRunner.StartNextGeneration(),
+	)
+	suite.Require().NoError(
+		verifierRunner.AwaitGenerationEnd(),
+	)
+
+	suite.Assert().Less(
+		verifier.srcChangeStreamReader.lag.Load().MustGet(),
+		10*time.Second,
+		"verifier lag is as expected",
+	)
+}
+
 func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
