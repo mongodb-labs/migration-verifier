@@ -335,7 +335,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 	)
 
 	suite.Assert().Less(
-		verifier.srcChangeStreamReader.lag.Load().MustGet(),
+		verifier.srcChangeStreamReader.GetLag().MustGet(),
 		10*time.Second,
 		"verifier lag is as expected",
 	)
