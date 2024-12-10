@@ -326,7 +326,12 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			Msgf("Failed to extract timestamp from %s's resume token to compute change stream lag.", csr)
 	}
 
-	csr.changeEventBatchChan <- changeEventBatch
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case csr.changeEventBatchChan <- changeEventBatch:
+	}
+
 	return nil
 }
 
