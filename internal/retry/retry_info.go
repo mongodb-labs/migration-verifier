@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"fmt"
 	"slices"
 	"time"
 
@@ -89,11 +90,11 @@ func (fi *FuncInfo) GetDurationSoFar() time.Duration {
 //
 // Call this after every successful command in a multi-command callback.
 // (It’s useless--but harmless--in a single-command callback.)
-func (i *FuncInfo) NoteSuccess(description string) {
+func (i *FuncInfo) NoteSuccess(description string, descArgs ...any) {
 	totalResets := i.lastReset.Load().resetsSoFar
 
 	i.lastReset.Store(lastResetInfo{
-		description: option.Some(description),
+		description: option.Some(fmt.Sprintf(description, descArgs...)),
 		time:        time.Now(),
 		resetsSoFar: 1 + totalResets,
 	})

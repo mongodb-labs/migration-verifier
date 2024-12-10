@@ -282,7 +282,11 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		}
 
 		if changeEventBatch == nil {
-			changeEventBatch = make([]ParsedEvent, cs.RemainingBatchLength()+1)
+			batchSize := cs.RemainingBatchLength() + 1
+
+			ri.NoteSuccess("received a batch of %d change event(s)", batchSize)
+
+			changeEventBatch = make([]ParsedEvent, batchSize)
 		}
 
 		if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
@@ -303,9 +307,9 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
-	ri.NoteSuccess("received a batch of change events")
-
 	if eventsRead == 0 {
+		ri.NoteSuccess("received an empty change stream response")
+
 		return nil
 	}
 
@@ -432,7 +436,9 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 		infoLog = infoLog.Interface("lastEventTime", *csr.lastChangeEventTime)
 	}
 
-	infoLog.Msg("Change stream is done.")
+	infoLog.
+		Stringer("reader", csr).
+		Msg("Change stream reader is done.")
 
 	return nil
 }
