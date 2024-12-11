@@ -304,6 +304,8 @@ func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, ve
 }
 
 func (suite *IntegrationTestSuite) TestChangeStreamLag() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
 	ctx := suite.Context()
 
 	db := suite.srcMongoClient.
@@ -327,11 +329,19 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 	_, err := db.Collection("mycoll").InsertOne(ctx, bson.D{})
 	suite.Require().NoError(err)
 
-	suite.Require().NoError(
-		verifierRunner.StartNextGeneration(),
-	)
-	suite.Require().NoError(
-		verifierRunner.AwaitGenerationEnd(),
+	suite.Require().Eventually(
+		func() bool {
+			suite.Require().NoError(
+				verifierRunner.StartNextGeneration(),
+			)
+			suite.Require().NoError(
+				verifierRunner.AwaitGenerationEnd(),
+			)
+
+			return verifier.srcChangeStreamReader.GetLag().IsSome()
+		},
+		time.Minute,
+		100*time.Millisecond,
 	)
 
 	suite.Assert().Less(
