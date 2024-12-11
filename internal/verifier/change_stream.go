@@ -318,7 +318,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	var curTs primitive.Timestamp
 	curTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
 	if err == nil {
-		lagSecs := int32(sess.OperationTime().T) - int32(curTs.T)
+		lagSecs := int64(sess.OperationTime().T) - int64(curTs.T)
 		csr.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
 	} else {
 		csr.logger.Warn().
