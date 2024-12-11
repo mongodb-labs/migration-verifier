@@ -319,10 +319,10 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			Msg("Updated lastChangeEventTime.")
 	}
 
-	var curTs primitive.Timestamp
-	curTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
+	var tokenTs primitive.Timestamp
+	tokenTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
 	if err == nil {
-		lagSecs := curTs.T - sess.OperationTime().T
+		lagSecs := int64(sess.OperationTime().T) - int64(tokenTs.T)
 		csr.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
 	} else {
 		csr.logger.Warn().
