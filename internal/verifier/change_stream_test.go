@@ -329,6 +329,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 	_, err := db.Collection("mycoll").InsertOne(ctx, bson.D{})
 	suite.Require().NoError(err)
 
+	// On sharded clusters sometimes the event hasn’t shown yet.
 	suite.Require().Eventually(
 		func() bool {
 			suite.Require().NoError(
