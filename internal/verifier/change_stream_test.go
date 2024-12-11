@@ -345,6 +345,8 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 		100*time.Millisecond,
 	)
 
+	// NB: The lag will include whatever time elapsed above before
+	// verifier read the event, so it can be several seconds.
 	suite.Assert().Less(
 		verifier.srcChangeStreamReader.GetLag().MustGet(),
 		10*time.Minute,
