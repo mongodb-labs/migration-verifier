@@ -1,6 +1,6 @@
 # Verify Migrations!
 
-_If verifying a migration done via [mongosync](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/), please check if it is possible to use the
+_If verifying a migration done via [mongosync](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/), please check if it is possible to use the 
 [embedded verifier](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/reference/verification/embedded/#std-label-c2c-embedded-verifier) as that is the preferred approach for verification._
 
 # To build
