@@ -59,7 +59,7 @@ jobs:
 
     steps:
       - name: Install OS packages
-        run: apt install -y libssl-dev # for libcrypto, which pre-v6 binaries need
+        run: sudo apt install -y libssl-dev # for libcrypto, which pre-v6 binaries need
 
       - name: Check out repository
         uses: actions/checkout@v4
