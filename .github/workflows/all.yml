@@ -58,6 +58,9 @@ jobs:
     name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}
 
     steps:
+      - name: Install deps
+        run: sudo apt install -y libssl-dev
+
       - name: Check out repository
         uses: actions/checkout@v4
 
