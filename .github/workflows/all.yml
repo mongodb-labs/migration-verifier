@@ -52,14 +52,16 @@ jobs:
             srcConnStr: mongodb://localhost:27020
             dstConnStr: mongodb://localhost:27030
 
-    # There seems no good reason to test on other OSes … ?
-    runs-on: ubuntu-latest
+    # Ubuntu 24 lacks OpenSSL 1.1.1’s libcrypto, which pre-v6 MongoDB
+    # versions need.
+    runs-on: ubuntu-22.04
 
     name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}
 
     steps:
-      - name: Install deps
-        run: sudo apt install -y libssl-dev
+      - run: uname -a
+      - run: ldconfig -p
+      - run: lsb_release -a
 
       - name: Check out repository
         uses: actions/checkout@v4
