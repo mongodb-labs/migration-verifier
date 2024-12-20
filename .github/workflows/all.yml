@@ -62,9 +62,9 @@ jobs:
       - run: ldconfig -p
       - run: lsb_release -a
 
-      # Servers 4.4 and 5.0 need libcrypto.so.1.1, which predates Ubuntu 24’s
-      # default libcrypto.
-      - run: sudo apt update && sudo apt install -y libssl1.1
+      # Ubuntu 24 doesn’t provide this library anymore.
+      - if: ${{ matrix.mongodb_versions[0] > 6.0 || matrix.mongodb_versions[1] > 6.0 }}
+        run: curl -O https://security.ubuntu.com/ubuntu/pool/main/o/openssl/libcrypto1.1-udeb_1.1.1f-1ubuntu2.23_amd64.udeb && sudo dpkg -i libcrypto1.1-udeb_1.1.1f-1ubuntu2.23_amd64.udeb
 
       - name: Check out repository
         uses: actions/checkout@v4
