@@ -2,6 +2,9 @@
 
 _This Repository is NOT an officially supported MongoDB product. This tool reduces the risk of undetected data inconsistencies from migrations, but it doesn’t provide guarantees of correctness._
 
+If verifying a migration done via [mongosync](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/), please try its
+[embedded verifier](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/reference/verification/embedded/#std-label-c2c-embedded-verifier) instead. That is the best way to verify a migration.
+
 # To build
 
 
