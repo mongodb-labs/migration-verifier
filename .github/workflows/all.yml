@@ -58,6 +58,8 @@ jobs:
     name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}
 
     steps:
+      - run: uname -a
+
       - name: Check out repository
         uses: actions/checkout@v4
 
