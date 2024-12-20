@@ -59,6 +59,7 @@ jobs:
 
     steps:
       - run: uname -a
+      - run: ldconfig -p
 
       - name: Check out repository
         uses: actions/checkout@v4
