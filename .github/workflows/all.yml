@@ -60,6 +60,7 @@ jobs:
     steps:
       - run: uname -a
       - run: ldconfig -p
+      - run: lsb_release -a
 
       - name: Check out repository
         uses: actions/checkout@v4
