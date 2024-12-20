@@ -52,11 +52,14 @@ jobs:
             srcConnStr: mongodb://localhost:27020
             dstConnStr: mongodb://localhost:27030
 
-    runs-on: ${{ (matrix.mongodb_versions[0] > 6.0 || matrix.mongodb_versions[1] > 6.0) && 'ubuntu-22.04' || 'ubuntu-latest' }}
+    runs-on: ${{ (matrix.mongodb_versions[0] >= 6.0 || matrix.mongodb_versions[1] >= 6.0) && 'ubuntu-22.04' || 'ubuntu-latest' }}
 
     name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}
 
     steps:
+      - run: echo src at least 6 ${{ matrix.mongodb_versions[0] >= 6 }}
+      - run: echo dst at least 6 ${{ matrix.mongodb_versions[1] >= 6 }}
+
       - run: uname -a
       - run: ldconfig -p
       - run: lsb_release -a
