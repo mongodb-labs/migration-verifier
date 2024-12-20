@@ -52,8 +52,7 @@ jobs:
             srcConnStr: mongodb://localhost:27020
             dstConnStr: mongodb://localhost:27030
 
-    # There seems no good reason to test on other OSes … ?
-    runs-on: ubuntu-latest
+    runs-on: ${{ (matrix.mongodb_versions[0] > 6.0 || matrix.mongodb_versions[1] > 6.0) && 'ubuntu-22.04' || 'ubuntu-latest' }}
 
     name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}
 
@@ -61,10 +60,6 @@ jobs:
       - run: uname -a
       - run: ldconfig -p
       - run: lsb_release -a
-
-      # Ubuntu 24 doesn’t provide this library anymore.
-      - if: ${{ matrix.mongodb_versions[0] > 6.0 || matrix.mongodb_versions[1] > 6.0 }}
-        run: curl -O https://security.ubuntu.com/ubuntu/pool/main/o/openssl/libcrypto1.1-udeb_1.1.1f-1ubuntu2.23_amd64.udeb && sudo dpkg -i libcrypto1.1-udeb_1.1.1f-1ubuntu2.23_amd64.udeb
 
       - name: Check out repository
         uses: actions/checkout@v4
