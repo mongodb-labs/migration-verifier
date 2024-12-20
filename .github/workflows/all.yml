@@ -52,6 +52,8 @@ jobs:
             srcConnStr: mongodb://localhost:27020
             dstConnStr: mongodb://localhost:27030
 
+    # Ubuntu 24 lacks OpenSSL 1.1.1’s libcrypto, which pre-v6 MongoDB
+    # versions need.
     runs-on: ubuntu-22.04
 
     name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}
