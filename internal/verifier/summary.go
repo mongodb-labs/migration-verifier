@@ -370,7 +370,7 @@ func (verifier *Verifier) printMismatchInvestigationNotes(strBuilder *strings.Bu
 
 	lines := []string{
 		"",
-		fmt.Sprintf("To investigate mismatches, connect to %s, then run:", verifier.metaURI),
+		"To investigate mismatches, connect to the metadata cluster, then run:",
 		fmt.Sprintf("\tuse %s", verifier.metaDBName),
 		fmt.Sprintf("\tdb.%s.find({generation: %d, status: 'failed'})", verificationTasksCollection, gen),
 	}
