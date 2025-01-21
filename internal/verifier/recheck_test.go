@@ -87,6 +87,32 @@ func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifie
 	return results
 }
 
+func (suite *IntegrationTestSuite) TestRecheckResumability() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	suite.Require().EqualValues(2, verifier.generation)
+
+	verifier2 := suite.BuildVerifier()
+	verifier2.SetVerifyAll(true)
+
+	runner2 := RunVerifierCheck(ctx, suite.T(), verifier2)
+	suite.Require().NoError(runner2.AwaitGenerationEnd())
+
+	suite.Require().EqualValues(2, verifier2.generation)
+}
+
 func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()

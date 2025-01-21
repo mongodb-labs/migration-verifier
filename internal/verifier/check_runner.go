@@ -13,6 +13,10 @@ type CheckRunner struct {
 	doNextGenerationChan chan struct{}
 }
 
+// RunVerifierCheck starts a Check and returns a CheckRunner to track this
+// Verifier.
+//
+// The next method to call is AwaitGenerationEnd.
 func RunVerifierCheck(ctx context.Context, t *testing.T, verifier *Verifier) *CheckRunner {
 	verifierDoneChan := make(chan error)
 
