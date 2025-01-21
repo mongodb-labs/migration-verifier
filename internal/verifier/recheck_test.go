@@ -146,10 +146,10 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 		suite.Require().NoError(runner.AwaitGenerationEnd())
 	}
 
-	_, err := srcColl.InsertOne(ctx, bson.D{{"foo", "on src"}})
+	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", "on src"}})
 	suite.Require().NoError(err)
 
-	_, err = dstColl.InsertOne(ctx, bson.D{{"foo", "on dst"}})
+	_, err = dstColl.InsertOne(ctx, bson.D{{"_id", "on dst"}})
 	suite.Require().NoError(err)
 
 	suite.T().Logf("Running verifier until it shows mismatch (generation=%d) ...", verifier.generation)
