@@ -6,6 +6,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/mslices"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -110,7 +111,82 @@ func (suite *IntegrationTestSuite) TestRecheckResumability() {
 	runner2 := RunVerifierCheck(ctx, suite.T(), verifier2)
 	suite.Require().NoError(runner2.AwaitGenerationEnd())
 
-	suite.Require().EqualValues(2, verifier2.generation)
+	suite.Require().EqualValues(verifier.generation, verifier2.generation)
+}
+
+func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
+	ctx := suite.Context()
+
+	srcColl := suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection("stuff")
+
+	ns := srcColl.Database().Name() + "." + srcColl.Name()
+
+	dstColl := suite.dstMongoClient.
+		Database(srcColl.Database().Name()).
+		Collection(srcColl.Name())
+
+	for _, coll := range mslices.Of(srcColl, dstColl) {
+		suite.Require().NoError(
+			coll.Database().CreateCollection(ctx, coll.Name()),
+		)
+	}
+
+	verifier := suite.BuildVerifier()
+	verifier.SetSrcNamespaces(mslices.Of(ns))
+	verifier.SetDstNamespaces(mslices.Of(ns))
+	verifier.SetNamespaceMap()
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	for range 10 {
+		suite.Require().NoError(runner.StartNextGeneration())
+		suite.Require().NoError(runner.AwaitGenerationEnd())
+	}
+
+	_, err := srcColl.InsertOne(ctx, bson.D{{"foo", "on src"}})
+	suite.Require().NoError(err)
+
+	_, err = dstColl.InsertOne(ctx, bson.D{{"foo", "on dst"}})
+	suite.Require().NoError(err)
+
+	suite.T().Logf("Running verifier until it shows mismatch (generation=%d) ...", verifier.generation)
+	for {
+		verificationStatus, err := verifier.GetVerificationStatus(ctx)
+		suite.Require().NoError(err)
+
+		if verificationStatus.FailedTasks != 0 {
+			break
+		}
+
+		suite.Require().NoError(runner.StartNextGeneration())
+		suite.Require().NoError(runner.AwaitGenerationEnd())
+	}
+
+	suite.T().Logf("Starting a 2nd verifier and confirming that it sees the mismatches.")
+
+	verifier2 := suite.BuildVerifier()
+	verifier2.SetSrcNamespaces(mslices.Of(ns))
+	verifier2.SetDstNamespaces(mslices.Of(ns))
+	verifier2.SetNamespaceMap()
+
+	runner2 := RunVerifierCheck(ctx, suite.T(), verifier2)
+	suite.Require().NoError(runner2.AwaitGenerationEnd())
+
+	suite.Require().EqualValues(verifier.generation, verifier2.generation)
+	verificationStatus, err := verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+
+	suite.Require().EqualValues(
+		1,
+		verificationStatus.FailedTasks,
+		"restarted verifier should immediately see mismatches",
+	)
+
+	recheckDocs := suite.fetchVerifierRechecks(ctx, verifier2)
+	suite.Require().Len(recheckDocs, 2, "expect # of rechecks")
 }
 
 func (suite *IntegrationTestSuite) TestLargeIDInsertions() {

@@ -182,8 +182,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	}
 	verifier.running = true
 	verifier.globalFilter = filter
-	verifier.initializeChangeStreamReaders()
-	verifier.mux.Unlock()
+
 	defer func() {
 		verifier.mux.Lock()
 		verifier.running = false
@@ -211,6 +210,12 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			verifier.logger.Info().Msg("Starting new verification.")
 		}
 	}
+
+	// Now that we’ve initialized verifier.generation we can
+	// start the change stream readers.
+	verifier.initializeChangeStreamReaders()
+	verifier.mux.Unlock()
+
 	err = retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			err = verifier.AddMetaIndexes(ctx)
