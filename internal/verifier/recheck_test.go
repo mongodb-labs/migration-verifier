@@ -157,7 +157,9 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 		verificationStatus, err := verifier.GetVerificationStatus(ctx)
 		suite.Require().NoError(err)
 
-		if verificationStatus.FailedTasks != 0 {
+		recheckDocs := suite.fetchVerifierRechecks(ctx, verifier)
+
+		if verificationStatus.FailedTasks != 0 && len(recheckDocs) == 2 {
 			break
 		}
 
