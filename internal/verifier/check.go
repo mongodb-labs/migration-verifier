@@ -193,11 +193,13 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		verifier.logger.Info().Msg("Dropping old verifier metadata")
 		err = verifier.verificationDatabase().Drop(ctx)
 		if err != nil {
+			verifier.mux.Unlock()
 			return err
 		}
 	} else {
 		genOpt, err := verifier.readGeneration(ctx)
 		if err != nil {
+			verifier.mux.Unlock()
 			return err
 		}
 
