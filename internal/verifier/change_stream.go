@@ -78,7 +78,8 @@ type ChangeStreamReader struct {
 	changeStreamRunning  bool
 	changeEventBatchChan chan []ParsedEvent
 	writesOffTs          *util.Eventual[primitive.Timestamp]
-	error                *util.Eventual[error]
+	readerError          *util.Eventual[error]
+	handlerError         *util.Eventual[error]
 	doneChan             chan struct{}
 
 	startAtTs *primitive.Timestamp
@@ -97,7 +98,8 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		changeStreamRunning:  false,
 		changeEventBatchChan: make(chan []ParsedEvent),
 		writesOffTs:          util.NewEventual[primitive.Timestamp](),
-		error:                util.NewEventual[error](),
+		readerError:          util.NewEventual[error](),
+		handlerError:         util.NewEventual[error](),
 		doneChan:             make(chan struct{}),
 		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
 	}
@@ -111,7 +113,8 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		changeStreamRunning:  false,
 		changeEventBatchChan: make(chan []ParsedEvent),
 		writesOffTs:          util.NewEventual[primitive.Timestamp](),
-		error:                util.NewEventual[error](),
+		readerError:          util.NewEventual[error](),
+		handlerError:         util.NewEventual[error](),
 		doneChan:             make(chan struct{}),
 		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
 	}
@@ -120,22 +123,33 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 // StartChangeEventHandler starts a goroutine that handles change event batches from the reader.
 // It needs to be started after the reader starts.
 func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *ChangeStreamReader) error {
-	for {
+	var err error
+
+HandlerLoop:
+	for err == nil {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			err = util.WrapCtxErrWithCause(ctx)
 		case batch, more := <-reader.changeEventBatchChan:
 			if !more {
 				verifier.logger.Debug().Msgf("Change Event Batch Channel has been closed by %s, returning...", reader)
-				return nil
+				break HandlerLoop
 			}
 			verifier.logger.Trace().Msgf("Verifier is handling a change event batch from %s: %v", reader, batch)
-			err := verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType)
-			if err != nil {
-				return err
-			}
+			err = errors.Wrap(
+				verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType),
+				"failed to handle change stream events",
+			)
 		}
 	}
+
+	// This will prevent the reader from hanging because the reader checks
+	// this along with checks for context expiry.
+	if err != nil {
+		reader.handlerError.Set(err)
+	}
+
+	return err
 }
 
 // HandleChangeStreamEvents performs the necessary work for change stream events after receiving a batch.
@@ -342,11 +356,20 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return util.WrapCtxErrWithCause(ctx)
+	case <-csr.handlerError.Ready():
+		return csr.wrapHandlerErrorForReader()
 	case csr.changeEventBatchChan <- changeEventBatch:
 	}
 
 	return nil
+}
+
+func (csr *ChangeStreamReader) wrapHandlerErrorForReader() error {
+	return errors.Wrap(
+		csr.handlerError.Get(),
+		"event handler failed, so no more events can be processed",
+	)
 }
 
 func (csr *ChangeStreamReader) iterateChangeStream(
@@ -378,7 +401,10 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 		// If the context is canceled, return immmediately.
 		case <-ctx.Done():
-			return ctx.Err()
+			return util.WrapCtxErrWithCause(ctx)
+
+		case <-csr.handlerError.Ready():
+			return csr.wrapHandlerErrorForReader()
 
 		// If the ChangeStreamEnderChan has a message, the user has indicated that
 		// source writes are ended and the migration tool is finished / committed.
@@ -581,7 +607,7 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 		).Run(ctx, csr.logger)
 
 		if err != nil {
-			csr.error.Set(err)
+			csr.readerError.Set(err)
 		}
 	}()
 
