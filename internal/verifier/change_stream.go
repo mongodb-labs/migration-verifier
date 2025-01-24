@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/mo"
@@ -21,6 +22,13 @@ import (
 )
 
 const fauxDocSizeForDeleteEvents = 1024
+
+var supportedEventOpTypes = mapset.NewSet(
+	"insert",
+	"update",
+	"replace",
+	"delete",
+)
 
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
 type ParsedEvent struct {
@@ -70,7 +78,8 @@ type ChangeStreamReader struct {
 	changeStreamRunning  bool
 	changeEventBatchChan chan []ParsedEvent
 	writesOffTs          *util.Eventual[primitive.Timestamp]
-	error                *util.Eventual[error]
+	readerError          *util.Eventual[error]
+	handlerError         *util.Eventual[error]
 	doneChan             chan struct{}
 
 	startAtTs *primitive.Timestamp
@@ -89,7 +98,8 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		changeStreamRunning:  false,
 		changeEventBatchChan: make(chan []ParsedEvent),
 		writesOffTs:          util.NewEventual[primitive.Timestamp](),
-		error:                util.NewEventual[error](),
+		readerError:          util.NewEventual[error](),
+		handlerError:         util.NewEventual[error](),
 		doneChan:             make(chan struct{}),
 		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
 	}
@@ -103,31 +113,58 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		changeStreamRunning:  false,
 		changeEventBatchChan: make(chan []ParsedEvent),
 		writesOffTs:          util.NewEventual[primitive.Timestamp](),
-		error:                util.NewEventual[error](),
+		readerError:          util.NewEventual[error](),
+		handlerError:         util.NewEventual[error](),
 		doneChan:             make(chan struct{}),
 		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
 	}
 }
 
-// StartChangeEventHandler starts a goroutine that handles change event batches from the reader.
-// It needs to be started after the reader starts.
-func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *ChangeStreamReader) error {
-	for {
+// RunChangeEventHandler handles change event batches from the reader.
+// It needs to be started after the reader starts and should run in its own
+// goroutine.
+func (verifier *Verifier) RunChangeEventHandler(ctx context.Context, reader *ChangeStreamReader) error {
+	var err error
+
+HandlerLoop:
+	for err == nil {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			err = util.WrapCtxErrWithCause(ctx)
+
+			verifier.logger.Debug().
+				Err(err).
+				Stringer("changeStreamReader", reader).
+				Msg("Change event handler failed.")
 		case batch, more := <-reader.changeEventBatchChan:
 			if !more {
-				verifier.logger.Debug().Msgf("Change Event Batch Channel has been closed by %s, returning...", reader)
-				return nil
+				verifier.logger.Debug().
+					Stringer("changeStreamReader", reader).
+					Msg("Change event batch channel has been closed.")
+
+				break HandlerLoop
 			}
-			verifier.logger.Trace().Msgf("Verifier is handling a change event batch from %s: %v", reader, batch)
-			err := verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType)
-			if err != nil {
-				return err
-			}
+
+			verifier.logger.Trace().
+				Stringer("changeStreamReader", reader).
+				Int("batchSize", len(batch)).
+				Interface("batch", batch).
+				Msg("Handling change event batch.")
+
+			err = errors.Wrap(
+				verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType),
+				"failed to handle change stream events",
+			)
 		}
 	}
+
+	// This will prevent the reader from hanging because the reader checks
+	// this along with checks for context expiry.
+	if err != nil {
+		reader.handlerError.Set(err)
+	}
+
+	return err
 }
 
 // HandleChangeStreamEvents performs the necessary work for change stream events after receiving a batch.
@@ -142,57 +179,50 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 	dataSizes := make([]int, len(batch))
 
 	for i, changeEvent := range batch {
-		switch changeEvent.OpType {
-		case "delete":
-			fallthrough
-		case "insert":
-			fallthrough
-		case "replace":
-			fallthrough
-		case "update":
-			if err := verifier.eventRecorder.AddEvent(&changeEvent); err != nil {
-				return errors.Wrapf(err, "failed to augment stats with change event (%+v)", changeEvent)
-			}
+		if !supportedEventOpTypes.Contains(changeEvent.OpType) {
+			panic(fmt.Sprintf("Unsupported optype in event; should have failed already! event=%+v", changeEvent))
+		}
 
-			var srcDBName, srcCollName string
+		if err := verifier.eventRecorder.AddEvent(&changeEvent); err != nil {
+			return errors.Wrapf(err, "failed to augment stats with change event (%+v)", changeEvent)
+		}
 
-			// Recheck Docs are keyed by source namespaces.
-			// We need to retrieve the source namespaces if change events are from the destination.
-			switch eventOrigin {
-			case dst:
-				if verifier.nsMap.Len() == 0 {
-					// Namespace is not remapped. Source namespace is the same as the destination.
-					srcDBName = changeEvent.Ns.DB
-					srcCollName = changeEvent.Ns.Coll
-				} else {
-					dstNs := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
-					srcNs, exist := verifier.nsMap.GetSrcNamespace(dstNs)
-					if !exist {
-						return errors.Errorf("no source namespace corresponding to the destination namepsace %s", dstNs)
-					}
-					srcDBName, srcCollName = SplitNamespace(srcNs)
-				}
-			case src:
+		var srcDBName, srcCollName string
+
+		// Recheck Docs are keyed by source namespaces.
+		// We need to retrieve the source namespaces if change events are from the destination.
+		switch eventOrigin {
+		case dst:
+			if verifier.nsMap.Len() == 0 {
+				// Namespace is not remapped. Source namespace is the same as the destination.
 				srcDBName = changeEvent.Ns.DB
 				srcCollName = changeEvent.Ns.Coll
-			default:
-				return errors.Errorf("unknown event origin: %s", eventOrigin)
-			}
-
-			dbNames[i] = srcDBName
-			collNames[i] = srcCollName
-			docIDs[i] = changeEvent.DocKey.ID
-
-			if changeEvent.FullDocument == nil {
-				// This happens for deletes and for some updates.
-				// The document is probably, but not necessarily, deleted.
-				dataSizes[i] = fauxDocSizeForDeleteEvents
 			} else {
-				// This happens for inserts, replaces, and most updates.
-				dataSizes[i] = len(changeEvent.FullDocument)
+				dstNs := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
+				srcNs, exist := verifier.nsMap.GetSrcNamespace(dstNs)
+				if !exist {
+					return errors.Errorf("no source namespace corresponding to the destination namepsace %s", dstNs)
+				}
+				srcDBName, srcCollName = SplitNamespace(srcNs)
 			}
+		case src:
+			srcDBName = changeEvent.Ns.DB
+			srcCollName = changeEvent.Ns.Coll
 		default:
-			return UnknownEventError{Event: &changeEvent}
+			panic(fmt.Sprintf("unknown event origin: %s", eventOrigin))
+		}
+
+		dbNames[i] = srcDBName
+		collNames[i] = srcCollName
+		docIDs[i] = changeEvent.DocKey.ID
+
+		if changeEvent.FullDocument == nil {
+			// This happens for deletes and for some updates.
+			// The document is probably, but not necessarily, deleted.
+			dataSizes[i] = fauxDocSizeForDeleteEvents
+		} else {
+			// This happens for inserts, replaces, and most updates.
+			dataSizes[i] = len(changeEvent.FullDocument)
 		}
 	}
 
@@ -294,7 +324,21 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		}
 
 		// This only logs in tests.
-		csr.logger.Trace().Interface("event", changeEventBatch[eventsRead]).Msgf("%s received a change event", csr)
+		csr.logger.Trace().
+			Stringer("changeStream", csr).
+			Interface("event", changeEventBatch[eventsRead]).
+			Int("eventsPreviouslyReadInBatch", eventsRead).
+			Int("batchSize", len(changeEventBatch)).
+			Msg("Received a change event.")
+
+		if !supportedEventOpTypes.Contains(changeEventBatch[eventsRead].OpType) {
+			return UnknownEventError{Event: &changeEventBatch[eventsRead]}
+		}
+
+		// This shouldn’t happen, but just in case:
+		if changeEventBatch[eventsRead].Ns == nil {
+			return errors.Errorf("Change event lacks a namespace: %+v", changeEventBatch[eventsRead])
+		}
 
 		if changeEventBatch[eventsRead].ClusterTime != nil &&
 			(csr.lastChangeEventTime == nil ||
@@ -315,9 +359,12 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	if event, has := latestEvent.Get(); has {
 		csr.logger.Trace().
+			Stringer("changeStreamReader", csr).
 			Interface("event", event).
 			Msg("Updated lastChangeEventTime.")
 	}
+
+	ri.NoteSuccess("parsed %d-event batch", len(changeEventBatch))
 
 	var tokenTs primitive.Timestamp
 	tokenTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
@@ -332,11 +379,22 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return util.WrapCtxErrWithCause(ctx)
+	case <-csr.handlerError.Ready():
+		return csr.wrapHandlerErrorForReader()
 	case csr.changeEventBatchChan <- changeEventBatch:
 	}
 
+	ri.NoteSuccess("sent %d-event batch to handler", len(changeEventBatch))
+
 	return nil
+}
+
+func (csr *ChangeStreamReader) wrapHandlerErrorForReader() error {
+	return errors.Wrap(
+		csr.handlerError.Get(),
+		"event handler failed, so no more events can be processed",
+	)
 }
 
 func (csr *ChangeStreamReader) iterateChangeStream(
@@ -368,7 +426,17 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 		// If the context is canceled, return immmediately.
 		case <-ctx.Done():
-			return ctx.Err()
+			err := util.WrapCtxErrWithCause(ctx)
+
+			csr.logger.Debug().
+				Err(err).
+				Stringer("changeStreamReader", csr).
+				Msg("Stopping iteration.")
+
+			return err
+
+		case <-csr.handlerError.Ready():
+			return csr.wrapHandlerErrorForReader()
 
 		// If the ChangeStreamEnderChan has a message, the user has indicated that
 		// source writes are ended and the migration tool is finished / committed.
@@ -539,7 +607,13 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 	go func() {
 		// Closing changeEventBatchChan at the end of change stream goroutine
 		// notifies the verifier's change event handler to exit.
-		defer close(csr.changeEventBatchChan)
+		defer func() {
+			csr.logger.Debug().
+				Stringer("changeStreamReader", csr).
+				Msg("Closing change event batch channel.")
+
+			close(csr.changeEventBatchChan)
+		}()
 
 		retryer := retry.New().WithErrorCodes(util.CursorKilled)
 
@@ -549,20 +623,36 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 			func(ctx context.Context, ri *retry.FuncInfo) error {
 				changeStream, sess, startTs, err := csr.createChangeStream(ctx)
 				if err != nil {
+					logEvent := csr.logger.Debug().
+						Err(err).
+						Stringer("changeStreamReader", csr)
+
 					if parentThreadWaiting {
+						logEvent.Msg("First change stream open failed.")
+
 						initialCreateResultChan <- mo.Err[primitive.Timestamp](err)
 						return nil
 					}
+
+					logEvent.Msg("Retried change stream open failed.")
 
 					return err
 				}
 
 				defer changeStream.Close(ctx)
 
+				logEvent := csr.logger.Debug().
+					Stringer("changeStreamReader", csr).
+					Interface("startTimestamp", startTs)
+
 				if parentThreadWaiting {
+					logEvent.Msg("First change stream open succeeded.")
+
 					initialCreateResultChan <- mo.Ok(startTs)
 					close(initialCreateResultChan)
 					parentThreadWaiting = false
+				} else {
+					logEvent.Msg("Retried change stream open succeeded.")
 				}
 
 				return csr.iterateChangeStream(ctx, ri, changeStream, sess)
@@ -571,7 +661,7 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 		).Run(ctx, csr.logger)
 
 		if err != nil {
-			csr.error.Set(err)
+			csr.readerError.Set(err)
 		}
 	}()
 
