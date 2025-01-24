@@ -120,9 +120,10 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 	}
 }
 
-// StartChangeEventHandler starts a goroutine that handles change event batches from the reader.
-// It needs to be started after the reader starts.
-func (verifier *Verifier) StartChangeEventHandler(ctx context.Context, reader *ChangeStreamReader) error {
+// RunChangeEventHandler handles change event batches from the reader.
+// It needs to be started after the reader starts and should run in its own
+// goroutine.
+func (verifier *Verifier) RunChangeEventHandler(ctx context.Context, reader *ChangeStreamReader) error {
 	var err error
 
 HandlerLoop:
@@ -130,12 +131,26 @@ HandlerLoop:
 		select {
 		case <-ctx.Done():
 			err = util.WrapCtxErrWithCause(ctx)
+
+			verifier.logger.Debug().
+				Err(err).
+				Stringer("changeStreamReader", reader).
+				Msg("Change event handler failed.")
 		case batch, more := <-reader.changeEventBatchChan:
 			if !more {
-				verifier.logger.Debug().Msgf("Change Event Batch Channel has been closed by %s, returning...", reader)
+				verifier.logger.Debug().
+					Stringer("changeStreamReader", reader).
+					Msg("Change event batch channel has been closed.")
+
 				break HandlerLoop
 			}
-			verifier.logger.Trace().Msgf("Verifier is handling a change event batch from %s: %v", reader, batch)
+
+			verifier.logger.Trace().
+				Stringer("changeStreamReader", reader).
+				Int("batchSize", len(batch)).
+				Interface("batch", batch).
+				Msg("Handling change event batch.")
+
 			err = errors.Wrap(
 				verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType),
 				"failed to handle change stream events",
@@ -309,7 +324,12 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		}
 
 		// This only logs in tests.
-		csr.logger.Trace().Interface("event", changeEventBatch[eventsRead]).Msgf("%s received a change event", csr)
+		csr.logger.Trace().
+			Stringer("changeStream", csr).
+			Interface("event", changeEventBatch[eventsRead]).
+			Int("eventsPreviouslyReadInBatch", eventsRead).
+			Int("batchSize", len(changeEventBatch)).
+			Msg("Received a change event.")
 
 		if !supportedEventOpTypes.Contains(changeEventBatch[eventsRead].OpType) {
 			return UnknownEventError{Event: &changeEventBatch[eventsRead]}
@@ -339,9 +359,12 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	if event, has := latestEvent.Get(); has {
 		csr.logger.Trace().
+			Stringer("changeStreamReader", csr).
 			Interface("event", event).
 			Msg("Updated lastChangeEventTime.")
 	}
+
+	ri.NoteSuccess("parsed %d-event batch", len(changeEventBatch))
 
 	var tokenTs primitive.Timestamp
 	tokenTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
@@ -361,6 +384,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		return csr.wrapHandlerErrorForReader()
 	case csr.changeEventBatchChan <- changeEventBatch:
 	}
+
+	ri.NoteSuccess("sent %d-event batch to handler", len(changeEventBatch))
 
 	return nil
 }
@@ -401,7 +426,14 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 		// If the context is canceled, return immmediately.
 		case <-ctx.Done():
-			return util.WrapCtxErrWithCause(ctx)
+			err := util.WrapCtxErrWithCause(ctx)
+
+			csr.logger.Debug().
+				Err(err).
+				Stringer("changeStreamReader", csr).
+				Msg("Stopping iteration.")
+
+			return err
 
 		case <-csr.handlerError.Ready():
 			return csr.wrapHandlerErrorForReader()
@@ -575,7 +607,13 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 	go func() {
 		// Closing changeEventBatchChan at the end of change stream goroutine
 		// notifies the verifier's change event handler to exit.
-		defer close(csr.changeEventBatchChan)
+		defer func() {
+			csr.logger.Debug().
+				Stringer("changeStreamReader", csr).
+				Msg("Closing change event batch channel.")
+
+			close(csr.changeEventBatchChan)
+		}()
 
 		retryer := retry.New().WithErrorCodes(util.CursorKilled)
 
@@ -585,20 +623,36 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 			func(ctx context.Context, ri *retry.FuncInfo) error {
 				changeStream, sess, startTs, err := csr.createChangeStream(ctx)
 				if err != nil {
+					logEvent := csr.logger.Debug().
+						Err(err).
+						Stringer("changeStreamReader", csr)
+
 					if parentThreadWaiting {
+						logEvent.Msg("First change stream open failed.")
+
 						initialCreateResultChan <- mo.Err[primitive.Timestamp](err)
 						return nil
 					}
+
+					logEvent.Msg("Retried change stream open failed.")
 
 					return err
 				}
 
 				defer changeStream.Close(ctx)
 
+				logEvent := csr.logger.Debug().
+					Stringer("changeStreamReader", csr).
+					Interface("startTimestamp", startTs)
+
 				if parentThreadWaiting {
+					logEvent.Msg("First change stream open succeeded.")
+
 					initialCreateResultChan <- mo.Ok(startTs)
 					close(initialCreateResultChan)
 					parentThreadWaiting = false
+				} else {
+					logEvent.Msg("Retried change stream open succeeded.")
 				}
 
 				return csr.iterateChangeStream(ctx, ri, changeStream, sess)

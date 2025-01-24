@@ -7,6 +7,8 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mslices"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
@@ -48,7 +50,7 @@ func (verifier *Verifier) Check(ctx context.Context, filter map[string]any) {
 func (verifier *Verifier) waitForChangeStream(ctx context.Context, csr *ChangeStreamReader) error {
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return util.WrapCtxErrWithCause(ctx)
 	case <-csr.readerError.Ready():
 		err := csr.readerError.Get()
 		verifier.logger.Warn().Err(err).
@@ -113,7 +115,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	waitForTaskCreation := 0
 
-	succeeded := false
+	finishedAllTasks := false
 
 	eg.Go(func() error {
 		for {
@@ -143,8 +145,8 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 				time.Sleep(verifier.verificationStatusCheckInterval)
 			} else {
 				verifier.PrintVerificationSummary(ctx, GenerationComplete)
-				succeeded = true
-				canceler(errors.Errorf("generation %d succeeded", generation))
+				finishedAllTasks = true
+				canceler(errors.Errorf("generation %d finished", generation))
 				return nil
 			}
 		}
@@ -152,11 +154,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	err := eg.Wait()
 
-	if succeeded {
-		if !errors.Is(err, context.Canceled) {
-			panic("success should mean that err is context.Canceled, not: " + err.Error())
-		}
-
+	if finishedAllTasks && errors.Is(err, context.Canceled) {
 		err = nil
 	}
 
@@ -263,7 +261,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 				return errors.Wrapf(err, "failed to start %s", csReader)
 			}
 			ceHandlerGroup.Go(func() error {
-				return verifier.StartChangeEventHandler(groupCtx, csReader)
+				return verifier.RunChangeEventHandler(groupCtx, csReader)
 			})
 		}
 	}
@@ -348,12 +346,21 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			// It's necessary to wait for the change stream to finish before incrementing the
 			// generation number, or the last changes will not be checked.
 			verifier.mux.Unlock()
-			if err = verifier.waitForChangeStream(ctx, verifier.srcChangeStreamReader); err != nil {
-				return err
+
+			for _, csr := range mslices.Of(verifier.srcChangeStreamReader, verifier.dstChangeStreamReader) {
+				if err = verifier.waitForChangeStream(ctx, csr); err != nil {
+					return errors.Wrapf(
+						err,
+						"an error interrupted the wait for closure of %s",
+						csr,
+					)
+				}
+
+				verifier.logger.Debug().
+					Stringer("changeStreamReader", csr).
+					Msg("Change stream reader finished.")
 			}
-			if err = verifier.waitForChangeStream(ctx, verifier.dstChangeStreamReader); err != nil {
-				return err
-			}
+
 			if err = ceHandlerGroup.Wait(); err != nil {
 				return err
 			}

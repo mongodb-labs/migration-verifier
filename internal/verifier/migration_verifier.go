@@ -245,37 +245,47 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	verifier.logger.Debug().
 		Msg("WritesOff called.")
 
-	verifier.mux.Lock()
-	if verifier.writesOff {
-		verifier.mux.Unlock()
-		return errors.New("writesOff already set")
-	}
-	verifier.writesOff = true
+	var srcFinalTs, dstFinalTs primitive.Timestamp
+	var err error
 
-	verifier.logger.Debug().Msg("Signalling that writes are done.")
+	// The anonymous function here makes it easier to ensure
+	// that we unlock the mutex.
+	err = func() error {
+		verifier.mux.Lock()
+		defer verifier.mux.Unlock()
 
-	srcFinalTs, err := GetNewClusterTime(
-		ctx,
-		verifier.logger,
-		verifier.srcClient,
-	)
+		if verifier.writesOff {
+			return errors.New("writesOff already set")
+		}
+		verifier.writesOff = true
 
+		verifier.logger.Debug().Msg("Signalling that writes are done.")
+
+		srcFinalTs, err = GetNewClusterTime(
+			ctx,
+			verifier.logger,
+			verifier.srcClient,
+		)
+
+		if err != nil {
+			return errors.Wrapf(err, "failed to fetch source's cluster time")
+		}
+
+		dstFinalTs, err = GetNewClusterTime(
+			ctx,
+			verifier.logger,
+			verifier.dstClient,
+		)
+
+		if err != nil {
+			return errors.Wrapf(err, "failed to fetch destination's cluster time")
+		}
+
+		return nil
+	}()
 	if err != nil {
-		verifier.mux.Unlock()
-		return errors.Wrapf(err, "failed to fetch source's cluster time")
+		return err
 	}
-
-	dstFinalTs, err := GetNewClusterTime(
-		ctx,
-		verifier.logger,
-		verifier.dstClient,
-	)
-
-	if err != nil {
-		verifier.mux.Unlock()
-		return errors.Wrapf(err, "failed to fetch destination's cluster time")
-	}
-	verifier.mux.Unlock()
 
 	// This has to happen outside the lock because the change streams
 	// might be inserting docs into the recheck queue, which happens
