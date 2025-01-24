@@ -182,8 +182,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 	}
 	verifier.running = true
 	verifier.globalFilter = filter
-	verifier.initializeChangeStreamReaders()
-	verifier.mux.Unlock()
+
 	defer func() {
 		verifier.mux.Lock()
 		verifier.running = false
@@ -194,9 +193,31 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		verifier.logger.Info().Msg("Dropping old verifier metadata")
 		err = verifier.verificationDatabase().Drop(ctx)
 		if err != nil {
+			verifier.mux.Unlock()
 			return err
 		}
+	} else {
+		genOpt, err := verifier.readGeneration(ctx)
+		if err != nil {
+			verifier.mux.Unlock()
+			return err
+		}
+
+		if gen, has := genOpt.Get(); has {
+			verifier.generation = gen
+			verifier.logger.Info().
+				Int("generation", verifier.generation).
+				Msg("Resuming in-progress verification.")
+		} else {
+			verifier.logger.Info().Msg("Starting new verification.")
+		}
 	}
+
+	// Now that we’ve initialized verifier.generation we can
+	// start the change stream readers.
+	verifier.initializeChangeStreamReaders()
+	verifier.mux.Unlock()
+
 	err = retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			err = verifier.AddMetaIndexes(ctx)
@@ -258,12 +279,26 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		verifier.logger.Debug().Msgf("Initial verification phase: %+v", verificationStatus)
 	}
 
-	err = verifier.CreateInitialTasks(ctx)
+	err = verifier.CreateInitialTasksIfNeeded(ctx)
 	if err != nil {
 		return err
 	}
 	// Now enter the multi-generational steady check state
 	for {
+		verifier.mux.Lock()
+		err = retry.New().WithCallback(
+			func(ctx context.Context, _ *retry.FuncInfo) error {
+				return verifier.persistGenerationWhileLocked(ctx)
+			},
+			"persisting generation (%d)",
+			verifier.generation,
+		).Run(ctx, verifier.logger)
+		if err != nil {
+			verifier.mux.Unlock()
+			return errors.Wrapf(err, "failed to persist generation (%d)", verifier.generation)
+		}
+		verifier.mux.Unlock()
+
 		verifier.generationStartTime = time.Now()
 		verifier.eventRecorder.Reset()
 
@@ -382,7 +417,7 @@ func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {
 	return nil
 }
 
-func (verifier *Verifier) CreateInitialTasks(ctx context.Context) error {
+func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error {
 	// If we don't know the src namespaces, we're definitely not the primary task.
 	if !verifier.verifyAll {
 		if len(verifier.srcNamespaces) == 0 {
