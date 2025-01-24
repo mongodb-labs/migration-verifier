@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/mo"
@@ -21,6 +22,13 @@ import (
 )
 
 const fauxDocSizeForDeleteEvents = 1024
+
+var supportedEventOpTypes = mapset.NewSet(
+	"insert",
+	"update",
+	"replace",
+	"delete",
+)
 
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
 type ParsedEvent struct {
@@ -142,57 +150,50 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 	dataSizes := make([]int, len(batch))
 
 	for i, changeEvent := range batch {
-		switch changeEvent.OpType {
-		case "delete":
-			fallthrough
-		case "insert":
-			fallthrough
-		case "replace":
-			fallthrough
-		case "update":
-			if err := verifier.eventRecorder.AddEvent(&changeEvent); err != nil {
-				return errors.Wrapf(err, "failed to augment stats with change event (%+v)", changeEvent)
-			}
+		if !supportedEventOpTypes.Contains(changeEvent.OpType) {
+			panic(fmt.Sprintf("Unsupported optype in event; should have failed already! event=%+v", changeEvent))
+		}
 
-			var srcDBName, srcCollName string
+		if err := verifier.eventRecorder.AddEvent(&changeEvent); err != nil {
+			return errors.Wrapf(err, "failed to augment stats with change event (%+v)", changeEvent)
+		}
 
-			// Recheck Docs are keyed by source namespaces.
-			// We need to retrieve the source namespaces if change events are from the destination.
-			switch eventOrigin {
-			case dst:
-				if verifier.nsMap.Len() == 0 {
-					// Namespace is not remapped. Source namespace is the same as the destination.
-					srcDBName = changeEvent.Ns.DB
-					srcCollName = changeEvent.Ns.Coll
-				} else {
-					dstNs := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
-					srcNs, exist := verifier.nsMap.GetSrcNamespace(dstNs)
-					if !exist {
-						return errors.Errorf("no source namespace corresponding to the destination namepsace %s", dstNs)
-					}
-					srcDBName, srcCollName = SplitNamespace(srcNs)
-				}
-			case src:
+		var srcDBName, srcCollName string
+
+		// Recheck Docs are keyed by source namespaces.
+		// We need to retrieve the source namespaces if change events are from the destination.
+		switch eventOrigin {
+		case dst:
+			if verifier.nsMap.Len() == 0 {
+				// Namespace is not remapped. Source namespace is the same as the destination.
 				srcDBName = changeEvent.Ns.DB
 				srcCollName = changeEvent.Ns.Coll
-			default:
-				return errors.Errorf("unknown event origin: %s", eventOrigin)
-			}
-
-			dbNames[i] = srcDBName
-			collNames[i] = srcCollName
-			docIDs[i] = changeEvent.DocKey.ID
-
-			if changeEvent.FullDocument == nil {
-				// This happens for deletes and for some updates.
-				// The document is probably, but not necessarily, deleted.
-				dataSizes[i] = fauxDocSizeForDeleteEvents
 			} else {
-				// This happens for inserts, replaces, and most updates.
-				dataSizes[i] = len(changeEvent.FullDocument)
+				dstNs := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
+				srcNs, exist := verifier.nsMap.GetSrcNamespace(dstNs)
+				if !exist {
+					return errors.Errorf("no source namespace corresponding to the destination namepsace %s", dstNs)
+				}
+				srcDBName, srcCollName = SplitNamespace(srcNs)
 			}
+		case src:
+			srcDBName = changeEvent.Ns.DB
+			srcCollName = changeEvent.Ns.Coll
 		default:
-			return UnknownEventError{Event: &changeEvent}
+			panic(fmt.Sprintf("unknown event origin: %s", eventOrigin))
+		}
+
+		dbNames[i] = srcDBName
+		collNames[i] = srcCollName
+		docIDs[i] = changeEvent.DocKey.ID
+
+		if changeEvent.FullDocument == nil {
+			// This happens for deletes and for some updates.
+			// The document is probably, but not necessarily, deleted.
+			dataSizes[i] = fauxDocSizeForDeleteEvents
+		} else {
+			// This happens for inserts, replaces, and most updates.
+			dataSizes[i] = len(changeEvent.FullDocument)
 		}
 	}
 
@@ -295,6 +296,15 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 		// This only logs in tests.
 		csr.logger.Trace().Interface("event", changeEventBatch[eventsRead]).Msgf("%s received a change event", csr)
+
+		if !supportedEventOpTypes.Contains(changeEventBatch[eventsRead].OpType) {
+			return UnknownEventError{Event: &changeEventBatch[eventsRead]}
+		}
+
+		// This shouldn’t happen, but just in case:
+		if changeEventBatch[eventsRead].Ns == nil {
+			return errors.Errorf("Change event lacks a namespace: %+v", changeEventBatch[eventsRead])
+		}
 
 		if changeEventBatch[eventsRead].ClusterTime != nil &&
 			(csr.lastChangeEventTime == nil ||
