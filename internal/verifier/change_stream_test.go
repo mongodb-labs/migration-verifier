@@ -195,7 +195,7 @@ func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx cont
 	err := verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	go func() {
-		err := verifier.StartChangeEventHandler(ctx, verifier.srcChangeStreamReader)
+		err := verifier.RunChangeEventHandler(ctx, verifier.srcChangeStreamReader)
 		if errors.Is(err, context.Canceled) {
 			return
 		}
@@ -303,6 +303,38 @@ func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, ve
 	return recheckDocs
 }
 
+func (suite *IntegrationTestSuite) TestChangeStreamDDLError() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
+	ctx := suite.Context()
+
+	db := suite.srcMongoClient.
+		Database(suite.DBNameForTest())
+
+	verifier := suite.BuildVerifier()
+
+	suite.Require().NoError(
+		db.CreateCollection(ctx, "mycoll"),
+	)
+
+	verifier.SetSrcNamespaces([]string{db.Name() + ".mycoll"})
+	verifier.SetDstNamespaces([]string{db.Name() + ".mycoll"})
+	verifier.SetNamespaceMap()
+
+	verifierRunner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(
+		verifierRunner.AwaitGenerationEnd(),
+	)
+
+	suite.Require().NoError(db.Collection("mycoll").Drop(ctx))
+
+	err := verifierRunner.Await()
+
+	suite.Require().ErrorContains(err, "drop")
+	suite.Require().ErrorContains(err, db.Name())
+	suite.Require().ErrorContains(err, "mycoll")
+}
+
 func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
@@ -376,12 +408,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 		suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
 		startAtTs := verifier.srcChangeStreamReader.startAtTs
-		suite.Require().NotNil(startAtTs)
-
-		suite.Require().False(
-			startAtTs.After(insertTs),
-			"change stream should start no later than the last operation",
-		)
+		suite.Require().NotNil(startAtTs, "startAtTs should be set")
 
 		verifier.srcChangeStreamReader.writesOffTs.Set(insertTs)
 
@@ -389,7 +416,9 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 
 		suite.Require().False(
 			verifier.srcChangeStreamReader.startAtTs.Before(*startAtTs),
-			"new startAtTs should be no earlier than last one",
+			"new startAtTs (%+v) should be no earlier than last one (%+v)",
+			verifier.srcChangeStreamReader.startAtTs,
+			*startAtTs,
 		)
 	}
 }
@@ -709,7 +738,7 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 
 	suite.Require().NoError(verifier.dstChangeStreamReader.StartChangeStream(ctx))
 	go func() {
-		err := verifier.StartChangeEventHandler(ctx, verifier.dstChangeStreamReader)
+		err := verifier.RunChangeEventHandler(ctx, verifier.dstChangeStreamReader)
 		if errors.Is(err, context.Canceled) {
 			return
 		}

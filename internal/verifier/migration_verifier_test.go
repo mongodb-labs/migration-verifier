@@ -429,11 +429,14 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	event.OpType = "update"
 	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
 	suite.Require().NoError(err)
+
 	event.OpType = "flibbity"
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
-	badEventErr := UnknownEventError{}
-	suite.Require().ErrorAs(err, &badEventErr)
-	suite.Assert().Equal("flibbity", badEventErr.Event.OpType)
+	suite.Assert().Panics(
+		func() {
+			_ = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
+		},
+		"HandleChangeStreamEvents should panic if it gets an unknown optype",
+	)
 
 	verifier.generation++
 	func() {
