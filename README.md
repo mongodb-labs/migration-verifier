@@ -14,6 +14,14 @@ _If verifying a migration done via [mongosync](https://www.mongodb.com/docs/clus
 
 _Assumes no port set, default port for operation webserver is 27020_
 
+# Recommendations
+
+# Verifier Metadata Considerations
+
+migration-verifier needs a database to store its state. This database SHOULD be on its own cluster.
+
+The verifier _can_ instead store its metadata on the destination cluster. This can severely degrade performance, though. 
+It also requires either disabling mongosync’s destination write blocking or giving the `bypassWriteBlockingMode` to the verifier’s `--metaURI` user.
 
 ## Launch the Verifier Binary
 
