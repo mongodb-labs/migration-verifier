@@ -14,6 +14,11 @@ _If verifying a migration done via [mongosync](https://www.mongodb.com/docs/clus
 
 _Assumes no port set, default port for operation webserver is 27020_
 
+# Recommendations
+
+Users should use a different cluster for storing migration verification metadata. If the user must use the destination cluster,
+they need to either disable mongosync's write blocking on the destination or provide a `--metaURI` with a database user that has the `bypassWriteBlockingMode`
+permission.
 
 ## Launch the Verifier Binary
 
