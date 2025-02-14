@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/logger"
@@ -147,18 +147,32 @@ func (server *WebServer) setupRouter() *gin.Engine {
 // Run checks the web server. This is a blocking call.
 // This function should only be called once during each Webserver's life time.
 func (server *WebServer) Run(ctx context.Context) error {
+	addrStr := fmt.Sprintf("0.0.0.0:%d", server.port)
+	server.logger.Info().
+		Str("address", addrStr).
+		Msg("Starting web server.")
+
+	listener, err := net.Listen("tcp", addrStr)
+	if err != nil {
+		return errors.Wrapf(err, "failed to bind to %s", addrStr)
+	}
+
+	boundPort := listener.Addr().(*net.TCPAddr).Port
+	server.logger.Info().
+		Int("port", boundPort).
+		Msg("Web server started.")
+
 	server.srv = &http.Server{
-		Addr:    "0.0.0.0:" + strconv.Itoa(server.port),
 		Handler: server.setupRouter(),
 	}
 
 	webServerCtx, shutDownWebServer := context.WithCancel(ctx)
-	server.logger.Info().Int("port", server.port).Msg("Running webserver.")
+
 	server.signalShutdown = shutDownWebServer
 
 	go func() {
 		// Handle incoming requests. We always get a non-nil error at the end.
-		err := server.srv.ListenAndServe()
+		err := server.srv.Serve(listener)
 
 		// Shut down the server manually if needed.
 		if !errors.Is(err, http.ErrServerClosed) {
