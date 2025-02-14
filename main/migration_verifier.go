@@ -209,6 +209,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 
 	v.GetLogger().Info().
 		Str("revision", Revision).
+		Int("processID", os.Getpid()).
 		Msg("migration-verifier started.")
 
 	err := v.SetSrcURI(ctx, cCtx.String(srcURI))
