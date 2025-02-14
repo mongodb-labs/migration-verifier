@@ -1,8 +1,6 @@
 module github.com/10gen/migration-verifier
 
-go 1.22.0
-
-toolchain go1.23.6
+go 1.22
 
 require (
 	github.com/cespare/permute/v2 v2.0.0-beta2
@@ -18,8 +16,8 @@ require (
 	github.com/stretchr/testify v1.8.0
 	github.com/urfave/cli v1.22.9
 	go.mongodb.org/mongo-driver v1.17.1
-	golang.org/x/exp v0.0.0-20250210185358-939b2ce775ac
-	golang.org/x/sync v0.11.0
+	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
+	golang.org/x/sync v0.8.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
