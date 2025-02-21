@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
@@ -15,23 +16,47 @@ import (
 
 const UnauthorizedErrCode = 13
 
-// RefreshAllMongosInstances prevents data corruption from SERVER-32198, which can cause reads and writes to be
+// RefreshSrcMongosInstances prevents data corruption from SERVER-32198, which can cause reads and writes to be
 // accepted by the wrong shard (this is caused by a mongos not knowing the collection is sharded and the shard not
 // knowing the collection is sharded). This method relies on the verifier rejecting 4.4 source SRV connection strings
 // (see the `auditor` package for more details).
 //
 // This method must only be called on a sharded cluster, otherwise it returns a "no such command: 'listShards'" error.
 //
+// This function should only be called on the source cluster because its
+// messaging (e.g., errors) say “source”. See RefreshDstMongosInstances for
+// equivalent logic for the destination cluster.
+//
 // Note: this is a reimplementation of MaybeRefreshAllSourceMongosInstances() in mongosync.
-func RefreshAllMongosInstances(
+func RefreshSrcMongosInstances(
 	ctx context.Context,
 	l *logger.Logger,
 	clientOpts *options.ClientOptions,
 ) error {
+	return refreshMongoses(ctx, l, clientOpts, "source")
+}
+
+// RefreshDstMongosInstances is the same as RefreshSrcMongosInstances, but
+// logging & error messages say “destination” rather than “source”.
+func RefreshDstMongosInstances(
+	ctx context.Context,
+	l *logger.Logger,
+	clientOpts *options.ClientOptions,
+) error {
+	return refreshMongoses(ctx, l, clientOpts, "destination")
+}
+
+func refreshMongoses(
+	ctx context.Context,
+	l *logger.Logger,
+	clientOpts *options.ClientOptions,
+	peerName string,
+) error {
 	hosts := clientOpts.Hosts
 	l.Info().
 		Strs("hosts", hosts).
-		Msgf("Refreshing all %d mongos instance(s) on the source.", len(hosts))
+		Str("whichCluster", peerName).
+		Msg("Refreshing all mongos instances.")
 
 	for _, host := range hosts {
 		singleHostClientOpts := *clientOpts
@@ -80,17 +105,17 @@ func RefreshAllMongosInstances(
 					RunCommand(ctx, bson.D{{"addShard", shardConnStr}}).
 					Err()
 				if err != nil {
+					desc := fmt.Sprintf("failed to execute %#q on %s host %#q to force refresh of mongos shard registry", "addShard", peerName, host)
+
 					// TODO (REP-3952): Do this error check using the `shared` package.
 					if mmongo.ErrorHasCode(err, UnauthorizedErrCode) {
-						return errors.New(
-							"missing privileges to refresh mongos instances on the source; please restart " +
-								"migration-verifier with a URI that includes the `clusterManager` role",
+						desc += fmt.Sprintf(
+							"; please restart migration-verifier with a %s URI that includes the `clusterManager` role",
+							peerName,
 						)
 					}
-					return errors.Wrap(
-						err,
-						"failed to execute `addShard` to force the mongos' ShardRegistry to refresh",
-					)
+
+					return errors.Wrapf(err, desc)
 				}
 
 				// We could alternatively run `flushRouterConfig: <dbName>` for each db, but that requires a
@@ -103,7 +128,7 @@ func RefreshAllMongosInstances(
 					RunCommand(ctx, bson.D{{"flushRouterConfig", 1}}).
 					Err()
 				if err != nil {
-					return errors.Wrap(err, "failed to flush the mongos config")
+					return errors.Wrapf(err, "failed to flush the %s mongos config", peerName)
 				}
 
 				return nil
@@ -116,13 +141,17 @@ func RefreshAllMongosInstances(
 		}
 
 		if err = singleHostClient.Disconnect(ctx); err != nil {
-			return errors.Wrap(err, "failed to gracefully disconnect from the mongos")
+			l.Warn().
+				Str("host", host).
+				Str("whichCluster", peerName).
+				Msg("Failed to disconnect gracefully.")
 		}
 	}
 
 	l.Info().
 		Strs("hosts", hosts).
-		Msgf("Successfully refreshed all %d mongos instance(s) on the source.", len(hosts))
+		Msgf("Successfully refreshed %s mongos instances.", peerName)
+
 	return nil
 }
 
