@@ -298,7 +298,8 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		verifier.mux.Unlock()
 
 		verifier.generationStartTime = time.Now()
-		verifier.eventRecorder.Reset()
+		verifier.srcEventRecorder.Reset()
+		verifier.dstEventRecorder.Reset()
 
 		err := verifier.CheckWorker(ctx)
 		if err != nil {

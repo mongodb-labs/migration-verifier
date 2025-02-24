@@ -98,7 +98,8 @@ type Verifier struct {
 	numWorkers         int
 	failureDisplaySize int64
 
-	eventRecorder *EventRecorder
+	srcEventRecorder *EventRecorder
+	dstEventRecorder *EventRecorder
 
 	// Used only with generation 0 to defer the first
 	// progress report until after we’ve finished partitioning
@@ -208,7 +209,8 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 
 		// This will get recreated once gen0 starts, but we want it
 		// here in case the change streams gets an event before then.
-		eventRecorder: NewEventRecorder(),
+		srcEventRecorder: NewEventRecorder(),
+		dstEventRecorder: NewEventRecorder(),
 
 		workerTracker: NewWorkerTracker(NumWorkers),
 
