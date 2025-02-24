@@ -363,6 +363,17 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
+	var tokenTs primitive.Timestamp
+	tokenTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
+	if err == nil {
+		lagSecs := int64(sess.OperationTime().T) - int64(tokenTs.T)
+		csr.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
+	} else {
+		csr.logger.Warn().
+			Err(err).
+			Msgf("Failed to extract timestamp from %s's resume token to compute change stream lag.", csr)
+	}
+
 	if eventsRead == 0 {
 		ri.NoteSuccess("received an empty change stream response")
 
@@ -377,17 +388,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	}
 
 	ri.NoteSuccess("parsed %d-event batch", len(changeEventBatch))
-
-	var tokenTs primitive.Timestamp
-	tokenTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
-	if err == nil {
-		lagSecs := int64(sess.OperationTime().T) - int64(tokenTs.T)
-		csr.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
-	} else {
-		csr.logger.Warn().
-			Err(err).
-			Msgf("Failed to extract timestamp from %s's resume token to compute change stream lag.", csr)
-	}
 
 	select {
 	case <-ctx.Done():
