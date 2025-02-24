@@ -183,16 +183,16 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 			panic(fmt.Sprintf("Unsupported optype in event; should have failed already! event=%+v", changeEvent))
 		}
 
-		if err := verifier.eventRecorder.AddEvent(&changeEvent); err != nil {
-			return errors.Wrapf(err, "failed to augment stats with change event (%+v)", changeEvent)
-		}
-
 		var srcDBName, srcCollName string
+
+		var eventRecorder EventRecorder
 
 		// Recheck Docs are keyed by source namespaces.
 		// We need to retrieve the source namespaces if change events are from the destination.
 		switch eventOrigin {
 		case dst:
+			eventRecorder = *verifier.dstEventRecorder
+
 			if verifier.nsMap.Len() == 0 {
 				// Namespace is not remapped. Source namespace is the same as the destination.
 				srcDBName = changeEvent.Ns.DB
@@ -206,6 +206,8 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 				srcDBName, srcCollName = SplitNamespace(srcNs)
 			}
 		case src:
+			eventRecorder = *verifier.srcEventRecorder
+
 			srcDBName = changeEvent.Ns.DB
 			srcCollName = changeEvent.Ns.Coll
 		default:
@@ -224,9 +226,19 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 			// This happens for inserts, replaces, and most updates.
 			dataSizes[i] = len(changeEvent.FullDocument)
 		}
+
+		if err := eventRecorder.AddEvent(&changeEvent); err != nil {
+			return errors.Wrapf(
+				err,
+				"failed to augment stats with %s change event (%+v)",
+				eventOrigin,
+				changeEvent,
+			)
+		}
 	}
 
 	verifier.logger.Debug().
+		Str("origin", string(eventOrigin)).
 		Int("count", len(docIDs)).
 		Msg("Persisting rechecks for change events.")
 
