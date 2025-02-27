@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/reportutils"
@@ -1399,7 +1400,7 @@ func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mong
 
 func (verifier *Verifier) StartServer() error {
 	server := NewWebServer(verifier.port, verifier, verifier.logger)
-	return server.Run(context.Background())
+	return server.Run(contextplus.Background())
 }
 
 func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {

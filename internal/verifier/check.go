@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -84,7 +85,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	verifier.writeStringBuilder(genStartReport)
 
-	cancelableCtx, canceler := context.WithCancelCause(ctxIn)
+	cancelableCtx, canceler := contextplus.New(ctxIn).WithCancel()
 	eg, ctx := errgroup.WithContext(cancelableCtx)
 
 	// If the change stream fails, everything should stop.

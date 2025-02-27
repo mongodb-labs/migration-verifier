@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -34,7 +35,7 @@ type WebServer struct {
 	logger             *logger.Logger
 	srv                *http.Server
 	operationalAPILock *semaphore.Weighted
-	signalShutdown     context.CancelFunc
+	signalShutdown     context.CancelCauseFunc
 	mongosyncError     error
 }
 
@@ -166,7 +167,7 @@ func (server *WebServer) Run(ctx context.Context) error {
 		Handler: server.setupRouter(),
 	}
 
-	webServerCtx, shutDownWebServer := context.WithCancel(ctx)
+	webServerCtx, shutDownWebServer := contextplus.New(ctx).WithCancel()
 
 	server.signalShutdown = shutDownWebServer
 
@@ -177,12 +178,12 @@ func (server *WebServer) Run(ctx context.Context) error {
 		// Shut down the server manually if needed.
 		if !errors.Is(err, http.ErrServerClosed) {
 			server.logger.Error().Err(err).Msg("Web server failed check")
-			shutDownWebServer()
+			shutDownWebServer(err)
 		}
 	}()
 
 	<-webServerCtx.Done()
-	if err := server.srv.Shutdown(context.Background()); err != nil {
+	if err := server.srv.Shutdown(ctx); err != nil {
 		// Web Server wasn't gracefully shutdown
 		server.logger.Error().Err(err).Msg("Web server forced to shutdown")
 	}
@@ -212,7 +213,7 @@ func (server *WebServer) checkEndPoint(c *gin.Context) {
 		return
 	}
 
-	server.Mapi.Check(context.Background(), req.Filter)
+	server.Mapi.Check(c, req.Filter)
 	//if err != nil {
 	//	server.operationalErrorResponse(c, err)
 	//	return
@@ -228,7 +229,7 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 		return
 	}
 
-	err := server.Mapi.WritesOff(context.Background())
+	err := server.Mapi.WritesOff(c)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
 		return
@@ -266,7 +267,7 @@ func (server *WebServer) operationalErrorResponse(c *gin.Context, err error) {
 
 	server.logger.Error().Err(err).Msg("Un-recoverable error during operational API handler, shutting down.")
 	server.mongosyncError = err
-	server.signalShutdown()
+	server.signalShutdown(err)
 
 	errorDescription := err.Error()
 	c.JSON(http.StatusOK, APIResponse{false, &errorName, &errorDescription})
