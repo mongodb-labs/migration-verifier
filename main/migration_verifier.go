@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/verifier"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -50,7 +51,7 @@ func main() {
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	ctx := context.TODO()
+	ctx := contextplus.New(context.TODO())
 
 	flags := []cli.Flag{
 		altsrc.NewStringFlag(cli.StringFlag{
