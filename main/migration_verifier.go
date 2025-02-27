@@ -51,6 +51,8 @@ func main() {
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+
+	//nolint:forbidigo
 	ctx := contextplus.New(context.TODO())
 
 	flags := []cli.Flag{

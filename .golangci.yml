@@ -27,6 +27,8 @@ linters-settings:
     forbid:
       - p: context\.Background
         msg: Use contextplus.
+      - p: context\.TODO
+        msg: Use contextplus.
       - p: context\.WithCancel(?:Cause)?
         msg: Use contextplus.
       - p: context\.WithTimeout(?:Cause)?
