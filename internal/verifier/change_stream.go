@@ -130,7 +130,7 @@ HandlerLoop:
 	for err == nil {
 		select {
 		case <-ctx.Done():
-			err = util.WrapCtxErrWithCause(ctx)
+			err = ctx.Err()
 
 			verifier.logger.Debug().
 				Err(err).
@@ -391,7 +391,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	select {
 	case <-ctx.Done():
-		return util.WrapCtxErrWithCause(ctx)
+		return ctx.Err()
 	case <-csr.handlerError.Ready():
 		return csr.wrapHandlerErrorForReader()
 	case csr.changeEventBatchChan <- changeEventBatch:
@@ -438,7 +438,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 		// If the context is canceled, return immmediately.
 		case <-ctx.Done():
-			err := util.WrapCtxErrWithCause(ctx)
+			err := ctx.Err()
 
 			csr.logger.Debug().
 				Err(err).

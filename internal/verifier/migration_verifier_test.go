@@ -7,7 +7,6 @@ package verifier
 // a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -403,11 +403,11 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
-	err := verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []interface{}{42}, []int{100})
+	err := verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []any{42}, []int{100})
 	suite.Require().NoError(err)
-	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []interface{}{43, 44}, []int{100, 100})
+	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []any{43, 44}, []int{100, 100})
 	suite.Require().NoError(err)
-	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar2", []interface{}{42}, []int{100})
+	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar2", []any{42}, []int{100})
 	suite.Require().NoError(err)
 	event := ParsedEvent{
 		DocKey: DocKey{ID: int32(55)},
@@ -591,7 +591,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	namespace := "testdb.testns"
 
-	ctx := context.Background()
+	ctx := contextplus.Background()
 
 	makeDocChannel := func(docs []bson.D) <-chan bson.Raw {
 		theChan := make(chan bson.Raw, len(docs))
@@ -1262,7 +1262,7 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 	ctx := suite.Context()
 
 	metaColl := verifier.verificationDatabase().Collection(verificationTasksCollection)
-	_, err := metaColl.InsertMany(ctx, []interface{}{
+	_, err := metaColl.InsertMany(ctx, []any{
 		bson.M{"generation": 0, "status": "added", "type": "verify"},
 		bson.M{"generation": 0, "status": "processing", "type": "verify"},
 		bson.M{"generation": 0, "status": "failed", "type": "verify"},
@@ -1464,8 +1464,8 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	dstColl := suite.dstMongoClient.Database(dbname2).Collection("testColl3")
 
 	// Documents with _id in [0, 100) should match.
-	var docs []interface{}
-	for i := 0; i < 100; i++ {
+	var docs []any
+	for i := range 100 {
 		docs = append(docs, bson.M{"_id": i, "x": i, "inFilter": true})
 	}
 	_, err := srcColl.InsertMany(ctx, docs)
@@ -1474,7 +1474,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	suite.Require().NoError(err)
 
 	// Documents with _id in [100, 200) should be ignored because they're not in the filter.
-	docs = []interface{}{}
+	docs = []any{}
 	for i := 100; i < 200; i++ {
 		docs = append(docs, bson.M{"_id": i, "x": i, "inFilter": false})
 	}
@@ -1718,7 +1718,7 @@ func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 	srcColl := suite.srcMongoClient.Database(dbname).Collection("testColl1")
 
 	// 30 documents with _ids [0, 30) are in the filter.
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		_, err := srcColl.InsertOne(ctx, bson.M{"_id": i, "n": rand.Intn(100) + 100})
 		suite.Require().NoError(err)
 	}

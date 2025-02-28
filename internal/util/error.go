@@ -85,11 +85,6 @@ func IsFailedToParseError(err error) bool {
 	return GetErrorCode(err) == 9
 }
 
-// IsContextCanceledError returns true if this is a Context Canceled error.
-func IsContextCanceledError(err error) bool {
-	return strings.Contains(err.Error(), context.Canceled.Error())
-}
-
 func isRetryablePoolError(err error) bool {
 	rerr, ok := err.(driver.RetryablePoolError)
 	return ok && rerr.Retryable()
@@ -121,7 +116,7 @@ func IsTransientError(err error) bool {
 		return false
 	}
 
-	if IsContextCanceledError(err) {
+	if errors.Is(err, context.Canceled) {
 		return false
 	}
 

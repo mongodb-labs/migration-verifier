@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
-	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
@@ -50,7 +50,7 @@ func (verifier *Verifier) Check(ctx context.Context, filter map[string]any) {
 func (verifier *Verifier) waitForChangeStream(ctx context.Context, csr *ChangeStreamReader) error {
 	select {
 	case <-ctx.Done():
-		return util.WrapCtxErrWithCause(ctx)
+		return ctx.Err()
 	case <-csr.readerError.Ready():
 		err := csr.readerError.Get()
 		verifier.logger.Warn().Err(err).
@@ -84,7 +84,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	verifier.writeStringBuilder(genStartReport)
 
-	cancelableCtx, canceler := context.WithCancelCause(ctxIn)
+	cancelableCtx, canceler := contextplus.WithCancel(ctxIn)
 	eg, ctx := errgroup.WithContext(cancelableCtx)
 
 	// If the change stream fails, everything should stop.
