@@ -1,7 +1,6 @@
 package contextplus
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -18,5 +17,5 @@ func TestUnitTestSuite(t *testing.T) {
 
 // Context returns a new `C`.
 func (_ *UnitTestSuite) Context() *C {
-	return New(context.Background())
+	return Background()
 }

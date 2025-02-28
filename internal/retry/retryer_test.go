@@ -157,11 +157,11 @@ func (suite *UnitTestSuite) TestCancelViaContext() {
 		return nil
 	}
 
-	ctx, cancel := context.WithCancel(suite.Context())
+	ctx, cancel := suite.Context().WithCancel()
 
 	// We need to cancel before we allow the f() func to do any work. This ensures that the
 	// retry code will see the cancel before the timer it sets expires.
-	cancel()
+	cancel(errors.New("right away"))
 	go func() {
 		err := retryer.WithCallback(f, "f").Run(ctx, logger)
 		suite.ErrorIs(err, context.Canceled)

@@ -74,6 +74,7 @@ func New(ctx context.Context) *C {
 
 // Background is a convenience alias for New(context.Background()).
 func Background() *C {
+	//nolint:forbidigo
 	return New(context.Background())
 }
 
@@ -95,6 +96,7 @@ func (c *C) Value(key any) any {
 // WithCancel works just like the stdlib’s `context.WithCancelCause`, but the
 // returned context is a *C.
 func (c *C) WithCancel() (*C, context.CancelCauseFunc) {
+	//nolint:forbidigo
 	newCtx, cancel := context.WithCancelCause(c.ctx)
 	return New(newCtx), cancel
 }
@@ -105,7 +107,10 @@ func (c *C) WithCancel() (*C, context.CancelCauseFunc) {
 // This also wraps the given cause with the stringified deadline.
 func (c *C) WithDeadline(deadline time.Time, cause error) (*C, context.CancelFunc) {
 	wrappedCause := errors.Wrapf(cause, "deadline (%s) passed", deadline)
+
+	//nolint:forbidigo
 	newCtx, cancel := context.WithDeadlineCause(c.ctx, deadline, wrappedCause)
+
 	return New(newCtx), cancel
 }
 
@@ -115,7 +120,10 @@ func (c *C) WithDeadline(deadline time.Time, cause error) (*C, context.CancelFun
 // This also wraps the given cause with the stringified timeout.
 func (c *C) WithTimeout(timeout time.Duration, cause error) (*C, context.CancelFunc) {
 	wrappedCause := errors.Wrapf(cause, "timed out after %s", timeout)
+
+	//nolint:forbidigo
 	newCtx, cancel := context.WithTimeoutCause(c.ctx, timeout, wrappedCause)
+
 	return New(newCtx), cancel
 }
 

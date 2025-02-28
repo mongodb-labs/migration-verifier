@@ -51,7 +51,7 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 	verifier := s.BuildVerifier()
 
 	for range 100 {
-		cancelableCtx, cancel := context.WithCancelCause(ctx)
+		cancelableCtx, cancel := ctx.WithCancel()
 
 		var done atomic.Bool
 		go func() {

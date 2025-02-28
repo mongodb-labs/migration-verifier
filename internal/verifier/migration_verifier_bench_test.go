@@ -7,7 +7,6 @@ package verifier
 // a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
@@ -16,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/10gen/migration-verifier/contextplus"
 )
 
 func BenchmarkGeneric(t *testing.B) {
@@ -59,24 +60,27 @@ func BenchmarkGeneric(t *testing.B) {
 	verifier.SetGenerationPauseDelayMillis(0)
 	verifier.SetWorkerSleepDelayMillis(0)
 	fmt.Printf("meta uri %s\n", metaUri)
-	err := verifier.SetMetaURI(context.Background(), metaUri)
+
+	ctx := contextplus.Background()
+
+	err := verifier.SetMetaURI(ctx, metaUri)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifier.SetSrcURI(context.Background(), srcUri)
+	err = verifier.SetSrcURI(ctx, srcUri)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifier.SetDstURI(context.Background(), dstUri)
+	err = verifier.SetDstURI(ctx, dstUri)
 	if err != nil {
 		t.Fatal(err)
 	}
 	verifier.SetMetaDBName(metaDBName)
-	err = verifier.verificationTaskCollection().Drop(context.Background())
+	err = verifier.verificationTaskCollection().Drop(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = verifier.verificationDatabase().Collection(recheckQueue).Drop(context.Background())
+	err = verifier.verificationDatabase().Collection(recheckQueue).Drop(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +91,7 @@ func BenchmarkGeneric(t *testing.B) {
 		qfilter := QueryFilter{Namespace: namespace}
 		task := VerificationTask{QueryFilter: qfilter}
 		// TODO: is this safe?
-		mismatchedIds, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(context.Background(), &task)
+		mismatchedIds, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(ctx, &task)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/util"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
@@ -25,7 +26,7 @@ type IntegrationTestSuite struct {
 	suite.Suite
 	srcConnStr, dstConnStr, metaConnStr             string
 	srcMongoClient, dstMongoClient, metaMongoClient *mongo.Client
-	testContext                                     context.Context
+	testContext                                     *contextplus.C
 	contextCanceller                                context.CancelCauseFunc
 	initialDbNames                                  mapset.Set[string]
 
@@ -36,7 +37,7 @@ var _ suite.TestingSuite = &IntegrationTestSuite{}
 
 // Context returns a Context that the suite will cancel after the test.
 // Always use this rather than context.Background() in tests!
-func (suite *IntegrationTestSuite) Context() context.Context {
+func (suite *IntegrationTestSuite) Context() *contextplus.C {
 	suite.Require().NotNil(
 		suite.testContext,
 		"context must exist (i.e., be fetched only within a test)",
@@ -46,7 +47,7 @@ func (suite *IntegrationTestSuite) Context() context.Context {
 }
 
 func (suite *IntegrationTestSuite) SetupSuite() {
-	ctx := context.Background()
+	ctx := contextplus.Background()
 	clientOpts := options.Client().ApplyURI(suite.srcConnStr).SetAppName("Verifier Test Suite").
 		SetWriteConcern(writeconcern.Majority()).
 		SetReadConcern(readconcern.Majority())
@@ -78,7 +79,7 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 }
 
 func (suite *IntegrationTestSuite) SetupTest() {
-	ctx, canceller := context.WithCancelCause(context.Background())
+	ctx, canceller := contextplus.Background().WithCancel()
 	suite.testContext, suite.contextCanceller = ctx, canceller
 	suite.zerologGlobalLogLevel = zerolog.GlobalLevel()
 
@@ -123,7 +124,7 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 
 	suite.contextCanceller(errors.Errorf("tearing down test %#q", suite.T().Name()))
 	suite.testContext, suite.contextCanceller = nil, nil
-	ctx := context.Background()
+	ctx := contextplus.Background()
 	for _, client := range []*mongo.Client{suite.srcMongoClient, suite.dstMongoClient} {
 		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
 		suite.Require().NoError(err)

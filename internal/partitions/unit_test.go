@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -14,10 +15,14 @@ import (
 type UnitTestSuite struct {
 	suite.Suite
 	logger *logger.Logger
+	ctx    *contextplus.C
 }
 
 func TestUnitTestSuite(t *testing.T) {
-	ts := new(UnitTestSuite)
+	ts := &UnitTestSuite{
+		ctx: contextplus.Background(),
+	}
+
 	suite.Run(t, ts)
 }
 
@@ -31,7 +36,7 @@ func (suite *UnitTestSuite) SetupSuite() {
 
 // Context returns a new context with the logger set in it.
 func (suite *UnitTestSuite) Context() context.Context {
-	return suite.logger.Logger.WithContext(context.Background())
+	return suite.logger.Logger.WithContext(suite.ctx)
 }
 
 // Logger returns the logger for the suite.

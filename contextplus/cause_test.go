@@ -14,7 +14,7 @@ func (s *UnitTestSuite) TestCancelCause() {
 		fmt.Errorf("just because"),
 		errors.Wrap(context.Canceled, "just because"),
 	) {
-		ctx := New(context.Background())
+		ctx := Background()
 		ctx2, canceller := ctx.WithCancel()
 
 		canceller(cause)
@@ -30,10 +30,7 @@ func (s *UnitTestSuite) TestCancelCause() {
 }
 
 func (s *UnitTestSuite) TestUncanceled() {
-	bg := context.Background()
-	ctx := New(bg)
-
-	s.Assert().Nil(ctx.Err())
+	s.Assert().Nil(Background().Err())
 }
 
 func (s *UnitTestSuite) TestTimeoutCause() {
@@ -43,7 +40,7 @@ func (s *UnitTestSuite) TestTimeoutCause() {
 	) {
 		negativeDuration := -1 * time.Nanosecond
 
-		ctx := New(context.Background())
+		ctx := Background()
 		ctx2, canceller := ctx.WithTimeout(
 			negativeDuration,
 			cause,
@@ -71,7 +68,7 @@ func (s *UnitTestSuite) TestDeadlineCause() {
 	) {
 		pastTime := time.Now().Add(-1 * time.Minute)
 
-		ctx := New(context.Background())
+		ctx := Background()
 		ctx2, canceller := ctx.WithDeadline(
 			pastTime,
 			cause,
