@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -157,7 +158,7 @@ func (suite *UnitTestSuite) TestCancelViaContext() {
 		return nil
 	}
 
-	ctx, cancel := suite.Context().WithCancel()
+	ctx, cancel := contextplus.WithCancel(suite.Context())
 
 	// We need to cancel before we allow the f() func to do any work. This ensures that the
 	// retry code will see the cancel before the timer it sets expires.

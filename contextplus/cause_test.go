@@ -15,7 +15,7 @@ func (s *UnitTestSuite) TestCancelCause() {
 		errors.Wrap(context.Canceled, "just because"),
 	) {
 		ctx := Background()
-		ctx2, canceller := ctx.WithCancel()
+		ctx2, canceller := WithCancel(ctx)
 
 		canceller(cause)
 
@@ -30,7 +30,9 @@ func (s *UnitTestSuite) TestCancelCause() {
 }
 
 func (s *UnitTestSuite) TestUncanceled() {
-	s.Assert().Nil(Background().Err())
+	ctx := Background()
+
+	s.Assert().Nil(ctx.Err())
 }
 
 func (s *UnitTestSuite) TestTimeoutCause() {
@@ -40,14 +42,14 @@ func (s *UnitTestSuite) TestTimeoutCause() {
 	) {
 		negativeDuration := -1 * time.Nanosecond
 
-		ctx := Background()
-		ctx2, canceller := ctx.WithTimeout(
+		ctx, canceller := WithTimeout(
+			Background(),
 			negativeDuration,
 			cause,
 		)
 		defer canceller()
 
-		ctxErr := ctx2.Err()
+		ctxErr := ctx.Err()
 
 		s.Assert().ErrorIs(ctxErr, context.DeadlineExceeded)
 		s.Assert().ErrorIs(ctxErr, cause)
@@ -56,7 +58,7 @@ func (s *UnitTestSuite) TestTimeoutCause() {
 			negativeDuration.String(),
 		)
 
-		fromCause := context.Cause(ctx2)
+		fromCause := context.Cause(ctx)
 		s.Assert().ErrorIs(fromCause, cause)
 	}
 }
@@ -68,14 +70,14 @@ func (s *UnitTestSuite) TestDeadlineCause() {
 	) {
 		pastTime := time.Now().Add(-1 * time.Minute)
 
-		ctx := Background()
-		ctx2, canceller := ctx.WithDeadline(
+		ctx, canceller := WithDeadline(
+			Background(),
 			pastTime,
 			cause,
 		)
 		defer canceller()
 
-		ctxErr := ctx2.Err()
+		ctxErr := ctx.Err()
 
 		s.Assert().ErrorIs(ctxErr, context.DeadlineExceeded)
 		s.Assert().ErrorIs(ctxErr, cause)
@@ -84,7 +86,7 @@ func (s *UnitTestSuite) TestDeadlineCause() {
 			pastTime.String(),
 		)
 
-		fromCause := context.Cause(ctx2)
+		fromCause := context.Cause(ctx)
 		s.Assert().ErrorIs(fromCause, cause)
 	}
 }

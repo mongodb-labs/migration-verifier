@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
@@ -51,7 +52,7 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 	verifier := s.BuildVerifier()
 
 	for range 100 {
-		cancelableCtx, cancel := ctx.WithCancel()
+		cancelableCtx, cancel := contextplus.WithCancel(ctx)
 
 		var done atomic.Bool
 		go func() {

@@ -84,7 +84,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	verifier.writeStringBuilder(genStartReport)
 
-	cancelableCtx, canceler := contextplus.New(ctxIn).WithCancel()
+	cancelableCtx, canceler := contextplus.WithCancel(ctxIn)
 	eg, ctx := errgroup.WithContext(cancelableCtx)
 
 	// If the change stream fails, everything should stop.

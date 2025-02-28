@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func (suite *UnitTestSuite) SetupSuite() {
 // Everything below was copied from testutil.
 
 // Context returns a new context with the logger set in it.
-func (suite *UnitTestSuite) Context() *contextplus.C {
+func (suite *UnitTestSuite) Context() context.Context {
 	return contextplus.New(suite.logger.Logger.WithContext(suite.ctx))
 }
 

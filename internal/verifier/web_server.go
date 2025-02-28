@@ -167,7 +167,7 @@ func (server *WebServer) Run(ctx context.Context) error {
 		Handler: server.setupRouter(),
 	}
 
-	webServerCtx, shutDownWebServer := contextplus.New(ctx).WithCancel()
+	webServerCtx, shutDownWebServer := contextplus.WithCancel(ctx)
 
 	server.signalShutdown = shutDownWebServer
 

@@ -79,7 +79,7 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 }
 
 func (suite *IntegrationTestSuite) SetupTest() {
-	ctx, canceller := contextplus.Background().WithCancel()
+	ctx, canceller := contextplus.WithCancel(contextplus.Background())
 	suite.testContext, suite.contextCanceller = ctx, canceller
 	suite.zerologGlobalLogLevel = zerolog.GlobalLevel()
 

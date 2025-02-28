@@ -67,6 +67,8 @@ type C struct {
 	ctx context.Context
 }
 
+var _ context.Context = &C{}
+
 // New creates a context that wraps the given one.
 func New(ctx context.Context) *C {
 	return &C{ctx}
@@ -74,7 +76,6 @@ func New(ctx context.Context) *C {
 
 // Background is a convenience alias for New(context.Background()).
 func Background() *C {
-	//nolint:forbidigo
 	return New(context.Background())
 }
 
@@ -95,9 +96,8 @@ func (c *C) Value(key any) any {
 
 // WithCancel works just like the stdlib’s `context.WithCancelCause`, but the
 // returned context is a *C.
-func (c *C) WithCancel() (*C, context.CancelCauseFunc) {
-	//nolint:forbidigo
-	newCtx, cancel := context.WithCancelCause(c.ctx)
+func WithCancel(ctx context.Context) (*C, context.CancelCauseFunc) {
+	newCtx, cancel := context.WithCancelCause(ctx)
 	return New(newCtx), cancel
 }
 
@@ -105,12 +105,9 @@ func (c *C) WithCancel() (*C, context.CancelCauseFunc) {
 // returned context is a *C.
 //
 // This also wraps the given cause with the stringified deadline.
-func (c *C) WithDeadline(deadline time.Time, cause error) (*C, context.CancelFunc) {
+func WithDeadline(ctx context.Context, deadline time.Time, cause error) (*C, context.CancelFunc) {
 	wrappedCause := errors.Wrapf(cause, "deadline (%s) passed", deadline)
-
-	//nolint:forbidigo
-	newCtx, cancel := context.WithDeadlineCause(c.ctx, deadline, wrappedCause)
-
+	newCtx, cancel := context.WithDeadlineCause(ctx, deadline, wrappedCause)
 	return New(newCtx), cancel
 }
 
@@ -118,12 +115,9 @@ func (c *C) WithDeadline(deadline time.Time, cause error) (*C, context.CancelFun
 // returned context is a *C.
 //
 // This also wraps the given cause with the stringified timeout.
-func (c *C) WithTimeout(timeout time.Duration, cause error) (*C, context.CancelFunc) {
+func WithTimeout(ctx context.Context, timeout time.Duration, cause error) (*C, context.CancelFunc) {
 	wrappedCause := errors.Wrapf(cause, "timed out after %s", timeout)
-
-	//nolint:forbidigo
-	newCtx, cancel := context.WithTimeoutCause(c.ctx, timeout, wrappedCause)
-
+	newCtx, cancel := context.WithTimeoutCause(ctx, timeout, wrappedCause)
 	return New(newCtx), cancel
 }
 
