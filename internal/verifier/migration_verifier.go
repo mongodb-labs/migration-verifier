@@ -44,7 +44,6 @@ const (
 	Missing            = "Missing"
 	Failed             = "Failed"
 	Mismatch           = "Mismatch"
-	FieldOrderMismatch = "FieldOrderMismatch"
 	ClusterTarget      = "dstClient"
 	ClusterSource      = "srcClient"
 	SrcNamespaceField  = "query_filter.namespace"
@@ -573,7 +572,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 		// If we're respecting field order we have just done a binary compare so we have fields in different order.
 		return []VerificationResult{{
 			ID:        srcClientDoc.Lookup("_id"),
-			Details:   FieldOrderMismatch,
+			Details:   Mismatch + fmt.Sprintf(" : Document %s has fields in different order", srcClientDoc.Lookup("_id")),
 			Cluster:   ClusterTarget,
 			NameSpace: namespace,
 			dataSize:  dataSize,
