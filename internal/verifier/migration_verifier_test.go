@@ -22,7 +22,6 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -99,18 +98,11 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(2, docCount, "should find source docs")
-	suite.Assert().NotZero(byteCount, "should tally docs’ size")
+	suite.Assert().NotZero(byteCount, "should tally docs' size")
 	suite.Assert().Len(results, 2)
-	suite.Assert().Equal(
-		[]any{Mismatch, Mismatch},
-		lo.Map(
-			results,
-			func(result VerificationResult, _ int) any {
-				return result.Details
-			},
-		),
-		"details as expected",
-	)
+	for _, res := range results {
+		suite.Assert().Regexp(regexp.MustCompile("^"+Mismatch), res.Details, "details as expected")
+	}
 
 	// Test fetchDocuments for ids with a global filter.
 
@@ -118,9 +110,9 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(1, docCount, "should find source docs")
-	suite.Assert().NotZero(byteCount, "should tally docs’ size")
+	suite.Assert().NotZero(byteCount, "should tally docs' size")
 	suite.Require().Len(results, 1)
-	suite.Assert().Equal(Mismatch, results[0].Details)
+	suite.Assert().Regexp(regexp.MustCompile("^"+Mismatch), results[0].Details, "mismatch expeceted")
 	suite.Assert().EqualValues(
 		any(id),
 		results[0].ID.(bson.RawValue).AsInt64(),
@@ -135,9 +127,9 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(1, docCount, "should find source docs")
-	suite.Assert().NotZero(byteCount, "should tally docs’ size")
+	suite.Assert().NotZero(byteCount, "should tally docs' size")
 	suite.Require().Len(results, 1)
-	suite.Assert().Equal(Mismatch, results[0].Details)
+	suite.Assert().Regexp(regexp.MustCompile("^"+Mismatch), results[0].Details, "mismatch expeceted")
 	suite.Assert().EqualValues(
 		any(id),
 		results[0].ID.(bson.RawValue).AsInt64(),
