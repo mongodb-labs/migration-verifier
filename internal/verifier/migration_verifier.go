@@ -41,17 +41,18 @@ type ReadConcernSetting string
 
 const (
 	//TODO: add comments for each of these so the warnings will stop :)
-	Missing           = "Missing"
-	Failed            = "Failed"
-	Mismatch          = "Mismatch"
-	ClusterTarget     = "dstClient"
-	ClusterSource     = "srcClient"
-	SrcNamespaceField = "query_filter.namespace"
-	DstNamespaceField = "query_filter.to"
-	NumWorkers        = 10
-	Idle              = "idle"
-	Check             = "check"
-	Recheck           = "recheck"
+	Missing            = "Missing"
+	Failed             = "Failed"
+	Mismatch           = "Mismatch"
+	FieldOrderMismatch = "FieldOrderMismatch"
+	ClusterTarget      = "dstClient"
+	ClusterSource      = "srcClient"
+	SrcNamespaceField  = "query_filter.namespace"
+	DstNamespaceField  = "query_filter.to"
+	NumWorkers         = 10
+	Idle               = "idle"
+	Check              = "check"
+	Recheck            = "recheck"
 
 	// ReadConcernMajority means to force majority read concern.
 	// This is generally desirable to ensure consistency.
@@ -556,30 +557,30 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 	}
 	//verifier.logger.Info().Msg("Byte comparison failed for id %s, falling back to field comparison", id)
 
-	if verifier.ignoreBSONFieldOrder {
-		mismatch, err := BsonUnorderedCompareRawDocumentWithDetails(srcClientDoc, dstClientDoc)
-		if err != nil {
-			return nil, err
-		}
-		if mismatch == nil {
+	mismatch, err := BsonUnorderedCompareRawDocumentWithDetails(srcClientDoc, dstClientDoc)
+	if err != nil {
+		return nil, err
+	}
+	if mismatch == nil {
+		if verifier.ignoreBSONFieldOrder {
 			return nil, nil
 		}
-		results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, srcClientDoc.Lookup("_id"), "" /* fieldPrefix */)
-		return results, nil
-	}
-	dataSize := len(srcClientDoc)
-	if dataSize < len(dstClientDoc) {
-		dataSize = len(dstClientDoc)
-	}
+		dataSize := len(srcClientDoc)
+		if dataSize < len(dstClientDoc) {
+			dataSize = len(dstClientDoc)
+		}
 
-	// If we're respecting field order we have just done a binary compare so don't know the mismatching fields.
-	return []VerificationResult{{
-		ID:        srcClientDoc.Lookup("_id"),
-		Details:   Mismatch,
-		Cluster:   ClusterTarget,
-		NameSpace: namespace,
-		dataSize:  dataSize,
-	}}, nil
+		// If we're respecting field order we have just done a binary compare so we have fields in different order.
+		return []VerificationResult{{
+			ID:        srcClientDoc.Lookup("_id"),
+			Details:   FieldOrderMismatch,
+			Cluster:   ClusterTarget,
+			NameSpace: namespace,
+			dataSize:  dataSize,
+		}}, nil
+	}
+	results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, srcClientDoc.Lookup("_id"), "" /* fieldPrefix */)
+	return results, nil
 }
 
 func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, task *VerificationTask) error {
