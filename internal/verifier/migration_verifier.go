@@ -41,17 +41,17 @@ type ReadConcernSetting string
 
 const (
 	//TODO: add comments for each of these so the warnings will stop :)
-	Missing            = "Missing"
-	Failed             = "Failed"
-	Mismatch           = "Mismatch"
-	ClusterTarget      = "dstClient"
-	ClusterSource      = "srcClient"
-	SrcNamespaceField  = "query_filter.namespace"
-	DstNamespaceField  = "query_filter.to"
-	NumWorkers         = 10
-	Idle               = "idle"
-	Check              = "check"
-	Recheck            = "recheck"
+	Missing           = "Missing"
+	Failed            = "Failed"
+	Mismatch          = "Mismatch"
+	ClusterTarget     = "dstClient"
+	ClusterSource     = "srcClient"
+	SrcNamespaceField = "query_filter.namespace"
+	DstNamespaceField = "query_filter.to"
+	NumWorkers        = 10
+	Idle              = "idle"
+	Check             = "check"
+	Recheck           = "recheck"
 
 	// ReadConcernMajority means to force majority read concern.
 	// This is generally desirable to ensure consistency.
