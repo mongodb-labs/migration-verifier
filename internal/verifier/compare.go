@@ -57,10 +57,11 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 			"reading from destination",
 		).
 		WithCallback(
-			func(ctx context.Context, _ *retry.FuncInfo) error {
+			func(ctx context.Context, fi *retry.FuncInfo) error {
 				var err error
 				results, docCount, byteCount, err = verifier.compareDocsFromChannels(
 					ctx,
+					fi,
 					task,
 					srcChannel,
 					dstChannel,
@@ -76,6 +77,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 
 func (verifier *Verifier) compareDocsFromChannels(
 	ctx context.Context,
+	fi *retry.FuncInfo,
 	task *VerificationTask,
 	srcChannel, dstChannel <-chan bson.Raw,
 ) (
@@ -190,6 +192,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 						break
 					}
 
+					fi.NoteSuccess("received document from source")
+
 					srcDocCount++
 					srcByteCount += types.ByteCount(len(srcDoc))
 				}
@@ -214,6 +218,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 						dstClosed = true
 						break
 					}
+
+					fi.NoteSuccess("received document from destination")
 				}
 
 				return nil
