@@ -449,12 +449,12 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 					),
 				)
 			}
-
-			builder.WriteString("\nSource’s most frequently-changing namespaces:\n")
 		}
 	}
 
 	if eventsTable != nil {
+		builder.WriteString("\nSource’s most frequently-changing namespaces:\n")
+
 		eventsTable.Render()
 	}
 }
