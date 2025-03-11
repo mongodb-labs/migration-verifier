@@ -15,7 +15,7 @@ import (
 //
 // … and all of the above pertain both for “normal” cancellation
 // causes as well as a cause that includes Canceled.
-func (s *UnitTestSuite) ParallelTestCancelCause() {
+func (s *UnitTestSuite) TestCancelCause() {
 	for _, cause := range []error{
 		fmt.Errorf("just because"),
 		errors.Wrap(context.Canceled, "just because"),
@@ -34,15 +34,15 @@ func (s *UnitTestSuite) ParallelTestCancelCause() {
 	}
 }
 
-func (s *UnitTestSuite) ParallelTestUncanceled() {
+func (s *UnitTestSuite) TestUncanceled() {
 	ctx, cancel := WithCancelCause(context.Background())
 
-	s.Require().NotNil(ctx.Err())
+	s.Assert().Nil(ctx.Err())
 
 	cancel(errors.New(""))
 }
 
-func (s *UnitTestSuite) ParallelTestTimeoutCause() {
+func (s *UnitTestSuite) TestTimeoutCause() {
 	for _, cause := range []error{
 		fmt.Errorf("just because"),
 		errors.Wrap(context.DeadlineExceeded, "just because"),
@@ -70,7 +70,7 @@ func (s *UnitTestSuite) ParallelTestTimeoutCause() {
 	}
 }
 
-func (s *UnitTestSuite) ParallelTestDeadlineCause() {
+func (s *UnitTestSuite) TestDeadlineCause() {
 	for _, cause := range []error{
 		fmt.Errorf("just because"),
 		errors.Wrap(context.DeadlineExceeded, "just because"),

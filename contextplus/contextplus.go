@@ -40,7 +40,7 @@ import (
 // same name, but the returned Context’s Err() will include both
 // `context.Canceled` and the Cause.
 func WithCancelCause(ctx context.Context) (*C, context.CancelCauseFunc) {
-	//nolint:gocritic
+	//nolint:forbidigo
 	newCtx, cancel := context.WithCancelCause(ctx)
 	return New(newCtx), cancel
 }
@@ -56,7 +56,7 @@ func WithDeadlineCause(
 	cause error,
 ) (*C, context.CancelFunc) {
 	wrappedCause := errors.Wrapf(cause, "deadline (%s) passed", deadline)
-	//nolint:gocritic
+	//nolint:forbidigo
 	newCtx, cancel := context.WithDeadlineCause(ctx, deadline, wrappedCause)
 	return New(newCtx), cancel
 }
@@ -68,7 +68,7 @@ func WithTimeoutCause(
 	cause error,
 ) (*C, context.CancelFunc) {
 	wrappedCause := errors.Wrapf(cause, "timed out after %s", timeout)
-	//nolint:gocritic
+	//nolint:forbidigo
 	newCtx, cancel := context.WithTimeoutCause(ctx, timeout, wrappedCause)
 	return New(newCtx), cancel
 }

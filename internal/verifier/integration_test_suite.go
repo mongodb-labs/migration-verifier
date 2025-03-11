@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/util"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
@@ -78,7 +79,7 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 }
 
 func (suite *IntegrationTestSuite) SetupTest() {
-	ctx, canceller := context.WithCancelCause(context.Background())
+	ctx, canceller := contextplus.WithCancelCause(context.Background())
 	suite.testContext, suite.contextCanceller = ctx, canceller
 	suite.zerologGlobalLogLevel = zerolog.GlobalLevel()
 
