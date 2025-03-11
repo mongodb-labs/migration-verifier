@@ -16,8 +16,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/cespare/permute/v2"
@@ -583,8 +586,6 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	namespace := "testdb.testns"
 
-	ctx := context.Background()
-
 	makeDocChannel := func(docs []bson.D) <-chan bson.Raw {
 		theChan := make(chan bson.Raw, len(docs))
 
@@ -625,12 +626,26 @@ func TestVerifierCompareDocs(t *testing.T) {
 						ShardKeys: indexFields,
 					},
 				}
-				results, docCount, byteCount, err := verifier.compareDocsFromChannels(
-					ctx,
-					&fauxTask,
-					srcChannel,
-					dstChannel,
-				)
+				var results []VerificationResult
+				var docCount types.DocumentCount
+				var byteCount types.ByteCount
+
+				err := retry.New().WithCallback(
+					func(ctx context.Context, fi *retry.FuncInfo) error {
+						var err error
+
+						results, docCount, byteCount, err = verifier.compareDocsFromChannels(
+							ctx,
+							fi,
+							&fauxTask,
+							srcChannel,
+							dstChannel,
+						)
+
+						return err
+					},
+					"comparing documents",
+				).Run(context.Background(), logger.NewDefaultLogger())
 
 				assert.EqualValues(t, len(srcDocs), docCount)
 				assert.Equal(t, len(srcDocs) > 0, byteCount > 0, "byte count should match docs")
