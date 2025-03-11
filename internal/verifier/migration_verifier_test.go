@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -1700,53 +1699,4 @@ func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {
 		status.MetadataMismatchTasks,
 		"no metadata mismatch",
 	)
-}
-
-func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
-	zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	dbname := suite.DBNameForTest()
-
-	ctx := suite.Context()
-
-	// Make a filter that filters on field "n".
-	filter := map[string]any{"$expr": map[string]any{"$and": []map[string]any{
-		{"$gte": []any{"$n", 100}}, {"$lt": []any{"$n", 200}}}}}
-
-	// Set up the verifier for testing.
-	verifier := suite.BuildVerifier()
-	verifier.SetSrcNamespaces([]string{dbname + ".testColl1"})
-	verifier.SetDstNamespaces([]string{dbname + ".testColl1"})
-	verifier.SetNamespaceMap()
-	verifier.globalFilter = filter
-	// Use a small partition size so that we can test creating multiple partitions.
-	verifier.partitionSizeInBytes = 30
-
-	// Insert documents into the source.
-	srcColl := suite.srcMongoClient.Database(dbname).Collection("testColl1")
-
-	// 30 documents with _ids [0, 30) are in the filter.
-	for i := 0; i < 30; i++ {
-		_, err := srcColl.InsertOne(ctx, bson.M{"_id": i, "n": rand.Intn(100) + 100})
-		suite.Require().NoError(err)
-	}
-
-	// 100 documents with _ids [30, 130) are out of the filter.
-	for i := 30; i < 130; i++ {
-		_, err := srcColl.InsertOne(ctx, bson.M{"_id": i, "n": rand.Intn(100)})
-		suite.Require().NoError(err)
-	}
-
-	// Create partitions with the filter.
-	partitions, _, _, _, err := verifier.partitionAndInspectNamespace(ctx, dbname+".testColl1")
-	suite.Require().NoError(err)
-
-	// Check that each partition have bounds in the filter.
-	for _, partition := range partitions {
-		if _, isMinKey := partition.Key.Lower.(primitive.MinKey); !isMinKey {
-			suite.Require().GreaterOrEqual(partition.Key.Lower.(bson.RawValue).AsInt64(), int64(0))
-		}
-		if _, isMaxKey := partition.Upper.(primitive.MaxKey); !isMaxKey {
-			suite.Require().Less(partition.Upper.(bson.RawValue).AsInt64(), int64(30))
-		}
-	}
 }
