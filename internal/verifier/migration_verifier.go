@@ -779,12 +779,14 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 		return nil, nil, 0, 0, err
 	}
 
-	// The partitioner doles out ranges to replicators; we don't use that functionality so we just pass
-	// one "replicator".
-	replicator1 := partitions.Replicator{ID: "verifier"}
-	replicators := []partitions.Replicator{replicator1}
 	partitionList, srcDocs, srcBytes, err := partitions.PartitionCollectionWithSize(
-		ctx, namespaceAndUUID, verifier.srcClient, replicators, verifier.logger, verifier.partitionSizeInBytes, verifier.globalFilter)
+		ctx,
+		verifier.srcClient.
+			Database(namespaceAndUUID.DBName).
+			Collection(namespaceAndUUID.CollName),
+		verifier.logger,
+		verifier.partitionSizeInBytes,
+	)
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
@@ -792,15 +794,16 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 	if len(partitionList) == 0 {
 		partitionList = []*partitions.Partition{{
 			Key: partitions.PartitionKey{
-				SourceUUID:  namespaceAndUUID.UUID,
-				MongosyncID: "verifier"},
+				Lower: primitive.MinKey{},
+			},
 			Ns: &partitions.Namespace{
 				DB:   namespaceAndUUID.DBName,
-				Coll: namespaceAndUUID.CollName}}}
+				Coll: namespaceAndUUID.CollName,
+			},
+			Upper: primitive.MaxKey{},
+		}}
 	}
-	// Use "open" partitions, otherwise out-of-range keys on the destination might be missed
-	partitionList[0].Key.Lower = primitive.MinKey{}
-	partitionList[len(partitionList)-1].Upper = primitive.MaxKey{}
+
 	debugLog := verifier.logger.Debug()
 	if debugLog.Enabled() {
 		debugLog.Msgf("Partitions (%d):", len(partitionList))
