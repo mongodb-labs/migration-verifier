@@ -15,6 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readconcern"
 )
 
 // Partitions is a slice of partitions.
@@ -64,18 +65,20 @@ func PartitionCollectionWithSize(
 		Float64("sampleRate", sampleRate).
 		Msg("Partitioning collection.")
 
-	boundsCursor, err := srcColl.Aggregate(
+	rcColl := srcColl.Database().Client().
+		Database(
+			srcColl.Database().Name(),
+			options.Database().SetReadConcern(readconcern.Available()),
+		).
+		Collection(srcColl.Name())
+
+	boundsCursor, err := rcColl.Aggregate(
 		ctx,
 		mongo.Pipeline{
 			{{"$match", bson.D{{"$sampleRate", sampleRate}}}},
 			{{"$project", bson.D{{"_id", 1}}}},
 		},
 		options.Aggregate().
-			SetCustom(bson.M{
-				"readConcern": bson.M{
-					"level": "available",
-				},
-			}).
 			SetHint(
 				bson.M{
 					"_id": 1,
