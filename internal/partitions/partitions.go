@@ -54,6 +54,10 @@ func PartitionCollectionWithSize(
 		)
 	}
 
+	if collSizeInBytes < partitionSizeInBytes {
+		return nil, types.DocumentCount(collDocCount), types.ByteCount(collSizeInBytes), nil
+	}
+
 	sampleRate := 1 - float64(partitionSizeInBytes)/float64(collSizeInBytes)
 
 	namespace := srcColl.Database().Name() + "." + srcColl.Name()
