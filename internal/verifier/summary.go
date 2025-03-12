@@ -171,7 +171,7 @@ OUTB:
 }
 
 // Boolean returned indicates whether this generation has any tasks.
-func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuilder *strings.Builder, elapsed time.Duration) (bool, error) {
+func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuilder *strings.Builder, now time.Time) (bool, error) {
 	stats, err := verifier.GetNamespaceStatistics(ctx)
 	if err != nil {
 		return false, err
@@ -209,6 +209,8 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		completedNss, totalNss,
 		reportutils.FmtPercent(completedNss, totalNss),
 	))
+
+	elapsed := now.Sub(verifier.generationStartTime)
 
 	docsPerSecond := float64(comparedDocs) / elapsed.Seconds()
 	bytesPerSecond := float64(comparedBytes) / elapsed.Seconds()
@@ -307,7 +309,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 	return true, nil
 }
 
-func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, strBuilder *strings.Builder, elapsed time.Duration) (bool, error) {
+func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, strBuilder *strings.Builder, now time.Time) (bool, error) {
 	stats, err := verifier.GetNamespaceStatistics(ctx)
 	if err != nil {
 		return false, err
@@ -341,6 +343,8 @@ func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, st
 	))
 
 	dataUnit := reportutils.FindBestUnit(comparedBytes)
+
+	elapsed := now.Sub(verifier.generationStartTime)
 
 	docsPerSecond := float64(comparedDocs) / elapsed.Seconds()
 	bytesPerSecond := float64(comparedBytes) / elapsed.Seconds()
@@ -377,7 +381,7 @@ func (verifier *Verifier) printMismatchInvestigationNotes(strBuilder *strings.Bu
 	}
 }
 
-func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, elapsed time.Duration) {
+func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, now time.Time) {
 	var eventsTable *tablewriter.Table
 
 	for _, cluster := range []struct {
@@ -398,6 +402,8 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, e
 			nsTotals[ns] = events.Total()
 			totalEvents += nsTotals[ns]
 		}
+
+		elapsed := now.Sub(verifier.generationStartTime)
 
 		eventsDescr := "none"
 		if totalEvents > 0 {
@@ -461,7 +467,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, e
 	}
 }
 
-func (verifier *Verifier) printWorkerStatus(builder *strings.Builder) {
+func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
 
 	table := tablewriter.NewWriter(builder)
 	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed"})
@@ -492,7 +498,7 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder) {
 				strconv.Itoa(w),
 				wsmap[w].Namespace,
 				taskIdStr,
-				reportutils.DurationToHMS(time.Since(wsmap[w].StartTime)),
+				reportutils.DurationToHMS(now.Sub(wsmap[w].StartTime)),
 			},
 		)
 	}

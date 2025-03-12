@@ -1494,7 +1494,8 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	strBuilder.WriteString(header + "\n\n")
 
-	elapsedSinceGenStart := time.Since(verifier.generationStartTime)
+	now := time.Now()
+	elapsedSinceGenStart := now.Sub(verifier.generationStartTime)
 
 	strBuilder.WriteString(fmt.Sprintf(
 		"Generation time elapsed: %s\n",
@@ -1512,9 +1513,9 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	case Gen0MetadataAnalysisComplete:
 		fallthrough
 	case GenerationInProgress:
-		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder, elapsedSinceGenStart)
+		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder, now)
 	case GenerationComplete:
-		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder)
+		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder, now)
 	default:
 		panic("Bad generation status: " + genstatus)
 	}
@@ -1524,13 +1525,13 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		return
 	}
 
-	verifier.printChangeEventStatistics(strBuilder, elapsedSinceGenStart)
+	verifier.printChangeEventStatistics(strBuilder, now)
 
 	// Only print the worker status table if debug logging is enabled.
 	if verifier.logger.Debug().Enabled() {
 		switch genstatus {
 		case Gen0MetadataAnalysisComplete, GenerationInProgress:
-			verifier.printWorkerStatus(strBuilder)
+			verifier.printWorkerStatus(strBuilder, now)
 		}
 	}
 
