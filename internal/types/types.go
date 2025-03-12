@@ -13,7 +13,8 @@ type NamespaceCount uint64
 // ByteCount represents a count of bytes.
 type ByteCount uint64
 
-type realNumber interface {
+// RealNumber represents any real (i.e., non-complex) number type.
+type RealNumber interface {
 	constraints.Integer | constraints.Float
 }
 
@@ -35,6 +36,6 @@ type realNumber interface {
 //	}
 //
 // ```
-func ToNumericTypeOf[To, From realNumber](value From, _ To) To {
+func ToNumericTypeOf[To, From RealNumber](value From, _ To) To {
 	return To(value)
 }

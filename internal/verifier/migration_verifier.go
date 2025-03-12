@@ -1494,9 +1494,11 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	strBuilder.WriteString(header + "\n\n")
 
+	elapsedSinceGenStart := time.Since(verifier.generationStartTime)
+
 	strBuilder.WriteString(fmt.Sprintf(
 		"Generation time elapsed: %s\n",
-		reportutils.DurationToHMS(time.Since(verifier.generationStartTime)),
+		reportutils.DurationToHMS(elapsedSinceGenStart),
 	))
 
 	metadataMismatches, anyCollsIncomplete, err := verifier.reportCollectionMetadataMismatches(ctx, strBuilder)
@@ -1510,7 +1512,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	case Gen0MetadataAnalysisComplete:
 		fallthrough
 	case GenerationInProgress:
-		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder)
+		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder, elapsedSinceGenStart)
 	case GenerationComplete:
 		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder)
 	default:
@@ -1522,7 +1524,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		return
 	}
 
-	verifier.printChangeEventStatistics(strBuilder)
+	verifier.printChangeEventStatistics(strBuilder, elapsedSinceGenStart)
 
 	// Only print the worker status table if debug logging is enabled.
 	if verifier.logger.Debug().Enabled() {
