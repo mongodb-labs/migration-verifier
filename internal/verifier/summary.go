@@ -14,6 +14,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/olekukonko/tablewriter"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/exp/maps"
@@ -170,7 +171,7 @@ OUTB:
 }
 
 // Boolean returned indicates whether this generation has any tasks.
-func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuilder *strings.Builder) (bool, error) {
+func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuilder *strings.Builder, now time.Time) (bool, error) {
 	stats, err := verifier.GetNamespaceStatistics(ctx)
 	if err != nil {
 		return false, err
@@ -209,7 +210,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		reportutils.FmtPercent(completedNss, totalNss),
 	))
 
-	elapsed := time.Since(verifier.generationStartTime)
+	elapsed := now.Sub(verifier.generationStartTime)
 
 	docsPerSecond := float64(comparedDocs) / elapsed.Seconds()
 	bytesPerSecond := float64(comparedBytes) / elapsed.Seconds()
@@ -308,7 +309,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 	return true, nil
 }
 
-func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, strBuilder *strings.Builder) (bool, error) {
+func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, strBuilder *strings.Builder, now time.Time) (bool, error) {
 	stats, err := verifier.GetNamespaceStatistics(ctx)
 	if err != nil {
 		return false, err
@@ -343,7 +344,7 @@ func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, st
 
 	dataUnit := reportutils.FindBestUnit(comparedBytes)
 
-	elapsed := time.Since(verifier.generationStartTime)
+	elapsed := now.Sub(verifier.generationStartTime)
 
 	docsPerSecond := float64(comparedDocs) / elapsed.Seconds()
 	bytesPerSecond := float64(comparedBytes) / elapsed.Seconds()
@@ -380,7 +381,7 @@ func (verifier *Verifier) printMismatchInvestigationNotes(strBuilder *strings.Bu
 	}
 }
 
-func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
+func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, now time.Time) {
 	var eventsTable *tablewriter.Table
 
 	for _, cluster := range []struct {
@@ -402,9 +403,16 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 			totalEvents += nsTotals[ns]
 		}
 
+		elapsed := now.Sub(verifier.generationStartTime)
+
 		eventsDescr := "none"
 		if totalEvents > 0 {
-			eventsDescr = fmt.Sprintf("%d total, across %d namespace(s)", totalEvents, activeNamespacesCount)
+			eventsDescr = fmt.Sprintf(
+				"%d total (%s/sec), across %d namespace(s)",
+				totalEvents,
+				reportutils.FmtFloat(util.Divide(totalEvents, elapsed.Seconds())),
+				activeNamespacesCount,
+			)
 		}
 
 		builder.WriteString(fmt.Sprintf("\n%s change events this generation: %s\n", cluster.title, eventsDescr))
@@ -459,7 +467,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 	}
 }
 
-func (verifier *Verifier) printWorkerStatus(builder *strings.Builder) {
+func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
 
 	table := tablewriter.NewWriter(builder)
 	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed"})
@@ -490,7 +498,7 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder) {
 				strconv.Itoa(w),
 				wsmap[w].Namespace,
 				taskIdStr,
-				reportutils.DurationToHMS(time.Since(wsmap[w].StartTime)),
+				reportutils.DurationToHMS(now.Sub(wsmap[w].StartTime)),
 			},
 		)
 	}
