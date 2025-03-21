@@ -361,7 +361,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			// a migration. For example, mongosync enables indexes’ uniqueness
 			// constraints and sets capped collection sizes.
 			if opType == modifyEventType && csr.onModifyEvent == onModifyEventIgnore {
-				fmt.Printf("\n============== ignoring event: %+v\n\n", cs.Current)
 				csr.logger.Info().
 					Stringer("changeStream", csr).
 					Stringer("event", cs.Current).
