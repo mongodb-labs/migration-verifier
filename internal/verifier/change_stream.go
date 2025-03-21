@@ -365,6 +365,11 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 					Stringer("changeStream", csr).
 					Interface("event", cs.Current).
 					Msg("This event is probably internal to the migration. Ignoring.")
+
+				// Discard this event, then keep reading.
+				changeEventBatch = changeEventBatch[:len(changeEventBatch)-1]
+
+				continue
 			} else {
 				return UnknownEventError{Event: clone.Clone(cs.Current)}
 			}
