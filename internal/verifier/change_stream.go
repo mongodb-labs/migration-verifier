@@ -364,7 +364,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 				fmt.Printf("\n============== ignoring event: %+v\n\n", cs.Current)
 				csr.logger.Info().
 					Stringer("changeStream", csr).
-					Interface("event", cs.Current).
+					Stringer("event", cs.Current).
 					Msg("This event is probably internal to the migration. Ignoring.")
 
 				// Discard this event, then keep reading.
