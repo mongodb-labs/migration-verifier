@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
+	clone "github.com/huandu/go-clone/generic"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/mo"
@@ -21,7 +22,15 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const fauxDocSizeForDeleteEvents = 1024
+type modifyEventHandling string
+
+const (
+	fauxDocSizeForDeleteEvents = 1024
+
+	modifyEventType = "modify"
+
+	onModifyEventIgnore modifyEventHandling = "ignore"
+)
 
 var supportedEventOpTypes = mapset.NewSet(
 	"insert",
@@ -57,7 +66,7 @@ const (
 )
 
 type UnknownEventError struct {
-	Event *ParsedEvent
+	Event bson.Raw
 }
 
 func (uee UnknownEventError) Error() string {
@@ -85,6 +94,8 @@ type ChangeStreamReader struct {
 	startAtTs *primitive.Timestamp
 
 	lag *msync.TypedAtomic[option.Option[time.Duration]]
+
+	onModifyEvent modifyEventHandling
 }
 
 func (verifier *Verifier) initializeChangeStreamReaders() {
@@ -117,6 +128,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		handlerError:         util.NewEventual[error](),
 		doneChan:             make(chan struct{}),
 		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
+		onModifyEvent:        onModifyEventIgnore,
 	}
 }
 
@@ -343,8 +355,25 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			Int("batchSize", len(changeEventBatch)).
 			Msg("Received a change event.")
 
-		if !supportedEventOpTypes.Contains(changeEventBatch[eventsRead].OpType) {
-			return UnknownEventError{Event: &changeEventBatch[eventsRead]}
+		opType := changeEventBatch[eventsRead].OpType
+		if !supportedEventOpTypes.Contains(opType) {
+
+			// We expect modify events on the destination as part of finalizing
+			// a migration. For example, mongosync enables indexes’ uniqueness
+			// constraints and sets capped collection sizes.
+			if opType == modifyEventType && csr.onModifyEvent == onModifyEventIgnore {
+				csr.logger.Info().
+					Stringer("changeStream", csr).
+					Stringer("event", cs.Current).
+					Msg("This event is probably internal to the migration. Ignoring.")
+
+				// Discard this event, then keep reading.
+				changeEventBatch = changeEventBatch[:len(changeEventBatch)-1]
+
+				continue
+			} else {
+				return UnknownEventError{Event: clone.Clone(cs.Current)}
+			}
 		}
 
 		// This shouldn’t happen, but just in case:

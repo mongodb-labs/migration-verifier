@@ -2,12 +2,15 @@ package verifier
 
 import (
 	"context"
+	"io"
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -15,6 +18,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
@@ -714,7 +718,76 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 
 	eventErr := UnknownEventError{}
 	suite.Require().ErrorAs(err, &eventErr)
-	suite.Assert().Equal("create", eventErr.Event.OpType)
+	suite.Assert().Equal("create", eventErr.Event.Lookup("operationType").StringValue())
+}
+
+func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
+	ctx := suite.Context()
+	buildInfo, err := util.GetClusterInfo(ctx, suite.dstMongoClient)
+	suite.Require().NoError(err)
+
+	if buildInfo.VersionArray[0] < 6 {
+		suite.T().Skipf("This test requires dst server v6+. (Found: %v)", buildInfo.VersionArray)
+	}
+
+	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
+		db := client.Database(suite.DBNameForTest())
+		coll := db.Collection("mycoll")
+		suite.Require().NoError(
+			db.CreateCollection(
+				ctx,
+				coll.Name(),
+				options.CreateCollection().
+					SetCapped(true).
+					SetSizeInBytes(123123).
+					SetMaxDocuments(1000),
+			),
+		)
+	}
+
+	verifier := suite.BuildVerifier()
+
+	logBuffer := &mstrings.SyncBuilder{}
+
+	multiOut := io.MultiWriter(
+		logger.DefaultLogWriter,
+		logBuffer,
+	)
+
+	zlog := verifier.logger.Logger.Output(multiOut)
+	verifier.logger = logger.NewLogger(&zlog, multiOut)
+
+	// start verifier
+	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
+
+	// wait for generation 0 to end
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+	suite.Require().NoError(
+		suite.dstMongoClient.
+			Database(suite.DBNameForTest()).
+			RunCommand(
+				ctx,
+				bson.D{
+					{"collMod", "mycoll"},
+					{"cappedSize", 1001},
+				},
+			).Err(),
+		"should alter capped size",
+	)
+
+	err = verifier.WritesOff(ctx)
+	if err == nil {
+		err = verifierRunner.Await()
+	}
+
+	suite.Require().NoError(err, "should get no error")
+
+	suite.Assert().Contains(
+		logBuffer.String(),
+		"cappedSize",
+		"modify event should be recorded in log",
+	)
 }
 
 func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
