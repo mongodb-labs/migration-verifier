@@ -776,6 +776,14 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 		"should alter capped size",
 	)
 
+	// Run another generation to ensure the collMod gets into the change stream.
+	suite.Require().NoError(
+		verifierRunner.StartNextGeneration(),
+	)
+	suite.Require().NoError(
+		verifierRunner.AwaitGenerationEnd(),
+	)
+
 	err = verifier.WritesOff(ctx)
 	if err == nil {
 		err = verifierRunner.Await()
