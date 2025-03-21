@@ -22,7 +22,14 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const fauxDocSizeForDeleteEvents = 1024
+type modifyEventHandling string
+
+const (
+	fauxDocSizeForDeleteEvents = 1024
+
+	onModifyEventIgnore modifyEventHandling = "ignore"
+	modifyEventType                         = "modify"
+)
 
 var supportedEventOpTypes = mapset.NewSet(
 	"insert",
@@ -64,12 +71,6 @@ type UnknownEventError struct {
 func (uee UnknownEventError) Error() string {
 	return fmt.Sprintf("received event with unknown optype: %+v", uee.Event)
 }
-
-type modifyEventHandling string
-
-const (
-	onModifyEventDiscard modifyEventHandling = "discard"
-)
 
 type ChangeStreamReader struct {
 	readerType whichCluster
@@ -126,7 +127,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		handlerError:         util.NewEventual[error](),
 		doneChan:             make(chan struct{}),
 		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
-		onModifyEvent:        onModifyEventDiscard,
+		onModifyEvent:        onModifyEventIgnore,
 	}
 }
 
@@ -359,11 +360,11 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			// We expect modify events on the destination as part of finalizing
 			// a migration. For example, mongosync enables indexes’ uniqueness
 			// constraints and sets capped collection sizes.
-			if opType == "modify" && csr.onModifyEvent == onModifyEventDiscard {
+			if opType == modifyEventType && csr.onModifyEvent == onModifyEventIgnore {
 				csr.logger.Info().
 					Stringer("changeStream", csr).
 					Interface("event", cs.Current).
-					Msg("This event is probably internal to the migration. Discarding.")
+					Msg("This event is probably internal to the migration. Ignoring.")
 			} else {
 				return UnknownEventError{Event: clone.Clone(cs.Current)}
 			}
