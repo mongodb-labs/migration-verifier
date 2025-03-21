@@ -729,18 +729,20 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 		suite.T().Skipf("This test requires dst server v6+. (Found: %v)", buildInfo.VersionArray)
 	}
 
-	db := suite.srcMongoClient.Database(suite.DBNameForTest())
-	coll := db.Collection("mycoll")
-	suite.Require().NoError(
-		db.CreateCollection(
-			ctx,
-			coll.Name(),
-			options.CreateCollection().
-				SetCapped(true).
-				SetSizeInBytes(123123).
-				SetMaxDocuments(1000),
-		),
-	)
+	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
+		db := client.Database(suite.DBNameForTest())
+		coll := db.Collection("mycoll")
+		suite.Require().NoError(
+			db.CreateCollection(
+				ctx,
+				coll.Name(),
+				options.CreateCollection().
+					SetCapped(true).
+					SetSizeInBytes(123123).
+					SetMaxDocuments(1000),
+			),
+		)
+	}
 
 	verifier := suite.BuildVerifier()
 
