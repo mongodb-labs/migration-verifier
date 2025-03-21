@@ -717,7 +717,7 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 
 	eventErr := UnknownEventError{}
 	suite.Require().ErrorAs(err, &eventErr)
-	suite.Assert().Equal("create", eventErr.Event.Lookup("operationType"))
+	suite.Assert().Equal("create", eventErr.Event.Lookup("operationType").StringValue())
 }
 
 func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
@@ -737,6 +737,7 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 			coll.Name(),
 			options.CreateCollection().
 				SetCapped(true).
+				SetSizeInBytes(123123).
 				SetMaxDocuments(1000),
 		),
 	)
