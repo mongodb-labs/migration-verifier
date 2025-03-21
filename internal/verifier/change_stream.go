@@ -27,8 +27,9 @@ type modifyEventHandling string
 const (
 	fauxDocSizeForDeleteEvents = 1024
 
+	modifyEventType = "modify"
+
 	onModifyEventIgnore modifyEventHandling = "ignore"
-	modifyEventType                         = "modify"
 )
 
 var supportedEventOpTypes = mapset.NewSet(
