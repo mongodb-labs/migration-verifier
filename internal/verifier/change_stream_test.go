@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -746,7 +747,7 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 
 	verifier := suite.BuildVerifier()
 
-	logBuffer := &strings.Builder{}
+	logBuffer := &mstrings.SyncBuilder{}
 
 	multiOut := io.MultiWriter(
 		logger.DefaultLogWriter,
