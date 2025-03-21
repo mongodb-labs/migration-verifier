@@ -360,19 +360,21 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			// We expect modify events on the destination as part of finalizing
 			// a migration. For example, mongosync enables indexes’ uniqueness
 			// constraints and sets capped collection sizes.
-			if opType == modifyEventType && csr.onModifyEvent == onModifyEventIgnore {
-				csr.logger.Info().
-					Stringer("changeStream", csr).
-					Interface("event", cs.Current).
-					Msg("This event is probably internal to the migration. Ignoring.")
+			/*
+				if opType == modifyEventType && csr.onModifyEvent == onModifyEventIgnore {
+					csr.logger.Info().
+						Stringer("changeStream", csr).
+						Interface("event", cs.Current).
+						Msg("This event is probably internal to the migration. Ignoring.")
 
-				// Discard this event, then keep reading.
-				changeEventBatch = changeEventBatch[:len(changeEventBatch)-1]
+					// Discard this event, then keep reading.
+					changeEventBatch = changeEventBatch[:len(changeEventBatch)-1]
 
-				continue
-			} else {
-				return UnknownEventError{Event: clone.Clone(cs.Current)}
-			}
+					continue
+				} else {
+			*/
+			return UnknownEventError{Event: clone.Clone(cs.Current)}
+			//}
 		}
 
 		// This shouldn’t happen, but just in case:
