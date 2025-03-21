@@ -714,7 +714,31 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 
 	eventErr := UnknownEventError{}
 	suite.Require().ErrorAs(err, &eventErr)
-	suite.Assert().Equal("create", eventErr.Event.OpType)
+	suite.Assert().Equal("create", eventErr.Event.Lookup("operationType"))
+}
+
+func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
+	ctx := suite.Context()
+	buildInfo, err := util.GetClusterInfo(ctx, suite.srcMongoClient)
+	suite.Require().NoError(err)
+
+	if buildInfo.VersionArray[0] < 6 {
+		suite.T().Skipf("This test requires server v6+. (Found: %v)", buildInfo.VersionArray)
+	}
+
+	verifier := suite.BuildVerifier()
+
+	// start verifier
+	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
+
+	// wait for generation 0 to end
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	coll := db.Collection("mycoll")
+	suite.Require().NoError(
+		db.CreateCollection(ctx, coll.Name()),
+	)
 }
 
 func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
