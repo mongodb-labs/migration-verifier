@@ -722,11 +722,11 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 
 func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 	ctx := suite.Context()
-	buildInfo, err := util.GetClusterInfo(ctx, suite.srcMongoClient)
+	buildInfo, err := util.GetClusterInfo(ctx, suite.dstMongoClient)
 	suite.Require().NoError(err)
 
 	if buildInfo.VersionArray[0] < 6 {
-		suite.T().Skipf("This test requires server v6+. (Found: %v)", buildInfo.VersionArray)
+		suite.T().Skipf("This test requires dst server v6+. (Found: %v)", buildInfo.VersionArray)
 	}
 
 	db := suite.srcMongoClient.Database(suite.DBNameForTest())
