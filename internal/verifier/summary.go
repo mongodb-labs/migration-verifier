@@ -15,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/dustin/go-humanize"
 	"github.com/olekukonko/tablewriter"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/exp/maps"
@@ -98,8 +99,14 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		missingOrChangedCount += len(task.Ids)
 	}
 
-	failureTypesTable.Append([]string{"Documents With Differing Content", fmt.Sprintf("%v", contentMismatchCount)})
-	failureTypesTable.Append([]string{"Missing or Changed Documents", fmt.Sprintf("%v", missingOrChangedCount)})
+	failureTypesTable.Append([]string{
+		"Documents With Differing Content",
+		fmt.Sprintf("%v", humanize.Comma(int64(contentMismatchCount))),
+	})
+	failureTypesTable.Append([]string{
+		"Missing or Changed Documents",
+		fmt.Sprintf("%v", humanize.Comma(int64(missingOrChangedCount))),
+	})
 	strBuilder.WriteString("Failure summary:\n")
 	failureTypesTable.Render()
 
@@ -222,13 +229,13 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 			comparedDocs,
 			totalDocs,
 			reportutils.FmtPercent(comparedDocs, totalDocs),
-			reportutils.FmtFloat(docsPerSecond),
+			reportutils.FmtReal(docsPerSecond),
 		))
 	} else {
 		strBuilder.WriteString(fmt.Sprintf(
 			"Total source documents compared: %d (%s/sec)\n",
 			comparedDocs,
-			reportutils.FmtFloat(docsPerSecond),
+			reportutils.FmtReal(docsPerSecond),
 		))
 	}
 
@@ -353,7 +360,7 @@ func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, st
 	strBuilder.WriteString(fmt.Sprintf(
 		"Source documents compared: %d (%s/sec)\n",
 		comparedDocs,
-		reportutils.FmtFloat(docsPerSecond),
+		reportutils.FmtReal(docsPerSecond),
 	))
 	strBuilder.WriteString(fmt.Sprintf(
 		"Total size of those documents: %s %s (%s %s/sec)\n",
@@ -410,7 +417,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, n
 			eventsDescr = fmt.Sprintf(
 				"%d total (%s/sec), across %d namespace(s)",
 				totalEvents,
-				reportutils.FmtFloat(util.Divide(totalEvents, elapsed.Seconds())),
+				reportutils.FmtReal(util.Divide(totalEvents, elapsed.Seconds())),
 				activeNamespacesCount,
 			)
 		}
