@@ -93,7 +93,7 @@ func (s *UnitTestSuite) TestBytesToUnit() {
 		{1024, KiB, "1"},
 		{1124, KiB, "1.1"},
 		{1124000, KiB, "1,097.66"},
-		{math.MaxUint64, Bytes, "18,446,744,073,709,551,615"},
+		{math.MaxInt64, Bytes, "9,223,372,036,854,775,807"},
 	}
 
 	for _, tt := range tests {
