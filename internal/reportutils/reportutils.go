@@ -103,7 +103,9 @@ func BytesToUnit[T num16Plus](count T, unit DataUnit) string {
 // FmtFloat provides a standard formatting of floats, with a consistent
 // precision and trailing decimal zeros removed.
 func FmtFloat[T constraints.Float](num T) string {
-	return humanize.Ftoa(roundFloat(float64(num), decimalPrecision))
+	return humanize.Commaf(
+		roundFloat(float64(num), decimalPrecision),
+	)
 }
 
 func fmtQuotient[T, U realNum](dividend T, divisor U) string {
