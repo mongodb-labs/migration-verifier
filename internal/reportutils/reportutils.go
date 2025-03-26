@@ -6,22 +6,15 @@ package reportutils
 import (
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/dustin/go-humanize"
 	"golang.org/x/exp/constraints"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
 )
 
 const decimalPrecision = 2
-
-var realNumFmtPattern = "%." + strconv.Itoa(decimalPrecision) + "f"
-
-var printer = message.NewPrinter(language.AmericanEnglish)
 
 // num16Plus is like realNum, but it excludes 8-bit int/uint.
 type num16Plus interface {
@@ -111,7 +104,16 @@ func BytesToUnit[T num16Plus](count T, unit DataUnit) string {
 // FmtReal provides a standard formatting of real numbers, with a consistent
 // precision and trailing decimal zeros removed.
 func FmtReal[T types.RealNumber](num T) string {
-	return printer.Sprintf(realNumFmtPattern, num)
+	return humanize.Commaf(roundFloat(float64(num), decimalPrecision))
+}
+
+func isIntegerValue[T types.RealNumber](num T) bool {
+	return float64(num) == math.Round(float64(num))
+}
+
+func roundFloat(val float64, precision uint) float64 {
+	ratio := math.Pow10(int(precision))
+	return math.Round(val*ratio) / ratio
 }
 
 func fmtQuotient[T, U realNum](dividend T, divisor U) string {
