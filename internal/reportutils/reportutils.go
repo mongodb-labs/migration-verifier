@@ -124,7 +124,7 @@ func roundFloat(val float64, precision uint) float64 {
 }
 
 func fmtQuotient[T, U realNum](dividend T, divisor U) string {
-	return FmtReal(float64(dividend) / float64(divisor))
+	return FmtReal(util.Divide(dividend, divisor))
 }
 
 // FmtPercent returns a stringified percentage without a trailing `%`,
