@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
@@ -12,7 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -98,7 +98,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	docIDIndexes := lo.Range(len(documentIDs))
 	indexesPerThread := splitToChunks(docIDIndexes, verifier.numWorkers)
 
-	eg, groupCtx := errgroup.WithContext(ctx)
+	eg, groupCtx := contextplus.ErrGroup(ctx)
 
 	for _, curThreadIndexes := range indexesPerThread {
 		curThreadIndexes := curThreadIndexes
