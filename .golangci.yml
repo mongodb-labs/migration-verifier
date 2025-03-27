@@ -31,3 +31,5 @@ linters-settings:
         msg: Use contextplus.
       - p: context\.WithDeadline(?:Cause)?
         msg: Use contextplus.
+      - p: errgroup.WithContext
+        msg: Use contextplus.
