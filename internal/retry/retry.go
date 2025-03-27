@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -13,7 +14,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
-	"golang.org/x/sync/errgroup"
 )
 
 type RetryCallback = func(context.Context, *FuncInfo) error
@@ -95,7 +95,7 @@ func (r *Retryer) runRetryLoop(
 			beforeFunc()
 		}
 
-		eg, egCtx := errgroup.WithContext(ctx)
+		eg, egCtx := contextplus.ErrGroup(ctx)
 
 		for i, curCbInfo := range r.callbacks {
 			curFunc := curCbInfo.callback

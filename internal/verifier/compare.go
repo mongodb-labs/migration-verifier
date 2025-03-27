@@ -5,6 +5,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -12,7 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/exp/slices"
-	"golang.org/x/sync/errgroup"
 )
 
 const readTimeout = 10 * time.Minute
@@ -173,7 +173,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 		var srcDoc, dstDoc bson.Raw
 
-		eg, egCtx := errgroup.WithContext(ctx)
+		eg, egCtx := contextplus.ErrGroup(ctx)
 
 		if !srcClosed {
 			eg.Go(func() error {

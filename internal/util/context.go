@@ -36,5 +36,12 @@ func WrapCtxErrWithCause(ctx context.Context) error {
 		return cause
 	}
 
+	// This can happen if the given ctx is a contextplus, or some other
+	// context.Context immplementation that includes the cause in the
+	// context’s Err().
+	if errors.Is(err, cause) {
+		return err
+	}
+
 	return fmt.Errorf("%w: %w", err, cause)
 }

@@ -1,6 +1,7 @@
 linters:
   enable:
     - errcheck
+    - forbidigo
     - gosimple
     - govet
     - ineffassign
@@ -22,3 +23,13 @@ linters-settings:
         # Unkeyed primitive.E and timestamp fields are used extensively in code taken from
         # mongosync.
         - composites
+  forbidigo:
+    forbid:
+      - p: context\.WithCancel(?:Cause)?
+        msg: Use contextplus.
+      - p: context\.WithTimeout(?:Cause)?
+        msg: Use contextplus.
+      - p: context\.WithDeadline(?:Cause)?
+        msg: Use contextplus.
+      - p: errgroup.WithContext
+        msg: Use contextplus.

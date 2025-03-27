@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -61,7 +62,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
 			bson.D{{"$set", bson.D{{"foo", 123}}}})
 	suite.Require().NoError(err)
 
-	timedCtx, cancel := context.WithTimeoutCause(
+	timedCtx, cancel := contextplus.WithTimeoutCause(
 		ctx,
 		time.Minute,
 		errors.New("should have gotten an event"),
@@ -219,13 +220,13 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	func() {
 		verifier1 := suite.BuildVerifier()
-		ctx, cancel := context.WithCancel(suite.Context())
-		defer cancel()
+		ctx, cancel := contextplus.WithCancelCause(suite.Context())
+		defer cancel(errors.New("finished change stream handling"))
 		suite.startSrcChangeStreamReaderAndHandler(ctx, verifier1)
 	}()
 
-	ctx, cancel := context.WithCancel(suite.Context())
-	defer cancel()
+	ctx, cancel := contextplus.WithCancelCause(suite.Context())
+	defer cancel(errors.New("finished test"))
 
 	_, err := suite.srcMongoClient.
 		Database(suite.DBNameForTest()).
