@@ -76,7 +76,7 @@ func WithTimeoutCause(
 // ErrGroup is like the standard library’s `errgroup.WithContext()`, but
 // it returns a context from this package.
 func ErrGroup(ctx context.Context) (*errgroup.Group, *C) {
-	//nolint:gocritic
+	//nolint:forbidigo
 	group, ctx2 := errgroup.WithContext(ctx)
 
 	return group, New(ctx2)
