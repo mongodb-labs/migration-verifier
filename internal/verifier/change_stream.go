@@ -190,9 +190,15 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 	docIDs := make([]interface{}, len(batch))
 	dataSizes := make([]int, len(batch))
 
+	latestTimestamp := primitive.Timestamp{}
+
 	for i, changeEvent := range batch {
 		if !supportedEventOpTypes.Contains(changeEvent.OpType) {
 			panic(fmt.Sprintf("Unsupported optype in event; should have failed already! event=%+v", changeEvent))
+		}
+
+		if changeEvent.ClusterTime.After(latestTimestamp) {
+			latestTimestamp = *changeEvent.ClusterTime
 		}
 
 		var srcDBName, srcCollName string
@@ -252,6 +258,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 	verifier.logger.Debug().
 		Str("origin", string(eventOrigin)).
 		Int("count", len(docIDs)).
+		Interface("latestClusterTime", latestTimestamp).
 		Msg("Persisting rechecks for change events.")
 
 	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes)

@@ -685,6 +685,8 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		Int("workerNum", workerNum).
 		Interface("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace).
+		Int64("documentCount", int64(docsCount)).
+		Str("dataSize", reportutils.FmtBytes(bytesCount)).
 		Stringer("timeElapsed", time.Since(start)).
 		Msg("Finished document comparison task.")
 
@@ -1494,8 +1496,8 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	strBuilder.WriteString(header + "\n\n")
 
-	now := time.Now()
-	elapsedSinceGenStart := now.Sub(verifier.generationStartTime)
+	reportGenStartTime := time.Now()
+	elapsedSinceGenStart := reportGenStartTime.Sub(verifier.generationStartTime)
 
 	strBuilder.WriteString(fmt.Sprintf(
 		"Generation time elapsed: %s\n",
@@ -1513,9 +1515,9 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	case Gen0MetadataAnalysisComplete:
 		fallthrough
 	case GenerationInProgress:
-		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder, now)
+		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder, reportGenStartTime)
 	case GenerationComplete:
-		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder, now)
+		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder, reportGenStartTime)
 	default:
 		panic("Bad generation status: " + genstatus)
 	}
@@ -1525,13 +1527,13 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		return
 	}
 
-	verifier.printChangeEventStatistics(strBuilder, now)
+	verifier.printChangeEventStatistics(strBuilder, reportGenStartTime)
 
 	// Only print the worker status table if debug logging is enabled.
 	if verifier.logger.Debug().Enabled() {
 		switch genstatus {
 		case Gen0MetadataAnalysisComplete, GenerationInProgress:
-			verifier.printWorkerStatus(strBuilder, now)
+			verifier.printWorkerStatus(strBuilder, reportGenStartTime)
 		}
 	}
 
@@ -1569,6 +1571,13 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	}
 
 	strBuilder.WriteString("\n" + statusLine + "\n")
+
+	strBuilder.WriteString(
+		fmt.Sprintf(
+			"\nTime to generate this report: %s\n",
+			reportutils.DurationToHMS(time.Since(reportGenStartTime)),
+		),
+	)
 
 	verifier.writeStringBuilder(strBuilder)
 }
