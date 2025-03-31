@@ -18,7 +18,7 @@ var someNetworkError = &mongo.CommandError{
 	Name:   "NetworkError",
 }
 
-var errBad = errors.New("i am fatal")
+var errBad = errors.New("fatal am I")
 
 func (suite *UnitTestSuite) TestRetryer() {
 	retryer := New()
