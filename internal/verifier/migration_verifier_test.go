@@ -152,6 +152,9 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
 			DocKey: DocKey{
 				ID: "heyhey",
 			},
+			ClusterTime: &primitive.Timestamp{
+				T: uint32(time.Now().Unix()),
+			},
 		}},
 		src,
 	)
@@ -167,6 +170,9 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
 			Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
 			DocKey: DocKey{
 				ID: "hoohoo",
+			},
+			ClusterTime: &primitive.Timestamp{
+				T: uint32(time.Now().Unix()),
 			},
 		}},
 		src,
