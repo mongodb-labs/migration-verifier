@@ -20,6 +20,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/exp/slices"
 )
 
 type modifyEventHandling string
@@ -272,7 +273,13 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline) {
 	if len(csr.namespaces) == 0 {
 		pipeline = mongo.Pipeline{
-			{{"$match", util.ExcludePrefixesQuery("ns.db", MongosyncMetaDBPrefixes)}},
+			{{"$match", util.ExcludePrefixesQuery(
+				"ns.db",
+				append(
+					slices.Clone(MongosyncMetaDBPrefixes),
+					csr.metaDB.Name(),
+				),
+			)}},
 		}
 	} else {
 		filter := []bson.D{}
