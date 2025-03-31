@@ -1,6 +1,7 @@
 package reportutils
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -88,9 +89,11 @@ func (s *UnitTestSuite) TestBytesToUnit() {
 	}{
 		{1, Bytes, "1"},
 		{2, Bytes, "2"},
-		{1024, Bytes, "1024"},
+		{1024, Bytes, "1,024"},
 		{1024, KiB, "1"},
 		{1124, KiB, "1.1"},
+		{1124000, KiB, "1,097.66"},
+		{math.MaxInt64, Bytes, "9,223,372,036,854,775,807"},
 	}
 
 	for _, tt := range tests {
