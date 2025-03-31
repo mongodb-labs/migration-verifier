@@ -1580,11 +1580,10 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	strBuilder.WriteString("\n" + statusLine + "\n")
 
-	strBuilder.WriteString(
-		fmt.Sprintf(
-			"\nTime elapsed during report generation: %s\n",
-			reportutils.DurationToHMS(time.Since(reportGenStartTime)),
-		),
+	fmt.Fprintf(
+		strBuilder,
+		"\nTime elapsed during report generation: %s\n",
+		reportutils.DurationToHMS(time.Since(reportGenStartTime)),
 	)
 
 	verifier.writeStringBuilder(strBuilder)
