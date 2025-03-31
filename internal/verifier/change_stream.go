@@ -197,6 +197,9 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 			panic(fmt.Sprintf("Unsupported optype in event; should have failed already! event=%+v", changeEvent))
 		}
 
+		if changeEvent.ClusterTime == nil {
+			panic(fmt.Sprintf("empty cluster time?? %+v", changeEvent))
+		}
 		if changeEvent.ClusterTime.After(latestTimestamp) {
 			latestTimestamp = *changeEvent.ClusterTime
 		}
