@@ -103,7 +103,7 @@ func (bc bufferConsumer) hasUint8() bool {
 
 func (bc *bufferConsumer) readUint8() (uint8, error) {
 	if bc.index >= len(bc.buf) {
-		return 0, errors.New("Unexpected end of input")
+		return 0, errors.New("unexpected end of input")
 	}
 	bc.index++
 	return bc.buf[bc.index-1], nil
@@ -544,7 +544,7 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (inte
 		}
 		return bin, nil
 	default:
-		return nil, fmt.Errorf("Unknown keystring ctype %v", ctype)
+		return nil, fmt.Errorf("unknown keystring ctype %v", ctype)
 	}
 }
 

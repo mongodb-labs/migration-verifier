@@ -131,7 +131,7 @@ func bsonUnorderedCompareRawArray(srcRaw, dstRaw bson.Raw) (bool, error) {
 	for i, srcElement := range srcElements {
 		dstElement := dstElements[i]
 		if srcElement.Key() != dstElement.Key() {
-			return false, fmt.Errorf("Array keys differ: %s %s", srcElement.Key(), dstElement.Key())
+			return false, fmt.Errorf("array keys differ: %s %s", srcElement.Key(), dstElement.Key())
 		}
 		matches, err := bsonUnorderedCompareRawValue(srcElement.Value(), dstElement.Value())
 		if err != nil || !matches {
