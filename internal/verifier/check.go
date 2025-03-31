@@ -9,7 +9,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/mtime"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
@@ -144,13 +143,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 			if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 {
 				waitForTaskCreation++
 
-				err := mtime.Sleep(ctx, verifier.verificationStatusCheckInterval)
-				if err != nil {
-					return errors.Wrapf(
-						err,
-						"interrupted between generation status checks",
-					)
-				}
+				time.Sleep(verifier.verificationStatusCheckInterval)
 			} else {
 				verifier.PrintVerificationSummary(ctx, GenerationComplete)
 				finishedAllTasks = true
@@ -550,9 +543,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			duration := verifier.workerSleepDelayMillis * time.Millisecond
 
 			if duration > 0 {
-				if err := mtime.Sleep(ctx, duration); err != nil {
-					return err
-				}
+				time.Sleep(duration)
 			}
 
 			continue
