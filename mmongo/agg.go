@@ -2,9 +2,10 @@ package mmongo
 
 import "go.mongodb.org/mongo-driver/bson"
 
-// StartsWithAgg indicates whether the referent field begins with the
-// “besought” string. Equivalent to String.prototype.startsWith(besought)
-// in JavaScript.
+// StartsWithAgg returns an aggregation expression that indicates whether
+// the referent field begins with the “besought” string.
+//
+// Equivalent to JavaScript String.prototype.startsWith(besought).
 func StartsWithAgg(fieldRef string, besought string) bson.D {
 	return bson.D{
 		{"$eq", bson.A{
