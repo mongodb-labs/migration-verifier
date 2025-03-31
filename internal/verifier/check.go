@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -13,7 +14,6 @@ import (
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"golang.org/x/sync/errgroup"
 )
 
 type GenerationStatus string
@@ -84,8 +84,8 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	verifier.writeStringBuilder(genStartReport)
 
-	cancelableCtx, canceler := context.WithCancelCause(ctxIn)
-	eg, ctx := errgroup.WithContext(cancelableCtx)
+	cancelableCtx, canceler := contextplus.WithCancelCause(ctxIn)
+	eg, ctx := contextplus.ErrGroup(cancelableCtx)
 
 	// If the change stream fails, everything should stop.
 	eg.Go(func() error {
@@ -250,7 +250,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 		verifier.phase = Idle
 	}()
 
-	ceHandlerGroup, groupCtx := errgroup.WithContext(ctx)
+	ceHandlerGroup, groupCtx := contextplus.ErrGroup(ctx)
 	for _, csReader := range []*ChangeStreamReader{verifier.srcChangeStreamReader, verifier.dstChangeStreamReader} {
 		if csReader.changeStreamRunning {
 			verifier.logger.Debug().Msgf("Check: %s already running.", csReader)
