@@ -434,7 +434,7 @@ func getErrorRaw(err error) bson.Raw {
 	// A bulk write error, consisting
 	// of a single write error.
 	case mongo.BulkWriteError:
-		return e.WriteError.Raw
+		return e.Raw
 
 	// An error with 1 or more bulk write errors.
 	// We return the first bulk write error's Raw error.

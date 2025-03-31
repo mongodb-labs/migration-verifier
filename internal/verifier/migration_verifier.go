@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	_ "net/http/pprof"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,6 +22,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/dustin/go-humanize"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -106,12 +106,12 @@ type Verifier struct {
 	// every collection.
 	gen0PendingCollectionTasks atomic.Int32
 
-	generationStartTime        time.Time
-	generationPauseDelayMillis time.Duration
-	workerSleepDelayMillis     time.Duration
-	ignoreBSONFieldOrder       bool
-	verifyAll                  bool
-	startClean                 bool
+	generationStartTime  time.Time
+	generationPauseDelay time.Duration
+	workerSleepDelay     time.Duration
+	ignoreBSONFieldOrder bool
+	verifyAll            bool
+	startClean           bool
 
 	// This would seem more ideal as uint64, but changing it would
 	// trigger several other similar type changes, and that’s not really
@@ -354,11 +354,11 @@ func (verifier *Verifier) SetNumWorkers(arg int) {
 }
 
 func (verifier *Verifier) SetGenerationPauseDelayMillis(arg time.Duration) {
-	verifier.generationPauseDelayMillis = arg
+	verifier.generationPauseDelay = arg
 }
 
 func (verifier *Verifier) SetWorkerSleepDelayMillis(arg time.Duration) {
-	verifier.workerSleepDelayMillis = arg
+	verifier.workerSleepDelay = arg
 }
 
 // SetPartitionSizeMB sets the verifier’s maximum partition size in MiB.
@@ -427,7 +427,13 @@ func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []strin
 		db, coll := SplitNamespace(n)
 		if db != "" {
 			s, _ := client.Database(db).Collection(coll).EstimatedDocumentCount(ctx)
-			table.Append([]string{strconv.FormatInt(s, 10), db, coll})
+			table.Append(
+				[]string{
+					humanize.Comma(s),
+					db,
+					coll,
+				},
+			)
 		}
 	}
 	table.Render()
@@ -1466,9 +1472,10 @@ func startReport() *strings.Builder {
 	timestampAndSpace := time.Now().Format(timeFormat) + " "
 	divider := strings.Repeat(dividerChar, dividerWidth-len(timestampAndSpace))
 
-	strBuilder.WriteString(fmt.Sprintf(
+	fmt.Fprintf(
+		strBuilder,
 		"\n%s%s\n\n", timestampAndSpace, divider,
-	))
+	)
 
 	return strBuilder
 }
@@ -1499,10 +1506,11 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	reportGenStartTime := time.Now()
 	elapsedSinceGenStart := reportGenStartTime.Sub(verifier.generationStartTime)
 
-	strBuilder.WriteString(fmt.Sprintf(
+	fmt.Fprintf(
+		strBuilder,
 		"Generation time elapsed: %s\n",
 		reportutils.DurationToHMS(elapsedSinceGenStart),
-	))
+	)
 
 	metadataMismatches, anyCollsIncomplete, err := verifier.reportCollectionMetadataMismatches(ctx, strBuilder)
 	if err != nil {

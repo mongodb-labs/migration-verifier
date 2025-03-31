@@ -115,7 +115,7 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 		var ok bool
 		dstNamespace, ok = verifier.nsMap.GetDstNamespace(srcNamespace)
 		if !ok {
-			return nil, fmt.Errorf("Could not find Namespace %s", srcNamespace)
+			return nil, fmt.Errorf("could not find Namespace %s", srcNamespace)
 		}
 	}
 
@@ -211,7 +211,7 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 		var ok bool
 		dstNamespace, ok = verifier.nsMap.GetDstNamespace(srcNamespace)
 		if !ok {
-			return nil, fmt.Errorf("Could not find Namespace %s", srcNamespace)
+			return nil, fmt.Errorf("could not find namespace %s", srcNamespace)
 		}
 	}
 

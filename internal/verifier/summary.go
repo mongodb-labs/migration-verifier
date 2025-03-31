@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -98,8 +97,14 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		missingOrChangedCount += len(task.Ids)
 	}
 
-	failureTypesTable.Append([]string{"Documents With Differing Content", fmt.Sprintf("%v", contentMismatchCount)})
-	failureTypesTable.Append([]string{"Missing or Changed Documents", fmt.Sprintf("%v", missingOrChangedCount)})
+	failureTypesTable.Append([]string{
+		"Documents With Differing Content",
+		fmt.Sprintf("%v", reportutils.FmtReal(contentMismatchCount)),
+	})
+	failureTypesTable.Append([]string{
+		"Missing or Changed Documents",
+		fmt.Sprintf("%v", reportutils.FmtReal(missingOrChangedCount)),
+	})
 	strBuilder.WriteString("Failure summary:\n")
 	failureTypesTable.Render()
 
@@ -131,7 +136,7 @@ OUTA:
 		if printAll {
 			strBuilder.WriteString("All documents in tasks in failed status due to differing content:\n")
 		} else {
-			strBuilder.WriteString(fmt.Sprintf("First %d documents in tasks in failed status due to differing content:\n", verifier.failureDisplaySize))
+			fmt.Fprintf(strBuilder, "First %d documents in tasks in failed status due to differing content:\n", verifier.failureDisplaySize)
 		}
 		mismatchedDocsTable.Render()
 	}
@@ -162,7 +167,7 @@ OUTB:
 		if printAll {
 			strBuilder.WriteString("All documents marked missing or changed:\n")
 		} else {
-			strBuilder.WriteString(fmt.Sprintf("First %d documents marked missing or changed:\n", verifier.failureDisplaySize))
+			fmt.Fprintf(strBuilder, "First %d documents marked missing or changed:\n", verifier.failureDisplaySize)
 		}
 		missingOrChangedDocsTable.Render()
 	}
@@ -204,11 +209,13 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 
 	strBuilder.WriteString("\n")
 
-	strBuilder.WriteString(fmt.Sprintf(
-		"Namespaces completed: %d of %d (%s%%)\n",
-		completedNss, totalNss,
+	fmt.Fprintf(
+		strBuilder,
+		"Namespaces completed: %s of %s (%s%%)\n",
+		reportutils.FmtReal(completedNss),
+		reportutils.FmtReal(totalNss),
 		reportutils.FmtPercent(completedNss, totalNss),
-	))
+	)
 
 	elapsed := now.Sub(verifier.generationStartTime)
 
@@ -217,25 +224,28 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 	perSecondDataUnit := reportutils.FindBestUnit(bytesPerSecond)
 
 	if totalDocs > 0 {
-		strBuilder.WriteString(fmt.Sprintf(
-			"Total source documents compared: %d of %d (%s%%, %s/sec)\n",
-			comparedDocs,
-			totalDocs,
+		fmt.Fprintf(
+			strBuilder,
+			"Total source documents compared: %s of %s (%s%%, %s/sec)\n",
+			reportutils.FmtReal(comparedDocs),
+			reportutils.FmtReal(totalDocs),
 			reportutils.FmtPercent(comparedDocs, totalDocs),
-			reportutils.FmtFloat(docsPerSecond),
-		))
+			reportutils.FmtReal(docsPerSecond),
+		)
 	} else {
-		strBuilder.WriteString(fmt.Sprintf(
-			"Total source documents compared: %d (%s/sec)\n",
-			comparedDocs,
-			reportutils.FmtFloat(docsPerSecond),
-		))
+		fmt.Fprintf(
+			strBuilder,
+			"Total source documents compared: %s (%s/sec)\n",
+			reportutils.FmtReal(comparedDocs),
+			reportutils.FmtReal(docsPerSecond),
+		)
 	}
 
 	if totalBytes > 0 {
 		dataUnit := reportutils.FindBestUnit(totalBytes)
 
-		strBuilder.WriteString(fmt.Sprintf(
+		fmt.Fprintf(
+			strBuilder,
 			"Total size of those documents: %s of %s %s (%s%%, %s %s/sec)\n",
 			reportutils.BytesToUnit(comparedBytes, dataUnit),
 			reportutils.BytesToUnit(totalBytes, dataUnit),
@@ -243,17 +253,18 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 			reportutils.FmtPercent(comparedBytes, totalBytes),
 			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
 			perSecondDataUnit,
-		))
+		)
 	} else {
 		dataUnit := reportutils.FindBestUnit(comparedBytes)
 
-		strBuilder.WriteString(fmt.Sprintf(
+		fmt.Fprintf(
+			strBuilder,
 			"Total size of those documents: %s %s (%s %s/sec)\n",
 			reportutils.BytesToUnit(comparedBytes, dataUnit),
 			dataUnit,
 			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
 			perSecondDataUnit,
-		))
+		)
 	}
 
 	table := tablewriter.NewWriter(strBuilder)
@@ -272,12 +283,13 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		var dataCell string
 
 		if result.TotalDocs > 0 {
-			docsCell = fmt.Sprintf("%d of %d (%s%%)",
-				result.DocsCompared, result.TotalDocs,
+			docsCell = fmt.Sprintf("%s of %s (%s%%)",
+				reportutils.FmtReal(result.DocsCompared),
+				reportutils.FmtReal(result.TotalDocs),
 				reportutils.FmtPercent(result.DocsCompared, result.TotalDocs),
 			)
 		} else {
-			docsCell = fmt.Sprintf("%d", result.DocsCompared)
+			docsCell = reportutils.FmtReal(result.DocsCompared)
 		}
 
 		if result.TotalBytes > 0 {
@@ -337,10 +349,11 @@ func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, st
 
 	strBuilder.WriteString("\n")
 
-	strBuilder.WriteString(fmt.Sprintf(
-		"Namespaces compared: %d\n",
-		completedNss,
-	))
+	fmt.Fprintf(
+		strBuilder,
+		"Namespaces compared: %s\n",
+		reportutils.FmtReal(completedNss),
+	)
 
 	dataUnit := reportutils.FindBestUnit(comparedBytes)
 
@@ -350,18 +363,20 @@ func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, st
 	bytesPerSecond := float64(comparedBytes) / elapsed.Seconds()
 	perSecondDataUnit := reportutils.FindBestUnit(bytesPerSecond)
 
-	strBuilder.WriteString(fmt.Sprintf(
-		"Source documents compared: %d (%s/sec)\n",
-		comparedDocs,
-		reportutils.FmtFloat(docsPerSecond),
-	))
-	strBuilder.WriteString(fmt.Sprintf(
+	fmt.Fprintf(
+		strBuilder,
+		"Source documents compared: %s (%s/sec)\n",
+		reportutils.FmtReal(comparedDocs),
+		reportutils.FmtReal(docsPerSecond),
+	)
+	fmt.Fprintf(
+		strBuilder,
 		"Total size of those documents: %s %s (%s %s/sec)\n",
 		reportutils.BytesToUnit(comparedBytes, dataUnit),
 		dataUnit,
 		reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
 		perSecondDataUnit,
-	))
+	)
 
 	return true, nil
 }
@@ -410,20 +425,18 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 		eventsDescr := "none"
 		if totalEvents > 0 {
 			eventsDescr = fmt.Sprintf(
-				"%d total (%s/sec), across %d namespace(s)",
-				totalEvents,
-				reportutils.FmtFloat(util.Divide(totalEvents, elapsed.Seconds())),
-				activeNamespacesCount,
+				"%s total (%s/sec), across %s namespace(s)",
+				reportutils.FmtReal(totalEvents),
+				reportutils.FmtReal(util.Divide(totalEvents, elapsed.Seconds())),
+				reportutils.FmtReal(activeNamespacesCount),
 			)
 		}
 
-		builder.WriteString(fmt.Sprintf("\n%s change events this generation: %s\n", cluster.title, eventsDescr))
+		fmt.Fprintf(builder, "\n%s change events this generation: %s\n", cluster.title, eventsDescr)
 
 		lag, hasLag := cluster.csReader.GetLag().Get()
 		if hasLag {
-			builder.WriteString(
-				fmt.Sprintf("%s change stream lag: %s\n", cluster.title, reportutils.DurationToHMS(lag)),
-			)
+			fmt.Fprintf(builder, "%s change stream lag: %s\n", cluster.title, reportutils.DurationToHMS(lag))
 		}
 
 		// We only print event breakdowns for the source because we assume that
@@ -451,11 +464,11 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 				eventsTable.Append(
 					append(
 						[]string{ns},
-						strconv.Itoa(curNsStats.Insert),
-						strconv.Itoa(curNsStats.Update),
-						strconv.Itoa(curNsStats.Replace),
-						strconv.Itoa(curNsStats.Delete),
-						strconv.Itoa(curNsStats.Total()),
+						reportutils.FmtReal(curNsStats.Insert),
+						reportutils.FmtReal(curNsStats.Update),
+						reportutils.FmtReal(curNsStats.Replace),
+						reportutils.FmtReal(curNsStats.Delete),
+						reportutils.FmtReal(curNsStats.Total()),
 					),
 				)
 			}
@@ -526,18 +539,19 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder) {
 
 		table.Append(
 			[]string{
-				strconv.Itoa(w),
+				reportutils.FmtReal(w),
 				actionStr,
 				elapsedStr,
 			},
 		)
 	}
 
-	builder.WriteString(fmt.Sprintf(
-		"\nActive worker threads (%d of %d):\n",
-		activeThreadCount,
-		verifier.numWorkers,
-	))
+	fmt.Fprintf(
+		builder,
+		"\nActive worker threads (%s of %s):\n",
+		reportutils.FmtReal(activeThreadCount),
+		reportutils.FmtReal(verifier.numWorkers),
+	)
 
 	table.Render()
 }

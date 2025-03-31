@@ -323,7 +323,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			verifier.logger.Debug().
 				Msg("Received test's signal. Continuing.")
 		}
-		time.Sleep(verifier.generationPauseDelayMillis * time.Millisecond)
+		time.Sleep(verifier.generationPauseDelay * time.Millisecond)
 		verifier.mux.Lock()
 		if verifier.lastGeneration {
 			verifier.mux.Unlock()
@@ -540,7 +540,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 
 		task, gotTask := taskOpt.Get()
 		if !gotTask {
-			duration := verifier.workerSleepDelayMillis * time.Millisecond
+			duration := verifier.workerSleepDelay * time.Millisecond
 
 			if duration > 0 {
 				time.Sleep(duration)

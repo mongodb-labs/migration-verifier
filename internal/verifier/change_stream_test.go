@@ -755,7 +755,7 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 		logBuffer,
 	)
 
-	zlog := verifier.logger.Logger.Output(multiOut)
+	zlog := verifier.logger.Output(multiOut)
 	verifier.logger = logger.NewLogger(&zlog, multiOut)
 
 	// start verifier
