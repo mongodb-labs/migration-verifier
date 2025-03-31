@@ -353,11 +353,11 @@ func (verifier *Verifier) SetNumWorkers(arg int) {
 	verifier.numWorkers = arg
 }
 
-func (verifier *Verifier) SetGenerationPauseDelayMillis(arg time.Duration) {
+func (verifier *Verifier) SetGenerationPauseDelay(arg time.Duration) {
 	verifier.generationPauseDelay = arg
 }
 
-func (verifier *Verifier) SetWorkerSleepDelayMillis(arg time.Duration) {
+func (verifier *Verifier) SetWorkerSleepDelay(arg time.Duration) {
 	verifier.workerSleepDelay = arg
 }
 
