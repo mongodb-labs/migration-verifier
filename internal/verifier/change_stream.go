@@ -272,12 +272,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline) {
 	if len(csr.namespaces) == 0 {
 		pipeline = mongo.Pipeline{
-			{{"$match", bson.D{
-				{"ns.db", bson.D{{"$nin", bson.A{
-					primitive.Regex{Pattern: MongosyncMetaDBsPattern},
-					csr.metaDB.Name(),
-				}}}},
-			}}},
+			{{"$match", util.ExcludePrefixesQuery("ns.db", MongosyncMetaDBPrefixes)}},
 		}
 	} else {
 		filter := []bson.D{}
