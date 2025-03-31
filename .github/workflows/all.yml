@@ -87,12 +87,10 @@ jobs:
       - name: Install latest stable MongoDB (metadata)
         run: yes | m stable && dirname $(readlink $(which mongod)) > .metapath
 
-      - name: Build
-        run: ./build.sh
-
-      - name: Start clusters
+      - name: Build migration-verifier & start clusters
         run: |-
             {
+                echo ./build.sh
                 echo mlaunch init --binarypath $(cat .srcpath) --port 27020 --dir src --replicaset ${{ matrix.topology.srcArgs }}
                 echo mlaunch init --binarypath $(cat .dstpath) --port 27030 --dir dst --replicaset ${{ matrix.topology.dstArgs }}
                 echo mlaunch init --binarypath $(cat .metapath) --port 27040 --dir meta --replicaset --nodes 1
