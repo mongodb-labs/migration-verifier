@@ -156,8 +156,8 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	//verifier.SetStartClean(true)
 	verifier.SetNumWorkers(3)
-	verifier.SetGenerationPauseDelayMillis(0)
-	verifier.SetWorkerSleepDelayMillis(0)
+	verifier.SetGenerationPauseDelay(0)
+	verifier.SetWorkerSleepDelay(0)
 
 	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
 
