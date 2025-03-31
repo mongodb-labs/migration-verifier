@@ -37,7 +37,7 @@ func (suite *UnitTestSuite) SetupSuite() {
 
 // Context returns a new context with the logger set in it.
 func (suite *UnitTestSuite) Context() context.Context {
-	return suite.logger.Logger.WithContext(context.Background())
+	return suite.logger.WithContext(context.Background())
 }
 
 // Logger returns the logger for the suite.

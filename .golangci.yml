@@ -1,35 +1,42 @@
+version: "2"
 linters:
   enable:
-    - errcheck
     - forbidigo
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - typecheck
-    - unused
-
+    - gomodguard
   disable:
-    - gofumpt
     - depguard
-
-  presets:
-    - format
-    - import
-
-linters-settings:
-  govet:
-    disable:
+  settings:
+    forbidigo:
+      forbid:
+        - pattern: context\.WithCancel(?:Cause)?
+          msg: Use contextplus.
+        - pattern: context\.WithTimeout(?:Cause)?
+          msg: Use contextplus.
+        - pattern: context\.WithDeadline(?:Cause)?
+          msg: Use contextplus.
+        - pattern: errgroup.WithContext
+          msg: Use contextplus.
+    govet:
+      disable:
         # Unkeyed primitive.E and timestamp fields are used extensively in code taken from
         # mongosync.
         - composites
-  forbidigo:
-    forbid:
-      - p: context\.WithCancel(?:Cause)?
-        msg: Use contextplus.
-      - p: context\.WithTimeout(?:Cause)?
-        msg: Use contextplus.
-      - p: context\.WithDeadline(?:Cause)?
-        msg: Use contextplus.
-      - p: errgroup.WithContext
-        msg: Use contextplus.
+  exclusions:
+    generated: lax
+    presets:
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

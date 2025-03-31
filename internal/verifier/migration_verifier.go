@@ -106,12 +106,12 @@ type Verifier struct {
 	// every collection.
 	gen0PendingCollectionTasks atomic.Int32
 
-	generationStartTime        time.Time
-	generationPauseDelayMillis time.Duration
-	workerSleepDelayMillis     time.Duration
-	ignoreBSONFieldOrder       bool
-	verifyAll                  bool
-	startClean                 bool
+	generationStartTime  time.Time
+	generationPauseDelay time.Duration
+	workerSleepDelay     time.Duration
+	ignoreBSONFieldOrder bool
+	verifyAll            bool
+	startClean           bool
 
 	// This would seem more ideal as uint64, but changing it would
 	// trigger several other similar type changes, and that’s not really
@@ -353,12 +353,12 @@ func (verifier *Verifier) SetNumWorkers(arg int) {
 	verifier.numWorkers = arg
 }
 
-func (verifier *Verifier) SetGenerationPauseDelayMillis(arg time.Duration) {
-	verifier.generationPauseDelayMillis = arg
+func (verifier *Verifier) SetGenerationPauseDelay(arg time.Duration) {
+	verifier.generationPauseDelay = arg
 }
 
-func (verifier *Verifier) SetWorkerSleepDelayMillis(arg time.Duration) {
-	verifier.workerSleepDelayMillis = arg
+func (verifier *Verifier) SetWorkerSleepDelay(arg time.Duration) {
+	verifier.workerSleepDelay = arg
 }
 
 // SetPartitionSizeMB sets the verifier’s maximum partition size in MiB.
@@ -1470,9 +1470,10 @@ func startReport() *strings.Builder {
 	timestampAndSpace := time.Now().Format(timeFormat) + " "
 	divider := strings.Repeat(dividerChar, dividerWidth-len(timestampAndSpace))
 
-	strBuilder.WriteString(fmt.Sprintf(
+	fmt.Fprintf(
+		strBuilder,
 		"\n%s%s\n\n", timestampAndSpace, divider,
-	))
+	)
 
 	return strBuilder
 }
@@ -1503,10 +1504,11 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	now := time.Now()
 	elapsedSinceGenStart := now.Sub(verifier.generationStartTime)
 
-	strBuilder.WriteString(fmt.Sprintf(
+	fmt.Fprintf(
+		strBuilder,
 		"Generation time elapsed: %s\n",
 		reportutils.DurationToHMS(elapsedSinceGenStart),
-	))
+	)
 
 	metadataMismatches, anyCollsIncomplete, err := verifier.reportCollectionMetadataMismatches(ctx, strBuilder)
 	if err != nil {

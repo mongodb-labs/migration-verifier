@@ -226,8 +226,8 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 	v.SetServerPort(cCtx.Int(serverPort))
 	v.SetNumWorkers(cCtx.Int(numWorkers))
-	v.SetGenerationPauseDelayMillis(time.Duration(cCtx.Int64(generationPauseDelay)))
-	v.SetWorkerSleepDelayMillis(time.Duration(cCtx.Int64(workerSleepDelay)))
+	v.SetGenerationPauseDelay(time.Duration(cCtx.Int64(generationPauseDelay)) * time.Millisecond)
+	v.SetWorkerSleepDelay(time.Duration(cCtx.Int64(workerSleepDelay)) * time.Millisecond)
 
 	err = v.SetPprofInterval(cCtx.String(pprofInterval))
 	if err != nil {

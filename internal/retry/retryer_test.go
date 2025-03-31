@@ -18,7 +18,7 @@ var someNetworkError = &mongo.CommandError{
 	Name:   "NetworkError",
 }
 
-var badError = errors.New("I am fatal!")
+var errBad = errors.New("fatal am I")
 
 func (suite *UnitTestSuite) TestRetryer() {
 	retryer := New()
@@ -239,19 +239,19 @@ func (suite *UnitTestSuite) TestMulti_NonTransient() {
 		"slow",
 	).WithCallback(
 		func(_ context.Context, _ *FuncInfo) error {
-			return badError
+			return errBad
 		},
 		"fails quickly",
 	).Run(ctx, logger)
 
-	suite.Assert().ErrorIs(err, badError)
+	suite.Assert().ErrorIs(err, errBad)
 }
 
 func (suite *UnitTestSuite) TestMulti_Transient() {
 	ctx := suite.Context()
 	logger := suite.Logger()
 
-	for _, finalErr := range []error{nil, badError} {
+	for _, finalErr := range []error{nil, errBad} {
 		suite.Run(
 			fmt.Sprintf("final error: %v", finalErr),
 			func() {

@@ -59,7 +59,7 @@ func NewWebServer(port int, mapi MigrationVerifierAPI, logger *logger.Logger) *W
 func (server *WebServer) operationalAPILockMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !server.operationalAPILock.TryAcquire(1) {
-			err := fmt.Errorf("Request in progress")
+			err := fmt.Errorf("request in progress")
 			server.operationalErrorResponse(c, err)
 			c.Abort()
 			return
