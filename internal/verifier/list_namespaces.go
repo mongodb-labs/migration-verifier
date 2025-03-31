@@ -57,12 +57,19 @@ func ListAllUserCollections(ctx context.Context, logger *logger.Logger, client *
 	collectionNamespaces := []string{}
 	for _, dbName := range dbNames {
 		db := client.Database(dbName)
-		filter := bson.D{{"$and", []bson.D{
+
+		filterTerms := []bson.D{
 			util.ExcludePrefixesQuery("name", mslices.Of(ExcludedSystemCollPrefix)),
-		}}}
-		if !includeViews {
-			filter = append(filter, bson.E{"type", bson.D{{"$ne", "view"}}})
 		}
+		if !includeViews {
+			filterTerms = append(
+				filterTerms,
+				bson.D{{"type", bson.D{{"$ne", "view"}}}},
+			)
+		}
+
+		filter := bson.D{{"$and", filterTerms}}
+
 		specifications, err := db.ListCollectionSpecifications(ctx, filter, options.ListCollections().SetNameOnly(true))
 		if err != nil {
 			return nil, err
