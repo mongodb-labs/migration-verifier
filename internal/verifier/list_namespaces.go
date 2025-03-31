@@ -22,7 +22,8 @@ var (
 	// ExcludedSystemDBs are system databases that are excluded from verification.
 	ExcludedSystemDBs = []string{"admin", "config", "local"}
 
-	// ExcludedSystemCollRegex is the regular expression representation of the excluded system collections.
+	// ExcludedSystemCollPrefix is the prefix of system collections,
+	// which we ignore.
 	ExcludedSystemCollPrefix = "system."
 )
 
@@ -56,7 +57,6 @@ func ListAllUserCollections(ctx context.Context, logger *logger.Logger, client *
 	collectionNamespaces := []string{}
 	for _, dbName := range dbNames {
 		db := client.Database(dbName)
-		//filter := bson.D{{"name", bson.D{{"$nin", bson.A{ExcludedSystemCollRegex}}}}}
 		filter := bson.D{{"$and", []bson.D{
 			util.ExcludePrefixesQuery("name", mslices.Of(ExcludedSystemCollPrefix)),
 		}}}
