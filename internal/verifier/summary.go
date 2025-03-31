@@ -381,8 +381,10 @@ func (verifier *Verifier) printMismatchInvestigationNotes(strBuilder *strings.Bu
 	}
 }
 
-func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, now time.Time) {
+func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder) {
 	var eventsTable *tablewriter.Table
+
+	now := time.Now()
 
 	for _, cluster := range []struct {
 		title         string

@@ -1574,7 +1574,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	strBuilder.WriteString(
 		fmt.Sprintf(
-			"\nTime to generate this report: %s\n",
+			"\nTime elapsed during report generation: %s\n",
 			reportutils.DurationToHMS(time.Since(reportGenStartTime)),
 		),
 	)
