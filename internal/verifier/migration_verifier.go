@@ -1533,7 +1533,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	if verifier.logger.Debug().Enabled() {
 		switch genstatus {
 		case Gen0MetadataAnalysisComplete, GenerationInProgress:
-			verifier.printWorkerStatus(strBuilder, reportGenStartTime)
+			verifier.printWorkerStatus(strBuilder)
 		}
 	}
 

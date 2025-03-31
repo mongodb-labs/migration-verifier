@@ -467,38 +467,66 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, n
 	}
 }
 
-func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
+func (verifier *Verifier) printWorkerStatus(builder *strings.Builder) {
 
 	table := tablewriter.NewWriter(builder)
-	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed"})
+	table.SetHeader([]string{"Thread #", "Action", "Time Elapsed"})
 
 	wsmap := verifier.workerTracker.Load()
 
 	activeThreadCount := 0
+
+	var now = time.Now()
+
+	var actionStr string
+	var elapsedStr string
+
 	for w := 0; w <= verifier.numWorkers; w++ {
-		if wsmap[w].TaskID == nil {
-			continue
-		}
+		if wsmap[w] == nil {
+			actionStr = "none"
+			elapsedStr = "-"
+		} else {
 
-		activeThreadCount++
+			var startedAt time.Time
 
-		var taskIdStr string
+			switch v := wsmap[w].(type) {
+			case WorkerTaskStatus:
+				if v.TaskID == nil {
+					continue
+				}
 
-		switch id := wsmap[w].TaskID.(type) {
-		case primitive.ObjectID:
-			theBytes, _ := id.MarshalText()
+				activeThreadCount++
 
-			taskIdStr = string(theBytes)
-		default:
-			taskIdStr = fmt.Sprintf("%s", wsmap[w].TaskID)
+				var taskIdStr string
+
+				switch id := v.TaskID.(type) {
+				case primitive.ObjectID:
+					theBytes, _ := id.MarshalText()
+
+					taskIdStr = string(theBytes)
+
+				default:
+					// All task IDs should be ObjID, but just in case:
+					taskIdStr = fmt.Sprintf("%s", v.TaskID)
+				}
+
+				actionStr = fmt.Sprintf("doing task: %s (%s)", taskIdStr, v.Namespace)
+				startedAt = v.StartTime
+			case WorkerTaskQuerying:
+				actionStr = "querying for next task"
+				startedAt = v.StartTime
+			default:
+				panic(fmt.Sprintf("worker %d: unexpected task status (%T): %v", w, v, v))
+			}
+
+			elapsedStr = reportutils.DurationToHMS(now.Sub(startedAt))
 		}
 
 		table.Append(
 			[]string{
 				strconv.Itoa(w),
-				wsmap[w].Namespace,
-				taskIdStr,
-				reportutils.DurationToHMS(now.Sub(wsmap[w].StartTime)),
+				actionStr,
+				elapsedStr,
 			},
 		)
 	}

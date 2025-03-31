@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/mtime"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
@@ -142,7 +143,14 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 			// “added” or “pending”.
 			if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 {
 				waitForTaskCreation++
-				time.Sleep(verifier.verificationStatusCheckInterval)
+
+				err := mtime.Sleep(ctx, verifier.verificationStatusCheckInterval)
+				if err != nil {
+					return errors.Wrapf(
+						err,
+						"interrupted between generation status checks",
+					)
+				}
 			} else {
 				verifier.PrintVerificationSummary(ctx, GenerationComplete)
 				finishedAllTasks = true
@@ -527,6 +535,8 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 		Msg("Worker finished.")
 
 	for {
+		verifier.workerTracker.SetQuerying(workerNum)
+
 		taskOpt, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
 		if err != nil {
 			return errors.Wrap(
@@ -540,13 +550,15 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			duration := verifier.workerSleepDelayMillis * time.Millisecond
 
 			if duration > 0 {
-				time.Sleep(duration)
+				if err := mtime.Sleep(ctx, duration); err != nil {
+					return err
+				}
 			}
 
 			continue
 		}
 
-		verifier.workerTracker.Set(workerNum, task)
+		verifier.workerTracker.SetTask(workerNum, task)
 
 		switch task.Type {
 		case verificationTaskVerifyCollection:
