@@ -109,6 +109,10 @@ func FmtReal[T types.RealNumber](num T) string {
 		if uint64(num) > math.MaxInt64 {
 			return fmtFloat(num)
 		}
+
+		// Any other uint* type can be an int, which we format below.
+	default:
+		// Formatted below.
 	}
 
 	return humanize.Comma(int64(num))
