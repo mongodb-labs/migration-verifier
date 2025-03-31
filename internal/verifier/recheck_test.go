@@ -3,11 +3,13 @@ package verifier
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/mslices"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -52,6 +54,9 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 			Coll: "namespace",
 		},
 		FullDocument: testutil.MustMarshal(bson.D{{"foo", 1}}),
+		ClusterTime: &primitive.Timestamp{
+			T: uint32(time.Now().Unix()),
+		},
 	}
 
 	err := verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)

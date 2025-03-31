@@ -411,6 +411,9 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 			DB:   "foo",
 			Coll: "bar2",
 		},
+		ClusterTime: &primitive.Timestamp{
+			T: uint32(time.Now().Unix()),
+		},
 	}
 
 	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
