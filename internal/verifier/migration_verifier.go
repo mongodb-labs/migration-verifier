@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	_ "net/http/pprof"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,6 +22,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/dustin/go-humanize"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -427,7 +427,13 @@ func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []strin
 		db, coll := SplitNamespace(n)
 		if db != "" {
 			s, _ := client.Database(db).Collection(coll).EstimatedDocumentCount(ctx)
-			table.Append([]string{strconv.FormatInt(s, 10), db, coll})
+			table.Append(
+				[]string{
+					humanize.Comma(s),
+					db,
+					coll,
+				},
+			)
 		}
 	}
 	table.Render()

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/dustin/go-humanize"
 	"golang.org/x/exp/constraints"
 )
@@ -58,7 +60,7 @@ func DurationToHMS(duration time.Duration) string {
 
 	secs := math.Mod(duration.Seconds(), 60)
 
-	str := FmtFloat(secs) + "s"
+	str := FmtReal(secs) + "s"
 
 	if hours > 0 {
 		str = fmt.Sprintf("%dh %dm %s", hours, minutes, str)
@@ -83,31 +85,50 @@ func BytesToUnit[T num16Plus](count T, unit DataUnit) string {
 	// conversion and possibly risk little rounding errors. We might
 	// as well keep it simple where we can.
 
-	var retval float64
-
 	if unit == Bytes {
-		retval = float64(count)
-	} else {
-		myUnitSize, exists := unitSize[unit]
-
-		if !exists {
-			panic(fmt.Sprintf("Missing unit in unitSize: %s", unit))
-		}
-
-		retval = float64(count) / float64(myUnitSize)
+		return FmtReal(count)
 	}
 
-	return FmtFloat(retval)
+	myUnitSize, exists := unitSize[unit]
+
+	if !exists {
+		panic(fmt.Sprintf("Missing unit in unitSize: %s", unit))
+	}
+
+	return FmtReal(util.Divide(count, myUnitSize))
 }
 
-// FmtFloat provides a standard formatting of floats, with a consistent
+// FmtReal provides a standard formatting of real numbers, with a consistent
 // precision and trailing decimal zeros removed.
-func FmtFloat[T constraints.Float](num T) string {
-	return humanize.Ftoa(roundFloat(float64(num), decimalPrecision))
+func FmtReal[T types.RealNumber](num T) string {
+	switch any(num).(type) {
+	case float32, float64:
+		return fmtFloat(num)
+	case uint64, uint:
+		// Uints that can’t be int64 need to be formatted as floats.
+		if uint64(num) > math.MaxInt64 {
+			return fmtFloat(num)
+		}
+
+		// Any other uint* type can be an int, which we format below.
+	default:
+		// Formatted below.
+	}
+
+	return humanize.Comma(int64(num))
+}
+
+func fmtFloat[T types.RealNumber](num T) string {
+	return humanize.Commaf(roundFloat(float64(num), decimalPrecision))
+}
+
+func roundFloat(val float64, precision uint) float64 {
+	ratio := math.Pow10(int(precision))
+	return math.Round(val*ratio) / ratio
 }
 
 func fmtQuotient[T, U realNum](dividend T, divisor U) string {
-	return FmtFloat(float64(dividend) / float64(divisor))
+	return FmtReal(util.Divide(dividend, divisor))
 }
 
 // FmtPercent returns a stringified percentage without a trailing `%`,
@@ -131,11 +152,6 @@ func FmtPercent[T, U realNum](numerator T, denominator U) string {
 	}
 
 	return str
-}
-
-func roundFloat(val float64, precision uint) float64 {
-	ratio := math.Pow10(int(precision))
-	return math.Round(val*ratio) / ratio
 }
 
 // FindBestUnit gives the “best” DataUnit for the given `count` of bytes.
