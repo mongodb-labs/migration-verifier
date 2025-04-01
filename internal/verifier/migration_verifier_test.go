@@ -146,35 +146,39 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
 
 	err := verifier.HandleChangeStreamEvents(
 		ctx,
-		[]ParsedEvent{{
-			OpType: "insert",
-			Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
-			DocKey: DocKey{
-				ID: "heyhey",
-			},
-			ClusterTime: &primitive.Timestamp{
-				T: uint32(time.Now().Unix()),
-			},
-		}},
+		changeEventBatch{
+			events: []ParsedEvent{{
+				OpType: "insert",
+				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
+				DocKey: DocKey{
+					ID: "heyhey",
+				},
+				ClusterTime: &primitive.Timestamp{
+					T: uint32(time.Now().Unix()),
+				},
+			}},
+		},
 		src,
 	)
 	suite.Require().NoError(err)
 
 	err = verifier.HandleChangeStreamEvents(
 		ctx,
-		[]ParsedEvent{{
-			ID: bson.M{
-				"docID": "ID/docID",
-			},
-			OpType: "insert",
-			Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
-			DocKey: DocKey{
-				ID: "hoohoo",
-			},
-			ClusterTime: &primitive.Timestamp{
-				T: uint32(time.Now().Unix()),
-			},
-		}},
+		changeEventBatch{
+			events: []ParsedEvent{{
+				ID: bson.M{
+					"docID": "ID/docID",
+				},
+				OpType: "insert",
+				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
+				DocKey: DocKey{
+					ID: "hoohoo",
+				},
+				ClusterTime: &primitive.Timestamp{
+					T: uint32(time.Now().Unix()),
+				},
+			}},
+		},
 		src,
 	)
 	suite.Require().NoError(err)
@@ -422,22 +426,26 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		},
 	}
 
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
+	batch := changeEventBatch{
+		events: mslices.Of(event),
+	}
+
+	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
 	suite.Require().NoError(err)
 	event.OpType = "insert"
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
+	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
 	suite.Require().NoError(err)
 	event.OpType = "replace"
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
+	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
 	suite.Require().NoError(err)
 	event.OpType = "update"
-	err = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
+	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
 	suite.Require().NoError(err)
 
 	event.OpType = "flibbity"
 	suite.Assert().Panics(
 		func() {
-			_ = verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
+			_ = verifier.HandleChangeStreamEvents(ctx, batch, src)
 		},
 		"HandleChangeStreamEvents should panic if it gets an unknown optype",
 	)

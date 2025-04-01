@@ -59,7 +59,11 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 		},
 	}
 
-	err := verifier.HandleChangeStreamEvents(ctx, []ParsedEvent{event}, src)
+	err := verifier.HandleChangeStreamEvents(
+		ctx,
+		changeEventBatch{events: mslices.Of(event)},
+		src,
+	)
 	suite.Require().NoError(err)
 
 	recheckDocs = suite.fetchRecheckDocs(ctx, verifier)

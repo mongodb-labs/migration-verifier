@@ -131,7 +131,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 			}
 
 			verifier.logger.Debug().
-				Interface("taskCountsByStatus", verificationStatus).
+				Any("taskCountsByStatus", verificationStatus).
 				Send()
 
 			if waitForTaskCreation%2 == 0 {
