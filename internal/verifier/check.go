@@ -22,6 +22,8 @@ const (
 	Gen0MetadataAnalysisComplete GenerationStatus = "gen0_metadata_analysis_complete"
 	GenerationInProgress         GenerationStatus = "inprogress"
 	GenerationComplete           GenerationStatus = "complete"
+
+	findTaskTimeWarnThreshold = 5 * time.Second
 )
 
 var failedStatuses = mapset.NewSet(
@@ -533,7 +535,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 		Msg("Worker finished.")
 
 	for {
-		verifier.workerTracker.SetQuerying(workerNum)
+		startedFind := time.Now()
 
 		taskOpt, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
 		if err != nil {
@@ -541,6 +543,14 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 				err,
 				"failed to seek next task",
 			)
+		}
+
+		elapsed := time.Since(startedFind)
+		if elapsed > findTaskTimeWarnThreshold {
+			verifier.logger.Warn().
+				Int("workerNum", workerNum).
+				Stringer("elapsed", elapsed).
+				Msg("This worker just queried for the next available task. That query took longer than expected. The metadata database may be under excess load.")
 		}
 
 		task, gotTask := taskOpt.Get()
@@ -554,7 +564,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			continue
 		}
 
-		verifier.workerTracker.SetTask(workerNum, task)
+		verifier.workerTracker.Set(workerNum, task)
 
 		switch task.Type {
 		case verificationTaskVerifyCollection:

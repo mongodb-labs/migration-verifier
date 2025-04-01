@@ -1535,13 +1535,13 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		return
 	}
 
-	verifier.printChangeEventStatistics(strBuilder)
+	verifier.printChangeEventStatistics(strBuilder, reportGenStartTime)
 
 	// Only print the worker status table if debug logging is enabled.
 	if verifier.logger.Debug().Enabled() {
 		switch genstatus {
 		case Gen0MetadataAnalysisComplete, GenerationInProgress:
-			verifier.printWorkerStatus(strBuilder)
+			verifier.printWorkerStatus(strBuilder, reportGenStartTime)
 		}
 	}
 

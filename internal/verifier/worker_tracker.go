@@ -15,20 +15,14 @@ type WorkerTracker struct {
 
 // WorkerStatusMap represents the status of each worker,
 // indexed by worker number (which start at 0).
-type WorkerStatusMap = map[int]any
+type WorkerStatusMap = map[int]WorkerStatus
 
-// WorkerTaskStatus details the work that an individual worker thread
-// is doing on a task.
-type WorkerTaskStatus struct {
+// WorkerStatus details the work that an individual worker thread
+// is doing.
+type WorkerStatus struct {
 	TaskID    any
 	TaskType  verificationTaskType
 	Namespace string
-	StartTime time.Time
-}
-
-// WorkerPendingStatus details an individual worker thread that’s
-// querying for a new task.
-type WorkerTaskQuerying struct {
 	StartTime time.Time
 }
 
@@ -36,17 +30,17 @@ type WorkerTaskQuerying struct {
 func NewWorkerTracker(workersCount int) *WorkerTracker {
 	wsmap := WorkerStatusMap{}
 	for i := 0; i < workersCount; i++ {
-		wsmap[i] = WorkerTaskStatus{}
+		wsmap[i] = WorkerStatus{}
 	}
 	return &WorkerTracker{
 		guard: msync.NewDataGuard(wsmap),
 	}
 }
 
-// SetTask tells the WorkerTracker about a task that the worker is starting.
-func (wt *WorkerTracker) SetTask(workerNum int, task VerificationTask) {
+// Set updates the worker’s state in the WorkerTracker.
+func (wt *WorkerTracker) Set(workerNum int, task VerificationTask) {
 	wt.guard.Store(func(m WorkerStatusMap) WorkerStatusMap {
-		m[workerNum] = WorkerTaskStatus{
+		m[workerNum] = WorkerStatus{
 			TaskID:    task.PrimaryKey,
 			TaskType:  task.Type,
 			Namespace: task.QueryFilter.Namespace,
@@ -57,21 +51,10 @@ func (wt *WorkerTracker) SetTask(workerNum int, task VerificationTask) {
 	})
 }
 
-// SetTask tells the WorkerTracker about a task that the worker is starting.
-func (wt *WorkerTracker) SetQuerying(workerNum int) {
-	wt.guard.Store(func(m WorkerStatusMap) WorkerStatusMap {
-		m[workerNum] = WorkerTaskQuerying{
-			StartTime: time.Now(),
-		}
-
-		return m
-	})
-}
-
 // Unset tells the WorkerTracker that the worker is now inactive.
 func (wt *WorkerTracker) Unset(workerNum int) {
 	wt.guard.Store(func(m WorkerStatusMap) WorkerStatusMap {
-		m[workerNum] = nil
+		m[workerNum] = WorkerStatus{}
 
 		return m
 	})
@@ -81,7 +64,7 @@ func (wt *WorkerTracker) Unset(workerNum int) {
 // state map.
 func (wt *WorkerTracker) Load() WorkerStatusMap {
 	var wtmap WorkerStatusMap
-	wt.guard.Load(func(m map[int]any) {
+	wt.guard.Load(func(m map[int]WorkerStatus) {
 		wtmap = maps.Clone(m)
 	})
 
