@@ -70,6 +70,8 @@ const (
 	notOkSymbol = "\u2757" // heavy exclamation mark symbol
 
 	clientAppName = "Migration Verifier"
+
+	progressReportTimeWarnThreshold = 10 * time.Second
 )
 
 type whichCluster string
@@ -169,12 +171,12 @@ type VerificationResult struct {
 	// VerificationResult instances might share the same ID. That’s OK,
 	// though; it’ll just make the recheck include all docs with that ID,
 	// regardless of which ones actually need the recheck.
-	ID interface{}
+	ID any
 
-	Field     interface{}
-	Details   interface{}
-	Cluster   interface{}
-	NameSpace interface{}
+	Field     any
+	Details   any
+	Cluster   any
+	NameSpace any
 	// The data size of the largest of the mismatched objects.
 	// Note this is not persisted; it is used only to ensure recheck tasks
 	// don't get too large.
@@ -504,7 +506,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 	// quite long.
 	if len(task.Ids) == 0 {
 		verifier.logger.Debug().
-			Interface("task", task.PrimaryKey).
+			Any("task", task.PrimaryKey).
 			Str("findCmd", fmt.Sprintf("%s", findCmd)).
 			Str("options", fmt.Sprintf("%v", *runCommandOptions)).
 			Msg("getDocuments findCmd.")
@@ -513,7 +515,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
 }
 
-func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, id interface{}, fieldPrefix string) (results []VerificationResult) {
+func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, id any, fieldPrefix string) (results []VerificationResult) {
 	for _, field := range mismatch.missingFieldOnSrc {
 		result := VerificationResult{
 			Field:     fieldPrefix + field,
@@ -593,7 +595,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 	debugLog := verifier.logger.Debug().
 		Int("workerNum", workerNum).
-		Interface("task", task.PrimaryKey).
+		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace)
 
 	task.augmentLogWithDetails(debugLog)
@@ -626,25 +628,25 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		if verifier.lastGeneration {
 			verifier.logger.Error().
 				Int("workerNum", workerNum).
-				Interface("task", task.PrimaryKey).
+				Any("task", task.PrimaryKey).
 				Str("namespace", task.QueryFilter.Namespace).
 				Int("mismatchesCount", len(problems)).
 				Msg("Document(s) mismatched, and this is the final generation.")
 		} else {
 			verifier.logger.Debug().
 				Int("workerNum", workerNum).
-				Interface("task", task.PrimaryKey).
+				Any("task", task.PrimaryKey).
 				Str("namespace", task.QueryFilter.Namespace).
 				Int("mismatchesCount", len(problems)).
 				Msg("Discrepancies found. Will recheck in the next generation.")
 
 			var mismatches []VerificationResult
-			var missingIds []interface{}
+			var missingIds []any
 			var dataSizes []int
 
 			// This stores all IDs for the next generation to check.
 			// Its length should equal len(mismatches) + len(missingIds).
-			var idsToRecheck []interface{}
+			var idsToRecheck []any
 
 			for _, mismatch := range problems {
 				idsToRecheck = append(idsToRecheck, mismatch.ID)
@@ -689,8 +691,10 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
-		Interface("task", task.PrimaryKey).
+		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace).
+		Int64("documentCount", int64(docsCount)).
+		Str("dataSize", reportutils.FmtBytes(bytesCount)).
 		Stringer("timeElapsed", time.Since(start)).
 		Msg("Finished document comparison task.")
 
@@ -933,7 +937,7 @@ func (verifier *Verifier) ProcessCollectionVerificationTask(
 ) error {
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
-		Interface("task", task.PrimaryKey).
+		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace).
 		Msg("Processing collection.")
 
@@ -1501,8 +1505,8 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	strBuilder.WriteString(header + "\n\n")
 
-	now := time.Now()
-	elapsedSinceGenStart := now.Sub(verifier.generationStartTime)
+	reportGenStartTime := time.Now()
+	elapsedSinceGenStart := reportGenStartTime.Sub(verifier.generationStartTime)
 
 	fmt.Fprintf(
 		strBuilder,
@@ -1521,9 +1525,9 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	case Gen0MetadataAnalysisComplete:
 		fallthrough
 	case GenerationInProgress:
-		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder, now)
+		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder, reportGenStartTime)
 	case GenerationComplete:
-		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder, now)
+		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder, reportGenStartTime)
 	default:
 		panic("Bad generation status: " + genstatus)
 	}
@@ -1533,13 +1537,13 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		return
 	}
 
-	verifier.printChangeEventStatistics(strBuilder, now)
+	verifier.printChangeEventStatistics(strBuilder, reportGenStartTime)
 
 	// Only print the worker status table if debug logging is enabled.
 	if verifier.logger.Debug().Enabled() {
 		switch genstatus {
 		case Gen0MetadataAnalysisComplete, GenerationInProgress:
-			verifier.printWorkerStatus(strBuilder, now)
+			verifier.printWorkerStatus(strBuilder, reportGenStartTime)
 		}
 	}
 
@@ -1577,6 +1581,13 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	}
 
 	strBuilder.WriteString("\n" + statusLine + "\n")
+
+	elapsed := time.Since(reportGenStartTime)
+	if elapsed > progressReportTimeWarnThreshold {
+		verifier.logger.Warn().
+			Stringer("elapsed", elapsed).
+			Msg("Report generation took longer than expected. The metadata database may be under excess load.")
+	}
 
 	verifier.writeStringBuilder(strBuilder)
 }

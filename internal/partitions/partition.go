@@ -12,9 +12,9 @@ import (
 
 // PartitionKey represents the _id of a partition document stored in the destination.
 type PartitionKey struct {
-	SourceUUID  util.UUID   `bson:"srcUUID"`
-	MongosyncID string      `bson:"id"`
-	Lower       interface{} `bson:"lowerBound"`
+	SourceUUID  util.UUID `bson:"srcUUID"`
+	MongosyncID string    `bson:"id"`
+	Lower       any       `bson:"lowerBound"`
 }
 
 // Namespace stores the database and collection name of the namespace being copied.
@@ -31,7 +31,7 @@ type Partition struct {
 	Ns  *Namespace   `bson:"namespace"`
 
 	// The upper index key bound for the partition.
-	Upper interface{} `bson:"upperBound"`
+	Upper any `bson:"upperBound"`
 
 	// Set to true if the partition is for a capped collection. If so, this partition's
 	// upper/lower bounds should be set to the minKey and maxKey of the collection.
@@ -56,7 +56,7 @@ func (p *Partition) GetUpperBoundString() string {
 }
 
 // getIndexKeyBoundString returns the string representation of the given index key bound.
-func (p *Partition) getIndexKeyBoundString(bound interface{}) string {
+func (p *Partition) getIndexKeyBoundString(bound any) string {
 	switch b := bound.(type) {
 	case bson.RawValue:
 		return b.String()
@@ -72,7 +72,7 @@ func (p *Partition) getIndexKeyBoundString(bound interface{}) string {
 // lowerBoundFromCurrent takes the current value of a cursor and returns the value to save as
 // the lower bound for the cursor. For capped collections, this is `nil`. For others it's the
 // value of the `_id` field.
-func (p *Partition) lowerBoundFromCurrent(current bson.Raw) (interface{}, error) {
+func (p *Partition) lowerBoundFromCurrent(current bson.Raw) (any, error) {
 	if p.IsCapped {
 		return nil, nil
 	}

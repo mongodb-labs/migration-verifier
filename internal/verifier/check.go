@@ -22,6 +22,8 @@ const (
 	Gen0MetadataAnalysisComplete GenerationStatus = "gen0_metadata_analysis_complete"
 	GenerationInProgress         GenerationStatus = "inprogress"
 	GenerationComplete           GenerationStatus = "complete"
+
+	findTaskTimeWarnThreshold = 5 * time.Second
 )
 
 var failedStatuses = mapset.NewSet(
@@ -71,7 +73,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	verifier.logger.Debug().
 		Int("generation", generation).
 		Int("workersCount", verifier.numWorkers).
-		Msgf("Starting verification worker threads.")
+		Msg("Starting verification worker threads.")
 
 	// Since we do a progress report right at the start we don’t need
 	// this to go in non-debug output.
@@ -129,7 +131,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 			}
 
 			verifier.logger.Debug().
-				Interface("taskCountsByStatus", verificationStatus).
+				Any("taskCountsByStatus", verificationStatus).
 				Send()
 
 			if waitForTaskCreation%2 == 0 {
@@ -142,6 +144,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 			// “added” or “pending”.
 			if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 {
 				waitForTaskCreation++
+
 				time.Sleep(verifier.verificationStatusCheckInterval)
 			} else {
 				verifier.PrintVerificationSummary(ctx, GenerationComplete)
@@ -161,7 +164,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	if err == nil {
 		verifier.logger.Debug().
 			Int("generation", generation).
-			Msgf("Check finished.")
+			Msg("Check finished.")
 	}
 
 	return errors.Wrapf(
@@ -274,7 +277,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			"failed to retrieve verification status",
 		)
 	} else {
-		verifier.logger.Debug().Msgf("Initial verification phase: %+v", verificationStatus)
+		verifier.logger.Debug().
+			Any("status", verificationStatus).
+			Msg("Initial verification phase.")
 	}
 
 	err = verifier.CreateInitialTasksIfNeeded(ctx)
@@ -416,7 +421,10 @@ func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {
 			srcNamespaces = append(srcNamespaces, ns)
 		}
 	}
-	verifier.logger.Debug().Msgf("Namespaces to verify %+v", srcNamespaces)
+	verifier.logger.Debug().
+		Strs("srcNamespaces", srcNamespaces).
+		Msg("Namespaces to verify.")
+
 	// In verifyAll mode, we do not support collection renames, so src and dest lists are the same.
 	verifier.srcNamespaces = srcNamespaces
 	verifier.dstNamespaces = srcNamespaces
@@ -445,7 +453,7 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 		return err
 	}
 	if !isPrimary {
-		verifier.logger.Info().Msgf("Primary task already existed; skipping setup")
+		verifier.logger.Info().Msg("Primary task already existed; skipping setup")
 		return nil
 	}
 	if verifier.verifyAll {
@@ -525,12 +533,22 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 		Msg("Worker finished.")
 
 	for {
+		startedFind := time.Now()
+
 		taskOpt, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
 		if err != nil {
 			return errors.Wrap(
 				err,
 				"failed to seek next task",
 			)
+		}
+
+		elapsed := time.Since(startedFind)
+		if elapsed > findTaskTimeWarnThreshold {
+			verifier.logger.Warn().
+				Int("workerNum", workerNum).
+				Stringer("elapsed", elapsed).
+				Msg("This worker just queried for the next available task. That query took longer than expected. The metadata database may be under excess load.")
 		}
 
 		task, gotTask := taskOpt.Get()

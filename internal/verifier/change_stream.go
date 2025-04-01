@@ -42,7 +42,7 @@ var supportedEventOpTypes = mapset.NewSet(
 
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
 type ParsedEvent struct {
-	ID           interface{}          `bson:"_id"`
+	ID           any                  `bson:"_id"`
 	OpType       string               `bson:"operationType"`
 	Ns           *Namespace           `bson:"ns,omitempty"`
 	DocKey       DocKey               `bson:"documentKey,omitempty"`
@@ -57,7 +57,7 @@ func (pe *ParsedEvent) String() string {
 // DocKey is a deserialized form for the ChangeEvent documentKey field. We currently only care about
 // the _id.
 type DocKey struct {
-	ID interface{} `bson:"_id"`
+	ID any `bson:"_id"`
 }
 
 const (
@@ -74,6 +74,11 @@ func (uee UnknownEventError) Error() string {
 	return fmt.Sprintf("received event with unknown optype: %+v", uee.Event)
 }
 
+type changeEventBatch struct {
+	events      []ParsedEvent
+	clusterTime primitive.Timestamp
+}
+
 type ChangeStreamReader struct {
 	readerType whichCluster
 
@@ -86,7 +91,7 @@ type ChangeStreamReader struct {
 	clusterInfo   util.ClusterInfo
 
 	changeStreamRunning  bool
-	changeEventBatchChan chan []ParsedEvent
+	changeEventBatchChan chan changeEventBatch
 	writesOffTs          *util.Eventual[primitive.Timestamp]
 	readerError          *util.Eventual[error]
 	handlerError         *util.Eventual[error]
@@ -108,7 +113,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		watcherClient:        verifier.srcClient,
 		clusterInfo:          *verifier.srcClusterInfo,
 		changeStreamRunning:  false,
-		changeEventBatchChan: make(chan []ParsedEvent),
+		changeEventBatchChan: make(chan changeEventBatch),
 		writesOffTs:          util.NewEventual[primitive.Timestamp](),
 		readerError:          util.NewEventual[error](),
 		handlerError:         util.NewEventual[error](),
@@ -123,7 +128,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		watcherClient:        verifier.dstClient,
 		clusterInfo:          *verifier.dstClusterInfo,
 		changeStreamRunning:  false,
-		changeEventBatchChan: make(chan []ParsedEvent),
+		changeEventBatchChan: make(chan changeEventBatch),
 		writesOffTs:          util.NewEventual[primitive.Timestamp](),
 		readerError:          util.NewEventual[error](),
 		handlerError:         util.NewEventual[error](),
@@ -160,8 +165,8 @@ HandlerLoop:
 
 			verifier.logger.Trace().
 				Stringer("changeStreamReader", reader).
-				Int("batchSize", len(batch)).
-				Interface("batch", batch).
+				Int("batchSize", len(batch.events)).
+				Any("batch", batch).
 				Msg("Handling change event batch.")
 
 			err = errors.Wrap(
@@ -181,19 +186,29 @@ HandlerLoop:
 }
 
 // HandleChangeStreamEvents performs the necessary work for change stream events after receiving a batch.
-func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []ParsedEvent, eventOrigin whichCluster) error {
-	if len(batch) == 0 {
+func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch changeEventBatch, eventOrigin whichCluster) error {
+	if len(batch.events) == 0 {
 		return nil
 	}
 
-	dbNames := make([]string, len(batch))
-	collNames := make([]string, len(batch))
-	docIDs := make([]interface{}, len(batch))
-	dataSizes := make([]int, len(batch))
+	dbNames := make([]string, len(batch.events))
+	collNames := make([]string, len(batch.events))
+	docIDs := make([]any, len(batch.events))
+	dataSizes := make([]int, len(batch.events))
 
-	for i, changeEvent := range batch {
+	latestTimestamp := primitive.Timestamp{}
+
+	for i, changeEvent := range batch.events {
 		if !supportedEventOpTypes.Contains(changeEvent.OpType) {
 			panic(fmt.Sprintf("Unsupported optype in event; should have failed already! event=%+v", changeEvent))
+		}
+
+		if changeEvent.ClusterTime == nil {
+			verifier.logger.Warn().
+				Any("event", changeEvent).
+				Msg("Change event unexpectedly lacks a clusterTime?!?")
+		} else if changeEvent.ClusterTime.After(latestTimestamp) {
+			latestTimestamp = *changeEvent.ClusterTime
 		}
 
 		var srcDBName, srcCollName string
@@ -250,9 +265,15 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 		}
 	}
 
+	latestTimestampTime := time.Unix(int64(latestTimestamp.T), 0)
+	lag := time.Unix(int64(batch.clusterTime.T), 0).Sub(latestTimestampTime)
+
 	verifier.logger.Debug().
 		Str("origin", string(eventOrigin)).
 		Int("count", len(docIDs)).
+		Any("latestTimestamp", latestTimestamp).
+		Time("latestTimestampTime", latestTimestampTime).
+		Stringer("lag", lag).
 		Msg("Persisting rechecks for change events.")
 
 	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes)
@@ -322,7 +343,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	sess mongo.Session,
 ) error {
 	eventsRead := 0
-	var changeEventBatch []ParsedEvent
+	var changeEvents []ParsedEvent
 
 	latestEvent := option.None[ParsedEvent]()
 
@@ -337,27 +358,27 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			break
 		}
 
-		if changeEventBatch == nil {
+		if changeEvents == nil {
 			batchSize := cs.RemainingBatchLength() + 1
 
 			ri.NoteSuccess("received a batch of %d change event(s)", batchSize)
 
-			changeEventBatch = make([]ParsedEvent, batchSize)
+			changeEvents = make([]ParsedEvent, batchSize)
 		}
 
-		if err := cs.Decode(&changeEventBatch[eventsRead]); err != nil {
-			return errors.Wrapf(err, "failed to decode change event to %T", changeEventBatch[eventsRead])
+		if err := cs.Decode(&changeEvents[eventsRead]); err != nil {
+			return errors.Wrapf(err, "failed to decode change event to %T", changeEvents[eventsRead])
 		}
 
 		// This only logs in tests.
 		csr.logger.Trace().
 			Stringer("changeStream", csr).
-			Interface("event", changeEventBatch[eventsRead]).
+			Any("event", changeEvents[eventsRead]).
 			Int("eventsPreviouslyReadInBatch", eventsRead).
-			Int("batchSize", len(changeEventBatch)).
+			Int("batchSize", len(changeEvents)).
 			Msg("Received a change event.")
 
-		opType := changeEventBatch[eventsRead].OpType
+		opType := changeEvents[eventsRead].OpType
 		if !supportedEventOpTypes.Contains(opType) {
 
 			// We expect modify events on the destination as part of finalizing
@@ -370,7 +391,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 					Msg("This event is probably internal to the migration. Ignoring.")
 
 				// Discard this event, then keep reading.
-				changeEventBatch = changeEventBatch[:len(changeEventBatch)-1]
+				changeEvents = changeEvents[:len(changeEvents)-1]
 
 				continue
 			} else {
@@ -379,16 +400,16 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		}
 
 		// This shouldn’t happen, but just in case:
-		if changeEventBatch[eventsRead].Ns == nil {
-			return errors.Errorf("Change event lacks a namespace: %+v", changeEventBatch[eventsRead])
+		if changeEvents[eventsRead].Ns == nil {
+			return errors.Errorf("Change event lacks a namespace: %+v", changeEvents[eventsRead])
 		}
 
-		if changeEventBatch[eventsRead].ClusterTime != nil &&
+		if changeEvents[eventsRead].ClusterTime != nil &&
 			(csr.lastChangeEventTime == nil ||
-				csr.lastChangeEventTime.Before(*changeEventBatch[eventsRead].ClusterTime)) {
+				csr.lastChangeEventTime.Before(*changeEvents[eventsRead].ClusterTime)) {
 
-			csr.lastChangeEventTime = changeEventBatch[eventsRead].ClusterTime
-			latestEvent = option.Some(changeEventBatch[eventsRead])
+			csr.lastChangeEventTime = changeEvents[eventsRead].ClusterTime
+			latestEvent = option.Some(changeEvents[eventsRead])
 		}
 
 		eventsRead++
@@ -414,21 +435,26 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	if event, has := latestEvent.Get(); has {
 		csr.logger.Trace().
 			Stringer("changeStreamReader", csr).
-			Interface("event", event).
+			Any("event", event).
 			Msg("Updated lastChangeEventTime.")
 	}
 
-	ri.NoteSuccess("parsed %d-event batch", len(changeEventBatch))
+	ri.NoteSuccess("parsed %d-event batch", len(changeEvents))
 
 	select {
 	case <-ctx.Done():
 		return util.WrapCtxErrWithCause(ctx)
 	case <-csr.handlerError.Ready():
 		return csr.wrapHandlerErrorForReader()
-	case csr.changeEventBatchChan <- changeEventBatch:
+	case csr.changeEventBatchChan <- changeEventBatch{
+		events: changeEvents,
+
+		// NB: We know by now that OperationTime is non-nil.
+		clusterTime: *sess.OperationTime(),
+	}:
 	}
 
-	ri.NoteSuccess("sent %d-event batch to handler", len(changeEventBatch))
+	ri.NoteSuccess("sent %d-event batch to handler", len(changeEvents))
 
 	return nil
 }
@@ -489,8 +515,8 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			writesOffTs := csr.writesOffTs.Get()
 
 			csr.logger.Debug().
-				Interface("writesOffTimestamp", writesOffTs).
-				Msgf("%s thread received writesOff timestamp. Finalizing change stream.", csr)
+				Any("writesOffTimestamp", writesOffTs).
+				Msgf("%s received writesOff timestamp. Finalizing change stream.", csr)
 
 			gotwritesOffTimestamp = true
 
@@ -507,8 +533,8 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 				// so we can stop once curTs >= writesOffTs.
 				if !curTs.Before(writesOffTs) {
 					csr.logger.Debug().
-						Interface("currentTimestamp", curTs).
-						Interface("writesOffTimestamp", writesOffTs).
+						Any("currentTimestamp", curTs).
+						Any("writesOffTimestamp", writesOffTs).
 						Msgf("%s has reached the writesOff timestamp. Shutting down.", csr)
 
 					break
@@ -549,7 +575,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	if csr.lastChangeEventTime == nil {
 		infoLog = infoLog.Str("lastEventTime", "none")
 	} else {
-		infoLog = infoLog.Interface("lastEventTime", *csr.lastChangeEventTime)
+		infoLog = infoLog.Any("lastEventTime", *csr.lastChangeEventTime)
 	}
 
 	infoLog.
@@ -627,8 +653,8 @@ func (csr *ChangeStreamReader) createChangeStream(
 	}
 
 	csr.logger.Debug().
-		Interface("resumeTokenTimestamp", startTs).
-		Interface("clusterTime", clusterTime).
+		Any("resumeTokenTimestamp", startTs).
+		Any("clusterTime", clusterTime).
 		Stringer("changeStreamReader", csr).
 		Msg("Using earlier time as start timestamp.")
 
@@ -686,7 +712,7 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 
 				logEvent := csr.logger.Debug().
 					Stringer("changeStreamReader", csr).
-					Interface("startTimestamp", startTs)
+					Any("startTimestamp", startTs)
 
 				if parentThreadWaiting {
 					logEvent.Msg("First change stream open succeeded.")
@@ -728,7 +754,7 @@ func (csr *ChangeStreamReader) GetLag() option.Option[time.Duration] {
 
 func addTimestampToLogEvent(ts primitive.Timestamp, event *zerolog.Event) *zerolog.Event {
 	return event.
-		Interface("timestamp", ts).
+		Any("timestamp", ts).
 		Time("time", time.Unix(int64(ts.T), int64(0)))
 }
 

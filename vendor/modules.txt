@@ -73,11 +73,11 @@ github.com/klauspost/compress/zstd/internal/xxhash
 # github.com/leodido/go-urn v1.2.1
 ## explicit; go 1.13
 github.com/leodido/go-urn
-# github.com/mattn/go-colorable v0.1.12
-## explicit; go 1.13
+# github.com/mattn/go-colorable v0.1.13
+## explicit; go 1.15
 github.com/mattn/go-colorable
-# github.com/mattn/go-isatty v0.0.14
-## explicit; go 1.12
+# github.com/mattn/go-isatty v0.0.19
+## explicit; go 1.15
 github.com/mattn/go-isatty
 # github.com/mattn/go-runewidth v0.0.9
 ## explicit; go 1.9
@@ -106,7 +106,11 @@ github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.0
 ## explicit
 github.com/pmezard/go-difflib/difflib
-# github.com/rs/zerolog v1.28.0
+# github.com/quasilyte/go-ruleguard/dsl v0.3.22
+## explicit; go 1.15
+github.com/quasilyte/go-ruleguard/dsl
+github.com/quasilyte/go-ruleguard/dsl/types
+# github.com/rs/zerolog v1.34.0
 ## explicit; go 1.15
 github.com/rs/zerolog
 github.com/rs/zerolog/internal/cbor

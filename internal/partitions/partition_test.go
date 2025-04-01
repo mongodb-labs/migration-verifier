@@ -136,7 +136,7 @@ func makeTestPartition() (Partition, bson.D) {
 	return partition, makeExpectedFilter(partition.Key.Lower, partition.Upper)
 }
 
-func makeExpectedFilter(lower, upper interface{}) bson.D {
+func makeExpectedFilter(lower, upper any) bson.D {
 	return bson.D{{"$and", bson.A{
 		bson.D{{"$and", []bson.D{
 			// All _id values >= lower bound.
@@ -157,7 +157,7 @@ func makeExpectedFilter(lower, upper interface{}) bson.D {
 	}}}
 }
 
-func makeExpectedFilterWithTypeBracketing(lower, upper interface{}) bson.D {
+func makeExpectedFilterWithTypeBracketing(lower, upper any) bson.D {
 	return bson.D{{"$and", bson.A{
 		bson.D{{"$and", []bson.D{
 			// All _id values >= lower bound.
@@ -174,7 +174,7 @@ func makeTestCappedPartition() Partition {
 	return partition
 }
 
-func assertBSONEqual(t *testing.T, expected, actual interface{}) {
+func assertBSONEqual(t *testing.T, expected, actual any) {
 	expectedJSON, err := bson.MarshalExtJSONIndent(expected, false, false, "", "    ")
 	require.NoError(t, err)
 
