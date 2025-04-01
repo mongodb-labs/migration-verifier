@@ -444,8 +444,10 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	case <-csr.handlerError.Ready():
 		return csr.wrapHandlerErrorForReader()
 	case csr.changeEventBatchChan <- changeEventBatch{
-		events:      changeEvents,
-		clusterTime: tokenTs,
+		events: changeEvents,
+
+		// NB: We know by now that OperationTime is non-nil.
+		clusterTime: *sess.OperationTime(),
 	}:
 	}
 
