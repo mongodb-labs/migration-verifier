@@ -71,7 +71,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	verifier.logger.Debug().
 		Int("generation", generation).
 		Int("workersCount", verifier.numWorkers).
-		Msgf("Starting verification worker threads.")
+		Msg("Starting verification worker threads.")
 
 	// Since we do a progress report right at the start we don’t need
 	// this to go in non-debug output.
@@ -162,7 +162,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	if err == nil {
 		verifier.logger.Debug().
 			Int("generation", generation).
-			Msgf("Check finished.")
+			Msg("Check finished.")
 	}
 
 	return errors.Wrapf(
@@ -275,7 +275,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			"failed to retrieve verification status",
 		)
 	} else {
-		verifier.logger.Debug().Msgf("Initial verification phase: %+v", verificationStatus)
+		verifier.logger.Debug().
+			Any("status", verificationStatus).
+			Msg("Initial verification phase.")
 	}
 
 	err = verifier.CreateInitialTasksIfNeeded(ctx)
@@ -419,7 +421,10 @@ func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {
 			srcNamespaces = append(srcNamespaces, ns)
 		}
 	}
-	verifier.logger.Debug().Msgf("Namespaces to verify %+v", srcNamespaces)
+	verifier.logger.Debug().
+		Strs("srcNamespaces", srcNamespaces).
+		Msg("Namespaces to verify.")
+
 	// In verifyAll mode, we do not support collection renames, so src and dest lists are the same.
 	verifier.srcNamespaces = srcNamespaces
 	verifier.dstNamespaces = srcNamespaces
@@ -448,7 +453,7 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 		return err
 	}
 	if !isPrimary {
-		verifier.logger.Info().Msgf("Primary task already existed; skipping setup")
+		verifier.logger.Info().Msg("Primary task already existed; skipping setup")
 		return nil
 	}
 	if verifier.verifyAll {
