@@ -203,9 +203,10 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 		}
 
 		if changeEvent.ClusterTime == nil {
-			panic(fmt.Sprintf("empty cluster time?? %+v", changeEvent))
-		}
-		if changeEvent.ClusterTime.After(latestTimestamp) {
+			verifier.logger.Warn().
+				Any("event", changeEvent).
+				Msg("Change event unexpectedly lacks a clusterTime?!?")
+		} else if changeEvent.ClusterTime.After(latestTimestamp) {
 			latestTimestamp = *changeEvent.ClusterTime
 		}
 
@@ -513,7 +514,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 			csr.logger.Debug().
 				Any("writesOffTimestamp", writesOffTs).
-				Msgf("%s thread received writesOff timestamp. Finalizing change stream.", csr)
+				Msgf("%s received writesOff timestamp. Finalizing change stream.", csr)
 
 			gotwritesOffTimestamp = true
 
