@@ -29,8 +29,12 @@ var (
 
 // Lists all the user collections on a cluster.  Unlike mongosync, we don't use the internal $listCatalog, since we need to
 // work on old versions without that command.  This means this does not run with read concern majority.
-func ListAllUserCollections(ctx context.Context, logger *logger.Logger, client *mongo.Client, includeViews bool,
-	additionalExcludedDBs ...string) ([]string, error) {
+func ListAllUserCollections(
+	ctx context.Context,
+	logger *logger.Logger,
+	client *mongo.Client,
+	additionalExcludedDBs ...string,
+) ([]string, error) {
 	excludedDBs := []string{}
 	excludedDBs = append(excludedDBs, additionalExcludedDBs...)
 	excludedDBs = append(excludedDBs, ExcludedSystemDBs...)
@@ -58,17 +62,10 @@ func ListAllUserCollections(ctx context.Context, logger *logger.Logger, client *
 	for _, dbName := range dbNames {
 		db := client.Database(dbName)
 
-		filterTerms := []bson.D{
-			util.ExcludePrefixesQuery("name", mslices.Of(ExcludedSystemCollPrefix)),
-		}
-		if !includeViews {
-			filterTerms = append(
-				filterTerms,
-				bson.D{{"type", bson.D{{"$ne", "view"}}}},
-			)
-		}
-
-		filter := bson.D{{"$and", filterTerms}}
+		filter := util.ExcludePrefixesQuery(
+			"name",
+			mslices.Of(ExcludedSystemCollPrefix),
+		)
 
 		specifications, err := db.ListCollectionSpecifications(ctx, filter, options.ListCollections().SetNameOnly(true))
 		if err != nil {
