@@ -41,7 +41,7 @@ var supportedEventOpTypes = mapset.NewSet(
 
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
 type ParsedEvent struct {
-	ID           interface{}          `bson:"_id"`
+	ID           any          `bson:"_id"`
 	OpType       string               `bson:"operationType"`
 	Ns           *Namespace           `bson:"ns,omitempty"`
 	DocKey       DocKey               `bson:"documentKey,omitempty"`
@@ -56,7 +56,7 @@ func (pe *ParsedEvent) String() string {
 // DocKey is a deserialized form for the ChangeEvent documentKey field. We currently only care about
 // the _id.
 type DocKey struct {
-	ID interface{} `bson:"_id"`
+	ID any `bson:"_id"`
 }
 
 const (
@@ -160,7 +160,7 @@ HandlerLoop:
 			verifier.logger.Trace().
 				Stringer("changeStreamReader", reader).
 				Int("batchSize", len(batch)).
-				Interface("batch", batch).
+				Any("batch", batch).
 				Msg("Handling change event batch.")
 
 			err = errors.Wrap(
@@ -187,7 +187,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 
 	dbNames := make([]string, len(batch))
 	collNames := make([]string, len(batch))
-	docIDs := make([]interface{}, len(batch))
+	docIDs := make([]any, len(batch))
 	dataSizes := make([]int, len(batch))
 
 	latestTimestamp := primitive.Timestamp{}
@@ -360,7 +360,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		// This only logs in tests.
 		csr.logger.Trace().
 			Stringer("changeStream", csr).
-			Interface("event", changeEventBatch[eventsRead]).
+			Any("event", changeEventBatch[eventsRead]).
 			Int("eventsPreviouslyReadInBatch", eventsRead).
 			Int("batchSize", len(changeEventBatch)).
 			Msg("Received a change event.")
@@ -422,7 +422,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	if event, has := latestEvent.Get(); has {
 		csr.logger.Trace().
 			Stringer("changeStreamReader", csr).
-			Interface("event", event).
+			Any("event", event).
 			Msg("Updated lastChangeEventTime.")
 	}
 
@@ -497,7 +497,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			writesOffTs := csr.writesOffTs.Get()
 
 			csr.logger.Debug().
-				Interface("writesOffTimestamp", writesOffTs).
+				Any("writesOffTimestamp", writesOffTs).
 				Msgf("%s thread received writesOff timestamp. Finalizing change stream.", csr)
 
 			gotwritesOffTimestamp = true
@@ -515,8 +515,8 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 				// so we can stop once curTs >= writesOffTs.
 				if !curTs.Before(writesOffTs) {
 					csr.logger.Debug().
-						Interface("currentTimestamp", curTs).
-						Interface("writesOffTimestamp", writesOffTs).
+						Any("currentTimestamp", curTs).
+						Any("writesOffTimestamp", writesOffTs).
 						Msgf("%s has reached the writesOff timestamp. Shutting down.", csr)
 
 					break
@@ -557,7 +557,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	if csr.lastChangeEventTime == nil {
 		infoLog = infoLog.Str("lastEventTime", "none")
 	} else {
-		infoLog = infoLog.Interface("lastEventTime", *csr.lastChangeEventTime)
+		infoLog = infoLog.Any("lastEventTime", *csr.lastChangeEventTime)
 	}
 
 	infoLog.
@@ -635,8 +635,8 @@ func (csr *ChangeStreamReader) createChangeStream(
 	}
 
 	csr.logger.Debug().
-		Interface("resumeTokenTimestamp", startTs).
-		Interface("clusterTime", clusterTime).
+		Any("resumeTokenTimestamp", startTs).
+		Any("clusterTime", clusterTime).
 		Stringer("changeStreamReader", csr).
 		Msg("Using earlier time as start timestamp.")
 
@@ -694,7 +694,7 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 
 				logEvent := csr.logger.Debug().
 					Stringer("changeStreamReader", csr).
-					Interface("startTimestamp", startTs)
+					Any("startTimestamp", startTs)
 
 				if parentThreadWaiting {
 					logEvent.Msg("First change stream open succeeded.")
@@ -736,7 +736,7 @@ func (csr *ChangeStreamReader) GetLag() option.Option[time.Duration] {
 
 func addTimestampToLogEvent(ts primitive.Timestamp, event *zerolog.Event) *zerolog.Event {
 	return event.
-		Interface("timestamp", ts).
+		Any("timestamp", ts).
 		Time("time", time.Unix(int64(ts.T), int64(0)))
 }
 

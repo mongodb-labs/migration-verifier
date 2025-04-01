@@ -201,7 +201,7 @@ const (
 	modeNamed    = iota
 )
 
-func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (interface{}, error) {
+func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any, error) {
 	isNegative := false
 	switch ctype {
 	case kMinKey:
@@ -548,7 +548,7 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (inte
 	}
 }
 
-func keystringToBsonPartial(version KeyStringVersion, buf *bufferConsumer, mode decodeMode) (interface{}, error) {
+func keystringToBsonPartial(version KeyStringVersion, buf *bufferConsumer, mode decodeMode) (any, error) {
 	contents := bson.D{}
 	for buf.hasUint8() {
 		b, _ := buf.readUint8()
@@ -594,7 +594,7 @@ func keystringToBsonPartial(version KeyStringVersion, buf *bufferConsumer, mode 
 	return contents, nil
 }
 
-func KeystringToBson(version KeyStringVersion, inbuf interface{}) (bson.D, error) {
+func KeystringToBson(version KeyStringVersion, inbuf any) (bson.D, error) {
 	buf, ok := inbuf.([]uint8)
 	if !ok {
 		strbuf, ok := inbuf.(string)

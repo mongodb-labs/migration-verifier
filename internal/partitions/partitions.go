@@ -238,7 +238,7 @@ func PartitionCollectionWithParameters(
 	}
 
 	// Prepend the lower bound and append the upper bound to any intermediate bounds.
-	allIDBounds := make([]interface{}, 0, numPartitions+1)
+	allIDBounds := make([]any, 0, numPartitions+1)
 	allIDBounds = append(allIDBounds, minIDBound)
 
 	// The intermediate bounds for the collection (i.e. all bounds apart from the lower and upper bounds).
@@ -465,7 +465,7 @@ func getOuterIDBound(
 	srcDB *mongo.Database,
 	collName string,
 	globalFilter map[string]any,
-) (interface{}, error) {
+) (any, error) {
 	// Choose a sort direction based on the minOrMaxBound.
 	var sortDirection int
 	switch minOrMaxBound {
@@ -477,7 +477,7 @@ func getOuterIDBound(
 		return nil, errors.Errorf("unknown minOrMaxBound parameter '%v' when getting outer _id bound", minOrMaxBound)
 	}
 
-	var docID interface{}
+	var docID any
 
 	var pipeline mongo.Pipeline
 	if len(globalFilter) > 0 {
@@ -541,7 +541,7 @@ func getMidIDBounds(
 	numPartitions, sampleMinNumDocs int,
 	sampleRate float64,
 	globalFilter map[string]any,
-) ([]interface{}, bool, error) {
+) ([]any, bool, error) {
 	// We entirely avoid sampling for mid bounds if we don't meet the criteria for the number of documents or partitions.
 	if collDocCount < int64(sampleMinNumDocs) || numPartitions < 2 {
 		return nil, false, nil
@@ -581,7 +581,7 @@ func getMidIDBounds(
 	}...)
 
 	// Get a cursor for the $sample and $bucketAuto aggregation.
-	var midIDBounds []interface{}
+	var midIDBounds []any
 	agRetryer := retry.New().WithErrorCodes(util.SampleTooManyDuplicates)
 	err := agRetryer.
 		WithCallback(
@@ -609,7 +609,7 @@ func getMidIDBounds(
 				//   },
 				//   "count" : ...
 				// }
-				midIDBounds = make([]interface{}, 0, numPartitions)
+				midIDBounds = make([]any, 0, numPartitions)
 				for cursor.Next(ctx) {
 					// Get a mid _id bound using the $bucketAuto document's max value.
 					bucketAutoDoc := make(bson.Raw, len(cursor.Current))

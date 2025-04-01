@@ -404,11 +404,11 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
-	err := verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []interface{}{42}, []int{100})
+	err := verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []any{42}, []int{100})
 	suite.Require().NoError(err)
-	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []interface{}{43, 44}, []int{100, 100})
+	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []any{43, 44}, []int{100, 100})
 	suite.Require().NoError(err)
-	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar2", []interface{}{42}, []int{100})
+	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar2", []any{42}, []int{100})
 	suite.Require().NoError(err)
 	event := ParsedEvent{
 		DocKey: DocKey{ID: int32(55)},
@@ -1278,7 +1278,7 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 	ctx := suite.Context()
 
 	metaColl := verifier.verificationDatabase().Collection(verificationTasksCollection)
-	_, err := metaColl.InsertMany(ctx, []interface{}{
+	_, err := metaColl.InsertMany(ctx, []any{
 		bson.M{"generation": 0, "status": "added", "type": "verify"},
 		bson.M{"generation": 0, "status": "processing", "type": "verify"},
 		bson.M{"generation": 0, "status": "failed", "type": "verify"},
@@ -1480,7 +1480,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	dstColl := suite.dstMongoClient.Database(dbname2).Collection("testColl3")
 
 	// Documents with _id in [0, 100) should match.
-	var docs []interface{}
+	var docs []any
 	for i := 0; i < 100; i++ {
 		docs = append(docs, bson.M{"_id": i, "x": i, "inFilter": true})
 	}
@@ -1490,7 +1490,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	suite.Require().NoError(err)
 
 	// Documents with _id in [100, 200) should be ignored because they're not in the filter.
-	docs = []interface{}{}
+	docs = []any{}
 	for i := 100; i < 200; i++ {
 		docs = append(docs, bson.M{"_id": i, "x": i, "inFilter": false})
 	}

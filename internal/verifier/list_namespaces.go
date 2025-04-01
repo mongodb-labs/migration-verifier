@@ -57,7 +57,7 @@ func ListAllUserCollections(ctx context.Context, logger *logger.Logger, client *
 		}
 		logger.Debug().
 			Str("database", dbName).
-			Interface("specifications", specifications).
+			Any("specifications", specifications).
 			Msg("Found database members.")
 
 		for _, spec := range specifications {

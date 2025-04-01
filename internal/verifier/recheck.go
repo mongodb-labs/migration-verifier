@@ -32,7 +32,7 @@ type RecheckPrimaryKey struct {
 	Generation        int         `bson:"generation"`
 	SrcDatabaseName   string      `bson:"db"`
 	SrcCollectionName string      `bson:"coll"`
-	DocumentID        interface{} `bson:"docID"`
+	DocumentID        any `bson:"docID"`
 }
 
 // RecheckDoc stores the necessary information to know which documents must be rechecked.
@@ -44,7 +44,7 @@ type RecheckDoc struct {
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	ctx context.Context,
-	namespace string, documentIDs []interface{}, dataSizes []int) error {
+	namespace string, documentIDs []any, dataSizes []int) error {
 	dbName, collName := SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
@@ -87,7 +87,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
 	dbNames []string,
 	collNames []string,
-	documentIDs []interface{},
+	documentIDs []any,
 	dataSizes []int,
 ) error {
 	verifier.mux.Lock()
@@ -240,7 +240,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	//    this to prevent one thread from doing all of the rechecks.
 
 	var prevDBName, prevCollName string
-	var idAccum []interface{}
+	var idAccum []any
 	var idLenAccum int
 	var totalDocs types.DocumentCount
 	var dataSizeAccum, totalRecheckData int64
@@ -287,7 +287,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		}
 
 		verifier.logger.Debug().
-			Interface("task", task.PrimaryKey).
+			Any("task", task.PrimaryKey).
 			Str("namespace", namespace).
 			Int("numDocuments", len(idAccum)).
 			Str("dataSize", reportutils.FmtBytes(dataSizeAccum)).

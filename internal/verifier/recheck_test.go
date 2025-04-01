@@ -204,7 +204,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	id1 := strings.Repeat("a", overlyLarge)
 	id2 := strings.Repeat("b", overlyLarge)
 	id3 := strings.Repeat("c", overlyLarge)
-	ids := []interface{}{id1, id2, id3}
+	ids := []any{id1, id2, id3}
 	dataSizes := []int{overlyLarge, overlyLarge, overlyLarge}
 	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
@@ -223,7 +223,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	d3.PrimaryKey.DocumentID = id3
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
-	suite.ElementsMatch([]interface{}{d1, d2, d3}, results)
+	suite.ElementsMatch([]any{d1, d2, d3}, results)
 
 	verifier.generation++
 	verifier.mux.Lock()
@@ -238,7 +238,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 
 	t1 := VerificationTask{
 		Generation: 1,
-		Ids:        []interface{}{id1, id2},
+		Ids:        []any{id1, id2},
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerifyDocuments,
 		QueryFilter: QueryFilter{
@@ -250,7 +250,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	}
 
 	t2 := t1
-	t2.Ids = []interface{}{id3}
+	t2.Ids = []any{id3}
 	t2.SourceDocumentCount = 1
 	t2.SourceByteCount = types.ByteCount(overlyLarge)
 
@@ -265,7 +265,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	id1 := "a"
 	id2 := "b"
 	id3 := "c"
-	ids := []interface{}{id1, id2, id3}
+	ids := []any{id1, id2, id3}
 	dataSizes := []int{400 * 1024, 700 * 1024, 1024}
 	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
@@ -285,7 +285,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	d3.DataSize = dataSizes[2]
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
-	suite.ElementsMatch([]interface{}{d1, d2, d3}, results)
+	suite.ElementsMatch([]any{d1, d2, d3}, results)
 
 	verifier.generation++
 	verifier.mux.Lock()
@@ -300,7 +300,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 
 	t1 := VerificationTask{
 		Generation: 1,
-		Ids:        []interface{}{id1, id2},
+		Ids:        []any{id1, id2},
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerifyDocuments,
 		QueryFilter: QueryFilter{
@@ -312,7 +312,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	}
 
 	t2 := t1
-	t2.Ids = []interface{}{id3}
+	t2.Ids = []any{id3}
 	t2.SourceDocumentCount = 1
 	t2.SourceByteCount = 1024
 
@@ -326,7 +326,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 	id1 := "a"
 	id2 := "b"
 	id3 := "c"
-	ids := []interface{}{id1, id2, id3}
+	ids := []any{id1, id2, id3}
 	dataSizes := []int{1000, 1000, 1000}
 	err := insertRecheckDocs(ctx, verifier, "testDB1", "testColl1", ids, dataSizes)
 	suite.Require().NoError(err)
@@ -350,7 +350,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 
 	t1 := VerificationTask{
 		Generation: 1,
-		Ids:        []interface{}{id1, id2, id3},
+		Ids:        []any{id1, id2, id3},
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerifyDocuments,
 		QueryFilter: QueryFilter{
@@ -376,7 +376,7 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 
 	id1 := "a"
 	id2 := "b"
-	ids := []interface{}{id1, id2}
+	ids := []any{id1, id2}
 	dataSizes := []int{1000, 1000}
 	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
@@ -412,7 +412,7 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 	d6.PrimaryKey.Generation = 2
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
-	suite.ElementsMatch([]interface{}{d1, d2, d3, d4, d5, d6}, results)
+	suite.ElementsMatch([]any{d1, d2, d3, d4, d5, d6}, results)
 
 	verifier.mux.Lock()
 
@@ -421,21 +421,21 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 	suite.Require().NoError(err)
 
 	results = suite.fetchRecheckDocs(ctx, verifier)
-	suite.ElementsMatch([]interface{}{d1, d2, d5, d6}, results)
+	suite.ElementsMatch([]any{d1, d2, d5, d6}, results)
 
 	verifier.generation = 1
 	err = verifier.ClearRecheckDocsWhileLocked(ctx)
 	suite.Require().NoError(err)
 
 	results = suite.fetchRecheckDocs(ctx, verifier)
-	suite.ElementsMatch([]interface{}{d5, d6}, results)
+	suite.ElementsMatch([]any{d5, d6}, results)
 
 	verifier.generation = 3
 	err = verifier.ClearRecheckDocsWhileLocked(ctx)
 	suite.Require().NoError(err)
 
 	results = suite.fetchRecheckDocs(ctx, verifier)
-	suite.ElementsMatch([]interface{}{}, results)
+	suite.ElementsMatch([]any{}, results)
 }
 
 func insertRecheckDocs(
