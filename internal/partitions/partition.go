@@ -12,9 +12,9 @@ import (
 
 // PartitionKey represents the _id of a partition document stored in the destination.
 type PartitionKey struct {
-	SourceUUID  util.UUID   `bson:"srcUUID"`
-	MongosyncID string      `bson:"id"`
-	Lower       any `bson:"lowerBound"`
+	SourceUUID  util.UUID `bson:"srcUUID"`
+	MongosyncID string    `bson:"id"`
+	Lower       any       `bson:"lowerBound"`
 }
 
 // Namespace stores the database and collection name of the namespace being copied.

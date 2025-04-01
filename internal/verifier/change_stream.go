@@ -41,7 +41,7 @@ var supportedEventOpTypes = mapset.NewSet(
 
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
 type ParsedEvent struct {
-	ID           any          `bson:"_id"`
+	ID           any                  `bson:"_id"`
 	OpType       string               `bson:"operationType"`
 	Ns           *Namespace           `bson:"ns,omitempty"`
 	DocKey       DocKey               `bson:"documentKey,omitempty"`

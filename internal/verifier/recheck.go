@@ -29,10 +29,10 @@ const (
 // sorting by _id will guarantee that all rechecks for a given
 // namespace appear consecutively.
 type RecheckPrimaryKey struct {
-	Generation        int         `bson:"generation"`
-	SrcDatabaseName   string      `bson:"db"`
-	SrcCollectionName string      `bson:"coll"`
-	DocumentID        any `bson:"docID"`
+	Generation        int    `bson:"generation"`
+	SrcDatabaseName   string `bson:"db"`
+	SrcCollectionName string `bson:"coll"`
+	DocumentID        any    `bson:"docID"`
 }
 
 // RecheckDoc stores the necessary information to know which documents must be rechecked.
