@@ -418,21 +418,41 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, n
 			totalEvents += nsTotals[ns]
 		}
 
-		elapsed := now.Sub(verifier.generationStartTime)
+		lag, hasLag := cluster.csReader.GetLag().Get()
 
 		eventsDescr := "none"
 		if totalEvents > 0 {
+			// To compute this change stream’s events per second we divide the
+			// total # of events by the “reception duration”, which the amount
+			// of time over which the events we’ve received were generated.
+			// This differs from a simple $eventsReceived / $timeElapsed
+			// calculation by incorporating the change stream’s lag. For
+			// example, if we received 1,000,000 events over 1 hour, and the
+			// change stream is lagged by 10 minutes, we compute the stream’s
+			// speed as 1mil events over 50 minutes (~333 events per second)
+			// instead of over 60 minutes (~278 events per second).
+			//
+			// This makes the events-per-second calculation better approximate
+			// the stream’s actual speed rather than merely the rate at which
+			// migration-verifier parses the events. It also usefully prevents
+			// downtime from artificially impacting the calculation since
+			// downtime will increase the change stream lag.
+
+			eventReceptionDuration := now.Sub(verifier.generationStartTime)
+			if hasLag {
+				eventReceptionDuration -= lag
+			}
+
 			eventsDescr = fmt.Sprintf(
 				"%s total (%s/sec), across %s namespace(s)",
 				reportutils.FmtReal(totalEvents),
-				reportutils.FmtReal(util.Divide(totalEvents, elapsed.Seconds())),
+				reportutils.FmtReal(util.Divide(totalEvents, eventReceptionDuration.Seconds())),
 				reportutils.FmtReal(activeNamespacesCount),
 			)
 		}
 
 		fmt.Fprintf(builder, "\n%s change events this generation: %s\n", cluster.title, eventsDescr)
 
-		lag, hasLag := cluster.csReader.GetLag().Get()
 		if hasLag {
 			fmt.Fprintf(builder, "%s change stream lag: %s\n", cluster.title, reportutils.DurationToHMS(lag))
 		}
