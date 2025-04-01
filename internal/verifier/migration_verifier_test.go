@@ -442,7 +442,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
 	suite.Require().NoError(err)
 
-	event.OpType = "flibbity"
+	batch.events[0].OpType = "flibbity"
 	suite.Assert().Panics(
 		func() {
 			_ = verifier.HandleChangeStreamEvents(ctx, batch, src)
