@@ -70,6 +70,8 @@ const (
 	notOkSymbol = "\u2757" // heavy exclamation mark symbol
 
 	clientAppName = "Migration Verifier"
+
+	progressReportTimeWarnThreshold = 10 * time.Second
 )
 
 type whichCluster string
@@ -1580,11 +1582,12 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	strBuilder.WriteString("\n" + statusLine + "\n")
 
-	fmt.Fprintf(
-		strBuilder,
-		"\nTime elapsed during report generation: %s\n",
-		reportutils.DurationToHMS(time.Since(reportGenStartTime)),
-	)
+	elapsed := time.Since(reportGenStartTime)
+	if elapsed > progressReportTimeWarnThreshold {
+		verifier.logger.Warn().
+			Stringer("elapsed", elapsed).
+			Msg("Report generation took longer than expected. The metadata database may be under excess load.")
+	}
 
 	verifier.writeStringBuilder(strBuilder)
 }
