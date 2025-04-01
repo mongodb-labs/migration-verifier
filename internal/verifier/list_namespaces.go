@@ -29,7 +29,7 @@ var (
 
 // Lists all the user collections on a cluster.  Unlike mongosync, we don't use the internal $listCatalog, since we need to
 // work on old versions without that command.  This means this does not run with read concern majority.
-func ListAllUserCollections(
+func ListAllUserNamespaces(
 	ctx context.Context,
 	logger *logger.Logger,
 	client *mongo.Client,
