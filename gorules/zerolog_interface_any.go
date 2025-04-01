@@ -10,5 +10,5 @@ func NoZerologInterface(m dsl.Matcher) {
 
 	m.Match("$v.Interface").
 		Where(m["v"].Type.Is("*zerolog.Event")).
-		Report("Avoid Interface(); use Any() instead.").
+		Report("Avoid Interface(); use Any() instead.")
 }
