@@ -261,7 +261,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch []
 	verifier.logger.Debug().
 		Str("origin", string(eventOrigin)).
 		Int("count", len(docIDs)).
-		Interface("latestClusterTime", latestTimestamp).
+		Any("latestClusterTime", latestTimestamp).
 		Msg("Persisting rechecks for change events.")
 
 	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes)
