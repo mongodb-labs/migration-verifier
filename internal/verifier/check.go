@@ -397,14 +397,16 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 
 func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {
 	// We want to check all user collections on both source and dest.
-	srcNamespaces, err := ListAllUserCollections(ctx, verifier.logger, verifier.srcClient, verifier.metaDBName)
+	srcNamespaces, err := ListAllUserCollections(ctx, verifier.logger, verifier.srcClient,
+		true /* include views */, verifier.metaDBName)
 	if err != nil {
-		return errors.Wrap(err, "failed to list source collections")
+		return err
 	}
 
-	dstNamespaces, err := ListAllUserCollections(ctx, verifier.logger, verifier.dstClient, verifier.metaDBName)
+	dstNamespaces, err := ListAllUserCollections(ctx, verifier.logger, verifier.dstClient,
+		true /* include views */, verifier.metaDBName)
 	if err != nil {
-		return errors.Wrap(err, "failed to list destination collections")
+		return err
 	}
 
 	srcMap := map[string]bool{}
