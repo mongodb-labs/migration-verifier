@@ -687,7 +687,11 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 
 func (suite *IntegrationTestSuite) TestCreateForbidden() {
 	ctx := suite.Context()
-	buildInfo, err := util.GetClusterInfo(ctx, suite.srcMongoClient)
+	buildInfo, err := util.GetClusterInfo(
+		ctx,
+		logger.NewDefaultLogger(),
+		suite.srcMongoClient,
+	)
 	suite.Require().NoError(err)
 
 	if buildInfo.VersionArray[0] < 6 {
@@ -724,7 +728,11 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 
 func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 	ctx := suite.Context()
-	buildInfo, err := util.GetClusterInfo(ctx, suite.dstMongoClient)
+	buildInfo, err := util.GetClusterInfo(
+		ctx,
+		logger.NewDefaultLogger(),
+		suite.dstMongoClient,
+	)
 	suite.Require().NoError(err)
 
 	if buildInfo.VersionArray[0] < 6 {
