@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
@@ -142,6 +143,7 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 func (suite *IntegrationTestSuite) GetTopology(client *mongo.Client) util.ClusterTopology {
 	clusterInfo, err := util.GetClusterInfo(
 		suite.Context(),
+		logger.NewDefaultLogger(),
 		client,
 	)
 	suite.Require().NoError(err, "should fetch src cluster info")

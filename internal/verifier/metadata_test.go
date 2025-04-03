@@ -3,6 +3,7 @@ package verifier
 import (
 	"fmt"
 
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/samber/lo"
@@ -13,10 +14,10 @@ import (
 
 func (suite *IntegrationTestSuite) TestShardingMismatch() {
 	ctx := suite.Context()
-	srcInfo, err := util.GetClusterInfo(ctx, suite.srcMongoClient)
+	srcInfo, err := util.GetClusterInfo(ctx, logger.NewDefaultLogger(), suite.srcMongoClient)
 	suite.Require().NoError(err, "should fetch src cluster info")
 
-	dstInfo, err := util.GetClusterInfo(ctx, suite.dstMongoClient)
+	dstInfo, err := util.GetClusterInfo(ctx, logger.NewDefaultLogger(), suite.dstMongoClient)
 	suite.Require().NoError(err, "should fetch dst cluster info")
 
 	dbname := suite.DBNameForTest()
