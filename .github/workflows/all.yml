@@ -12,35 +12,40 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-
-        # versions are: source, destination
-        mongodb_versions:
+        include:
 
           # Testing fallback when `hello` isn’t implemented
           # (but appendOplogNote is).
-          - [ '4.2.5', '6.0' ]
+          - mongodb_versions: [ '4.2.5', '6.0' ]
+            topology:
+              name: replset
+              srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
+              dstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
 
-#          - [ '4.2', '4.2' ]
-#          - [ '4.2', '4.4' ]
-#          - [ '4.2', '5.0' ]
-#          - [ '4.2', '6.0' ]
-#
-#          - [ '4.4', '4.4' ]
-#          - [ '4.4', '5.0' ]
-#          - [ '4.4', '6.0' ]
-#
-#          - [ '5.0', '5.0' ]
-#          - [ '5.0', '6.0' ]
-#          - [ '5.0', '7.0' ]
-#
-#          - [ '6.0', '6.0' ]
-#          - [ '6.0', '7.0' ]
-#          - [ '6.0', '8.0' ]
-#
-#          - [ '7.0', '7.0' ]
-#          - [ '7.0', '8.0' ]
-#
-#          - [ '8.0', '8.0' ]
+
+        # versions are: source, destination
+        mongodb_versions:
+          - [ '4.2', '4.2' ]
+          - [ '4.2', '4.4' ]
+          - [ '4.2', '5.0' ]
+          - [ '4.2', '6.0' ]
+
+          - [ '4.4', '4.4' ]
+          - [ '4.4', '5.0' ]
+          - [ '4.4', '6.0' ]
+
+          - [ '5.0', '5.0' ]
+          - [ '5.0', '6.0' ]
+          - [ '5.0', '7.0' ]
+
+          - [ '6.0', '6.0' ]
+          - [ '6.0', '7.0' ]
+          - [ '6.0', '8.0' ]
+
+          - [ '7.0', '7.0' ]
+          - [ '7.0', '8.0' ]
+
+          - [ '8.0', '8.0' ]
 
         topology:
           - name: replset
