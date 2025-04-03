@@ -34,11 +34,11 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 		logger.Info().
 			Err(err).
 			Msgf("Failed to learn topology via %#q; falling back to %#q.", "hello", "isMaster")
-	}
 
-	topology, err = getTopology(ctx, "isMaster", client)
-	if err != nil {
-		return ClusterInfo{}, errors.Wrapf(err, "failed to learn topology via %#q", "isMaster")
+		topology, err = getTopology(ctx, "isMaster", client)
+		if err != nil {
+			return ClusterInfo{}, errors.Wrapf(err, "failed to learn topology via %#q", "isMaster")
+		}
 	}
 
 	return ClusterInfo{
@@ -78,7 +78,7 @@ func getTopology(ctx context.Context, cmdName string, client *mongo.Client) (Clu
 
 	msgVal, err := raw.LookupErr("msg")
 	if err != nil {
-		return "", errors.Wrapf(err, "failed to find %#q in %#q response", "msg", cmdName)
+		return "", errors.Wrapf(err, "failed to find %#q in %#q response (%v)", "msg", cmdName, raw)
 	}
 
 	msg, isString := msgVal.StringValueOK()
