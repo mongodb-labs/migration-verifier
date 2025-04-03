@@ -69,10 +69,6 @@ jobs:
 
     name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}
 
-    # appendOplogNote was added to mongos in a 4.2 point release. If we’re testing
-    # a specific point release then assume (for now) that it predates that one.
-    if: ${{ matrix.topology.name != 'sharded' || !contains(matrix.mongodb_versions[0], '4.2.') }}
-
     steps:
       - run: uname -a
       - run: ldconfig -p
