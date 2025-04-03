@@ -76,15 +76,10 @@ func getTopology(ctx context.Context, cmdName string, client *mongo.Client) (Clu
 		return "", errors.Wrapf(err, "failed learn topology via %#q", cmdName)
 	}
 
-	msgVal, err := raw.LookupErr("msg")
+	hasMsg, err := mbson.RawContains(raw, "msg")
 	if err != nil {
-		return "", errors.Wrapf(err, "failed to find %#q in %#q response (%v)", "msg", cmdName, raw)
+		return "", errors.Wrapf(err, "failed to check for %#q in %#q response (%v)", "msg", cmdName, raw)
 	}
 
-	msg, isString := msgVal.StringValueOK()
-	if !isString {
-		return "", errors.Wrapf(err, "%#q in %#q response (%v) is a %s but should be a %s", "msg", cmdName, msgVal, msgVal.Type, bson.TypeString)
-	}
-
-	return lo.Ternary(msg == "isdbgrid", TopologySharded, TopologyReplset), nil
+	return lo.Ternary(hasMsg, TopologySharded, TopologyReplset), nil
 }
