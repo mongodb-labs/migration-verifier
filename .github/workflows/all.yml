@@ -15,8 +15,9 @@ jobs:
         # versions are: source, destination
         mongodb_versions:
 
-          # Testing fallback when `hello` isn’t implemented.
-          - [ '4.2.1', '6.0' ]
+          # Testing fallback when `hello` isn’t implemented
+          # (but appendOplogNote is).
+          - [ '4.2.5', '6.0' ]
 
           - [ '4.2', '4.2' ]
           - [ '4.2', '4.4' ]
