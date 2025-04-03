@@ -17,7 +17,7 @@ jobs:
 
           # Testing fallback when `hello` isn’t implemented
           # (but appendOplogNote is).
-          - [ '4.2.9', '6.0' ]
+          - [ '4.2.5', '6.0' ]
 
 #          - [ '4.2', '4.2' ]
 #          - [ '4.2', '4.4' ]
@@ -62,6 +62,10 @@ jobs:
     runs-on: ubuntu-22.04
 
     name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}
+
+    # appendOplogNote was added to mongos in a 4.2 point release. If we’re testing
+    # a specific point release then assume (for now) that it predates that one.
+    if: ${{ matrix.topology.name != "sharded" || !contains(matrix.mongodb_versions[0], "4.2.") }}
 
     steps:
       - run: uname -a
