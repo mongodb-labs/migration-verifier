@@ -7,12 +7,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-env:
-    _GHA_SRC_RS_CONNSTR: mongodb://localhost:27020,localhost:27021,localhost:27022
-    _GHA_DST_RS_CONNSTR: mongodb://localhost:27030,localhost:27031,localhost:27032
-    _GHA_SRC_SC_CONNSTR: mongodb://localhost:27020
-    _GHA_DST_SC_CONNSTR: mongodb://localhost:27030
-
 jobs:
   basics:
     strategy:
@@ -25,8 +19,8 @@ jobs:
           - mongodb_versions: [ '4.2.5', '6.0' ]
             topology:
               name: replset
-              srcConnStr: ${{ env._GHA_SRC_RS_CONNSTR }}
-              dstConnStr: ${{ env._GHA_DST_RS_CONNSTR }}
+              srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
+              dstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
 
 
         # versions are: source, destination
@@ -55,19 +49,19 @@ jobs:
 
         topology:
           - name: replset
-            srcConnStr: ${{ env._GHA_SRC_RS_CONNSTR }}
-            dstConnStr: ${{ env._GHA_DST_RS_CONNSTR }}
+            srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
+            dstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
 
           - name: replset-to-sharded
             dstArgs: --sharded 2
-            srcConnStr: ${{ env._GHA_SRC_RS_CONNSTR }}
-            dstConnStr: ${{ env._GHA_DST_SC_CONNSTR }}
+            srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
+            dstConnStr: mongodb://localhost:27030
 
           - name: sharded
             srcArgs: --sharded 2
             dstArgs: --sharded 2
-            srcConnStr: ${{ env._GHA_SRC_SC_CONNSTR }}
-            dstConnStr: ${{ env._GHA_DST_SC_CONNSTR }}
+            srcConnStr: mongodb://localhost:27020
+            dstConnStr: mongodb://localhost:27030
 
     # Ubuntu 24 lacks OpenSSL 1.1.1’s libcrypto, which pre-v6 MongoDB
     # versions need.
