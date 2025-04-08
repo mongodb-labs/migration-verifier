@@ -43,7 +43,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 		WithBefore(func() {
 			srcChannel, dstChannel, readSrcCallback, readDstCallback = verifier.getFetcherChannelsAndCallbacks(task)
 		}).
-		WithErrorCodes(util.CursorKilled).
+		WithErrorCodes(util.CursorKilledErrCode).
 		WithCallback(
 			func(ctx context.Context, fi *retry.FuncInfo) error {
 				return readSrcCallback(ctx, fi)
