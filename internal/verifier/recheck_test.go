@@ -2,12 +2,15 @@ package verifier
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/rs/zerolog"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -28,6 +31,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 	)
 
 	recheckDocs := suite.fetchRecheckDocs(ctx, verifier)
+
 	suite.Assert().Equal(
 		[]RecheckDoc{
 			{
@@ -37,7 +41,6 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 					SrcCollectionName: "namespace",
 					DocumentID:        "theDocID",
 				},
-				DataSize: 1234,
 			},
 		},
 		recheckDocs,
@@ -76,7 +79,6 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 					SrcCollectionName: "namespace",
 					DocumentID:        "theDocID",
 				},
-				DataSize: len(event.FullDocument),
 			},
 		},
 		recheckDocs,
@@ -87,7 +89,11 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifier *Verifier) []RecheckDoc {
 	metaColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue)
 
-	cursor, err := metaColl.Find(ctx, bson.D{})
+	cursor, err := metaColl.Find(
+		ctx,
+		bson.D{},
+		options.Find().SetProjection(bson.D{{"dataSize", 0}}),
+	)
 	suite.Require().NoError(err, "find recheck docs")
 
 	var results []RecheckDoc
@@ -200,6 +206,68 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 	suite.Require().Len(recheckDocs, 2, "expect # of rechecks: %+v", recheckDocs)
 }
 
+func (suite *IntegrationTestSuite) TestDuplicateRecheck() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
+	docsCount := 100
+
+	ids := lo.Range(docsCount)
+	err := insertRecheckDocs(
+		ctx,
+		verifier,
+		suite.T().Name(), "testColl",
+		lo.ToAnySlice(ids),
+		lo.RepeatBy(docsCount, func(_ int) int { return 16 }),
+	)
+	suite.Require().NoError(err, "should insert the first time")
+
+	err = insertRecheckDocs(
+		ctx,
+		verifier,
+		suite.T().Name(), "testColl",
+		lo.ToAnySlice(ids),
+		lo.RepeatBy(docsCount, func(_ int) int { return 16 }),
+	)
+	suite.Require().NoError(err, "should insert the second time")
+}
+
+func (suite *IntegrationTestSuite) TestManyManyRechecks() {
+	if len(os.Getenv("CI")) > 0 {
+		suite.T().Skip("Skipping this test in CI. (It causes GitHub Action to self-terminate.)")
+	}
+
+	verifier := suite.BuildVerifier()
+	verifier.SetNumWorkers(10)
+	ctx := suite.Context()
+
+	docsCount := 20_000_000
+
+	suite.T().Logf("Inserting %d rechecks …", docsCount)
+
+	ids := lo.Range(docsCount)
+	err := insertRecheckDocs(
+		ctx,
+		verifier,
+		suite.T().Name(), "testColl",
+		lo.ToAnySlice(ids),
+		lo.RepeatBy(docsCount, func(_ int) int { return 16 }),
+	)
+	suite.Require().NoError(err)
+
+	verifier.mux.Lock()
+	defer verifier.mux.Unlock()
+
+	verifier.generation++
+
+	suite.T().Logf("Generating recheck tasks …")
+	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
+	suite.Require().NoError(err)
+}
+
 func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
@@ -220,7 +288,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 			SrcCollectionName: "testColl",
 			DocumentID:        id1,
 		},
-		DataSize: overlyLarge}
+	}
 	d2 := d1
 	d2.PrimaryKey.DocumentID = id2
 	d3 := d1
@@ -280,13 +348,11 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 			SrcCollectionName: "testColl",
 			DocumentID:        id1,
 		},
-		DataSize: dataSizes[0]}
+	}
 	d2 := d1
 	d2.PrimaryKey.DocumentID = id2
-	d2.DataSize = dataSizes[1]
 	d3 := d1
 	d3.PrimaryKey.DocumentID = id3
-	d3.DataSize = dataSizes[2]
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
@@ -402,10 +468,9 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 			SrcCollectionName: "testColl",
 			DocumentID:        id1,
 		},
-		DataSize: dataSizes[0]}
+	}
 	d2 := d1
 	d2.PrimaryKey.DocumentID = id2
-	d2.DataSize = dataSizes[1]
 	d3 := d1
 	d3.PrimaryKey.Generation = 1
 	d4 := d2
