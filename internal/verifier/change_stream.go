@@ -684,7 +684,7 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 			close(csr.changeEventBatchChan)
 		}()
 
-		retryer := retry.New().WithErrorCodes(util.CursorKilled)
+		retryer := retry.New().WithErrorCodes(util.CursorKilledErrCode)
 
 		parentThreadWaiting := true
 

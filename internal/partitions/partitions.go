@@ -582,7 +582,7 @@ func getMidIDBounds(
 
 	// Get a cursor for the $sample and $bucketAuto aggregation.
 	var midIDBounds []any
-	agRetryer := retry.New().WithErrorCodes(util.SampleTooManyDuplicates)
+	agRetryer := retry.New().WithErrorCodes(util.SampleTooManyDuplicatesErrCode)
 	err := agRetryer.
 		WithCallback(
 			func(ctx context.Context, ri *retry.FuncInfo) error {

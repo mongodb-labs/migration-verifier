@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
@@ -38,7 +39,11 @@ type RecheckPrimaryKey struct {
 // RecheckDoc stores the necessary information to know which documents must be rechecked.
 type RecheckDoc struct {
 	PrimaryKey RecheckPrimaryKey `bson:"_id"`
-	DataSize   int               `bson:"dataSize"`
+
+	// NB: Because we don’t update the recheck queue’s documents, this field
+	// and any others that may be added will remain unchanged even if a recheck
+	// is enqueued multiple times for the same document in the same generation.
+	DataSize int `bson:"dataSize"`
 }
 
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
@@ -106,26 +111,18 @@ func (verifier *Verifier) insertRecheckDocs(
 		eg.Go(func() error {
 			models := make([]mongo.WriteModel, len(curThreadIndexes))
 			for m, i := range curThreadIndexes {
-				pk := RecheckPrimaryKey{
-					Generation:        generation,
-					SrcDatabaseName:   dbNames[i],
-					SrcCollectionName: collNames[i],
-					DocumentID:        documentIDs[i],
+				recheckDoc := RecheckDoc{
+					PrimaryKey: RecheckPrimaryKey{
+						Generation:        generation,
+						SrcDatabaseName:   dbNames[i],
+						SrcCollectionName: collNames[i],
+						DocumentID:        documentIDs[i],
+					},
+					DataSize: dataSizes[i],
 				}
 
-				models[m] = mongo.NewReplaceOneModel().
-
-					// The filter must exclude DataSize; otherwise, if a failed comparison
-					// and a change event happen on the same document for the same
-					// generation, the 2nd insert will fail because a) its filter won’t
-					// match anything, and b) it’ll try to insert a new document with the
-					// same _id as the one that the 1st insert already created.
-					SetFilter(bson.D{{"_id", pk}}).
-					SetReplacement(RecheckDoc{
-						PrimaryKey: pk,
-						DataSize:   dataSizes[i],
-					}).
-					SetUpsert(true)
+				models[m] = mongo.NewInsertOneModel().
+					SetDocument(recheckDoc)
 			}
 
 			retryer := retry.New()
@@ -135,6 +132,26 @@ func (verifier *Verifier) insertRecheckDocs(
 						retryCtx,
 						models,
 						options.BulkWrite().SetOrdered(false),
+					)
+
+					// We expect duplicate-key errors from the above because:
+					//
+					// a) The same document can change multiple times per generation.
+					// b) The source’s changes also happen on the destination, and both
+					//    change streams populate this recheck queue.
+					//
+					// Because of that, we ignore duplicate-key errors. We do *not*, though,
+					// ignore other errors that may accompany duplicate-key errors in the
+					// same server response.
+					//
+					// This does mean that the persisted DataSize _does not change_ after
+					// a document is first inserted. That should matter little, though,
+					// the persisted document size is just an optimization for parallelizing,
+					// and document sizes probably remain stable(-ish) across updates.
+					err = util.TolerateSimpleDuplicateKeyInBulk(
+						verifier.logger,
+						len(models),
+						err,
 					)
 
 					return err
