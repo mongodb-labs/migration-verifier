@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
 
@@ -232,6 +233,39 @@ func (suite *IntegrationTestSuite) TestDuplicateRecheck() {
 		lo.RepeatBy(docsCount, func(_ int) int { return 16 }),
 	)
 	suite.Require().NoError(err, "should insert the second time")
+}
+
+func (suite *IntegrationTestSuite) TestManyManyRechecks() {
+	if len(os.Getenv("CI")) > 0 {
+		suite.T().Skip("Skipping this test in CI. (It causes GitHub Action to self-terminate.)")
+	}
+
+	verifier := suite.BuildVerifier()
+	verifier.SetNumWorkers(10)
+	ctx := suite.Context()
+
+	docsCount := 20_000_000
+
+	suite.T().Logf("Inserting %d rechecks …", docsCount)
+
+	ids := lo.Range(docsCount)
+	err := insertRecheckDocs(
+		ctx,
+		verifier,
+		suite.T().Name(), "testColl",
+		lo.ToAnySlice(ids),
+		lo.RepeatBy(docsCount, func(_ int) int { return 16 }),
+	)
+	suite.Require().NoError(err)
+
+	verifier.mux.Lock()
+	defer verifier.mux.Unlock()
+
+	verifier.generation++
+
+	suite.T().Logf("Generating recheck tasks …")
+	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
+	suite.Require().NoError(err)
 }
 
 func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
