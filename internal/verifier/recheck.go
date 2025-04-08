@@ -17,9 +17,12 @@ import (
 )
 
 const (
-	recheckQueue         = "recheckQueue"
-	maxBSONObjSize       = 16 * 1024 * 1024
-	maxIdsPerRecheckTask = 12 * 1024 * 1024
+	recheckQueue   = "recheckQueue"
+	maxBSONObjSize = 16 * 1024 * 1024
+
+	// This is the upper limit on the BSON-encoded length of document IDs
+	// per recheck task.
+	maxRecheckIdsLen = 12 * 1024 * 1024
 )
 
 // RecheckPrimaryKey stores the implicit type of recheck to perform
@@ -258,15 +261,14 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 
 	var prevDBName, prevCollName string
 	var idAccum []any
-	var idLenAccum int
+	var idsSizer util.BSONArraySizer
 	var totalDocs types.DocumentCount
 	var dataSizeAccum, totalRecheckData int64
 
-	maxDocsPerTask := rechecksCount / int64(verifier.numWorkers)
-
-	if maxDocsPerTask < int64(verifier.numWorkers) {
-		maxDocsPerTask = int64(verifier.numWorkers)
-	}
+	maxDocsPerTask := max(
+		int(rechecksCount)/verifier.numWorkers,
+		verifier.numWorkers,
+	)
 
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
@@ -322,8 +324,10 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 			return err
 		}
 
-		idRaw := cursor.Current.Lookup("_id", "docID")
-		idLen := len(idRaw.Value)
+		idRaw, err := cursor.Current.LookupErr("_id", "docID")
+		if err != nil {
+			return errors.Wrapf(err, "failed to find docID in enqueued recheck %v", cursor.Current)
+		}
 
 		// We persist rechecks if any of these happen:
 		// - the namespace has changed
@@ -333,8 +337,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		//
 		if doc.PrimaryKey.SrcDatabaseName != prevDBName ||
 			doc.PrimaryKey.SrcCollectionName != prevCollName ||
-			int64(len(idAccum)) > maxDocsPerTask ||
-			idLenAccum >= maxIdsPerRecheckTask ||
+			len(idAccum) > maxDocsPerTask ||
+			idsSizer.Len() >= maxRecheckIdsLen ||
 			dataSizeAccum >= verifier.partitionSizeInBytes {
 
 			err := persistBufferedRechecks()
@@ -344,12 +348,12 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 
 			prevDBName = doc.PrimaryKey.SrcDatabaseName
 			prevCollName = doc.PrimaryKey.SrcCollectionName
-			idLenAccum = 0
+			idsSizer = util.BSONArraySizer{}
 			dataSizeAccum = 0
 			idAccum = idAccum[:0]
 		}
 
-		idLenAccum += idLen
+		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 

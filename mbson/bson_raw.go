@@ -27,3 +27,27 @@ func RawContains(doc bson.Raw, keys ...string) (bool, error) {
 	val := any(nil)
 	return RawLookup(doc, &val, keys...)
 }
+
+// ConvertToRawValue converts the specified argument to a bson.RawValue.
+func ConvertToRawValue(thing any) (bson.RawValue, error) {
+	t, val, err := bson.MarshalValue(thing)
+	if err != nil {
+		return bson.RawValue{}, errors.Wrapf(err, "failed to encode value (%T) to BSON (%v)", thing, thing)
+	}
+
+	return bson.RawValue{
+		Type:  t,
+		Value: val,
+	}, nil
+}
+
+// MustConvertToRawValue is like ConvertToRawValue, but it panics if the
+// value can’t be marshaled. This is for use in tests only.
+func MustConvertToRawValue(thing any) bson.RawValue {
+	val, err := ConvertToRawValue(thing)
+	if err != nil {
+		panic(err)
+	}
+
+	return val
+}
