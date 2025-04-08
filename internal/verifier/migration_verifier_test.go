@@ -46,6 +46,8 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("%s requires %#q in environment.", t.Name(), name)
 		}
 
+		t.Logf("Found %s: %#q", name, connStr)
+
 		envVals[name] = connStr
 	}
 
