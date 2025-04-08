@@ -23,7 +23,6 @@ import (
 // `ErrorCode` newtype, but that requires a more invasive change to everything
 // that uses error codes.
 const (
-	CommandNotFound                = 59
 	LockFailedErrCode              = 107
 	SampleTooManyDuplicatesErrCode = 28799
 	CursorKilledErrCode            = 237
