@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -22,15 +23,22 @@ const (
 	TopologyReplset ClusterTopology = "replset"
 )
 
-func GetClusterInfo(ctx context.Context, client *mongo.Client) (ClusterInfo, error) {
+func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Client) (ClusterInfo, error) {
 	va, err := getVersionArray(ctx, client)
 	if err != nil {
 		return ClusterInfo{}, errors.Wrap(err, "failed to fetch version array")
 	}
 
-	topology, err := getTopology(ctx, client)
+	topology, err := getTopology(ctx, "hello", client)
 	if err != nil {
-		return ClusterInfo{}, errors.Wrap(err, "failed to determine topology")
+		logger.Info().
+			Err(err).
+			Msgf("Failed to learn topology via %#q; falling back to %#q.", "hello", "isMaster")
+
+		topology, err = getTopology(ctx, "isMaster", client)
+		if err != nil {
+			return ClusterInfo{}, errors.Wrapf(err, "failed to learn topology via %#q", "isMaster")
+		}
 	}
 
 	return ClusterInfo{
@@ -56,23 +64,22 @@ func getVersionArray(ctx context.Context, client *mongo.Client) ([]int, error) {
 	return va, nil
 }
 
-func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, error) {
+func getTopology(ctx context.Context, cmdName string, client *mongo.Client) (ClusterTopology, error) {
+
 	resp := client.Database("admin").RunCommand(
 		ctx,
-		bson.D{{"hello", 1}},
+		bson.D{{cmdName, 1}},
 	)
 
-	hello := struct {
-		Msg string
-	}{}
-
-	if err := resp.Decode(&hello); err != nil {
-		return "", errors.Wrapf(
-			err,
-			"failed to decode %#q response",
-			"hello",
-		)
+	raw, err := resp.Raw()
+	if err != nil {
+		return "", errors.Wrapf(err, "failed learn topology via %#q", cmdName)
 	}
 
-	return lo.Ternary(hello.Msg == "isdbgrid", TopologySharded, TopologyReplset), nil
+	hasMsg, err := mbson.RawContains(raw, "msg")
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to check for %#q in %#q response (%v)", "msg", cmdName, raw)
+	}
+
+	return lo.Ternary(hasMsg, TopologySharded, TopologyReplset), nil
 }
