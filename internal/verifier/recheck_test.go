@@ -36,7 +36,6 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 		[]RecheckDoc{
 			{
 				PrimaryKey: RecheckPrimaryKey{
-					Generation:        verifier.generation,
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
 					DocumentID:        "theDocID",
@@ -74,7 +73,6 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 		[]RecheckDoc{
 			{
 				PrimaryKey: RecheckPrimaryKey{
-					Generation:        verifier.generation,
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
 					DocumentID:        "theDocID",
@@ -87,7 +85,8 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 }
 
 func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifier *Verifier) []RecheckDoc {
-	metaColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue)
+	metaColl := suite.metaMongoClient.Database(verifier.metaDBName).
+		Collection(getRecheckQueueCollectionName(verifier.generation))
 
 	cursor, err := metaColl.Find(
 		ctx,
@@ -283,7 +282,6 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 
 	d1 := RecheckDoc{
 		PrimaryKey: RecheckPrimaryKey{
-			Generation:        0,
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
 			DocumentID:        id1,
@@ -343,7 +341,6 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	suite.Require().NoError(err)
 	d1 := RecheckDoc{
 		PrimaryKey: RecheckPrimaryKey{
-			Generation:        0,
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
 			DocumentID:        id1,
@@ -453,17 +450,8 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 
 	verifier.generation++
 
-	err = insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
-	suite.Require().NoError(err)
-
-	verifier.generation++
-
-	err = insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
-	suite.Require().NoError(err)
-
 	d1 := RecheckDoc{
 		PrimaryKey: RecheckPrimaryKey{
-			Generation:        0,
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
 			DocumentID:        id1,
@@ -471,40 +459,17 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 	}
 	d2 := d1
 	d2.PrimaryKey.DocumentID = id2
-	d3 := d1
-	d3.PrimaryKey.Generation = 1
-	d4 := d2
-	d4.PrimaryKey.Generation = 1
-	d5 := d1
-	d5.PrimaryKey.Generation = 2
-	d6 := d2
-	d6.PrimaryKey.Generation = 2
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
-	suite.ElementsMatch([]any{d1, d2, d3, d4, d5, d6}, results)
+	suite.Assert().ElementsMatch([]any{d1, d2}, results)
 
 	verifier.mux.Lock()
 
-	verifier.generation = 2
 	err = verifier.ClearRecheckDocsWhileLocked(ctx)
 	suite.Require().NoError(err)
 
 	results = suite.fetchRecheckDocs(ctx, verifier)
-	suite.ElementsMatch([]any{d1, d2, d5, d6}, results)
-
-	verifier.generation = 1
-	err = verifier.ClearRecheckDocsWhileLocked(ctx)
-	suite.Require().NoError(err)
-
-	results = suite.fetchRecheckDocs(ctx, verifier)
-	suite.ElementsMatch([]any{d5, d6}, results)
-
-	verifier.generation = 3
-	err = verifier.ClearRecheckDocsWhileLocked(ctx)
-	suite.Require().NoError(err)
-
-	results = suite.fetchRecheckDocs(ctx, verifier)
-	suite.ElementsMatch([]any{}, results)
+	suite.Assert().ElementsMatch([]any{}, results)
 }
 
 func insertRecheckDocs(

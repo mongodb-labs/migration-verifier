@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	recheckQueue   = "recheckQueue"
-	maxBSONObjSize = 16 * 1024 * 1024
+	recheckQueueBase = "recheckQueue"
+	maxBSONObjSize   = 16 * 1024 * 1024
 
 	// This is the upper limit on the BSON-encoded length of document IDs
 	// per recheck task.
@@ -33,7 +33,6 @@ const (
 // sorting by _id will guarantee that all rechecks for a given
 // namespace appear consecutively.
 type RecheckPrimaryKey struct {
-	Generation        int    `bson:"generation"`
 	SrcDatabaseName   string `bson:"db"`
 	SrcCollectionName string `bson:"coll"`
 	DocumentID        any    `bson:"docID"`
@@ -108,6 +107,9 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	eg, groupCtx := contextplus.ErrGroup(ctx)
 
+	genCollection := verifier.verificationDatabase().
+		Collection(getRecheckQueueCollectionName(generation))
+
 	for _, curThreadIndexes := range indexesPerThread {
 		curThreadIndexes := curThreadIndexes
 
@@ -116,7 +118,6 @@ func (verifier *Verifier) insertRecheckDocs(
 			for m, i := range curThreadIndexes {
 				recheckDoc := RecheckDoc{
 					PrimaryKey: RecheckPrimaryKey{
-						Generation:        generation,
 						SrcDatabaseName:   dbNames[i],
 						SrcCollectionName: collNames[i],
 						DocumentID:        documentIDs[i],
@@ -131,7 +132,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			retryer := retry.New()
 			err := retryer.WithCallback(
 				func(retryCtx context.Context, _ *retry.FuncInfo) error {
-					_, err := verifier.verificationDatabase().Collection(recheckQueue).BulkWrite(
+					_, err := genCollection.BulkWrite(
 						retryCtx,
 						models,
 						options.BulkWrite().SetOrdered(false),
@@ -197,14 +198,12 @@ func (verifier *Verifier) ClearRecheckDocsWhileLocked(ctx context.Context) error
 		Int("previousGeneration", prevGeneration).
 		Msg("Deleting previous generation's enqueued rechecks.")
 
+	genCollection := verifier.verificationDatabase().
+		Collection(getRecheckQueueCollectionName(prevGeneration))
+
 	return retry.New().WithCallback(
 		func(ctx context.Context, i *retry.FuncInfo) error {
-			_, err := verifier.verificationDatabase().Collection(recheckQueue).DeleteMany(
-				ctx,
-				bson.D{{"_id.generation", prevGeneration}},
-			)
-
-			return err
+			return genCollection.Drop(ctx)
 		},
 		"deleting generation %d's enqueued rechecks",
 		prevGeneration,
@@ -231,14 +230,14 @@ func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
 func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) error {
 	prevGeneration := verifier.getPreviousGenerationWhileLocked()
 
-	findFilter := bson.D{{"_id.generation", prevGeneration}}
-
 	verifier.logger.Debug().
 		Int("priorGeneration", prevGeneration).
 		Msgf("Counting prior generation’s enqueued rechecks.")
 
-	recheckColl := verifier.verificationDatabase().Collection(recheckQueue)
-	rechecksCount, err := recheckColl.CountDocuments(ctx, findFilter)
+	recheckColl := verifier.verificationDatabase().
+		Collection(getRecheckQueueCollectionName(prevGeneration))
+
+	rechecksCount, err := recheckColl.CountDocuments(ctx, bson.D{})
 	if err != nil {
 		return errors.Wrapf(err,
 			"failed to count generation %d’s rechecks",
@@ -275,7 +274,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	// namespace will be consecutive in this query’s result.
 	cursor, err := recheckColl.Find(
 		ctx,
-		findFilter,
+		bson.D{},
 		options.Find().SetSort(bson.D{{"_id", 1}}),
 	)
 	if err != nil {
@@ -377,4 +376,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	}
 
 	return err
+}
+
+func getRecheckQueueCollectionName(generation int) string {
+	return fmt.Sprintf("%s_gen%d", recheckQueueBase, generation)
 }

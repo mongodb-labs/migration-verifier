@@ -72,11 +72,7 @@ func BenchmarkGeneric(t *testing.B) {
 		t.Fatal(err)
 	}
 	verifier.SetMetaDBName(metaDBName)
-	err = verifier.verificationTaskCollection().Drop(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = verifier.verificationDatabase().Collection(recheckQueue).Drop(context.Background())
+	err = verifier.verificationDatabase().Drop(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1591,9 +1591,11 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	<-checkDoneChan
 }
 
-func (suite *IntegrationTestSuite) waitForRecheckDocs(verifier *Verifier) {
+func (suite *IntegrationTestSuite) waitForRecheckDocs(verifier *Verifier, generation int) {
 	suite.Eventually(func() bool {
-		cursor, err := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue).Find(suite.Context(), bson.D{})
+		cursor, err := suite.metaMongoClient.Database(verifier.metaDBName).
+			Collection(getRecheckQueueCollectionName(generation)).
+			Find(suite.Context(), bson.D{})
 		var docs []bson.D
 		suite.Require().NoError(err)
 		suite.Require().NoError(cursor.All(suite.Context(), &docs))
@@ -1627,7 +1629,7 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	_, err = dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
-	suite.waitForRecheckDocs(verifier)
+	suite.waitForRecheckDocs(verifier, 1)
 
 	// Run generation 2 and get verification status.
 	suite.Require().NoError(runner.StartNextGeneration())
@@ -1644,7 +1646,7 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
-	suite.waitForRecheckDocs(verifier)
+	suite.waitForRecheckDocs(verifier, 3)
 
 	status, err = verifier.GetVerificationStatus(ctx)
 	suite.Require().NoError(err)
@@ -1660,7 +1662,7 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
-	suite.waitForRecheckDocs(verifier)
+	suite.waitForRecheckDocs(verifier, 4)
 
 	// Everything should match by the end of it.
 	status, err = verifier.GetVerificationStatus(ctx)
