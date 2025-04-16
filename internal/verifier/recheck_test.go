@@ -448,8 +448,6 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
-	verifier.generation++
-
 	d1 := RecheckDoc{
 		PrimaryKey: RecheckPrimaryKey{
 			SrcDatabaseName:   "testDB",
@@ -465,8 +463,13 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 
 	verifier.mux.Lock()
 
-	err = verifier.ClearRecheckDocsWhileLocked(ctx)
+	verifier.generation++
+
+	err = verifier.DropOldRecheckQueueWhileLocked(ctx)
 	suite.Require().NoError(err)
+
+	// This never happens in real life but is needed for this test.
+	verifier.generation--
 
 	results = suite.fetchRecheckDocs(ctx, verifier)
 	suite.Assert().ElementsMatch([]any{}, results)

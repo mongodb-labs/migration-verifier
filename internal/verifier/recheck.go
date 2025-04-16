@@ -187,11 +187,11 @@ func (verifier *Verifier) insertRecheckDocs(
 	return nil
 }
 
-// ClearRecheckDocsWhileLocked deletes the previous generation’s recheck
+// DropOldRecheckQueueWhileLocked deletes the previous generation’s recheck
 // documents from the verifier’s metadata.
 //
 // The verifier **MUST** be locked when this function is called (or panic).
-func (verifier *Verifier) ClearRecheckDocsWhileLocked(ctx context.Context) error {
+func (verifier *Verifier) DropOldRecheckQueueWhileLocked(ctx context.Context) error {
 	prevGeneration := verifier.getPreviousGenerationWhileLocked()
 
 	verifier.logger.Debug().

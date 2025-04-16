@@ -390,7 +390,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any
 			return err
 		}
 
-		err = verifier.ClearRecheckDocsWhileLocked(ctx)
+		err = verifier.DropOldRecheckQueueWhileLocked(ctx)
 		if err != nil {
 			verifier.logger.Warn().
 				Err(err).
