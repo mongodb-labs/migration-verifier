@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	recheckQueueBase = "recheckQueue"
-	maxBSONObjSize   = 16 * 1024 * 1024
+	recheckQueueCollectionNameBase = "recheckQueue"
+
+	maxBSONObjSize = 16 * 1024 * 1024
 
 	// This is the upper limit on the BSON-encoded length of document IDs
 	// per recheck task.
@@ -377,5 +378,5 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 
 func (v *Verifier) getRecheckQueueCollection(generation int) *mongo.Collection {
 	return v.verificationDatabase().
-		Collection(fmt.Sprintf("%s_gen%d", recheckQueueBase, generation))
+		Collection(fmt.Sprintf("%s_gen%d", recheckQueueCollectionNameBase, generation))
 }

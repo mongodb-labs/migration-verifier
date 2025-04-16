@@ -1591,9 +1591,9 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	<-checkDoneChan
 }
 
-func (suite *IntegrationTestSuite) waitForRecheckDocs(verifier *Verifier, generation int) {
+func (suite *IntegrationTestSuite) waitForRecheckDocs(verifier *Verifier) {
 	suite.Eventually(func() bool {
-		cursor, err := verifier.getRecheckQueueCollection(generation).
+		cursor, err := verifier.getRecheckQueueCollection(verifier.generation).
 			Find(suite.Context(), bson.D{})
 		var docs []bson.D
 		suite.Require().NoError(err)
@@ -1628,7 +1628,7 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	_, err = dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
-	suite.waitForRecheckDocs(verifier, 1)
+	suite.waitForRecheckDocs(verifier)
 
 	// Run generation 2 and get verification status.
 	suite.Require().NoError(runner.StartNextGeneration())
@@ -1645,7 +1645,7 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
-	suite.waitForRecheckDocs(verifier, 3)
+	suite.waitForRecheckDocs(verifier)
 
 	status, err = verifier.GetVerificationStatus(ctx)
 	suite.Require().NoError(err)
@@ -1661,7 +1661,7 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
-	suite.waitForRecheckDocs(verifier, 4)
+	suite.waitForRecheckDocs(verifier)
 
 	// Everything should match by the end of it.
 	status, err = verifier.GetVerificationStatus(ctx)
