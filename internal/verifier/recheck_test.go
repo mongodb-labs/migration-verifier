@@ -85,8 +85,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 }
 
 func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifier *Verifier) []RecheckDoc {
-	metaColl := suite.metaMongoClient.Database(verifier.metaDBName).
-		Collection(getRecheckQueueCollectionName(verifier.generation))
+	metaColl := verifier.getRecheckQueueCollection(verifier.generation)
 
 	cursor, err := metaColl.Find(
 		ctx,

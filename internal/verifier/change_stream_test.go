@@ -296,8 +296,7 @@ func (suite *IntegrationTestSuite) getClusterTime(ctx context.Context, client *m
 func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, verifier *Verifier) []bson.M {
 	recheckDocs := []bson.M{}
 
-	recheckColl := verifier.verificationDatabase().
-		Collection(getRecheckQueueCollectionName(verifier.generation))
+	recheckColl := verifier.getRecheckQueueCollection(verifier.generation)
 	cursor, err := recheckColl.Find(ctx, bson.D{})
 
 	if !errors.Is(err, mongo.ErrNoDocuments) {
@@ -839,8 +838,7 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			recheckColl := verifier.verificationDatabase().
-				Collection(getRecheckQueueCollectionName(0))
+			recheckColl := verifier.getRecheckQueueCollection(verifier.generation)
 			cursor, err := recheckColl.Find(ctx, bson.D{})
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				return false

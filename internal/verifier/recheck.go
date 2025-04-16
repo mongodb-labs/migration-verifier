@@ -107,8 +107,7 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	eg, groupCtx := contextplus.ErrGroup(ctx)
 
-	genCollection := verifier.verificationDatabase().
-		Collection(getRecheckQueueCollectionName(generation))
+	genCollection := verifier.getRecheckQueueCollection(generation)
 
 	for _, curThreadIndexes := range indexesPerThread {
 		curThreadIndexes := curThreadIndexes
@@ -198,8 +197,7 @@ func (verifier *Verifier) DropOldRecheckQueueWhileLocked(ctx context.Context) er
 		Int("previousGeneration", prevGeneration).
 		Msg("Deleting previous generation's enqueued rechecks.")
 
-	genCollection := verifier.verificationDatabase().
-		Collection(getRecheckQueueCollectionName(prevGeneration))
+	genCollection := verifier.getRecheckQueueCollection(prevGeneration)
 
 	return retry.New().WithCallback(
 		func(ctx context.Context, i *retry.FuncInfo) error {
@@ -234,8 +232,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		Int("priorGeneration", prevGeneration).
 		Msgf("Counting prior generation’s enqueued rechecks.")
 
-	recheckColl := verifier.verificationDatabase().
-		Collection(getRecheckQueueCollectionName(prevGeneration))
+	recheckColl := verifier.getRecheckQueueCollection(prevGeneration)
 
 	rechecksCount, err := recheckColl.CountDocuments(ctx, bson.D{})
 	if err != nil {
@@ -378,6 +375,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	return err
 }
 
-func getRecheckQueueCollectionName(generation int) string {
-	return fmt.Sprintf("%s_gen%d", recheckQueueBase, generation)
+func (v *Verifier) getRecheckQueueCollection(generation int) *mongo.Collection {
+	return v.verificationDatabase().
+		Collection(fmt.Sprintf("%s_gen%d", recheckQueueBase, generation))
 }
