@@ -19,8 +19,6 @@ import (
 const (
 	recheckQueueCollectionNameBase = "recheckQueue"
 
-	maxBSONObjSize = 16 * 1024 * 1024
-
 	// This is the upper limit on the BSON-encoded length of document IDs
 	// per recheck task.
 	maxRecheckIdsLen = 12 * 1024 * 1024
