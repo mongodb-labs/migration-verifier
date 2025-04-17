@@ -339,11 +339,7 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 	model := mongo.IndexModel{Keys: bson.M{"generation": 1}}
 	_, err := verifier.verificationTaskCollection().Indexes().CreateOne(ctx, model)
-	if err != nil {
-		return err
-	}
-	model = mongo.IndexModel{Keys: bson.D{{"_id.generation", 1}}}
-	_, err = verifier.verificationDatabase().Collection(recheckQueue).Indexes().CreateOne(ctx, model)
+
 	return err
 }
 

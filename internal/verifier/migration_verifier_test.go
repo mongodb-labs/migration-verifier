@@ -1593,7 +1593,8 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 
 func (suite *IntegrationTestSuite) waitForRecheckDocs(verifier *Verifier) {
 	suite.Eventually(func() bool {
-		cursor, err := suite.metaMongoClient.Database(verifier.metaDBName).Collection(recheckQueue).Find(suite.Context(), bson.D{})
+		cursor, err := verifier.getRecheckQueueCollection(verifier.generation).
+			Find(suite.Context(), bson.D{})
 		var docs []bson.D
 		suite.Require().NoError(err)
 		suite.Require().NoError(cursor.All(suite.Context(), &docs))
