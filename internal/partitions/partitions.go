@@ -200,9 +200,6 @@ func PartitionCollectionWithParameters(
 	if minIDBound == nil {
 		subLogger.Info().Msgf("No minimum _id found for collection %s.%s; will not perform collection copy for this collection.", uuidEntry.DBName, uuidEntry.CollName)
 		return nil, 0, 0, nil
-	} else {
-		subLogger.Debug().Msgf("Minimum _id for collection %s.%s: %v",
-			uuidEntry.DBName, uuidEntry.CollName, minIDBound)
 	}
 
 	// The upper bound for the collection. There is no partitioning to do if the bound is nil.
@@ -213,9 +210,6 @@ func PartitionCollectionWithParameters(
 	if maxIDBound == nil {
 		subLogger.Info().Msgf("No maximum _id found for collection %s.%s; will not perform collection copy for this collection.", uuidEntry.DBName, uuidEntry.CollName)
 		return nil, 0, 0, nil
-	} else {
-		subLogger.Debug().Msgf("Maximum _id for collection %s.%s: %v",
-			uuidEntry.DBName, uuidEntry.CollName, maxIDBound)
 	}
 
 	// The total number of partitions needed for the collection. If it is a capped collection, we
