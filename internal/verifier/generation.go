@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"

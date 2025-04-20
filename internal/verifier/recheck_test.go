@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/10gen/migration-verifier/internal/testutil"
-	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-verifier/internal/testutil"
+	"github.com/mongodb-labs/migration-verifier/internal/types"
+	"github.com/mongodb-labs/migration-verifier/mslices"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"

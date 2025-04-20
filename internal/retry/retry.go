@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/10gen/migration-verifier/contextplus"
-	"github.com/10gen/migration-verifier/internal/logger"
-	"github.com/10gen/migration-verifier/internal/reportutils"
-	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/10gen/migration-verifier/mmongo"
-	"github.com/10gen/migration-verifier/msync"
+	"github.com/mongodb-labs/migration-verifier/contextplus"
+	"github.com/mongodb-labs/migration-verifier/internal/logger"
+	"github.com/mongodb-labs/migration-verifier/internal/reportutils"
+	"github.com/mongodb-labs/migration-verifier/internal/util"
+	"github.com/mongodb-labs/migration-verifier/mmongo"
+	"github.com/mongodb-labs/migration-verifier/msync"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -238,7 +238,7 @@ func (r *Retryer) addDescriptionToEvent(event *zerolog.Event) *zerolog.Event {
 //
 // For the above function, there have historically been concerns regarding majority write concern
 // upon retrying a write operation to the server. Mongomirror explicitly handled this:
-// https://github.com/10gen/mongomirror/blob/7dc961b1fe0d8986815277179c1e97f92f6b9808/mongomirror/mongomirror.go#L1265-L1272
+// https://github.com/mongodb-labs/mongomirror/blob/7dc961b1fe0d8986815277179c1e97f92f6b9808/mongomirror/mongomirror.go#L1265-L1272
 //
 // However, the server will generally honor write concern for a command that attempted a write, even if the write results in an error.
 // So explicit handling this upon a write command retry is not necessary:

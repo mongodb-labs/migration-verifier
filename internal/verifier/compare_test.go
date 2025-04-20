@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/10gen/migration-verifier/contextplus"
-	"github.com/10gen/migration-verifier/internal/partitions"
-	"github.com/10gen/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-verifier/contextplus"
+	"github.com/mongodb-labs/migration-verifier/internal/partitions"
+	"github.com/mongodb-labs/migration-verifier/mslices"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"

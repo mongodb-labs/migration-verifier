@@ -6,16 +6,16 @@ variables:
 
 functions:
   "fetch source":
-    # This clones the project being tracked into the 'src/github.com/10gen/migration-verifier' directory.
+    # This clones the project being tracked into the 'src/github.com/mongodb-labs/migration-verifier' directory.
     - command: git.get_project
       params:
-        directory: src/github.com/10gen/migration-verifier
+        directory: src/github.com/mongodb-labs/migration-verifier
     # Make an evergreen expansion file with dynamic values
     - command: subprocess.exec
       params:
         binary: bash
         args:
-          - "./src/github.com/10gen/migration-verifier/evergreen/generate_expansions.sh"
+          - "./src/github.com/mongodb-labs/migration-verifier/evergreen/generate_expansions.sh"
         env:
           build_tags: ${build_tags}
           version_id: ${version_id}
@@ -30,12 +30,12 @@ functions:
           evg_key: ${evg_key}
           release_aws_access_key_id: ${release_aws_access_key_id}
           release_aws_secret: ${release_aws_secret}
-          verifier_dir: "src/github.com/10gen/migration-verifier"
+          verifier_dir: "src/github.com/mongodb-labs/migration-verifier"
 
     # Load the expansion file to make an evergreen variable with the current unique version
     - command: expansions.update
       params:
-        file: src/github.com/10gen/migration-verifier/verifier_expansion.yml
+        file: src/github.com/mongodb-labs/migration-verifier/verifier_expansion.yml
 
   "run unit tests":
     - command: subprocess.exec
@@ -43,7 +43,7 @@ functions:
       params:
         binary: bash
         add_expansions_to_env: true
-        working_dir: src/github.com/10gen/migration-verifier
+        working_dir: src/github.com/mongodb-labs/migration-verifier
         args:
           - "evergreen/run_python_script.sh"
           - "evergreen/go_test.py"
@@ -54,7 +54,7 @@ functions:
       params:
         binary: bash
         add_expansions_to_env: true
-        working_dir: src/github.com/10gen/migration-verifier
+        working_dir: src/github.com/mongodb-labs/migration-verifier
         args:
           - "evergreen/run_python_script.sh"
           - "evergreen/go_lint.py"

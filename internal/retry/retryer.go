@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-verifier/option"
 )
 
 type retryCallbackInfo struct {

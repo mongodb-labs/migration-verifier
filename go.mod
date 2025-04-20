@@ -1,4 +1,4 @@
-module github.com/10gen/migration-verifier
+module github.com/mongodb-labs/migration-verifier
 
 go 1.22
 

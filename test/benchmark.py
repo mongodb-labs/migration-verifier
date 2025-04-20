@@ -165,7 +165,7 @@ subprocess.run(["go", "build", "main/migration_verifier.go"], check=True)
 # command = [
 #     "go", "test", "-v", "-run", "^$", "-bench", "^BenchmarkGeneric$",
 #     "-benchtime", "1x", "-timeout", "5h",
-#     "github.com/10gen/migration-verifier/internal/verifier"
+#     "github.com/mongodb-labs/migration-verifier/internal/verifier"
 # ]
 
 src_namespaces = ' '.join([

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/mongodb-labs/migration-verifier/internal/logger"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/suite"

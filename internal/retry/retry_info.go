@@ -5,10 +5,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/10gen/migration-verifier/internal/reportutils"
-	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/msync"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-verifier/internal/reportutils"
+	"github.com/mongodb-labs/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-verifier/msync"
+	"github.com/mongodb-labs/migration-verifier/option"
 	"github.com/rs/zerolog"
 )
 

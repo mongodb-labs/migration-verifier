@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/mongodb-labs/migration-verifier/internal/util"
 )
 
 // C stores a `context.Context`. This is the concrete type of the contexts that

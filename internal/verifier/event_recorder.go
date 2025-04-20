@@ -1,7 +1,7 @@
 package verifier
 
 import (
-	"github.com/10gen/migration-verifier/msync"
+	"github.com/mongodb-labs/migration-verifier/msync"
 	"github.com/pkg/errors"
 	"golang.org/x/exp/maps"
 )

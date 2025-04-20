@@ -3,7 +3,7 @@ package util
 import (
 	"log"
 
-	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/mongodb-labs/migration-verifier/internal/logger"
 )
 
 // Invariant asserts the predicate is true, and if not, logs the message and exits.
