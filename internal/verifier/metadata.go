@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-verifier/internal/util"
+	"github.com/mongodb-labs/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/mongo"

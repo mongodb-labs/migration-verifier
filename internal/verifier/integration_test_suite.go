@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/10gen/migration-verifier/contextplus"
-	"github.com/10gen/migration-verifier/internal/logger"
-	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/mongodb-labs/migration-verifier/contextplus"
+	"github.com/mongodb-labs/migration-verifier/internal/logger"
+	"github.com/mongodb-labs/migration-verifier/internal/util"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"

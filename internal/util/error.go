@@ -6,8 +6,8 @@ import (
 	"net"
 	"strings"
 
-	"github.com/10gen/migration-verifier/internal/logger"
-	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/mongodb-labs/migration-verifier/internal/logger"
+	"github.com/mongodb-labs/migration-verifier/mmongo"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"

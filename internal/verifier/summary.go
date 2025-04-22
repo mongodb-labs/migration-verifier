@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/10gen/migration-verifier/internal/reportutils"
-	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/mongodb-labs/migration-verifier/internal/reportutils"
+	"github.com/mongodb-labs/migration-verifier/internal/types"
+	"github.com/mongodb-labs/migration-verifier/internal/util"
 	"github.com/olekukonko/tablewriter"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/exp/maps"

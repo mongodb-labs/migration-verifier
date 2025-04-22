@@ -1,7 +1,7 @@
 package util
 
 import (
-	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/mongodb-labs/migration-verifier/mmongo"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 )

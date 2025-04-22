@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/10gen/migration-verifier/contextplus"
-	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/mongodb-labs/migration-verifier/contextplus"
+	"github.com/mongodb-labs/migration-verifier/internal/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/10gen/migration-verifier/internal/verifier"
+	"github.com/mongodb-labs/migration-verifier/internal/verifier"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"

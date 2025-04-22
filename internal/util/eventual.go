@@ -3,7 +3,7 @@ package util
 import (
 	"sync"
 
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-verifier/option"
 )
 
 // Eventual solves the “one writer, many readers” problem: a value gets

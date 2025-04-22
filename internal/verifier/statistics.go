@@ -9,7 +9,7 @@ import (
 	"sync"
 	"text/template"
 
-	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/mongodb-labs/migration-verifier/internal/types"
 	"go.mongodb.org/mongo-driver/bson"
 )
 

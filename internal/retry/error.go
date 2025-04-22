@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/10gen/migration-verifier/internal/reportutils"
+	"github.com/mongodb-labs/migration-verifier/internal/reportutils"
 )
 
 type RetryDurationLimitExceededErr struct {

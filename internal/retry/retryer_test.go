@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/10gen/migration-verifier/contextplus"
-	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-verifier/contextplus"
+	"github.com/mongodb-labs/migration-verifier/internal/util"
+	"github.com/mongodb-labs/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 

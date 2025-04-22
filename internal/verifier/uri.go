@@ -3,7 +3,7 @@ package verifier
 import (
 	"context"
 
-	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/mongodb-labs/migration-verifier/internal/util"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"

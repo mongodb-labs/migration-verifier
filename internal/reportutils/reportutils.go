@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/mongodb-labs/migration-verifier/internal/types"
+	"github.com/mongodb-labs/migration-verifier/internal/util"
 	"github.com/dustin/go-humanize"
 	"golang.org/x/exp/constraints"
 )

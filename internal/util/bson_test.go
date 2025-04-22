@@ -1,7 +1,7 @@
 package util
 
 import (
-	"github.com/10gen/migration-verifier/mbson"
+	"github.com/mongodb-labs/migration-verifier/mbson"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
