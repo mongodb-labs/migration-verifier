@@ -11,6 +11,7 @@ import (
 	"github.com/mongodb-labs/migration-verifier/internal/types"
 	"github.com/mongodb-labs/migration-verifier/internal/util"
 	"github.com/mongodb-labs/migration-verifier/internal/uuidutil"
+	"github.com/mongodb-labs/migration-verifier/mmongo"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -37,10 +38,11 @@ const (
 	defaultSampleMinNumDocs = 101
 
 	//
-	// The maximum number of documents to sample per partition. This is intended as an upper limit
-	// on sampling 4% of a collection for performance reasons. See the trial results in REP-332.
+	// The maximum number of documents to sample per partition. Previously this is set to 10.
+	// Because sampling too many documents can cause the WiredTiger bug (WT-13310),
+	// it is reduced to 3 in REP-5971.
 	//
-	defaultMaxNumDocsToSamplePerPartition = 10
+	defaultMaxNumDocsToSamplePerPartition = 3
 
 	//
 	// In general, this constant should be set to (16 MB) / (defaultSampleRate) = (16 MB) / (4%) = 400 MB.
@@ -256,17 +258,38 @@ func PartitionCollectionWithParameters(
 	// The intermediate bounds for the collection (i.e. all bounds apart from the lower and upper bounds).
 	// It's okay for these bounds to be nil, since we already have the lower and upper bounds from which
 	// to make at least one partition.
-	midIDBounds, collDropped, err := getMidIDBounds(
-		ctx,
-		subLogger,
-		srcDB,
-		uuidEntry.CollName,
-		collDocCount,
-		numPartitions,
-		sampleMinNumDocs,
-		sampleRate,
-		globalFilter,
+	var (
+		midIDBounds   []any
+		collDropped   bool
+		prevSampleErr error
 	)
+	err = retry.New().
+		WithErrorCodes(util.SampleTooManyDuplicatesErrCode).
+		WithCallback(func(ctx context.Context, info *retry.FuncInfo) error {
+			if info.GetAttemptNumber() > 0 && mmongo.ErrorHasCode(prevSampleErr, util.SampleTooManyDuplicatesErrCode) {
+				subLogger.Debug().
+					Err(prevSampleErr).
+					Int("prevNumPartitions", numPartitions).
+					Int("newNumPartitions", numPartitions).
+					Msg("Retrying with decreased number of partitions. This will hopefully make $sample succeed.")
+
+				numPartitions = numPartitions / 10
+			}
+			midIDBounds, collDropped, err = getMidIDBounds(
+				ctx,
+				subLogger,
+				srcDB,
+				uuidEntry.CollName,
+				collDocCount,
+				numPartitions,
+				sampleMinNumDocs,
+				sampleRate,
+				globalFilter,
+			)
+			prevSampleErr = err
+			return err
+		}, "sampling documents to get partition mid bounds").Run(ctx, subLogger)
+
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -574,7 +597,7 @@ func getMidIDBounds(
 		return nil, false, nil
 	}
 
-	// We sample the lesser of 4% of a collection, or 10x the number of partitions.
+	// We sample the lesser of 4% of a collection, or 3x the number of partitions.
 	// See the constant definitions at the top of this file for rationale.
 	numDocsToSample := int64(sampleRate * float64(collDocCount))
 	if numDocsToSample > int64(defaultMaxNumDocsToSamplePerPartition*numPartitions) {
@@ -613,7 +636,7 @@ func getMidIDBounds(
 
 	// Get a cursor for the $sample and $bucketAuto aggregation.
 	var midIDBounds []any
-	agRetryer := retry.New().WithErrorCodes(util.SampleTooManyDuplicatesErrCode)
+	agRetryer := retry.New()
 	err := agRetryer.
 		WithCallback(
 			func(ctx context.Context, ri *retry.FuncInfo) error {
