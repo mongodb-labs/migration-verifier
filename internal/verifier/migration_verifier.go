@@ -482,7 +482,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 	runCommandOptions := options.RunCmd()
 	var andPredicates bson.A
 
-	if len(task.Ids) > 0 {
+	if task.IsRecheck() {
 		andPredicates = append(andPredicates, bson.D{{"_id", bson.M{"$in": task.Ids}}})
 		andPredicates = verifier.maybeAppendGlobalFilterToPredicates(andPredicates)
 		findOptions = bson.D{
@@ -509,7 +509,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
-	if len(task.Ids) == 0 {
+	if !task.IsRecheck() {
 		verifier.logger.Debug().
 			Any("task", task.PrimaryKey).
 			Str("findCmd", fmt.Sprintf("%s", findCmd)).
@@ -607,10 +607,44 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 	debugLog.Msg("Processing document comparison task.")
 
-	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(
-		ctx,
-		task,
-	)
+	var problems []VerificationResult
+	var docsCount types.DocumentCount
+	var bytesCount types.ByteCount
+	var err error
+
+	// Recheck tasks
+	if task.IsRecheck() {
+		idGroups, err := util.SplitArrayByBSONMaxSize(task.Ids, int(verifier.recheckMaxSizeInBytes))
+		if err != nil {
+			return errors.Wrapf(err, "failed to split recheck task %v document IDs", task.PrimaryKey)
+		}
+
+		for _, ids := range idGroups {
+			miniTask := *task
+			miniTask.Ids = ids
+
+			var curProblems []VerificationResult
+			var curDocsCount types.DocumentCount
+			var curBytesCount types.ByteCount
+			curProblems, curDocsCount, curBytesCount, err = verifier.FetchAndCompareDocuments(
+				ctx,
+				&miniTask,
+			)
+
+			if err != nil {
+				break
+			}
+
+			problems = append(problems, curProblems...)
+			docsCount += curDocsCount
+			bytesCount += curBytesCount
+		}
+	} else {
+		problems, docsCount, bytesCount, err = verifier.FetchAndCompareDocuments(
+			ctx,
+			task,
+		)
+	}
 
 	if err != nil {
 		return errors.Wrapf(

@@ -98,6 +98,10 @@ func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
 	}
 }
 
+func (t *VerificationTask) IsRecheck() bool {
+	return len(t.Ids) > 0
+}
+
 // VerificationRange stores ID ranges for tasks that can be re-used between runs
 type VerificationRange struct {
 	PrimaryKey primitive.ObjectID `bson:"_id"`
