@@ -91,7 +91,7 @@ func main() {
 		altsrc.NewUintFlag(cli.UintFlag{
 			Name:  recheckMaxSizeMB,
 			Value: verifier.DefaultRecheckMaxSizeMB,
-			Usage: "Maximum size of a recheck task. Reduce this to constrain server memory usage after generation 0.",
+			Usage: "Maximum size of a recheck query. Reduce this to constrain server memory usage after generation 0.",
 		}),
 		altsrc.NewInt64Flag(cli.Int64Flag{
 			Name:  generationPauseDelay,
