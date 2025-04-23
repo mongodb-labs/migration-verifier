@@ -41,8 +41,11 @@ func (b *BSONArraySizer) Len() int {
 
 // SplitArrayByBSONMaxSize takes an array of arbitrary Go values and
 // groups them so that, when built into a BSON array, each group exceeds
-// maxSize by the smallest length possible.
-func SplitArrayByBSONMaxSize(ids []any, maxSize int) ([][]any, error) {
+// softMaxSize by the smallest length possible.
+//
+// (The max is a “soft” max because we need to accommodate the chance
+// that a single item can exceed the limit.)
+func SplitArrayByBSONMaxSize(ids []any, softMaxSize int) ([][]any, error) {
 	ids = slices.Clone(ids)
 
 	groups := [][]any{}
@@ -59,7 +62,7 @@ func SplitArrayByBSONMaxSize(ids []any, maxSize int) ([][]any, error) {
 		sizer.Add(rawVal)
 		ids = ids[1:]
 
-		if sizer.Len() >= maxSize {
+		if sizer.Len() >= softMaxSize {
 			groups = append(groups, curGroup)
 			curGroup = []any{}
 			sizer = &BSONArraySizer{}

@@ -23,6 +23,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/dustin/go-humanize"
+	clone "github.com/huandu/go-clone/generic"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -631,7 +632,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 					Msg("Comparing subset of recheck task’s documents.")
 			}
 
-			miniTask := *task
+			miniTask := clone.Clone(*task)
 			miniTask.Ids = ids
 
 			var curProblems []VerificationResult
