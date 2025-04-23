@@ -91,7 +91,7 @@ func main() {
 		altsrc.NewUintFlag(cli.UintFlag{
 			Name:  recheckMaxSizeMB,
 			Value: verifier.DefaultRecheckMaxSizeMB,
-			Usage: "Maximum size of a recheck query. Reduce this to constrain server memory usage after generation 0.",
+			Usage: "Maximum size of a recheck query. Reduce this to limit server memory usage after generation 0.",
 		}),
 		altsrc.NewInt64Flag(cli.Int64Flag{
 			Name:  generationPauseDelay,
@@ -251,8 +251,8 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 
 	recheckMaxSizeMBVal := cCtx.Uint(recheckMaxSizeMB)
 	if recheckMaxSizeMBVal != 0 {
-		if recheckMaxSizeMBVal > verifier.DefaultRecheckMaxSizeMB {
-			return nil, fmt.Errorf("%#q may not exceed %d", recheckMaxSizeMB, verifier.DefaultRecheckMaxSizeMB)
+		if recheckMaxSizeMBVal > verifier.MaxRecheckMaxSizeMB {
+			return nil, fmt.Errorf("%#q may not exceed %d", recheckMaxSizeMB, verifier.MaxRecheckMaxSizeMB)
 		}
 
 		v.SetRecheckMaxSizeMB(recheckMaxSizeMBVal)

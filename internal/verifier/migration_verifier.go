@@ -73,7 +73,8 @@ const (
 
 	progressReportTimeWarnThreshold = 10 * time.Second
 
-	DefaultRecheckMaxSizeMB = 12
+	DefaultRecheckMaxSizeMB = 8
+	MaxRecheckMaxSizeMB     = 12
 )
 
 type whichCluster string
