@@ -295,6 +295,8 @@ The migration-verifier is also rather resource-hungry. To mitigate this, try lim
 
 - The verifier conflates “missing” documents with change events: if it finds a document missing and receives a change event for another document, the verifier records those together in its metadata. As a result, the verifier’s reporting can cause confusion: what its log calls “missing or changed” documents aren’t, in fact, necessarily failures; they could all just be change events that are pending a recheck.
 
+- If the server’s memory usage rises after generation 0, try reducing `recheckMaxSizeMB`. This will shrink the queries that the verifier sends, which in turn should reduce the server’s memory usage. (The number of actual queries sent will rise, of course.)
+
 # Limitations
 
 - The verifier’s iterative process can handle data changes while it is running, until you hit the writesOff endpoint.  However, it cannot handle DDL commands.  If the verifier receives a DDL change stream event (drop, dropDatabase, rename), the verification will fail.  If an untracked DDL event (create, createIndexes, dropIndexes, modify) occurs, the verifier may miss the change.

@@ -23,6 +23,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/dustin/go-humanize"
+	clone "github.com/huandu/go-clone/generic"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -72,6 +73,9 @@ const (
 	clientAppName = "Migration Verifier"
 
 	progressReportTimeWarnThreshold = 10 * time.Second
+
+	DefaultRecheckMaxSizeMB = 8
+	MaxRecheckMaxSizeMB     = 12
 )
 
 type whichCluster string
@@ -119,6 +123,8 @@ type Verifier struct {
 	// trigger several other similar type changes, and that’s not really
 	// worthwhile for now.
 	partitionSizeInBytes int64
+
+	recheckMaxSizeInBytes types.ByteCount
 
 	readPreference *readpref.ReadPref
 
@@ -201,11 +207,12 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		logger: logger,
 		writer: logWriter,
 
-		phase:                Idle,
-		numWorkers:           NumWorkers,
-		readPreference:       readpref.Primary(),
-		partitionSizeInBytes: 400 * 1024 * 1024,
-		failureDisplaySize:   DefaultFailureDisplaySize,
+		phase:                 Idle,
+		numWorkers:            NumWorkers,
+		readPreference:        readpref.Primary(),
+		partitionSizeInBytes:  400 * 1024 * 1024,
+		recheckMaxSizeInBytes: DefaultRecheckMaxSizeMB * 1024 * 1024,
+		failureDisplaySize:    DefaultFailureDisplaySize,
 
 		readConcernSetting: readConcern,
 
@@ -364,6 +371,10 @@ func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
 	verifier.partitionSizeInBytes = int64(partitionSizeMB) * 1024 * 1024
 }
 
+func (verifier *Verifier) SetRecheckMaxSizeMB(size uint) {
+	verifier.recheckMaxSizeInBytes = types.ByteCount(size) * 1024 * 1024
+}
+
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {
 	verifier.srcNamespaces = arg
 }
@@ -473,7 +484,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 	runCommandOptions := options.RunCmd()
 	var andPredicates bson.A
 
-	if len(task.Ids) > 0 {
+	if task.IsRecheck() {
 		andPredicates = append(andPredicates, bson.D{{"_id", bson.M{"$in": task.Ids}}})
 		andPredicates = verifier.maybeAppendGlobalFilterToPredicates(andPredicates)
 		findOptions = bson.D{
@@ -500,7 +511,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
-	if len(task.Ids) == 0 {
+	if !task.IsRecheck() {
 		verifier.logger.Debug().
 			Any("task", task.PrimaryKey).
 			Str("findCmd", fmt.Sprintf("%s", findCmd)).
@@ -598,10 +609,54 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 	debugLog.Msg("Processing document comparison task.")
 
-	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(
-		ctx,
-		task,
-	)
+	var problems []VerificationResult
+	var docsCount types.DocumentCount
+	var bytesCount types.ByteCount
+	var err error
+
+	// Recheck tasks
+	if task.IsRecheck() {
+		idGroups, err := util.SplitArrayByBSONMaxSize(task.Ids, int(verifier.recheckMaxSizeInBytes))
+		if err != nil {
+			return errors.Wrapf(err, "failed to split recheck task %v document IDs", task.PrimaryKey)
+		}
+
+		for _, ids := range idGroups {
+			if len(idGroups) != 1 {
+				verifier.logger.Info().
+					Int("workerNum", workerNum).
+					Any("task", task.PrimaryKey).
+					Str("namespace", task.QueryFilter.Namespace).
+					Int("subsetDocs", len(ids)).
+					Int("totalTaskDocs", len(task.Ids)).
+					Msg("Comparing subset of recheck task’s documents.")
+			}
+
+			miniTask := clone.Clone(*task)
+			miniTask.Ids = ids
+
+			var curProblems []VerificationResult
+			var curDocsCount types.DocumentCount
+			var curBytesCount types.ByteCount
+			curProblems, curDocsCount, curBytesCount, err = verifier.FetchAndCompareDocuments(
+				ctx,
+				&miniTask,
+			)
+
+			if err != nil {
+				break
+			}
+
+			problems = append(problems, curProblems...)
+			docsCount += curDocsCount
+			bytesCount += curBytesCount
+		}
+	} else {
+		problems, docsCount, bytesCount, err = verifier.FetchAndCompareDocuments(
+			ctx,
+			task,
+		)
+	}
 
 	if err != nil {
 		return errors.Wrapf(
