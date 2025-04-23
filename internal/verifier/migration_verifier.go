@@ -620,6 +620,16 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		}
 
 		for _, ids := range idGroups {
+			if len(idGroups) != 1 {
+				verifier.logger.Info().
+					Int("workerNum", workerNum).
+					Any("task", task.PrimaryKey).
+					Str("namespace", task.QueryFilter.Namespace).
+					Int("subsetDocs", len(ids)).
+					Int("totalTaskDocs", len(task.Ids)).
+					Msg("Comparing subset of recheck task’s documents.")
+			}
+
 			miniTask := *task
 			miniTask.Ids = ids
 
