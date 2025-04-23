@@ -371,7 +371,7 @@ func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
 }
 
 func (verifier *Verifier) SetRecheckMaxSizeMB(size uint) {
-	verifier.recheckMaxSizeInBytes = types.ByteCount(size)
+	verifier.recheckMaxSizeInBytes = types.ByteCount(size) * 1024 * 1024
 }
 
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {
