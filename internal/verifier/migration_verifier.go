@@ -72,6 +72,8 @@ const (
 	clientAppName = "Migration Verifier"
 
 	progressReportTimeWarnThreshold = 10 * time.Second
+
+	DefaultRecheckMaxSizeMB = 12
 )
 
 type whichCluster string
@@ -119,6 +121,8 @@ type Verifier struct {
 	// trigger several other similar type changes, and that’s not really
 	// worthwhile for now.
 	partitionSizeInBytes int64
+
+	recheckMaxSizeInBytes types.ByteCount
 
 	readPreference *readpref.ReadPref
 
@@ -201,11 +205,12 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		logger: logger,
 		writer: logWriter,
 
-		phase:                Idle,
-		numWorkers:           NumWorkers,
-		readPreference:       readpref.Primary(),
-		partitionSizeInBytes: 400 * 1024 * 1024,
-		failureDisplaySize:   DefaultFailureDisplaySize,
+		phase:                 Idle,
+		numWorkers:            NumWorkers,
+		readPreference:        readpref.Primary(),
+		partitionSizeInBytes:  400 * 1024 * 1024,
+		recheckMaxSizeInBytes: DefaultRecheckMaxSizeMB * 1024 * 1024,
+		failureDisplaySize:    DefaultFailureDisplaySize,
 
 		readConcernSetting: readConcern,
 
@@ -362,6 +367,10 @@ func (verifier *Verifier) SetWorkerSleepDelay(arg time.Duration) {
 // SetPartitionSizeMB sets the verifier’s maximum partition size in MiB.
 func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
 	verifier.partitionSizeInBytes = int64(partitionSizeMB) * 1024 * 1024
+}
+
+func (verifier *Verifier) SetRecheckMaxSizeMB(size uint) {
+	verifier.recheckMaxSizeInBytes = types.ByteCount(size)
 }
 
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {

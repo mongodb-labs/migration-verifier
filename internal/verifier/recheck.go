@@ -18,10 +18,6 @@ import (
 
 const (
 	recheckQueueCollectionNameBase = "recheckQueue"
-
-	// This is the upper limit on the BSON-encoded length of document IDs
-	// per recheck task.
-	maxRecheckIdsLen = 12 * 1024 * 1024
 )
 
 // RecheckPrimaryKey stores the implicit type of recheck to perform
@@ -333,7 +329,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		if doc.PrimaryKey.SrcDatabaseName != prevDBName ||
 			doc.PrimaryKey.SrcCollectionName != prevCollName ||
 			len(idAccum) > maxDocsPerTask ||
-			idsSizer.Len() >= maxRecheckIdsLen ||
+			types.ByteCount(idsSizer.Len()) >= verifier.recheckMaxSizeInBytes ||
 			dataSizeAccum >= verifier.partitionSizeInBytes {
 
 			err := persistBufferedRechecks()
