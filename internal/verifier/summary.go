@@ -483,7 +483,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, n
 func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
 
 	table := tablewriter.NewWriter(builder)
-	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed"})
+	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed", "Detail"})
 
 	wsmap := verifier.workerTracker.Load()
 
@@ -512,6 +512,7 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 				wsmap[w].Namespace,
 				taskIdStr,
 				reportutils.DurationToHMS(now.Sub(wsmap[w].StartTime)),
+				wsmap[w].Detail,
 			},
 		)
 	}

@@ -640,6 +640,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 			var curBytesCount types.ByteCount
 			curProblems, curDocsCount, curBytesCount, err = verifier.FetchAndCompareDocuments(
 				ctx,
+				workerNum,
 				&miniTask,
 			)
 
@@ -654,6 +655,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 	} else {
 		problems, docsCount, bytesCount, err = verifier.FetchAndCompareDocuments(
 			ctx,
+			workerNum,
 			task,
 		)
 	}

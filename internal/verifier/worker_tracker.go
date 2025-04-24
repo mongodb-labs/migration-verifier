@@ -24,6 +24,7 @@ type WorkerStatus struct {
 	TaskType  verificationTaskType
 	Namespace string
 	StartTime time.Time
+	Detail    string
 }
 
 // NewWorkerTracker creates and returns a WorkerTracker.
@@ -46,6 +47,16 @@ func (wt *WorkerTracker) Set(workerNum int, task VerificationTask) {
 			Namespace: task.QueryFilter.Namespace,
 			StartTime: time.Now(),
 		}
+
+		return m
+	})
+}
+
+func (wt *WorkerTracker) SetDetail(workerNum int, detail string) {
+	wt.guard.Store(func(m WorkerStatusMap) WorkerStatusMap {
+		status := m[workerNum]
+		status.Detail = detail
+		m[workerNum] = status
 
 		return m
 	})
