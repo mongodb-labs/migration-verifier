@@ -100,7 +100,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 
 	// Test fetchDocuments without global filter.
 	verifier.globalFilter = nil
-	results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, task)
+	results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(2, docCount, "should find source docs")
 	suite.Assert().NotZero(byteCount, "should tally docs' size")
@@ -112,7 +112,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	// Test fetchDocuments for ids with a global filter.
 
 	verifier.globalFilter = map[string]any{"num": map[string]any{"$lt": 100}}
-	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, task)
+	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(1, docCount, "should find source docs")
 	suite.Assert().NotZero(byteCount, "should tally docs' size")
@@ -129,7 +129,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 		Ns: &partitions.Namespace{DB: "keyhole", Coll: "dealers"},
 	}
 	verifier.globalFilter = map[string]any{"num": map[string]any{"$lt": 100}}
-	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, task)
+	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(1, docCount, "should find source docs")
 	suite.Assert().NotZero(byteCount, "should tally docs' size")
@@ -655,6 +655,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 						results, docCount, byteCount, err = verifier.compareDocsFromChannels(
 							ctx,
+							0,
 							fi,
 							&fauxTask,
 							srcChannel,
