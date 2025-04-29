@@ -58,6 +58,7 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 		go func() {
 			_, _, _, err := verifier.FetchAndCompareDocuments(
 				cancelableCtx,
+				0,
 				&task,
 			)
 			if err != nil {

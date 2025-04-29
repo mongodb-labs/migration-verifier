@@ -3,9 +3,11 @@ package verifier
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -19,6 +21,7 @@ const readTimeout = 10 * time.Minute
 
 func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
+	workerNum int,
 	task *VerificationTask,
 ) (
 	[]VerificationResult,
@@ -61,6 +64,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 				var err error
 				results, docCount, byteCount, err = verifier.compareDocsFromChannels(
 					ctx,
+					workerNum,
 					fi,
 					task,
 					srcChannel,
@@ -77,6 +81,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 
 func (verifier *Verifier) compareDocsFromChannels(
 	ctx context.Context,
+	workerNum int,
 	fi *retry.FuncInfo,
 	task *VerificationTask,
 	srcChannel, dstChannel <-chan bson.Raw,
@@ -196,6 +201,13 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 					srcDocCount++
 					srcByteCount += types.ByteCount(len(srcDoc))
+					verifier.workerTracker.SetDetail(
+						workerNum,
+						fmt.Sprintf(
+							"read %s documents",
+							reportutils.FmtReal(srcDocCount),
+						),
+					)
 				}
 
 				return nil
