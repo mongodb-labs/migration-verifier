@@ -11,9 +11,11 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/verifier/webserver"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"go.mongodb.org/mongo-driver/bson"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -22,7 +24,7 @@ const RequestInProgressErrorDescription = "Another request is currently in progr
 
 // MigrationVerifierAPI represents the interaction webserver with mongosync
 type MigrationVerifierAPI interface {
-	Check(ctx context.Context, filter map[string]any)
+	Check(ctx context.Context, filter bson.D)
 	WritesOff(ctx context.Context) error
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
@@ -201,14 +203,13 @@ type EmptyRequest struct{}
 
 // CheckRequest is for requests to the /check endpoint.
 type CheckRequest struct {
-	Filter map[string]any `json:"filter"`
+	Filter bson.D `bson:"filter"`
 }
 
 func (server *WebServer) checkEndPoint(c *gin.Context) {
 	var req CheckRequest
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		err = errors.Wrap(err, "filter is not valid JSON")
+	if err := c.ShouldBindWith(&req, webserver.ExtJSONBinding); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

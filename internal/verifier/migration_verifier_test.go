@@ -64,6 +64,52 @@ func TestIntegration(t *testing.T) {
 	suite.Run(t, testSuite)
 }
 
+func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
+	verifier := suite.BuildVerifier()
+	ctx := suite.Context()
+	t := suite.T()
+
+	dbName := suite.DBNameForTest()
+	collName := "coll"
+
+	srcColl := verifier.srcClient.Database(dbName).Collection(collName)
+	dstColl := verifier.dstClient.Database(dbName).Collection(collName)
+
+	id1 := primitive.NewObjectID()
+	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", id1}})
+	require.NoError(t, err, "should insert to source")
+
+	id2 := primitive.NewObjectID()
+	_, err = srcColl.InsertOne(ctx, bson.D{{"_id", id2}})
+	require.NoError(t, err, "should insert to source")
+
+	_, err = dstColl.InsertOne(ctx, bson.D{{"_id", id1}})
+	require.NoError(t, err, "should insert to destination")
+
+	namespace := dbName + "." + collName
+
+	task := &VerificationTask{
+		Ids: []any{id1, id2},
+		QueryFilter: QueryFilter{
+			Namespace: namespace,
+			To:        namespace,
+		},
+	}
+
+	verifier.globalFilter = bson.D{{"_id", id1}}
+
+	results, docCount, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
+	require.NoError(t, err, "should fetch & compare")
+	assert.EqualValues(t, 1, docCount, "should compare 1 doc")
+	assert.Empty(t, results, "should find no problem")
+
+	verifier.globalFilter = bson.D{{"_id", id2}}
+	results, docCount, _, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
+	require.NoError(t, err, "should fetch & compare")
+	assert.EqualValues(t, 1, docCount, "should compare 1 doc")
+	assert.NotEmpty(t, results, "should find a problem")
+}
+
 func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
@@ -111,13 +157,15 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 
 	// Test fetchDocuments for ids with a global filter.
 
-	verifier.globalFilter = map[string]any{"num": map[string]any{"$lt": 100}}
+	verifier.globalFilter = bson.D{
+		{"num", map[string]any{"$lt": 100}},
+	}
 	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(1, docCount, "should find source docs")
 	suite.Assert().NotZero(byteCount, "should tally docs' size")
 	suite.Require().Len(results, 1)
-	suite.Assert().Regexp(regexp.MustCompile("^"+Mismatch), results[0].Details, "mismatch expeceted")
+	suite.Assert().Regexp(regexp.MustCompile("^"+Mismatch), results[0].Details, "mismatch expected")
 	suite.Assert().EqualValues(
 		any(id),
 		results[0].ID.(bson.RawValue).AsInt64(),
@@ -128,7 +176,9 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	task.QueryFilter.Partition = &partitions.Partition{
 		Ns: &partitions.Namespace{DB: "keyhole", Coll: "dealers"},
 	}
-	verifier.globalFilter = map[string]any{"num": map[string]any{"$lt": 100}}
+	verifier.globalFilter = bson.D{
+		{"num", map[string]any{"$lt": 100}},
+	}
 	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(1, docCount, "should find source docs")
@@ -1476,7 +1526,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	dbname1 := suite.DBNameForTest("1")
 	dbname2 := suite.DBNameForTest("2")
 
-	filter := bson.M{"inFilter": bson.M{"$ne": false}}
+	filter := bson.D{{"inFilter", bson.M{"$ne": false}}}
 	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
 	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})
@@ -1730,8 +1780,14 @@ func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 	ctx := suite.Context()
 
 	// Make a filter that filters on field "n".
-	filter := map[string]any{"$expr": map[string]any{"$and": []map[string]any{
-		{"$gte": []any{"$n", 100}}, {"$lt": []any{"$n", 200}}}}}
+	filter := bson.D{
+		{"$expr", map[string]any{
+			"$and": []map[string]any{
+				{"$gte": []any{"$n", 100}},
+				{"$lt": []any{"$n", 200}},
+			},
+		}},
+	}
 
 	// Set up the verifier for testing.
 	verifier := suite.BuildVerifier()
