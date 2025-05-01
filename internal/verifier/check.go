@@ -36,7 +36,7 @@ var failedStatuses = mapset.NewSet(
 // testChan is a pair of channels for coordinating generations in tests.
 // testChan[0] is a channel signalled when when a generation is complete
 // testChan[1] is a channel signalled when Check should continue with the next generation.
-func (verifier *Verifier) Check(ctx context.Context, filter map[string]any) {
+func (verifier *Verifier) Check(ctx context.Context, filter bson.D) {
 	go func() {
 		err := verifier.CheckDriver(ctx, filter)
 		if err != nil {
@@ -174,7 +174,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	)
 }
 
-func (verifier *Verifier) CheckDriver(ctx context.Context, filter map[string]any, testChan ...chan struct{}) error {
+func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testChan ...chan struct{}) error {
 	verifier.mux.Lock()
 	if verifier.running {
 		verifier.mux.Unlock()

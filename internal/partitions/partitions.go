@@ -126,7 +126,7 @@ func PartitionCollectionWithSize(
 	replicatorList []Replicator,
 	subLogger *logger.Logger,
 	partitionSizeInBytes int64,
-	globalFilter map[string]any,
+	globalFilter bson.D,
 ) ([]*Partition, types.DocumentCount, types.ByteCount, error) {
 	if partitionSizeInBytes < 0 {
 		subLogger.Warn().
@@ -186,7 +186,7 @@ func PartitionCollectionWithParameters(
 	sampleMinNumDocs int,
 	partitionSizeInBytes int64,
 	subLogger *logger.Logger,
-	globalFilter map[string]any,
+	globalFilter bson.D,
 ) ([]*Partition, types.DocumentCount, types.ByteCount, error) {
 	subLogger.Debug().
 		Str("namespace", uuidEntry.DBName+"."+uuidEntry.CollName).
@@ -426,7 +426,7 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 //
 // This function could take a long time, especially if the collection does not have an index
 // on the filtered fields.
-func GetDocumentCountAfterFiltering(ctx context.Context, logger *logger.Logger, srcColl *mongo.Collection, filter map[string]any) (int64, error) {
+func GetDocumentCountAfterFiltering(ctx context.Context, logger *logger.Logger, srcColl *mongo.Collection, filter bson.D) (int64, error) {
 	srcDB := srcColl.Database()
 	collName := srcColl.Name()
 
@@ -514,7 +514,7 @@ func getOuterIDBound(
 	minOrMaxBound minOrMaxBound,
 	srcDB *mongo.Database,
 	collName string,
-	globalFilter map[string]any,
+	globalFilter bson.D,
 ) (any, error) {
 	// Choose a sort direction based on the minOrMaxBound.
 	var sortDirection int
@@ -590,7 +590,7 @@ func getMidIDBounds(
 	collDocCount int64,
 	numPartitions, sampleMinNumDocs int,
 	sampleRate float64,
-	globalFilter map[string]any,
+	globalFilter bson.D,
 ) ([]any, bool, error) {
 	// We entirely avoid sampling for mid bounds if we don't meet the criteria for the number of documents or partitions.
 	if collDocCount < int64(sampleMinNumDocs) || numPartitions < 2 {

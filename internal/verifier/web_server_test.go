@@ -2,7 +2,6 @@ package verifier
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +9,8 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/stretchr/testify/suite"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // WebServerTestSuite uses a mock verifier to test webserver endpoints.
@@ -20,14 +21,14 @@ type WebServerTestSuite struct {
 }
 
 type MockVerifier struct {
-	filter map[string]any
+	filter bson.D
 }
 
 func NewMockVerifier() *MockVerifier {
 	return &MockVerifier{}
 }
 
-func (verifier *MockVerifier) Check(ctx context.Context, filter map[string]any) {
+func (verifier *MockVerifier) Check(ctx context.Context, filter bson.D) {
 	verifier.filter = filter
 }
 func (verifier *MockVerifier) WritesOff(ctx context.Context) error { return nil }
@@ -48,7 +49,13 @@ func (suite *WebServerTestSuite) TestCheckEndPoint() {
 	router := suite.webServer.setupRouter()
 
 	input := `{
-		"filter": {"i": {"$gt": 10 } }
+		"filter": {
+			"i": {"$gt": 10 },
+			"$and": [
+				{"_id": {"$gte": { "$oid": "507f1f77bcf86cd799439000" }}},
+				{"_id": {"$lte": { "$oid": "507f1f77bcf86cd7994390ff" }}}
+			]
+		}
 	}`
 
 	w := httptest.NewRecorder()
@@ -57,7 +64,23 @@ func (suite *WebServerTestSuite) TestCheckEndPoint() {
 
 	router.ServeHTTP(w, req)
 	suite.Require().Equal(200, w.Code)
-	suite.Require().Equal(map[string]any{"i": map[string]any{"$gt": json.Number("10")}}, suite.mockVerifier.filter)
+	suite.Require().Equal(
+		bson.D{
+			{"i", bson.D{
+				{"$gt", int32(10)},
+			}},
+			{"$and", bson.A{
+				bson.D{
+					{"_id", bson.D{{"$gte", primitive.ObjectID{0x50, 0x7f, 0x1f, 0x77, 0xbc, 0xf8, 0x6c, 0xd7, 0x99, 0x43, 0x90, 0x00}}}},
+				},
+				bson.D{
+					{"_id", bson.D{{"$lte", primitive.ObjectID{0x50, 0x7f, 0x1f, 0x77, 0xbc, 0xf8, 0x6c, 0xd7, 0x99, 0x43, 0x90, 0xff}}}},
+				},
+			}},
+		},
+		suite.mockVerifier.filter,
+		"filter should be parsed correctly",
+	)
 
 	invalidJSONInput1 := `{
 		"filter": "A string, not JSON."

@@ -146,7 +146,7 @@ type Verifier struct {
 	// A user-defined $match-compatible document-level query filter.
 	// The filter is applied to all namespaces in both initial checking and iterative checking.
 	// The verifier only checks documents within the filter.
-	globalFilter map[string]any
+	globalFilter bson.D
 
 	pprofInterval time.Duration
 
@@ -154,6 +154,8 @@ type Verifier struct {
 
 	verificationStatusCheckInterval time.Duration
 }
+
+var _ MigrationVerifierAPI = &Verifier{}
 
 // VerificationStatus holds the Verification Status
 type VerificationStatus struct {
