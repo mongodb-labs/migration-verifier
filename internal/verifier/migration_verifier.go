@@ -552,7 +552,7 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 	for _, field := range mismatch.fieldContentsDiffer {
 		srcClientValue := srcClientDoc.Lookup(field)
 		dstClientValue := dstClientDoc.Lookup(field)
-		details := Mismatch + fmt.Sprintf(" : Document %s failed comparison on field %s between srcClient (Type: %s) and dstClient (Type: %s)", id, fieldPrefix+field, srcClientValue.Type, dstClientValue.Type)
+		details := Mismatch + fmt.Sprintf(" : Document %s failed comparison on field %#q between srcClient (Type: %s) and dstClient (Type: %s)", id, fieldPrefix+field, srcClientValue.Type, dstClientValue.Type)
 		result := VerificationResult{
 			Field:     fieldPrefix + field,
 			Details:   details,
