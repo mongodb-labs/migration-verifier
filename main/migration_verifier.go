@@ -222,14 +222,24 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	if err != nil {
 		return nil, err
 	}
-	err = v.SetDstURI(ctx, cCtx.String(dstURI))
+
+	dstConnStr := cCtx.String(dstURI)
+	err = v.SetDstURI(ctx, dstConnStr)
 	if err != nil {
 		return nil, err
 	}
-	err = v.SetMetaURI(ctx, cCtx.String(metaURI))
+
+	metaConnStr := cCtx.String(metaURI)
+	err = v.SetMetaURI(ctx, metaConnStr)
 	if err != nil {
 		return nil, err
 	}
+
+	if dstConnStr == metaConnStr {
+		v.GetLogger().Warn().
+			Msg("Storing migration-verifier’s metadata on the destination can significantly impede performance. Use a dedicated cluster for the metadata if you can.")
+	}
+
 	v.SetServerPort(cCtx.Int(serverPort))
 	v.SetNumWorkers(cCtx.Int(numWorkers))
 	v.SetGenerationPauseDelay(time.Duration(cCtx.Int64(generationPauseDelay)) * time.Millisecond)
