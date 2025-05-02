@@ -1642,14 +1642,36 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	<-checkDoneChan
 }
 
-func (suite *IntegrationTestSuite) waitForRecheckDocs(verifier *Verifier) {
+func (suite *IntegrationTestSuite) awaitEnqueueOfRechecks(verifier *Verifier, minDocs int) {
+	var lastNonzeroRechecksCount int
+
 	suite.Eventually(func() bool {
 		cursor, err := verifier.getRecheckQueueCollection(verifier.generation).
 			Find(suite.Context(), bson.D{})
-		var docs []bson.D
+		var rechecks []bson.D
 		suite.Require().NoError(err)
-		suite.Require().NoError(cursor.All(suite.Context(), &docs))
-		return len(docs) > 0
+		suite.Require().NoError(cursor.All(suite.Context(), &rechecks))
+
+		if len(rechecks) >= minDocs {
+			return true
+		}
+
+		if len(rechecks) > 0 {
+			// Note any progress toward our minimum rechecks count.
+			if lastNonzeroRechecksCount != len(rechecks) {
+				suite.T().Logf(
+					"%d recheck(s) are enqueued, but we want %d.",
+					len(rechecks),
+					minDocs,
+				)
+
+				lastNonzeroRechecksCount = len(rechecks)
+			}
+
+			return false
+		}
+
+		return false
 	}, 1*time.Minute, 100*time.Millisecond)
 }
 
@@ -1679,7 +1701,7 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	_, err = dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
-	suite.waitForRecheckDocs(verifier)
+	suite.awaitEnqueueOfRechecks(verifier, 2)
 
 	// Run generation 2 and get verification status.
 	suite.Require().NoError(runner.StartNextGeneration())
@@ -1696,7 +1718,7 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
-	suite.waitForRecheckDocs(verifier)
+	suite.awaitEnqueueOfRechecks(verifier, 1)
 
 	status, err = verifier.GetVerificationStatus(ctx)
 	suite.Require().NoError(err)
@@ -1712,7 +1734,7 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
-	suite.waitForRecheckDocs(verifier)
+	suite.awaitEnqueueOfRechecks(verifier, 1)
 
 	// Everything should match by the end of it.
 	status, err = verifier.GetVerificationStatus(ctx)
