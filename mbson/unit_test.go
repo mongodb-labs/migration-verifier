@@ -86,3 +86,10 @@ func (s *UnitTestSuite) Test_RawContains() {
 	_, err = RawContains(myRaw, "not there")
 	s.Assert().ErrorAs(err, &bsoncore.InsufficientBytesError{})
 }
+
+func (s *UnitTestSuite) Test_ConvertToRawValue() {
+	rv, err := ConvertToRawValue(nil)
+	s.Require().NoError(err, "nil should convert")
+
+	s.Assert().Equal(bson.TypeNull, rv.Type, "type should be correct")
+}
