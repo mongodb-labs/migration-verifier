@@ -21,6 +21,17 @@ type generationDoc struct {
 	MetadataVersion int
 }
 
+type metadataMismatchErr struct {
+	persistedVersion int
+}
+
+func (mme metadataMismatchErr) Error() string {
+	return fmt.Sprintf("persisted metadata (version: %d) predates this migration-verifier build (metadata version: %d); please discard prior verification progress by restarting with the `--clean` flag",
+		mme.persistedVersion,
+		verifierMetadataVersion,
+	)
+}
+
 func (v *Verifier) persistGenerationWhileLocked(ctx context.Context) error {
 	generation, _ := v.getGenerationWhileLocked()
 
@@ -66,11 +77,8 @@ func (v *Verifier) readGeneration(ctx context.Context) (option.Option[int], erro
 	}
 
 	if parsed.MetadataVersion != verifierMetadataVersion {
-		return option.None[int](), errors.Errorf(
-			"persisted metadata (version: %d) predates this migration-verifier build (metadata version: %d); please discard prior verification progress by restarting with the `--clean` flag",
-			parsed.MetadataVersion,
-			verifierMetadataVersion,
-		)
+		return option.None[int](), metadataMismatchErr{parsed.MetadataVersion}
+
 	}
 
 	return option.Some(parsed.Generation), nil
