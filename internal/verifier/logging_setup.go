@@ -7,9 +7,10 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/term"
 )
 
-func getLogWriter(logPath string) io.Writer {
+func getLogWriter(logPath string) (io.Writer, io.Writer) {
 	var writer io.Writer
 
 	switch logPath {
@@ -21,23 +22,34 @@ func getLogWriter(logPath string) io.Writer {
 
 	default:
 		if w, err := logger.NewRotatingWriter(logPath); err == nil {
-			return w
+			return w, w
 		}
 
 		log.Fatal().Msgf("Failed to open logPath: %s", logPath)
 	}
 
-	return zerolog.SyncWriter(writer)
+	return writer, zerolog.SyncWriter(writer)
 }
 
 func getLoggerAndWriter(logPath string) (*logger.Logger, io.Writer) {
-	writer := getLogWriter(logPath)
+	rawWriter, writer := getLogWriter(logPath)
 
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        writer,
 		TimeFormat: timeFormat,
+		NoColor:    !shouldColorize(rawWriter),
 	}
 
 	l := zerolog.New(consoleWriter).With().Timestamp().Logger()
 	return logger.NewLogger(&l, writer), writer
+}
+
+// Returns true only if the writer is a TTY.
+func shouldColorize(writer io.Writer) bool {
+	osFile, isOsFile := writer.(*os.File)
+	if !isOsFile {
+		return true
+	}
+
+	return term.IsTerminal(int(osFile.Fd()))
 }
