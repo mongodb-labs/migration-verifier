@@ -17,7 +17,7 @@ const (
 )
 
 type generationDoc struct {
-	Generation      int `bson:"generation"`
+	Generation      int
 	MetadataVersion int
 }
 
