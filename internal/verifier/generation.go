@@ -16,6 +16,11 @@ const (
 	generationFieldName = "generation"
 )
 
+type generationDoc struct {
+	Generation      int `bson:"generation"`
+	MetadataVersion int
+}
+
 func (v *Verifier) persistGenerationWhileLocked(ctx context.Context) error {
 	generation, _ := v.getGenerationWhileLocked()
 
@@ -24,7 +29,10 @@ func (v *Verifier) persistGenerationWhileLocked(ctx context.Context) error {
 	result, err := db.Collection(generationCollName).ReplaceOne(
 		ctx,
 		bson.D{},
-		bson.D{{generationFieldName, generation}},
+		generationDoc{
+			Generation:      generation,
+			MetadataVersion: verifierMetadataVersion,
+		},
 		options.Replace().SetUpsert(true),
 	)
 
@@ -43,9 +51,7 @@ func (v *Verifier) readGeneration(ctx context.Context) (option.Option[int], erro
 		bson.D{},
 	)
 
-	parsed := struct {
-		Generation int `bson:"generation"`
-	}{}
+	parsed := generationDoc{}
 
 	err := result.Decode(&parsed)
 
@@ -57,6 +63,14 @@ func (v *Verifier) readGeneration(ctx context.Context) (option.Option[int], erro
 		}
 
 		return option.None[int](), err
+	}
+
+	if parsed.MetadataVersion != verifierMetadataVersion {
+		return option.None[int](), errors.Errorf(
+			"persisted metadata (version: %d) predates this migration-verifier build (metadata version: %d); please discard prior verification progress by restarting with the `--clean` flag",
+			parsed.MetadataVersion,
+			verifierMetadataVersion,
+		)
 	}
 
 	return option.Some(parsed.Generation), nil
