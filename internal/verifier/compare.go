@@ -204,8 +204,9 @@ func (verifier *Verifier) compareDocsFromChannels(
 					verifier.workerTracker.SetDetail(
 						workerNum,
 						fmt.Sprintf(
-							"read %s documents",
+							"%s documents (%s)",
 							reportutils.FmtReal(srcDocCount),
+							reportutils.FmtBytes(srcByteCount),
 						),
 					)
 				}
