@@ -61,7 +61,7 @@ const (
 
 // VerificationTask stores source cluster info
 type VerificationTask struct {
-	PrimaryKey any                    `bson:"_id"`
+	PrimaryKey primitive.ObjectID     `bson:"_id"`
 	Type       verificationTaskType   `bson:"type"`
 	Status     verificationTaskStatus `bson:"status"`
 	Generation int                    `bson:"generation"`
