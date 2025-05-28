@@ -963,7 +963,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	// Capped and size should differ
 	var wrongFields []string
 	for _, result := range task.FailedDocs {
-		field := result.Field.(string)
+		field := result.Field
 		suite.Require().NotNil(field)
 		wrongFields = append(wrongFields, field)
 	}

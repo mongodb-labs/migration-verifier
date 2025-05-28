@@ -181,10 +181,10 @@ type VerificationResult struct {
 	// regardless of which ones actually need the recheck.
 	ID any
 
-	Field     any
-	Details   any
-	Cluster   any
-	NameSpace any
+	Field     string
+	Details   string
+	Cluster   string
+	NameSpace string
 	// The data size of the largest of the mismatched objects.
 	// Note this is not persisted; it is used only to ensure recheck tasks
 	// don't get too large.

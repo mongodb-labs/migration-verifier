@@ -70,9 +70,6 @@ type VerificationTask struct {
 	// one cluster or the other.
 	Ids []any `bson:"_ids"`
 
-	// Deprecated: VerificationTask ID field is ignored by the verifier.
-	ID int `bson:"id"`
-
 	// For failed tasks, this stores details on documents that exist on
 	// both clusters but don’t match.
 	FailedDocs []VerificationResult `bson:"failed_docs,omitempty"`
