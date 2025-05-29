@@ -147,6 +147,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	suite.Require().NoError(err)
 	task := &VerificationTask{
 		PrimaryKey:  primitive.NewObjectID(),
+		Generation:  1,
 		Ids:         []any{id, id + 1},
 		QueryFilter: basicQueryFilter("keyhole.dealers"),
 	}
