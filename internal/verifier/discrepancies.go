@@ -26,10 +26,8 @@ func createDiscrepanciesCollection(ctx context.Context, db *mongo.Database) erro
 		ctx,
 		[]mongo.IndexModel{
 			{
-				Keys: []bson.D{
-					{
-						{"task", 1},
-					},
+				Keys: bson.D{
+					{"task", 1},
 				},
 			},
 		},
