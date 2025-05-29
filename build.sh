@@ -12,7 +12,7 @@ EOF
 exit 1;
 }
 
-while getopts "o:a:" option; do
+while getopts "o:a:h" option; do
     case "$option" in
         a)
             arch=${OPTARG}
