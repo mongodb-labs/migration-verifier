@@ -91,7 +91,8 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 	namespace := dbName + "." + collName
 
 	task := &VerificationTask{
-		Ids: []any{id1, id2},
+		PrimaryKey: primitive.NewObjectID(),
+		Ids:        []any{id1, id2},
 		QueryFilter: QueryFilter{
 			Namespace: namespace,
 			To:        namespace,
@@ -144,7 +145,11 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 		bson.D{{"_id", id + 1}, {"num", 101}, {"name", "dstTest"}},
 	})
 	suite.Require().NoError(err)
-	task := &VerificationTask{Ids: []any{id, id + 1}, QueryFilter: basicQueryFilter("keyhole.dealers")}
+	task := &VerificationTask{
+		PrimaryKey:  primitive.NewObjectID(),
+		Ids:         []any{id, id + 1},
+		QueryFilter: basicQueryFilter("keyhole.dealers"),
+	}
 
 	// Test fetchDocuments without global filter.
 	verifier.globalFilter = nil
@@ -695,6 +700,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 				dstChannel := makeDocChannel(dstDocs)
 
 				fauxTask := VerificationTask{
+					PrimaryKey: primitive.NewObjectID(),
 					QueryFilter: QueryFilter{
 						Namespace: namespace,
 						ShardKeys: indexFields,
@@ -776,7 +782,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
 	task := &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.sameView",
 			To:        "testDb.sameView"}}
@@ -792,7 +799,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "wrongColl", "testColl2", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.wrongColl",
 			To:        "testDb.wrongColl"}}
@@ -814,7 +822,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "wrongPipeline", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}, {"a", 0}}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.wrongPipeline",
 			To:        "testDb.wrongPipeline"}}
@@ -841,7 +850,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "missingOptionsSrc", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.missingOptionsSrc",
 			To:        "testDb.missingOptionsSrc"}}
@@ -863,7 +873,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.missingOptionsDst",
 			To:        "testDb.missingOptionsDst"}}
@@ -884,7 +895,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.differentOptions",
 			To:        "testDb.differentOptions"}}
@@ -1055,7 +1067,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	_, err = dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}})
 	suite.Require().NoError(err)
 	task := &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl1",
 			To:        "testDb.testColl1",
@@ -1087,7 +1100,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	dstIndexNames, err := dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl2",
 			To:        "testDb.testColl2"}}
@@ -1119,7 +1133,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	dstIndexNames, err = dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl3",
 			To:        "testDb.testColl3"}}
@@ -1158,7 +1173,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Require().NoError(err)
 	suite.Require().Equal("wrong", dstIndexNames[1])
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl4",
 			To:        "testDb.testColl4"}}
