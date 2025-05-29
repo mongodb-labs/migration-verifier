@@ -384,7 +384,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 	}
 
 	readDstCallback := func(ctx context.Context, state *retry.FuncInfo) error {
-		sess, err := verifier.srcClient.StartSession()
+		sess, err := verifier.dstClient.StartSession()
 		if err != nil {
 			return errors.Wrapf(err, "starting session")
 		}
