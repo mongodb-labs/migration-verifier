@@ -455,8 +455,7 @@ func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A)
 	return append(predicates, verifier.globalFilter)
 }
 
-func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, idOpt option.Option[bson.RawValue], fieldPrefix string) (results []VerificationResult) {
-	id := idOpt.OrZero()
+func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, id any, fieldPrefix string) (results []VerificationResult) {
 
 	for _, field := range mismatch.missingFieldOnSrc {
 		result := VerificationResult{
@@ -529,7 +528,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 			dataSize:  dataSize,
 		}}, nil
 	}
-	results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, option.Some(srcClientDoc.Lookup("_id")), "" /* fieldPrefix */)
+	results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, srcClientDoc.Lookup("_id"), "" /* fieldPrefix */)
 	return results, nil
 }
 
@@ -887,7 +886,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 				Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Options, dstSpec.Options),
 			})
 		} else {
-			results = append(results, mismatchResultsToVerificationResults(mismatchDetails, srcSpec.Options, dstSpec.Options, srcNs, option.None[bson.RawValue](), "Options.")...)
+			results = append(results, mismatchResultsToVerificationResults(mismatchDetails, srcSpec.Options, dstSpec.Options, srcNs, "spec", "Options.")...)
 		}
 	}
 
