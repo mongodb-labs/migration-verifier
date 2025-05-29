@@ -1090,6 +1090,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	suite.T().Logf("failures: %+v", failures)
+
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(dstIndexNames[1], failures[0].ID)
 		suite.Equal(Missing, failures[0].Details)
