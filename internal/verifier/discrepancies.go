@@ -84,8 +84,6 @@ func getDiscrepanciesForTasks(
 		}
 	}
 
-	fmt.Printf("=====\ndiscrepancies: %+v\n\n", result)
-
 	return result, nil
 }
 
@@ -98,8 +96,6 @@ func recordDiscrepancies(
 	if option.IfNotZero(taskID).IsNone() {
 		panic("empty task ID given")
 	}
-
-	fmt.Printf("\n=======\nrecording discrepancies for %v:\n%+v\n", taskID, problems)
 
 	models := lo.Map(
 		problems,
