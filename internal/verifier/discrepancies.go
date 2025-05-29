@@ -1,0 +1,123 @@
+package verifier
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/pkg/errors"
+	"github.com/samber/lo"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+const (
+	discrepanciesCollectionName = "discrepancies"
+)
+
+type Discrepancy struct {
+	Task   primitive.ObjectID
+	Detail VerificationResult
+}
+
+func createDiscrepanciesCollection(ctx context.Context, db *mongo.Database) error {
+	_, err := db.Collection(discrepanciesCollectionName).Indexes().CreateMany(
+		ctx,
+		[]mongo.IndexModel{
+			{
+				Keys: []bson.D{
+					{
+						{"task", 1},
+						{"detail.id", 1},
+					},
+				},
+				Options: options.Index().SetUnique(true),
+			},
+		},
+	)
+
+	if err != nil {
+		return errors.Wrapf(err, "creating indexes for collection %#q", discrepanciesCollectionName)
+	}
+
+	return nil // TODO
+}
+
+func getDiscrepanciesForTasks(
+	ctx context.Context,
+	db *mongo.Database,
+	taskIDs []primitive.ObjectID,
+) (map[primitive.ObjectID][]VerificationResult, error) {
+	cursor, err := db.Collection(discrepanciesCollectionName).Find(
+		ctx,
+		bson.D{
+			{"task", bson.D{{"$in", taskIDs}}},
+		},
+	)
+
+	if err != nil {
+		return nil, errors.Wrapf(err, "fetching %d tasks' discrepancies", len(taskIDs))
+	}
+
+	result := map[primitive.ObjectID][]VerificationResult{}
+
+	for cursor.Next(ctx) {
+		if cursor.Err() != nil {
+			break
+		}
+
+		var d Discrepancy
+		if err := cursor.Decode(&d); err != nil {
+			return nil, errors.Wrapf(err, "parsing discrepancy %+v", cursor.Current)
+		}
+
+		result[d.Task] = append(
+			result[d.Task],
+			d.Detail,
+		)
+	}
+
+	if cursor.Err() != nil {
+		return nil, errors.Wrapf(err, "reading %d tasks' discrepancies", len(taskIDs))
+	}
+
+	for _, taskID := range taskIDs {
+		if _, ok := result[taskID]; !ok {
+			result[taskID] = []VerificationResult{}
+		}
+	}
+
+	return result, nil
+}
+
+func recordDiscrepancies(
+	ctx context.Context,
+	db *mongo.Database,
+	taskID primitive.ObjectID,
+	problems []VerificationResult,
+) error {
+	models := lo.Map(
+		problems,
+		func(r VerificationResult, _ int) mongo.WriteModel {
+			if r.ID == nil {
+				panic(fmt.Sprintf("No ID assigned to problem: %+v", r))
+			}
+
+			return &mongo.ReplaceOneModel{
+				Upsert: lo.ToPtr(true),
+				Filter: Discrepancy{
+					Task:   taskID,
+					Detail: r,
+				},
+			}
+		},
+	)
+
+	_, err := db.Collection(discrepanciesCollectionName).BulkWrite(
+		ctx,
+		models,
+	)
+
+	return errors.Wrapf(err, "recording %d discrepancies", len(models))
+}

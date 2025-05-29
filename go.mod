@@ -1,6 +1,6 @@
 module github.com/10gen/migration-verifier
 
-go 1.22
+go 1.24
 
 require (
 	github.com/cespare/permute/v2 v2.0.0-beta2

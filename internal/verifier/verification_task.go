@@ -66,13 +66,8 @@ type VerificationTask struct {
 	Status     verificationTaskStatus `bson:"status"`
 	Generation int                    `bson:"generation"`
 
-	// For failed tasks, this stores the document IDs missing on
-	// one cluster or the other.
+	// For recheck tasks, this stores the document IDs to check.
 	Ids []any `bson:"_ids"`
-
-	// For failed tasks, this stores details on documents that exist on
-	// both clusters but don’t match.
-	FailedDocs []VerificationResult `bson:"failed_docs,omitempty"`
 
 	QueryFilter QueryFilter `bson:"query_filter" json:"query_filter"`
 
@@ -304,10 +299,8 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *Veri
 				bson.M{
 					"$set": bson.M{
 						"status":                 task.Status,
-						"failed_docs":            task.FailedDocs,
 						"source_documents_count": task.SourceDocumentCount,
 						"source_bytes_count":     task.SourceByteCount,
-						"_ids":                   task.Ids,
 					},
 				},
 			)

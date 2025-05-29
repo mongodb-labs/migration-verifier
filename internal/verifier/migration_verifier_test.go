@@ -9,9 +9,11 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math/rand"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -655,11 +657,14 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	namespace := "testdb.testns"
 
-	makeDocChannel := func(docs []bson.D) <-chan bson.Raw {
-		theChan := make(chan bson.Raw, len(docs))
+	makeDocChannel := func(docs []bson.D) <-chan docWithTs {
+		theChan := make(chan docWithTs, len(docs))
 
-		for _, doc := range docs {
-			theChan <- testutil.MustMarshal(doc)
+		for d, doc := range docs {
+			theChan <- docWithTs{
+				doc: testutil.MustMarshal(doc),
+				ts:  primitive.Timestamp{1, uint32(d)},
+			}
 		}
 
 		close(theChan)
@@ -747,6 +752,21 @@ func TestVerifierCompareDocs(t *testing.T) {
 	}
 }
 
+func (suite *IntegrationTestSuite) getFailuresForTask(
+	verifier *Verifier,
+	taskID primitive.ObjectID,
+) []VerificationResult {
+	discrepancies, err := getDiscrepanciesForTasks(
+		suite.Context(),
+		verifier.verificationDatabase(),
+		mslices.Of(taskID),
+	)
+
+	require.NoError(suite.T(), err)
+
+	return slices.Collect(maps.Values(discrepancies))[0]
+}
+
 func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
@@ -764,7 +784,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskCompleted, task.Status)
-	suite.Nil(task.FailedDocs)
+	suite.Empty(suite.getFailuresForTask(verifier, task.PrimaryKey))
 
 	// Views must have the same underlying collection
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "wrongColl", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
@@ -780,10 +800,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(task.FailedDocs[0].Field, "Options.viewOn")
-		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.wrongColl")
+
+	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(failures[0].Field, "Options.viewOn")
+		suite.Equal(failures[0].Cluster, ClusterTarget)
+		suite.Equal(failures[0].NameSpace, "testDb.wrongColl")
 	}
 
 	// Views must have the same underlying pipeline
@@ -800,10 +822,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(task.FailedDocs[0].Field, "Options.pipeline")
-		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.wrongPipeline")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(failures[0].Field, "Options.pipeline")
+		suite.Equal(failures[0].Cluster, ClusterTarget)
+		suite.Equal(failures[0].NameSpace, "testDb.wrongPipeline")
 	}
 
 	// Views must have the same underlying options
@@ -825,11 +849,13 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
-		suite.Equal(task.FailedDocs[0].Cluster, ClusterSource)
-		suite.Equal(task.FailedDocs[0].Details, "Missing")
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.missingOptionsSrc")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(failures[0].Field, "Options.collation")
+		suite.Equal(failures[0].Cluster, ClusterSource)
+		suite.Equal(failures[0].Details, "Missing")
+		suite.Equal(failures[0].NameSpace, "testDb.missingOptionsSrc")
 	}
 
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation1))
@@ -844,12 +870,13 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
-	suite.Equal(verificationTaskFailed, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
-		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-		suite.Equal(task.FailedDocs[0].Details, "Missing")
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.missingOptionsDst")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(failures[0].Field, "Options.collation")
+		suite.Equal(failures[0].Cluster, ClusterTarget)
+		suite.Equal(failures[0].Details, "Missing")
+		suite.Equal(failures[0].NameSpace, "testDb.missingOptionsDst")
 	}
 
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation1))
@@ -865,10 +892,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
-		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.differentOptions")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(failures[0].Field, "Options.collation")
+		suite.Equal(failures[0].Cluster, ClusterTarget)
+		suite.Equal(failures[0].NameSpace, "testDb.differentOptions")
 	}
 }
 
@@ -888,10 +917,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	suite.Equal(1, len(task.FailedDocs))
-	suite.Equal(task.FailedDocs[0].Details, Missing)
-	suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.testColl")
+
+	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
+	suite.Equal(1, len(failures))
+	suite.Equal(failures[0].Details, Missing)
+	suite.Equal(failures[0].Cluster, ClusterTarget)
+	suite.Equal(failures[0].NameSpace, "testDb.testColl")
 
 	// Make sure "To" is respected.
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
@@ -905,10 +936,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	suite.Equal(1, len(task.FailedDocs))
-	suite.Equal(task.FailedDocs[0].Details, Missing)
-	suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.testCollTo")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	suite.Equal(1, len(failures))
+	suite.Equal(failures[0].Details, Missing)
+	suite.Equal(failures[0].Cluster, ClusterTarget)
+	suite.Equal(failures[0].NameSpace, "testDb.testCollTo")
 
 	// Collection exists only on dest.
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "destOnlyColl")
@@ -922,10 +955,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	suite.Equal(1, len(task.FailedDocs))
-	suite.Equal(task.FailedDocs[0].Details, Missing)
-	suite.Equal(task.FailedDocs[0].Cluster, ClusterSource)
-	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.destOnlyColl")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	suite.Equal(1, len(failures))
+	suite.Equal(failures[0].Details, Missing)
+	suite.Equal(failures[0].Cluster, ClusterSource)
+	suite.Equal(failures[0].NameSpace, "testDb.destOnlyColl")
 
 	// A view and a collection are different.
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "viewOnSrc", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
@@ -941,10 +976,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	suite.Equal(1, len(task.FailedDocs))
-	suite.Equal(task.FailedDocs[0].Field, "Type")
-	suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.viewOnSrc")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	suite.Equal(1, len(failures))
+	suite.Equal(failures[0].Field, "Type")
+	suite.Equal(failures[0].Cluster, ClusterTarget)
+	suite.Equal(failures[0].NameSpace, "testDb.viewOnSrc")
 
 	// Capped should not match uncapped
 	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "cappedOnDst")
@@ -962,7 +999,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Equal(verificationTaskFailed, task.Status)
 	// Capped and size should differ
 	var wrongFields []string
-	for _, result := range task.FailedDocs {
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	for _, result := range failures {
 		field := result.Field
 		suite.Require().NotNil(field)
 		wrongFields = append(wrongFields, field)
@@ -1019,11 +1058,13 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(srcIndexNames[1], task.FailedDocs[0].ID)
-		suite.Equal(Missing, task.FailedDocs[0].Details)
-		suite.Equal(ClusterTarget, task.FailedDocs[0].Cluster)
-		suite.Equal("testDb.testColl1", task.FailedDocs[0].NameSpace)
+
+	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(srcIndexNames[1], failures[0].ID)
+		suite.Equal(Missing, failures[0].Details)
+		suite.Equal(ClusterTarget, failures[0].Cluster)
+		suite.Equal("testDb.testColl1", failures[0].NameSpace)
 	}
 
 	// Missing index on source
@@ -1047,11 +1088,13 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(dstIndexNames[1], task.FailedDocs[0].ID)
-		suite.Equal(Missing, task.FailedDocs[0].Details)
-		suite.Equal(ClusterSource, task.FailedDocs[0].Cluster)
-		suite.Equal("testDb.testColl2", task.FailedDocs[0].NameSpace)
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(dstIndexNames[1], failures[0].ID)
+		suite.Equal(Missing, failures[0].Details)
+		suite.Equal(ClusterSource, failures[0].Cluster)
+		suite.Equal("testDb.testColl2", failures[0].NameSpace)
 	}
 
 	// Different indexes on each
@@ -1075,18 +1118,20 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
-	if suite.Equal(2, len(task.FailedDocs)) {
-		sort.Slice(task.FailedDocs, func(i, j int) bool {
-			return task.FailedDocs[i].ID.(string) < task.FailedDocs[j].ID.(string)
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(2, len(failures)) {
+		sort.Slice(failures, func(i, j int) bool {
+			return failures[i].ID.(string) < failures[j].ID.(string)
 		})
-		suite.Equal(dstIndexNames[1], task.FailedDocs[0].ID)
-		suite.Equal(Missing, task.FailedDocs[0].Details)
-		suite.Equal(ClusterSource, task.FailedDocs[0].Cluster)
-		suite.Equal("testDb.testColl3", task.FailedDocs[0].NameSpace)
-		suite.Equal(srcIndexNames[0], task.FailedDocs[1].ID)
-		suite.Equal(Missing, task.FailedDocs[1].Details)
-		suite.Equal(ClusterTarget, task.FailedDocs[1].Cluster)
-		suite.Equal("testDb.testColl3", task.FailedDocs[1].NameSpace)
+		suite.Equal(dstIndexNames[1], failures[0].ID)
+		suite.Equal(Missing, failures[0].Details)
+		suite.Equal(ClusterSource, failures[0].Cluster)
+		suite.Equal("testDb.testColl3", failures[0].NameSpace)
+		suite.Equal(srcIndexNames[0], failures[1].ID)
+		suite.Equal(Missing, failures[1].Details)
+		suite.Equal(ClusterTarget, failures[1].Cluster)
+		suite.Equal("testDb.testColl3", failures[1].NameSpace)
 	}
 
 	// Indexes with same names are different
@@ -1112,11 +1157,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal("wrong", task.FailedDocs[0].ID)
-		suite.Regexp(regexp.MustCompile("^"+Mismatch), task.FailedDocs[0].Details)
-		suite.Equal(ClusterTarget, task.FailedDocs[0].Cluster)
-		suite.Equal("testDb.testColl4", task.FailedDocs[0].NameSpace)
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal("wrong", failures[0].ID)
+		suite.Regexp(regexp.MustCompile("^"+Mismatch), failures[0].Details)
+		suite.Equal(ClusterTarget, failures[0].Cluster)
+		suite.Equal("testDb.testColl4", failures[0].NameSpace)
 	}
 }
 
