@@ -42,10 +42,13 @@ const (
 	ignoreReadConcernFlag = "ignoreReadConcern"
 	configFileFlag        = "configFile"
 	pprofInterval         = "pprofInterval"
+
+	buildVarDefaultStr = "Unknown; build with build.sh."
 )
 
-// This gets set at build time.
-var Revision = "Unknown; build with build.sh."
+// These get set at build time, assuming use of build.sh.
+var Revision = buildVarDefaultStr
+var BuildTime = buildVarDefaultStr
 
 func main() {
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
@@ -165,7 +168,7 @@ func main() {
 	app := &cli.App{
 		Name:    "migration-verifier",
 		Usage:   "verify migration correctness",
-		Version: Revision,
+		Version: fmt.Sprintf("%s, built at %s", Revision, BuildTime),
 		Flags:   flags,
 		Before: func(cCtx *cli.Context) error {
 			confFile := cCtx.String(configFileFlag)
@@ -215,6 +218,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 
 	v.GetLogger().Info().
 		Str("revision", Revision).
+		Str("buildTime", BuildTime).
 		Int("processID", os.Getpid()).
 		Msg("migration-verifier started.")
 
