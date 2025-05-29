@@ -115,7 +115,7 @@ func refreshMongoses(
 						)
 					}
 
-					return errors.Wrapf(err, desc)
+					return errors.Wrapf(err, "%s", desc)
 				}
 
 				// We could alternatively run `flushRouterConfig: <dbName>` for each db, but that requires a
