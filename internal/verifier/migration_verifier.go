@@ -835,7 +835,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 
 	if !hasSrcSpec {
 		return []VerificationResult{{
-			ID:        "spec",
+			ID:        "collSpec",
 			NameSpace: srcNs,
 			Cluster:   ClusterSource,
 			Details:   Missing,
@@ -843,7 +843,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 	}
 	if !hasDstSpec {
 		return []VerificationResult{{
-			ID:        "spec",
+			ID:        "collSpec",
 			NameSpace: dstNs,
 			Cluster:   ClusterTarget,
 			Details:   Missing,
@@ -851,7 +851,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 	}
 	if srcSpec.Type != dstSpec.Type {
 		return []VerificationResult{{
-			ID:        "spec",
+			ID:        "collSpec",
 			NameSpace: srcNs,
 			Cluster:   ClusterTarget,
 			Field:     "Type",
@@ -862,7 +862,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 	var results []VerificationResult
 	if srcSpec.Info.ReadOnly != dstSpec.Info.ReadOnly {
 		results = append(results, VerificationResult{
-			ID:        "spec",
+			ID:        "collSpec",
 			NameSpace: dstNs,
 			Cluster:   ClusterTarget,
 			Field:     "ReadOnly",
@@ -1062,7 +1062,8 @@ func (verifier *Verifier) verifyIndexes(
 
 			if !theyMatch {
 				results = append(results, VerificationResult{
-					ID:        "index:" + indexName,
+					ID:        indexName,
+					Field:     "index",
 					NameSpace: FullName(dstColl),
 					Cluster:   ClusterTarget,
 					Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec, dstSpec),
@@ -1070,7 +1071,8 @@ func (verifier *Verifier) verifyIndexes(
 			}
 		} else {
 			results = append(results, VerificationResult{
-				ID:        "index:" + indexName,
+				ID:        indexName,
+				Field:     "index",
 				Details:   Missing,
 				Cluster:   ClusterSource,
 				NameSpace: FullName(srcColl),
@@ -1082,7 +1084,8 @@ func (verifier *Verifier) verifyIndexes(
 	for indexName := range srcMap {
 		if !srcMapUsed[indexName] {
 			results = append(results, VerificationResult{
-				ID:        "index:indexName",
+				ID:        indexName,
+				Field:     "index",
 				Details:   Missing,
 				Cluster:   ClusterTarget,
 				NameSpace: FullName(dstColl)})
