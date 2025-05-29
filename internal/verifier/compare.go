@@ -212,6 +212,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 						break
 					}
 
+					fmt.Printf("\n=== received from src: %v\n", srcDocWithTs)
+
 					fi.NoteSuccess("received document from source")
 
 					srcDocCount++
@@ -328,6 +330,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 		)
 	}
 
+	fmt.Printf("\n=== returning %v %v %v\n", results, srcDocCount, srcByteCount)
+
 	return results, srcDocCount, srcByteCount, nil
 }
 
@@ -428,6 +432,8 @@ func iterateCursorToChannel(
 	defer close(writer)
 
 	for cursor.Next(sctx) {
+		fmt.Printf("\n=== received document: %+v\n", cursor.Current)
+
 		state.NoteSuccess("received a document")
 
 		clusterTime, err := util.GetClusterTimeFromSession(sctx)
@@ -443,6 +449,8 @@ func iterateCursorToChannel(
 				ts:  clusterTime,
 			},
 		)
+
+		fmt.Printf("\n=== sent document: %+v\n", cursor.Current)
 
 		if err != nil {
 			return errors.Wrapf(err, "sending document to compare thread")

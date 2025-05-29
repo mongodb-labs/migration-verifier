@@ -186,6 +186,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	verifier.globalFilter = bson.D{
 		{"num", map[string]any{"$lt": 100}},
 	}
+	fmt.Printf("............ before test\n")
 	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(1, docCount, "should find source docs")
