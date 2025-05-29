@@ -106,7 +106,11 @@ func recordDiscrepancies(
 
 			return &mongo.ReplaceOneModel{
 				Upsert: lo.ToPtr(true),
-				Filter: Discrepancy{
+				Filter: bson.D{
+					{"task", taskID},
+					{"detail.id", r.ID},
+				},
+				Replacement: Discrepancy{
 					Task:   taskID,
 					Detail: r,
 				},

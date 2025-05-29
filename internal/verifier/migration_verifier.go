@@ -651,21 +651,21 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 				)
 			}
 		}
-	}
 
-	err = recordDiscrepancies(
-		ctx,
-		verifier.metaClient.Database(verifier.metaDBName),
-		task.PrimaryKey,
-		problems,
-	)
-	if err != nil {
-		return errors.Wrapf(
-			err,
-			"recording task %s's %d discrepancies",
+		err = recordDiscrepancies(
+			ctx,
+			verifier.metaClient.Database(verifier.metaDBName),
 			task.PrimaryKey,
-			len(problems),
+			problems,
 		)
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"recording task %s's %d discrepancies",
+				task.PrimaryKey,
+				len(problems),
+			)
+		}
 	}
 
 	err = verifier.UpdateVerificationTask(ctx, task)
