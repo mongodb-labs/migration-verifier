@@ -324,7 +324,16 @@ func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 	model := mongo.IndexModel{Keys: bson.M{"generation": 1}}
 	_, err := verifier.verificationTaskCollection().Indexes().CreateOne(ctx, model)
 
-	return err
+	if err != nil {
+		return errors.Wrapf(err, "creating generation index")
+	}
+
+	err = createDiscrepanciesCollection(
+		ctx,
+		verifier.verificationDatabase(),
+	)
+
+	return errors.Wrapf(err, "creating discrepancies collection")
 }
 
 func (verifier *Verifier) SetServerPort(port int) {
@@ -879,7 +888,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		}
 		if mismatchDetails == nil {
 			results = append(results, VerificationResult{
-				ID:        "spec",
+				ID:        "collSpec",
 				NameSpace: dstNs,
 				Cluster:   ClusterTarget,
 				Field:     "Options (Field Order Only)",

@@ -909,7 +909,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
 	suite.Require().NoError(err)
 	task := &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl",
 			To:        "testDb.testColl"}}
@@ -928,7 +929,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl",
 			To:        "testDb.testCollTo"}}
@@ -947,7 +949,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "destOnlyColl")
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.destOnlyColl",
 			To:        "testDb.destOnlyColl"}}
@@ -968,7 +971,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "viewOnSrc")
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.viewOnSrc",
 			To:        "testDb.viewOnSrc"}}
@@ -989,7 +993,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "cappedOnDst", options.CreateCollection().SetCapped(true).SetSizeInBytes(1024*1024*100))
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.cappedOnDst",
 			To:        "testDb.cappedOnDst"}}
@@ -1010,7 +1015,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 
 	// Default success case
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl",
 			To:        "testDb.testColl"}}
@@ -1021,7 +1027,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 
 	// Neither collection exists success case
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testCollDNE",
 			To:        "testDb.testCollDNE"}}

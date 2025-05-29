@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
@@ -29,10 +29,8 @@ func createDiscrepanciesCollection(ctx context.Context, db *mongo.Database) erro
 				Keys: []bson.D{
 					{
 						{"task", 1},
-						{"detail.id", 1},
 					},
 				},
-				Options: options.Index().SetUnique(true),
 			},
 		},
 	)
@@ -88,6 +86,8 @@ func getDiscrepanciesForTasks(
 		}
 	}
 
+	fmt.Printf("=====\ndiscrepancies: %+v\n\n", result)
+
 	return result, nil
 }
 
@@ -97,6 +97,12 @@ func recordDiscrepancies(
 	taskID primitive.ObjectID,
 	problems []VerificationResult,
 ) error {
+	if option.IfNotZero(taskID).IsNone() {
+		panic("empty task ID given")
+	}
+
+	fmt.Printf("\n=======\nrecording discrepancies for %v:\n%+v\n", taskID, problems)
+
 	models := lo.Map(
 		problems,
 		func(r VerificationResult, _ int) mongo.WriteModel {
@@ -104,13 +110,8 @@ func recordDiscrepancies(
 				panic(fmt.Sprintf("No ID assigned to problem: %+v", r))
 			}
 
-			return &mongo.ReplaceOneModel{
-				Upsert: lo.ToPtr(true),
-				Filter: bson.D{
-					{"task", taskID},
-					{"detail.id", r.ID},
-				},
-				Replacement: Discrepancy{
+			return &mongo.InsertOneModel{
+				Document: Discrepancy{
 					Task:   taskID,
 					Detail: r,
 				},
