@@ -527,8 +527,8 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		err = cur.Decode(&doc)
 		suite.Require().NoError(err)
 		suite.Require().Equal(expectedIds, doc["_ids"])
-		suite.Require().Equal("added", doc["status"])
-		suite.Require().Equal("verify", doc["type"])
+		suite.Require().EqualValues(verificationTaskAdded, doc["status"])
+		suite.Require().EqualValues(verificationTaskVerifyDocuments, doc["type"])
 		suite.Require().Equal(expectedNamespace, doc["query_filter"].(bson.M)["namespace"])
 	}
 	verifyTask(bson.A{int32(42), int32(43), int32(44)}, "foo.bar")
@@ -1412,11 +1412,31 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 
 	metaColl := verifier.verificationDatabase().Collection(verificationTasksCollection)
 	_, err := metaColl.InsertMany(ctx, []any{
-		bson.M{"generation": 0, "status": "added", "type": "verify"},
-		bson.M{"generation": 0, "status": "processing", "type": "verify"},
-		bson.M{"generation": 0, "status": "failed", "type": "verify"},
-		bson.M{"generation": 0, "status": "mismatch", "type": "verify"},
-		bson.M{"generation": 0, "status": "completed", "type": "verify"},
+		bson.M{
+			"generation": 0,
+			"status":     verificationTaskAdded,
+			"type":       verificationTaskVerifyDocuments,
+		},
+		bson.M{
+			"generation": 0,
+			"status":     verificationTaskProcessing,
+			"type":       verificationTaskVerifyDocuments,
+		},
+		bson.M{
+			"generation": 0,
+			"status":     verificationTaskFailed,
+			"type":       verificationTaskVerifyDocuments,
+		},
+		bson.M{
+			"generation": 0,
+			"status":     verificationTaskMetadataMismatch,
+			"type":       verificationTaskVerifyDocuments,
+		},
+		bson.M{
+			"generation": 0,
+			"status":     verificationTaskCompleted,
+			"type":       verificationTaskVerifyDocuments,
+		},
 	})
 	suite.Require().NoError(err)
 
