@@ -107,29 +107,36 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	)
 	suite.Require().NoError(err)
 
+	orderedTypes := mslices.Of(
+		verificationTaskPrimary,
+		verificationTaskVerifyDocuments,
+		verificationTaskVerifyCollection,
+	)
+
 	// Contents should just be the primary task and
 	// the completed partition-level.
 	tasksColl := verifier.verificationTaskCollection()
 	cursor, err := tasksColl.Aggregate(
 		ctx,
 		append(
-			testutil.SortByListAgg(
-				"type",
-				mslices.Of(
-					verificationTaskPrimary,
-					verificationTaskVerifyDocuments,
-					verificationTaskVerifyCollection,
-				),
+			append(
+				mongo.Pipeline{
+					{{"$match", bson.D{
+						{"type", bson.D{{"$in", orderedTypes}}},
+					}}},
+				},
+				bson.D{
+					{"$sort", bson.D{
+						{"query_filter.namespace", 1},
+						{"status", 1},
+					}},
+				},
 			),
-			bson.D{
-				{"$sort", bson.D{
-					{"query_filter.namespace", 1},
-					{"status", 1},
-				}},
-			},
+			testutil.SortByListAgg("type", orderedTypes)...,
 		),
 	)
 	suite.Require().NoError(err)
+
 	var taskDocs []VerificationTask
 	suite.Require().NoError(cursor.All(ctx, &taskDocs))
 
@@ -197,4 +204,5 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 		ns1,
 		taskDocs[4].QueryFilter.Namespace,
 	)
+
 }

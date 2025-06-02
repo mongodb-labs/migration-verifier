@@ -130,6 +130,9 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
 		suite.Require().NoError(err)
 		for _, dbName := range dbNames {
+			if dbName == "VERIFIER_TEST_META" {
+				continue
+			}
 			if !suite.initialDbNames.Contains(dbName) {
 				suite.T().Logf("Dropping database %#q, which seems to have been created during test %#q.", dbName, suite.T().Name())
 

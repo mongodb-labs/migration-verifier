@@ -1478,10 +1478,19 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	cursor, err := verifier.verificationTaskCollection().Find(
+	sortedTaskTypes := mslices.Of(
+		verificationTaskVerifyDocuments,
+		verificationTaskVerifyCollection,
+	)
+
+	cursor, err := verifier.verificationTaskCollection().Aggregate(
 		ctx,
-		bson.M{"generation": 0},
-		options.Find().SetSort(bson.M{"type": 1}),
+		append(
+			mongo.Pipeline{
+				bson.D{{"$match", bson.D{{"generation", 0}}}},
+			},
+			testutil.SortByListAgg("type", sortedTaskTypes)...,
+		),
 	)
 	suite.Require().NoError(err)
 
@@ -1497,10 +1506,14 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	cursor, err = verifier.verificationTaskCollection().Find(
+	cursor, err = verifier.verificationTaskCollection().Aggregate(
 		ctx,
-		bson.M{"generation": 1},
-		options.Find().SetSort(bson.M{"type": 1}),
+		append(
+			mongo.Pipeline{
+				bson.D{{"$match", bson.D{{"generation", 1}}}},
+			},
+			testutil.SortByListAgg("type", sortedTaskTypes)...,
+		),
 	)
 	suite.Require().NoError(err)
 

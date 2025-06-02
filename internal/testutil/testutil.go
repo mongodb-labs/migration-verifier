@@ -30,24 +30,21 @@ func SortByListAgg[T any](
 	fieldName string,
 	values []T,
 ) []bson.D {
+	fieldRef := "$" + fieldName
+
 	sortField := generateRandomFieldName("sortOrder")
-	sortFieldRef := "$" + sortField
 
 	branches := lo.Map(
 		values,
 		func(v T, i int) bson.D {
 			return bson.D{
-				{"case", bson.D{{"$eq", bson.A{sortFieldRef, v}}}},
+				{"case", bson.D{{"$eq", bson.A{fieldRef, v}}}},
 				{"then", i},
 			}
 		},
 	)
 
 	return mongo.Pipeline{
-		// Match only types we're interested in
-		{{"$match", bson.D{
-			{"type", bson.D{{"$in", values}}},
-		}}},
 		{{"$addFields", bson.D{
 			{sortField, bson.D{{"$switch", bson.D{
 				{"branches", branches},
