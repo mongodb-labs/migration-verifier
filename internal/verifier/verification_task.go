@@ -48,10 +48,10 @@ const (
 	// --------------------------------------------------
 
 	// The “workhorse” task type: verify a partition of documents.
-	verificationTaskVerifyDocuments verificationTaskType = "verify"
+	verificationTaskVerifyDocuments verificationTaskType = "verifyDocuments"
 
 	// A verifyCollection task verifies collection metadata
-	// and inserts verify-documents tasks to verify data ranges.
+	// and, in generation 0, inserts verify-documents tasks for _id ranges.
 	verificationTaskVerifyCollection verificationTaskType = "verifyCollection"
 
 	// The primary task creates a verifyCollection task for each
@@ -92,13 +92,6 @@ func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
 
 func (t *VerificationTask) IsRecheck() bool {
 	return t.Generation > 0
-}
-
-// VerificationRange stores ID ranges for tasks that can be re-used between runs
-type VerificationRange struct {
-	PrimaryKey primitive.ObjectID `bson:"_id"`
-	StartID    primitive.ObjectID `bson:"start_id"`
-	EndID      primitive.ObjectID `bson:"end_id"`
 }
 
 func (verifier *Verifier) insertCollectionVerificationTask(
