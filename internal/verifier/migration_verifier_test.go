@@ -117,11 +117,13 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	task := &VerificationTask{
 		PrimaryKey: primitive.NewObjectID(),
 		QueryFilter: QueryFilter{
+			Namespace: "keyhole.dealers",
+			To:        "keyhole.dealers",
 			Partition: &partitions.Partition{
 				Key: partitions.PartitionKey{
 					Lower: primitive.MinKey{},
 				},
-				Upper: int32(0),
+				Upper: int32(999),
 			},
 		},
 	}
@@ -129,19 +131,31 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", nil}},
 		bson.D{{"_id", 123}},
+		bson.D{{"_id", primitive.Symbol("oh yeah")}},
 	})
 	suite.Require().NoError(err)
 
 	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", nil}},
 		bson.D{{"_id", 123}},
+		bson.D{{"_id", "oh yeah"}},
 	})
 	suite.Require().NoError(err)
 
 	results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
-	suite.Assert().Equal(2, docCount, "docs count")
-	suite.Assert().Greater(byteCount, 1, "byte count")
-	suite.Assert().Len(results, 0, "expect results")
+	suite.Require().NoError(err)
+	suite.Assert().EqualValues(2, docCount, "docs count")
+	suite.Assert().Greater(int(byteCount), 1, "byte count")
+	suite.Assert().Empty(results, "expect no mismatches")
+
+	task.QueryFilter.Partition.Key.Lower = int64(999)
+	task.QueryFilter.Partition.Upper = primitive.MaxKey{}
+
+	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
+	suite.Require().NoError(err)
+	suite.Assert().EqualValues(1, docCount, "docs count")
+	suite.Assert().Greater(int(byteCount), 1, "byte count")
+	suite.Assert().Len(results, 2, "expect mismatches")
 }
 
 func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
