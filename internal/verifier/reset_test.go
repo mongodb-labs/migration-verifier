@@ -5,9 +5,10 @@ import (
 	"strings"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/mslices"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
@@ -109,14 +110,24 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	// Contents should just be the primary task and
 	// the completed partition-level.
 	tasksColl := verifier.verificationTaskCollection()
-	cursor, err := tasksColl.Find(
+	cursor, err := tasksColl.Aggregate(
 		ctx,
-		bson.M{},
-		options.Find().SetSort(bson.D{
-			{"type", 1},
-			{"query_filter.namespace", 1},
-			{"status", 1},
-		}),
+		append(
+			testutil.SortByListAgg(
+				"type",
+				mslices.Of(
+					verificationTaskPrimary,
+					verificationTaskVerifyDocuments,
+					verificationTaskVerifyCollection,
+				),
+			),
+			bson.D{
+				{"$sort", bson.D{
+					{"query_filter.namespace", 1},
+					{"status", 1},
+				}},
+			},
+		),
 	)
 	suite.Require().NoError(err)
 	var taskDocs []VerificationTask

@@ -2,14 +2,62 @@ package testutil
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"log"
 	"testing"
 
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
 )
+
+func generateRandomFieldName(baseName string) string {
+	b := make([]byte, 4) // 8 hex chars
+	_, err := rand.Read(b)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return baseName + "_" + hex.EncodeToString(b)
+}
+
+// Returns an agg pipeline that sorts results according to a static list
+// of values. Any result that doesn’t match a list value goes at the end.
+func SortByListAgg[T any](
+	fieldName string,
+	values []T,
+) []bson.D {
+	sortField := generateRandomFieldName("sortOrder")
+	sortFieldRef := "$" + sortField
+
+	branches := lo.Map(
+		values,
+		func(v T, i int) bson.D {
+			return bson.D{
+				{"case", bson.D{{"$eq", bson.A{sortFieldRef, v}}}},
+				{"then", i},
+			}
+		},
+	)
+
+	return mongo.Pipeline{
+		// Match only types we're interested in
+		{{"$match", bson.D{
+			{"type", bson.D{{"$in", values}}},
+		}}},
+		{{"$addFields", bson.D{
+			{sortField, bson.D{{"$switch", bson.D{
+				{"branches", branches},
+				{"default", len(values)},
+			}}}},
+		}}},
+		{{"$sort", bson.D{{sortField, 1}}}},
+		{{"$project", bson.D{{sortField, 0}}}},
+	}
+}
 
 // Marshal wraps `bsonMarshal` with a panic on failure.
 func MustMarshal(doc any) bson.Raw {
