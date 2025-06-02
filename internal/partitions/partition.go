@@ -6,6 +6,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -157,18 +158,18 @@ func (p *Partition) GetFindOptions(clusterInfo *util.ClusterInfo, filterAndPredi
 
 		// For non-capped collections, the cursor should use the ID filter and the _id index.
 		// Get the bounded query filter from the partition to be used in the Find command.
-		allowTypeBracketing := false
-		if clusterInfo != nil {
-			allowTypeBracketing = true
+		useExprFind := true
 
+		if clusterInfo != nil {
 			if clusterInfo.VersionArray != nil {
-				allowTypeBracketing = clusterInfo.VersionArray[0] < 5
+				useExprFind = clusterInfo.VersionArray[0] >= 5
 			}
 		}
-		if !allowTypeBracketing {
-			filterAndPredicates = append(filterAndPredicates, p.filterWithNoTypeBracketing())
+
+		if useExprFind {
+			filterAndPredicates = append(filterAndPredicates, p.filterWithExpr())
 		} else {
-			filterAndPredicates = append(filterAndPredicates, p.filterWithTypeBracketing())
+			filterAndPredicates = append(filterAndPredicates, p.filterWithExplicitTypeChecks())
 		}
 
 		hint := bson.E{"hint", bson.D{{"_id", 1}}}
@@ -181,10 +182,10 @@ func (p *Partition) GetFindOptions(clusterInfo *util.ClusterInfo, filterAndPredi
 	return findOptions
 }
 
-// filterWithNoTypeBracketing returns a range filter on _id to be used in a Find query for the
+// filterWithExpr returns a range filter on _id to be used in a Find query for the
 // partition.  This filter will properly handle mixed-type _ids, but on server versions
 // < 5.0, will not use indexes and thus will be very slow
-func (p *Partition) filterWithNoTypeBracketing() bson.D {
+func (p *Partition) filterWithExpr() bson.D {
 	// We use $expr to avoid type bracketing and allow comparison of different _id types,
 	// and $literal to avoid MQL injection from an _id's value.
 	return bson.D{{"$and", []bson.D{
@@ -205,14 +206,36 @@ func (p *Partition) filterWithNoTypeBracketing() bson.D {
 	}}}
 }
 
-// filterWithTypeBracketing returns a range filter on _id to be used in a Find query for the
+// filterWithExplicitTypeChecks returns a range filter on _id to be used in a Find query for the
 // partition.  This filter will not properly handle mixed-type _ids -- if the upper and lower
 // bounds are of different types (except minkey/maxkey), nothing will be returned.
-func (p *Partition) filterWithTypeBracketing() bson.D {
-	return bson.D{{"$and", []bson.D{
+func (p *Partition) filterWithExplicitTypeChecks() bson.D {
+	// This will only catch types that match one of the boundary types.
+	// So if, for example, the lower is MinKey and the upper is of some
+	// high-sorting type (e.g., ObjectID), then no values of the intermediary
+	// types will match. We accommodate that below.
+	mainQuery := bson.D{{"$and", []bson.D{
 		// All _id values >= lower bound.
 		{{"_id", bson.D{{"$gte", p.Key.Lower}}}},
+
 		// All _id values <= upper bound.
 		{{"_id", bson.D{{"$lte", p.Upper}}}},
 	}}}
+
+	betweenTypes, err := getBSONTypesBetweenValues(p.Key.Lower, p.Upper)
+	if err != nil {
+		panic("failed to create find query: " + err.Error())
+	}
+
+	return bson.D{
+		{"$or", append(
+			lo.Map(
+				betweenTypes,
+				func(typestr string, _ int) bson.D {
+					return bson.D{{"_id", bson.D{{"$type", typestr}}}}
+				},
+			),
+			mainQuery,
+		)},
+	}
 }
