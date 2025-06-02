@@ -46,6 +46,27 @@ var bsonTypeSortOrder = []bsontype.Type{
 	bson.TypeMaxKey,
 }
 
+var bsonTypeString = map[bsontype.Type]string{
+	bson.TypeMinKey:           "minKey",
+	bson.TypeNull:             "null",
+	bson.TypeBoolean:          "bool",
+	bson.TypeInt32:            "int",
+	bson.TypeInt64:            "long",
+	bson.TypeDouble:           "double",
+	bson.TypeDecimal128:       "decimal",
+	bson.TypeString:           "string",
+	bson.TypeSymbol:           "symbol",
+	bson.TypeObjectID:         "objectId",
+	bson.TypeDateTime:         "date",
+	bson.TypeTimestamp:        "timestamp",
+	bson.TypeJavaScript:       "javascript",
+	bson.TypeCodeWithScope:    "javascriptWithScope",
+	bson.TypeEmbeddedDocument: "object",
+	bson.TypeBinary:           "binData",
+	bson.TypeDBPointer:        "dbPointer",
+	bson.TypeMaxKey:           "maxKey",
+}
+
 var minNumericType = lo.MinBy(
 	numericTypes.ToSlice(),
 	func(a, b bsontype.Type) bool {
@@ -136,7 +157,7 @@ func getBSONTypesBetweenValues(minVal, maxVal any) ([]string, error) {
 	return lo.Map(
 		bsonTypeSortOrder[1+minSortOrder:maxSortOrder],
 		func(t bsontype.Type, _ int) string {
-			return t.String()
+			return bsonTypeString[t]
 		},
 	), nil
 }
