@@ -328,7 +328,7 @@ func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 		return errors.Wrapf(err, "creating generation index")
 	}
 
-	err = createDiscrepanciesCollection(
+	err = createMismatchesCollection(
 		ctx,
 		verifier.verificationDatabase(),
 	)
@@ -660,7 +660,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 			}
 		}
 
-		err = recordDiscrepancies(
+		err = recordMismatches(
 			ctx,
 			verifier.metaClient.Database(verifier.metaDBName),
 			task.PrimaryKey,
@@ -1168,7 +1168,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		)
 	}
 	if specificationProblems != nil {
-		err := recordDiscrepancies(
+		err := recordMismatches(
 			ctx,
 			verifier.verificationDatabase(),
 			task.PrimaryKey,
@@ -1216,7 +1216,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			}
 		}
 
-		err := recordDiscrepancies(
+		err := recordMismatches(
 			ctx,
 			verifier.verificationDatabase(),
 			task.PrimaryKey,
@@ -1246,7 +1246,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			}
 		}
 
-		err := recordDiscrepancies(
+		err := recordMismatches(
 			ctx,
 			verifier.verificationDatabase(),
 			task.PrimaryKey,

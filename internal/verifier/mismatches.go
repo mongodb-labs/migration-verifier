@@ -13,16 +13,16 @@ import (
 )
 
 const (
-	discrepanciesCollectionName = "discrepancies"
+	mismatchesCollectionName = "mismatches"
 )
 
-type Discrepancy struct {
+type MismatchInfo struct {
 	Task   primitive.ObjectID
 	Detail VerificationResult
 }
 
-func createDiscrepanciesCollection(ctx context.Context, db *mongo.Database) error {
-	_, err := db.Collection(discrepanciesCollectionName).Indexes().CreateMany(
+func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
+	_, err := db.Collection(mismatchesCollectionName).Indexes().CreateMany(
 		ctx,
 		[]mongo.IndexModel{
 			{
@@ -34,18 +34,18 @@ func createDiscrepanciesCollection(ctx context.Context, db *mongo.Database) erro
 	)
 
 	if err != nil {
-		return errors.Wrapf(err, "creating indexes for collection %#q", discrepanciesCollectionName)
+		return errors.Wrapf(err, "creating indexes for collection %#q", mismatchesCollectionName)
 	}
 
 	return nil // TODO
 }
 
-func getDiscrepanciesForTasks(
+func getMismatchesForTasks(
 	ctx context.Context,
 	db *mongo.Database,
 	taskIDs []primitive.ObjectID,
 ) (map[primitive.ObjectID][]VerificationResult, error) {
-	cursor, err := db.Collection(discrepanciesCollectionName).Find(
+	cursor, err := db.Collection(mismatchesCollectionName).Find(
 		ctx,
 		bson.D{
 			{"task", bson.D{{"$in", taskIDs}}},
@@ -63,7 +63,7 @@ func getDiscrepanciesForTasks(
 			break
 		}
 
-		var d Discrepancy
+		var d MismatchInfo
 		if err := cursor.Decode(&d); err != nil {
 			return nil, errors.Wrapf(err, "parsing discrepancy %+v", cursor.Current)
 		}
@@ -87,7 +87,7 @@ func getDiscrepanciesForTasks(
 	return result, nil
 }
 
-func recordDiscrepancies(
+func recordMismatches(
 	ctx context.Context,
 	db *mongo.Database,
 	taskID primitive.ObjectID,
@@ -105,7 +105,7 @@ func recordDiscrepancies(
 			}
 
 			return &mongo.InsertOneModel{
-				Document: Discrepancy{
+				Document: MismatchInfo{
 					Task:   taskID,
 					Detail: r,
 				},
@@ -113,10 +113,10 @@ func recordDiscrepancies(
 		},
 	)
 
-	_, err := db.Collection(discrepanciesCollectionName).BulkWrite(
+	_, err := db.Collection(mismatchesCollectionName).BulkWrite(
 		ctx,
 		models,
 	)
 
-	return errors.Wrapf(err, "recording %d discrepancies", len(models))
+	return errors.Wrapf(err, "recording %d mismatches", len(models))
 }

@@ -142,6 +142,31 @@ The verifier will now check to completion to make sure that there are no inconsi
 | `--ignoreReadConcern`                   | Use connection-default read concerns rather than setting majority read concern. This option may degrade consistency, so only enable it if majority read concern (the default) doesn’t work. |
 | `--help`, `-h`                          | show help                                                                                                                                                                                   |
 
+# Investigation of Mismatches
+
+The verifier records any mismatches it finds in its metadata’s `mismatches`
+collection. Mismatches are indexed by verification task ID. To find a given
+generation’s mismatches, aggregate like this on the metadata cluster:
+
+    // Change this as needed if you specify a custom metadata database:
+    use migration_verification_metadata
+
+    db.verification_tasks.aggregate(
+        { $match: {
+            generation: <whichever generation>,
+            status: "failed",
+        } },
+        { $lookup: {
+            from: "mismatches",
+            localField: "_id",
+            foreignField: "task",
+            as: "mismatch",
+        }},
+        { $unwind: "$mismatch" },
+    )
+
+Note that each mismatch includes timestamps. You can cross-reference
+these with the clusters’ oplogs to diagnose problems.
 
 # Benchmarking Results
 

@@ -35,13 +35,24 @@ const (
 	// Task statuses:
 	// --------------------------------------------------
 
-	verificationTaskAdded     verificationTaskStatus = "added"
+	// This means the task is ready for work once a worker thread gets to it.
+	verificationTaskAdded verificationTaskStatus = "added"
+
+	// This means a worker thread is actively processing the task.
+	verificationTaskProcessing verificationTaskStatus = "processing"
+
+	// This means no mismatches were found. (Yay!)
 	verificationTaskCompleted verificationTaskStatus = "completed"
-	verificationTaskFailed    verificationTaskStatus = "failed"
-	// This is used for collection verification, and means the task successfully created the data tasks,
-	// but there were mismatches in the metadata/indexes
+
+	// This can mean a few different things. Generally it means that at least
+	// one mismatch was found. (It does *not* mean that the verifier failed to
+	// complete the verification task.)
+	verificationTaskFailed verificationTaskStatus = "failed"
+
+	// This is used for collection verification. It means the task successfully
+	// created the data tasks, but there were mismatches in the
+	// metadata/indexes.
 	verificationTaskMetadataMismatch verificationTaskStatus = "mismatch"
-	verificationTaskProcessing       verificationTaskStatus = "processing"
 
 	// --------------------------------------------------
 	// Task types:

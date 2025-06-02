@@ -763,7 +763,7 @@ func (suite *IntegrationTestSuite) getFailuresForTask(
 	verifier *Verifier,
 	taskID primitive.ObjectID,
 ) []VerificationResult {
-	discrepancies, err := getDiscrepanciesForTasks(
+	discrepancies, err := getMismatchesForTasks(
 		suite.Context(),
 		verifier.verificationDatabase(),
 		mslices.Of(taskID),

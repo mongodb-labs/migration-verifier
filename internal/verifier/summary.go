@@ -49,7 +49,7 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		table := tablewriter.NewWriter(strBuilder)
 		table.SetHeader([]string{"Index", "Cluster", "Field", "Namespace", "Details"})
 
-		taskDiscrepancies, err := getDiscrepanciesForTasks(
+		taskDiscrepancies, err := getMismatchesForTasks(
 			ctx,
 			verifier.verificationDatabase(),
 			lo.Map(
@@ -110,7 +110,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	failureTypesTable := tablewriter.NewWriter(strBuilder)
 	failureTypesTable.SetHeader([]string{"Failure Type", "Count"})
 
-	taskDiscrepancies, err := getDiscrepanciesForTasks(
+	taskDiscrepancies, err := getMismatchesForTasks(
 		ctx,
 		verifier.verificationDatabase(),
 		lo.Map(
