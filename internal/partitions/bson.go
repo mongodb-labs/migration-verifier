@@ -10,9 +10,16 @@ import (
 	"go.mongodb.org/mongo-driver/bson/bsontype"
 )
 
-// Notes:
-// - can’t have undefined, array, or regexp as _id
-// - numeric types index together, as do symbol & string
+// -------------------------------------------------------------------------
+// The sort order defined here derives from:
+//
+// https://www.mongodb.com/docs/manual/reference/bson-type-comparison-order/
+//
+// Everything there was verified empirically as part of writing this code.
+// Note that, at least as of this writing, that page erroneously omits
+// JS Code with Scope in the sort order. The observed behavior in MongoDB 4.4
+// is that that type sorts between JavaScript Code and MaxKey.
+// ------------------------------------------------------------------------
 
 var numericTypes = mslices.Of(
 	bson.TypeInt32,
@@ -26,6 +33,13 @@ var stringTypes = mslices.Of(
 	bson.TypeSymbol,
 )
 
+// NB: The server forbids arrays, undefined, and regexes as _id values.
+// That simplifies the following greatly because all of those behave
+// weirdly at various times:
+// - 0-element arrays sort as null.
+// - 1-element arrays sort as their contained element.
+// - undefined & null sometimes match strangely. (This changed in 8.0.)
+// - simple matches against regex actually run the regex.
 var bsonTypeSortOrder = lo.Flatten(mslices.Of(
 	mslices.Of(
 		bson.TypeMinKey,
