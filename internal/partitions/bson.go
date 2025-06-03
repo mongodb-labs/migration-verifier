@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
@@ -15,36 +15,47 @@ import (
 // - can’t have undefined, array, or regexp as _id
 // - symbol & string index together, as do all numeric types
 
-var numericTypes = mapset.NewSet(
+var numericTypes = mslices.Of(
 	bson.TypeInt32,
 	bson.TypeInt64,
 	bson.TypeDouble,
 	bson.TypeDecimal128,
 )
 
-var stringTypes = mapset.NewSet(
+var stringTypes = mslices.Of(
 	bson.TypeString,
 	bson.TypeSymbol,
 )
 
-var numericAndStringTypes = numericTypes.Union(stringTypes)
+var numericAndStringTypes = lo.Flatten(
+	mslices.Of(
+		numericTypes,
+		stringTypes,
+	),
+)
 
-var bsonTypeSortOrder = []bsontype.Type{
-	bson.TypeMinKey,
-	bson.TypeNull,
-	bson.TypeInt32, bson.TypeInt64, bson.TypeDouble, bson.TypeDecimal128,
-	bson.TypeString, bson.TypeSymbol,
-	bson.TypeEmbeddedDocument,
-	bson.TypeBinary,
-	bson.TypeObjectID,
-	bson.TypeBoolean,
-	bson.TypeDateTime,
-	bson.TypeTimestamp,
-	bson.TypeDBPointer,
-	bson.TypeJavaScript,
-	bson.TypeCodeWithScope,
-	bson.TypeMaxKey,
-}
+var bsonTypeSortOrder = lo.Flatten(
+	mslices.Of(
+		mslices.Of(
+			bson.TypeMinKey,
+			bson.TypeNull,
+		),
+		numericTypes,
+		stringTypes,
+		mslices.Of(
+			bson.TypeEmbeddedDocument,
+			bson.TypeBinary,
+			bson.TypeObjectID,
+			bson.TypeBoolean,
+			bson.TypeDateTime,
+			bson.TypeTimestamp,
+			bson.TypeDBPointer,
+			bson.TypeJavaScript,
+			bson.TypeCodeWithScope,
+			bson.TypeMaxKey,
+		),
+	),
+)
 
 var bsonTypeString = map[bsontype.Type]string{
 	bson.TypeMinKey:           "minKey",
@@ -67,40 +78,12 @@ var bsonTypeString = map[bsontype.Type]string{
 	bson.TypeMaxKey:           "maxKey",
 }
 
-var minNumericType = lo.MinBy(
-	numericTypes.ToSlice(),
-	func(a, b bsontype.Type) bool {
-		return slices.Index(bsonTypeSortOrder, a) < slices.Index(bsonTypeSortOrder, b)
-	},
-)
-
-var maxNumericType = lo.MinBy(
-	numericTypes.ToSlice(),
-	func(a, b bsontype.Type) bool {
-		return slices.Index(bsonTypeSortOrder, a) > slices.Index(bsonTypeSortOrder, b)
-	},
-)
-
-var minStringType = lo.MinBy(
-	stringTypes.ToSlice(),
-	func(a, b bsontype.Type) bool {
-		return slices.Index(bsonTypeSortOrder, a) < slices.Index(bsonTypeSortOrder, b)
-	},
-)
-
-var maxStringType = lo.MinBy(
-	stringTypes.ToSlice(),
-	func(a, b bsontype.Type) bool {
-		return slices.Index(bsonTypeSortOrder, a) > slices.Index(bsonTypeSortOrder, b)
-	},
-)
-
 // This function returns the stringified form of all BSON types that are
 // in between the given min & max *and* that the server doesn’t consider
 // type-equivalent. So for example, if the min bound is a BSON int, the
 // returned slice won’t contain numeric types because they’ll all be checked
 // as part of comparing against the int.
-func getBSONTypesBetweenValues(minVal, maxVal any) ([]string, error) {
+func getIdBSONTypesBetweenValues(minVal, maxVal any) ([]string, error) {
 	minBSONType, _, err := bson.MarshalValue(minVal)
 	if err != nil {
 		return nil, errors.Wrapf(err, "marshaling min value (%v)", minVal)
@@ -114,20 +97,20 @@ func getBSONTypesBetweenValues(minVal, maxVal any) ([]string, error) {
 	// Equality checks elide numeric type. They also elide string vs. symbol.
 	// These types also sort next to each other. Thus, any time both min & max
 	// are either string or number, return empty.
-	if numericAndStringTypes.Contains(minBSONType) && numericAndStringTypes.Contains(maxBSONType) {
+	if slices.Contains(numericAndStringTypes, minBSONType) && slices.Contains(numericAndStringTypes, maxBSONType) {
 		return []string{}, nil
 	}
 
-	if numericTypes.Contains(minBSONType) {
-		minBSONType = maxNumericType
-	} else if stringTypes.Contains(minBSONType) {
-		minBSONType = maxStringType
+	if slices.Contains(numericTypes, minBSONType) {
+		minBSONType, _ = lo.Last(numericTypes)
+	} else if slices.Contains(stringTypes, minBSONType) {
+		minBSONType, _ = lo.Last(stringTypes)
 	}
 
-	if numericTypes.Contains(maxBSONType) {
-		maxBSONType = minNumericType
-	} else if stringTypes.Contains(maxBSONType) {
-		maxBSONType = minStringType
+	if slices.Contains(numericTypes, maxBSONType) {
+		maxBSONType = numericTypes[0]
+	} else if slices.Contains(stringTypes, maxBSONType) {
+		maxBSONType = stringTypes[0]
 	}
 
 	minSortOrder := slices.Index(bsonTypeSortOrder, minBSONType)

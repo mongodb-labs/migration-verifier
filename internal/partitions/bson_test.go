@@ -109,7 +109,7 @@ func (suite *UnitTestSuite) Test_getBSONTypesBetweenValues() {
 			),
 		},
 	} {
-		got, err := getBSONTypesBetweenValues(tc.lower, tc.upper)
+		got, err := getIdBSONTypesBetweenValues(tc.lower, tc.upper)
 		suite.Require().NoError(err)
 
 		suite.Assert().ElementsMatch(

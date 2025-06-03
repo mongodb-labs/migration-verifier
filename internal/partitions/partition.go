@@ -157,9 +157,11 @@ func (p *Partition) GetFindOptions(clusterInfo *util.ClusterInfo, filterAndPredi
 
 		// For non-capped collections, the cursor should use the ID filter and the _id index.
 		// Get the bounded query filter from the partition to be used in the Find command.
-		useExprFind := false
+		useExprFind := true
 
 		if clusterInfo != nil {
+			useExprFind = false
+
 			if clusterInfo.VersionArray != nil {
 				useExprFind = clusterInfo.VersionArray[0] >= 5
 			}
@@ -205,9 +207,8 @@ func (p *Partition) filterWithExpr() bson.D {
 	}}}
 }
 
-// filterWithExplicitTypeChecks returns a range filter on _id to be used in a Find query for the
-// partition.  This filter will not properly handle mixed-type _ids -- if the upper and lower
-// bounds are of different types (except minkey/maxkey), nothing will be returned.
+// filterWithExplicitTypeChecks compensates for the server’s type bracketing
+// by matching _id types between the partition’s min & max boundaries.
 func (p *Partition) filterWithExplicitTypeChecks() bson.D {
 	// This will only catch types that match one of the boundary types.
 	// So if, for example, the lower is MinKey and the upper is of some
@@ -221,7 +222,7 @@ func (p *Partition) filterWithExplicitTypeChecks() bson.D {
 		{{"_id", bson.D{{"$lte", p.Upper}}}},
 	}}}
 
-	betweenTypes, err := getBSONTypesBetweenValues(p.Key.Lower, p.Upper)
+	betweenTypes, err := getIdBSONTypesBetweenValues(p.Key.Lower, p.Upper)
 	if err != nil {
 		panic("failed to create find query: " + err.Error())
 	}
