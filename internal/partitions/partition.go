@@ -6,7 +6,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -228,14 +227,9 @@ func (p *Partition) filterWithExplicitTypeChecks() bson.D {
 	}
 
 	return bson.D{
-		{"$or", append(
-			lo.Map(
-				betweenTypes,
-				func(typestr string, _ int) bson.D {
-					return bson.D{{"_id", bson.D{{"$type", typestr}}}}
-				},
-			),
+		{"$or", []bson.D{
 			mainQuery,
-		)},
+			{{"_id", bson.D{{"$type", betweenTypes}}}},
+		}},
 	}
 }
