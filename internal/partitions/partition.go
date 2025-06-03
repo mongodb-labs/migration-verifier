@@ -157,7 +157,7 @@ func (p *Partition) GetFindOptions(clusterInfo *util.ClusterInfo, filterAndPredi
 
 		// For non-capped collections, the cursor should use the ID filter and the _id index.
 		// Get the bounded query filter from the partition to be used in the Find command.
-		useExprFind := true
+		useExprFind := false
 
 		if clusterInfo != nil {
 			if clusterInfo.VersionArray != nil {

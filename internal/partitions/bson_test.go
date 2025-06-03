@@ -2,7 +2,9 @@ package partitions
 
 import (
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -34,66 +36,76 @@ func (suite *UnitTestSuite) Test_getBSONTypesBetweenValues() {
 		{
 			lower: primitive.MinKey{},
 			upper: primitive.ObjectID{},
-			expect: mslices.Of(
-				bson.TypeNull.String(),
-				bson.TypeInt32.String(),
-				bson.TypeInt64.String(),
-				bson.TypeDouble.String(),
-				bson.TypeDecimal128.String(),
-				bson.TypeString.String(),
-				bson.TypeSymbol.String(),
-				bson.TypeEmbeddedDocument.String(),
-				bson.TypeBinary.String(),
+			expect: typesToStrings(
+				mslices.Of(
+					bson.TypeNull,
+					bson.TypeInt32,
+					bson.TypeInt64,
+					bson.TypeDouble,
+					bson.TypeDecimal128,
+					bson.TypeString,
+					bson.TypeSymbol,
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+				),
 			),
 		},
 		{
 			lower: int32(1),
 			upper: primitive.MaxKey{},
-			expect: mslices.Of(
-				bson.TypeString.String(),
-				bson.TypeSymbol.String(),
-				bson.TypeEmbeddedDocument.String(),
-				bson.TypeBinary.String(),
-				bson.TypeObjectID.String(),
-				bson.TypeBoolean.String(),
-				bson.TypeDateTime.String(),
-				bson.TypeTimestamp.String(),
-				bson.TypeDBPointer.String(),
-				bson.TypeJavaScript.String(),
-				bson.TypeCodeWithScope.String(),
+			expect: typesToStrings(
+				mslices.Of(
+					bson.TypeString,
+					bson.TypeSymbol,
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+				),
 			),
 		},
 		{
 			lower: "",
 			upper: primitive.MaxKey{},
-			expect: mslices.Of(
-				bson.TypeEmbeddedDocument.String(),
-				bson.TypeBinary.String(),
-				bson.TypeObjectID.String(),
-				bson.TypeBoolean.String(),
-				bson.TypeDateTime.String(),
-				bson.TypeTimestamp.String(),
-				bson.TypeDBPointer.String(),
-				bson.TypeJavaScript.String(),
-				bson.TypeCodeWithScope.String(),
+			expect: typesToStrings(
+				mslices.Of(
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+				),
 			),
 		},
 		{
 			lower: primitive.MinKey{},
 			upper: "",
-			expect: mslices.Of(
-				bson.TypeNull.String(),
-				bson.TypeInt32.String(),
-				bson.TypeInt64.String(),
-				bson.TypeDouble.String(),
-				bson.TypeDecimal128.String(),
+			expect: typesToStrings(
+				mslices.Of(
+					bson.TypeNull,
+					bson.TypeInt32,
+					bson.TypeInt64,
+					bson.TypeDouble,
+					bson.TypeDecimal128,
+				),
 			),
 		},
 		{
 			lower: primitive.MinKey{},
 			upper: primitive.Decimal128{},
-			expect: mslices.Of(
-				bson.TypeNull.String(),
+			expect: typesToStrings(
+				mslices.Of(
+					bson.TypeNull,
+				),
 			),
 		},
 	} {
@@ -108,4 +120,13 @@ func (suite *UnitTestSuite) Test_getBSONTypesBetweenValues() {
 			tc.upper,
 		)
 	}
+}
+
+func typesToStrings(types []bsontype.Type) []string {
+	return lo.Map(
+		types,
+		func(t bsontype.Type, _ int) string {
+			return bsonTypeString[t]
+		},
+	)
 }
