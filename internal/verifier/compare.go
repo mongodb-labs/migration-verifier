@@ -351,6 +351,11 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 	dstChannel := make(chan docWithTs)
 
 	readSrcCallback := func(ctx context.Context, state *retry.FuncInfo) error {
+		// We open a session here so that we can read the session’s cluster
+		// time, which we store along with any document mismatches we may see.
+		//
+		// Ideally the driver would just expose the individual server responses’
+		// cluster times, but alas.
 		sess, err := verifier.srcClient.StartSession()
 		if err != nil {
 			return errors.Wrapf(err, "starting session")
