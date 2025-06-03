@@ -157,18 +157,20 @@ func (p *Partition) GetFindOptions(clusterInfo *util.ClusterInfo, filterAndPredi
 
 		// For non-capped collections, the cursor should use the ID filter and the _id index.
 		// Get the bounded query filter from the partition to be used in the Find command.
-		allowTypeBracketing := false
+		useExprFind := true
+
 		if clusterInfo != nil {
-			allowTypeBracketing = true
+			useExprFind = false
 
 			if clusterInfo.VersionArray != nil {
-				allowTypeBracketing = clusterInfo.VersionArray[0] < 5
+				useExprFind = clusterInfo.VersionArray[0] >= 5
 			}
 		}
-		if !allowTypeBracketing {
-			filterAndPredicates = append(filterAndPredicates, p.filterWithNoTypeBracketing())
+
+		if useExprFind {
+			filterAndPredicates = append(filterAndPredicates, p.filterWithExpr())
 		} else {
-			filterAndPredicates = append(filterAndPredicates, p.filterWithTypeBracketing())
+			filterAndPredicates = append(filterAndPredicates, p.filterWithExplicitTypeChecks())
 		}
 
 		hint := bson.E{"hint", bson.D{{"_id", 1}}}
@@ -181,10 +183,10 @@ func (p *Partition) GetFindOptions(clusterInfo *util.ClusterInfo, filterAndPredi
 	return findOptions
 }
 
-// filterWithNoTypeBracketing returns a range filter on _id to be used in a Find query for the
+// filterWithExpr returns a range filter on _id to be used in a Find query for the
 // partition.  This filter will properly handle mixed-type _ids, but on server versions
 // < 5.0, will not use indexes and thus will be very slow
-func (p *Partition) filterWithNoTypeBracketing() bson.D {
+func (p *Partition) filterWithExpr() bson.D {
 	// We use $expr to avoid type bracketing and allow comparison of different _id types,
 	// and $literal to avoid MQL injection from an _id's value.
 	return bson.D{{"$and", []bson.D{
@@ -205,14 +207,48 @@ func (p *Partition) filterWithNoTypeBracketing() bson.D {
 	}}}
 }
 
-// filterWithTypeBracketing returns a range filter on _id to be used in a Find query for the
-// partition.  This filter will not properly handle mixed-type _ids -- if the upper and lower
-// bounds are of different types (except minkey/maxkey), nothing will be returned.
-func (p *Partition) filterWithTypeBracketing() bson.D {
+// filterWithExplicitTypeChecks compensates for the server’s type bracketing
+// by matching _id types between the partition’s min & max boundaries.
+// It should yield the same result as filterWithExpr.
+func (p *Partition) filterWithExplicitTypeChecks() bson.D {
 	return bson.D{{"$and", []bson.D{
-		// All _id values >= lower bound.
-		{{"_id", bson.D{{"$gte", p.Key.Lower}}}},
-		// All _id values <= upper bound.
-		{{"_id", bson.D{{"$lte", p.Upper}}}},
+		getGTEQueryPredicate(p.Key.Lower),
+		getLTEQueryPredicate(p.Upper),
 	}}}
+}
+
+func getGTEQueryPredicate(boundary any) bson.D {
+	_, greaterTypeStrs, err := getTypeBracketExcludedBSONTypes(boundary)
+	if err != nil {
+		panic(errors.Wrapf(err, "creating query predicate: gte (%T: %v)", boundary, boundary))
+	}
+
+	return bson.D{
+		{"$or", []bson.D{
+			// All _id values >= lower bound.
+			{{"_id", bson.D{{"$gte", boundary}}}},
+
+			// All BSON types above the _id’s type *and* not checked
+			// in the _id comparison.
+			{{"_id", bson.D{{"$type", greaterTypeStrs}}}},
+		}},
+	}
+}
+
+func getLTEQueryPredicate(boundary any) bson.D {
+	lesserTypeStrs, _, err := getTypeBracketExcludedBSONTypes(boundary)
+	if err != nil {
+		panic(errors.Wrapf(err, "creating query predicate: lte (%T: %v)", boundary, boundary))
+	}
+
+	return bson.D{
+		{"$or", []bson.D{
+			// All _id values <= upper bound.
+			{{"_id", bson.D{{"$lte", boundary}}}},
+
+			// All BSON types below the _id’s type *and* not checked
+			// in the _id comparison.
+			{{"_id", bson.D{{"$type", lesserTypeStrs}}}},
+		}},
+	}
 }
