@@ -68,9 +68,16 @@ var bsonTypeString = map[bsontype.Type]string{
 	bson.TypeMaxKey:           "maxKey",
 }
 
-// This returns BSON types that the server excludes from queries against the
-// given value. The returned slices are types before & after, respectively.
-func splitBSONTypesOnId(val any) ([]string, []string, error) {
+// This returns BSON types that the server’s type bracketing excludes from
+// query results when matching against the given value.
+//
+// The returned slices are types before & after, respectively. They are
+// strings rather than bsontype.Type to facilitate easy insertion into queries.
+//
+// This is kind of like strings.Cut() but against the sort-ordered list of BSON
+// types, except that if the given value is a number or string-like, then other
+// “like” types will not be in the returned slices.
+func getTypeBracketExcludedBSONTypes(val any) ([]string, []string, error) {
 	bsonType, _, err := bson.MarshalValue(val)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "marshaling min value (%v)", val)

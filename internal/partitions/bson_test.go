@@ -474,7 +474,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 			after: []string{},
 		},
 	} {
-		before, after, err := splitBSONTypesOnId(tc.value)
+		before, after, err := getTypeBracketExcludedBSONTypes(tc.value)
 		suite.Require().NoError(err)
 
 		suite.Assert().ElementsMatch(

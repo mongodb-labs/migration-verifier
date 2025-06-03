@@ -218,7 +218,7 @@ func (p *Partition) filterWithExplicitTypeChecks() bson.D {
 }
 
 func getGTEQueryPredicate(boundary any) bson.D {
-	_, greaterTypeStrs, err := splitBSONTypesOnId(boundary)
+	_, greaterTypeStrs, err := getTypeBracketExcludedBSONTypes(boundary)
 	if err != nil {
 		panic(errors.Wrapf(err, "creating query predicate: gte (%T: %v)", boundary, boundary))
 	}
@@ -236,7 +236,7 @@ func getGTEQueryPredicate(boundary any) bson.D {
 }
 
 func getLTEQueryPredicate(boundary any) bson.D {
-	lesserTypeStrs, _, err := splitBSONTypesOnId(boundary)
+	lesserTypeStrs, _, err := getTypeBracketExcludedBSONTypes(boundary)
 	if err != nil {
 		panic(errors.Wrapf(err, "creating query predicate: lte (%T: %v)", boundary, boundary))
 	}
