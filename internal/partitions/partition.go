@@ -209,44 +209,45 @@ func (p *Partition) filterWithExpr() bson.D {
 
 // filterWithExplicitTypeChecks compensates for the server’s type bracketing
 // by matching _id types between the partition’s min & max boundaries.
+// It should yield the same result as filterWithExpr.
 func (p *Partition) filterWithExplicitTypeChecks() bson.D {
-	// This will only catch types that match one of the boundary types.
-	// So if, for example, the lower is MinKey and the upper is of some
-	// high-sorting type (e.g., ObjectID), then no values of the intermediary
-	// types will match. We accommodate that below.
 	return bson.D{{"$and", []bson.D{
-		getLowerBoundQueryPredicate(p.Key.Lower),
-		getUpperBoundQueryPredicate(p.Upper),
+		getGTEQueryPredicate(p.Key.Lower),
+		getLTEQueryPredicate(p.Upper),
 	}}}
 }
 
-func getLowerBoundQueryPredicate(lowerBound any) bson.D {
-	_, greaterTypeStrs, err := splitBSONTypesForId(lowerBound)
+func getGTEQueryPredicate(boundary any) bson.D {
+	_, greaterTypeStrs, err := splitBSONTypesOnId(boundary)
 	if err != nil {
-		panic(errors.Wrapf(err, "creating lower-bound (%T: %v) query predicate", lowerBound, lowerBound))
+		panic(errors.Wrapf(err, "creating query predicate: gte (%T: %v)", boundary, boundary))
 	}
 
 	return bson.D{
 		{"$or", []bson.D{
 			// All _id values >= lower bound.
-			{{"_id", bson.D{{"$gte", lowerBound}}}},
+			{{"_id", bson.D{{"$gte", boundary}}}},
 
+			// All BSON types above the _id’s type *and* not checked
+			// in the _id comparison.
 			{{"_id", bson.D{{"$type", greaterTypeStrs}}}},
 		}},
 	}
 }
 
-func getUpperBoundQueryPredicate(upperBound any) bson.D {
-	lesserTypeStrs, _, err := splitBSONTypesForId(upperBound)
+func getLTEQueryPredicate(boundary any) bson.D {
+	lesserTypeStrs, _, err := splitBSONTypesOnId(boundary)
 	if err != nil {
-		panic(errors.Wrapf(err, "creating lower-bound (%T: %v) query predicate", upperBound, upperBound))
+		panic(errors.Wrapf(err, "creating query predicate: lte (%T: %v)", boundary, boundary))
 	}
 
 	return bson.D{
 		{"$or", []bson.D{
 			// All _id values <= upper bound.
-			{{"_id", bson.D{{"$lte", upperBound}}}},
+			{{"_id", bson.D{{"$lte", boundary}}}},
 
+			// All BSON types below the _id’s type *and* not checked
+			// in the _id comparison.
 			{{"_id", bson.D{{"$type", lesserTypeStrs}}}},
 		}},
 	}

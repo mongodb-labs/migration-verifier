@@ -70,7 +70,7 @@ var bsonTypeString = map[bsontype.Type]string{
 
 // This returns BSON types that the server excludes from queries against the
 // given value. The returned slices are types before & after, respectively.
-func splitBSONTypesForId(val any) ([]string, []string, error) {
+func splitBSONTypesOnId(val any) ([]string, []string, error) {
 	bsonType, _, err := bson.MarshalValue(val)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "marshaling min value (%v)", val)
