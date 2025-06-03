@@ -96,6 +96,8 @@ func getTypeBracketExcludedBSONTypes(val any) ([]string, []string, error) {
 	// telling the caller to query on, e.g., [_id >= 123 OR type is double],
 	// which would match something like float64(12), which, of course, we
 	// don’t want.
+	//
+	// For the same reason, we need the same exclusion for string vs. symbol.
 	if slices.Contains(numericTypes, bsonType) {
 		earlier = lo.Without(earlier, numericTypes...)
 		later = lo.Without(later, numericTypes...)
