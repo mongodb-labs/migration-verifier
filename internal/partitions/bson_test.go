@@ -1,62 +1,51 @@
 package partitions
 
 import (
+	"slices"
+	"time"
+
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-func (suite *UnitTestSuite) Test_getBSONTypesBetweenValues() {
+func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 	for _, tc := range []struct {
-		lower  any
-		upper  any
-		expect []string
+		value  any
+		before []string
+		after  []string
 	}{
-		// Same type
 		{
-			lower:  primitive.ObjectID{},
-			upper:  primitive.ObjectID{},
-			expect: []string{},
+			value:  primitive.MinKey{},
+			before: []string{},
+			after: typesToStrings(lo.Without(
+				bsonTypeSortOrder,
+				bson.TypeMinKey,
+			)),
 		},
-		// Both numeric types
+
 		{
-			lower:  int32(0),
-			upper:  primitive.Decimal128{},
-			expect: []string{},
+			value:  primitive.Null{},
+			before: typesToStrings(mslices.Of(bson.TypeMinKey)),
+			after: typesToStrings(lo.Without(
+				bsonTypeSortOrder,
+				bson.TypeMinKey,
+				bson.TypeNull,
+			)),
 		},
-		// A numeric and a string type (far apart)
+
 		{
-			lower:  int32(0),
-			upper:  primitive.Symbol(""),
-			expect: []string{},
-		},
-		// The original case that turned this up:
-		{
-			lower: primitive.MinKey{},
-			upper: primitive.ObjectID{},
-			expect: typesToStrings(
+			value: int32(1),
+			before: typesToStrings(
 				mslices.Of(
+					bson.TypeMinKey,
 					bson.TypeNull,
-					bson.TypeInt32,
-					bson.TypeInt64,
-					bson.TypeDouble,
-					bson.TypeDecimal128,
-					bson.TypeString,
-					bson.TypeSymbol,
-					bson.TypeEmbeddedDocument,
-					bson.TypeBinary,
 				),
 			),
-		},
-		{
-			lower: int32(1),
-			upper: primitive.MaxKey{},
-			expect: typesToStrings(
-				mslices.Of(
-					bson.TypeString,
-					bson.TypeSymbol,
+			after: typesToStrings(
+				append(
+					slices.Clone(stringTypes),
 					bson.TypeEmbeddedDocument,
 					bson.TypeBinary,
 					bson.TypeObjectID,
@@ -66,13 +55,98 @@ func (suite *UnitTestSuite) Test_getBSONTypesBetweenValues() {
 					bson.TypeDBPointer,
 					bson.TypeJavaScript,
 					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
 				),
 			),
 		},
+
 		{
-			lower: "",
-			upper: primitive.MaxKey{},
-			expect: typesToStrings(
+			value: int64(1),
+			before: typesToStrings(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+			),
+			after: typesToStrings(
+				append(
+					slices.Clone(stringTypes),
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
+				),
+			),
+		},
+
+		{
+			value: float64(1),
+			before: typesToStrings(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+			),
+			after: typesToStrings(
+				append(
+					slices.Clone(stringTypes),
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
+				),
+			),
+		},
+
+		{
+			value: primitive.Decimal128{},
+			before: typesToStrings(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+			),
+			after: typesToStrings(
+				append(
+					slices.Clone(stringTypes),
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
+				),
+			),
+		},
+
+		{
+			value: "",
+			before: typesToStrings(
+				append(
+					mslices.Of(
+						bson.TypeMinKey,
+						bson.TypeNull,
+					),
+					numericTypes...,
+				),
+			),
+			after: typesToStrings(
 				mslices.Of(
 					bson.TypeEmbeddedDocument,
 					bson.TypeBinary,
@@ -83,50 +157,429 @@ func (suite *UnitTestSuite) Test_getBSONTypesBetweenValues() {
 					bson.TypeDBPointer,
 					bson.TypeJavaScript,
 					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
 				),
 			),
 		},
+
 		{
-			lower: primitive.MinKey{},
-			upper: "",
-			expect: typesToStrings(
+			value: primitive.Symbol(""),
+			before: typesToStrings(
+				append(
+					mslices.Of(
+						bson.TypeMinKey,
+						bson.TypeNull,
+					),
+					numericTypes...,
+				),
+			),
+			after: typesToStrings(
 				mslices.Of(
-					bson.TypeNull,
-					bson.TypeInt32,
-					bson.TypeInt64,
-					bson.TypeDouble,
-					bson.TypeDecimal128,
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
 				),
 			),
 		},
+
 		{
-			lower: primitive.MinKey{},
-			upper: primitive.Decimal128{},
-			expect: typesToStrings(
+			value: bson.D{},
+			before: typesToStrings(
+				lo.Flatten(mslices.Of(
+					mslices.Of(
+						bson.TypeMinKey,
+						bson.TypeNull,
+					),
+					numericTypes,
+					stringTypes,
+				)),
+			),
+			after: typesToStrings(
 				mslices.Of(
-					bson.TypeNull,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
 				),
 			),
 		},
+
+		{
+			value: []byte{},
+			before: typesToStrings(
+				lo.Flatten(mslices.Of(
+					mslices.Of(
+						bson.TypeMinKey,
+						bson.TypeNull,
+					),
+					numericTypes,
+					stringTypes,
+					mslices.Of(
+						bson.TypeEmbeddedDocument,
+					),
+				)),
+			),
+			after: typesToStrings(
+				mslices.Of(
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
+				),
+			),
+		},
+
+		{
+			value: primitive.ObjectID{},
+			before: typesToStrings(
+				lo.Flatten(mslices.Of(
+					mslices.Of(
+						bson.TypeMinKey,
+						bson.TypeNull,
+					),
+					numericTypes,
+					stringTypes,
+					mslices.Of(
+						bson.TypeEmbeddedDocument,
+						bson.TypeBinary,
+					),
+				)),
+			),
+			after: typesToStrings(
+				mslices.Of(
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
+				),
+			),
+		},
+
+		{
+			value: true,
+			before: typesToStrings(
+				lo.Flatten(mslices.Of(
+					mslices.Of(
+						bson.TypeMinKey,
+						bson.TypeNull,
+					),
+					numericTypes,
+					stringTypes,
+					mslices.Of(
+						bson.TypeEmbeddedDocument,
+						bson.TypeBinary,
+						bson.TypeObjectID,
+					),
+				)),
+			),
+			after: typesToStrings(
+				mslices.Of(
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
+				),
+			),
+		},
+
+		{
+			value: time.Now(),
+			before: typesToStrings(
+				lo.Flatten(mslices.Of(
+					mslices.Of(
+						bson.TypeMinKey,
+						bson.TypeNull,
+					),
+					numericTypes,
+					stringTypes,
+					mslices.Of(
+						bson.TypeEmbeddedDocument,
+						bson.TypeBinary,
+						bson.TypeObjectID,
+						bson.TypeBoolean,
+					),
+				)),
+			),
+			after: typesToStrings(
+				mslices.Of(
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
+				),
+			),
+		},
+
+		{
+			value: primitive.Timestamp{},
+			before: typesToStrings(
+				lo.Flatten(mslices.Of(
+					mslices.Of(
+						bson.TypeMinKey,
+						bson.TypeNull,
+					),
+					numericTypes,
+					stringTypes,
+					mslices.Of(
+						bson.TypeEmbeddedDocument,
+						bson.TypeBinary,
+						bson.TypeObjectID,
+						bson.TypeBoolean,
+						bson.TypeDateTime,
+					),
+				)),
+			),
+			after: typesToStrings(
+				mslices.Of(
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
+				),
+			),
+		},
+
+		{
+			value: primitive.DBPointer{},
+			before: typesToStrings(
+				lo.Flatten(mslices.Of(
+					mslices.Of(
+						bson.TypeMinKey,
+						bson.TypeNull,
+					),
+					numericTypes,
+					stringTypes,
+					mslices.Of(
+						bson.TypeEmbeddedDocument,
+						bson.TypeBinary,
+						bson.TypeObjectID,
+						bson.TypeBoolean,
+						bson.TypeDateTime,
+						bson.TypeTimestamp,
+					),
+				)),
+			),
+			after: typesToStrings(
+				mslices.Of(
+					bson.TypeJavaScript,
+					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
+				),
+			),
+		},
+
+		{
+			value: primitive.JavaScript(""),
+			before: typesToStrings(
+				lo.Flatten(mslices.Of(
+					mslices.Of(
+						bson.TypeMinKey,
+						bson.TypeNull,
+					),
+					numericTypes,
+					stringTypes,
+					mslices.Of(
+						bson.TypeEmbeddedDocument,
+						bson.TypeBinary,
+						bson.TypeObjectID,
+						bson.TypeBoolean,
+						bson.TypeDateTime,
+						bson.TypeTimestamp,
+						bson.TypeDBPointer,
+					),
+				)),
+			),
+			after: typesToStrings(
+				mslices.Of(
+					bson.TypeCodeWithScope,
+					bson.TypeMaxKey,
+				),
+			),
+		},
+
+		{
+			value: primitive.CodeWithScope{Scope: bson.D{}},
+			before: typesToStrings(
+				lo.Flatten(mslices.Of(
+					mslices.Of(
+						bson.TypeMinKey,
+						bson.TypeNull,
+					),
+					numericTypes,
+					stringTypes,
+					mslices.Of(
+						bson.TypeEmbeddedDocument,
+						bson.TypeBinary,
+						bson.TypeObjectID,
+						bson.TypeBoolean,
+						bson.TypeDateTime,
+						bson.TypeTimestamp,
+						bson.TypeDBPointer,
+						bson.TypeJavaScript,
+					),
+				)),
+			),
+			after: typesToStrings(
+				mslices.Of(
+					bson.TypeMaxKey,
+				),
+			),
+		},
+
+		{
+			value: primitive.MaxKey{},
+			before: typesToStrings(
+				lo.Flatten(mslices.Of(
+					mslices.Of(
+						bson.TypeMinKey,
+						bson.TypeNull,
+					),
+					numericTypes,
+					stringTypes,
+					mslices.Of(
+						bson.TypeEmbeddedDocument,
+						bson.TypeBinary,
+						bson.TypeObjectID,
+						bson.TypeBoolean,
+						bson.TypeDateTime,
+						bson.TypeTimestamp,
+						bson.TypeDBPointer,
+						bson.TypeJavaScript,
+						bson.TypeCodeWithScope,
+					),
+				)),
+			),
+			after: []string{},
+		},
+
+		/*
+			// Both numeric types
+			{
+				lower:  int32(0),
+				upper:  primitive.Decimal128{},
+				expect: []string{},
+			},
+			// A numeric and a string type (far apart)
+			{
+				lower:  int32(0),
+				upper:  primitive.Symbol(""),
+				expect: []string{},
+			},
+			// The original case that turned this up:
+			{
+				lower: primitive.MinKey{},
+				upper: primitive.ObjectID{},
+				expect: typesToStrings(
+					mslices.Of(
+						bson.TypeNull,
+						bson.TypeInt32,
+						bson.TypeInt64,
+						bson.TypeDouble,
+						bson.TypeDecimal128,
+						bson.TypeString,
+						bson.TypeSymbol,
+						bson.TypeEmbeddedDocument,
+						bson.TypeBinary,
+					),
+				),
+			},
+			{
+				lower: int32(1),
+				upper: primitive.MaxKey{},
+				expect: typesToStrings(
+					mslices.Of(
+						bson.TypeString,
+						bson.TypeSymbol,
+						bson.TypeEmbeddedDocument,
+						bson.TypeBinary,
+						bson.TypeObjectID,
+						bson.TypeBoolean,
+						bson.TypeDateTime,
+						bson.TypeTimestamp,
+						bson.TypeDBPointer,
+						bson.TypeJavaScript,
+						bson.TypeCodeWithScope,
+					),
+				),
+			},
+			{
+				lower: "",
+				upper: primitive.MaxKey{},
+				expect: typesToStrings(
+					mslices.Of(
+						bson.TypeEmbeddedDocument,
+						bson.TypeBinary,
+						bson.TypeObjectID,
+						bson.TypeBoolean,
+						bson.TypeDateTime,
+						bson.TypeTimestamp,
+						bson.TypeDBPointer,
+						bson.TypeJavaScript,
+						bson.TypeCodeWithScope,
+					),
+				),
+			},
+			{
+				lower: primitive.MinKey{},
+				upper: "",
+				expect: typesToStrings(
+					mslices.Of(
+						bson.TypeNull,
+						bson.TypeInt32,
+						bson.TypeInt64,
+						bson.TypeDouble,
+						bson.TypeDecimal128,
+					),
+				),
+			},
+			{
+				lower: primitive.MinKey{},
+				upper: primitive.Decimal128{},
+				expect: typesToStrings(
+					mslices.Of(
+						bson.TypeNull,
+					),
+				),
+			},
+		*/
 	} {
-		got, err := getIdBSONTypesBetweenValues(tc.lower, tc.upper)
+		before, after, err := splitBSONTypesForId(tc.value)
 		suite.Require().NoError(err)
 
 		suite.Assert().ElementsMatch(
-			tc.expect,
-			got,
-			"between %T and %T",
-			tc.lower,
-			tc.upper,
+			tc.before,
+			before,
+			"before %T",
+			tc.value,
+		)
+
+		suite.Assert().ElementsMatch(
+			tc.after,
+			after,
+			"before %T",
+			tc.value,
 		)
 	}
-}
-
-func typesToStrings(types []bsontype.Type) []string {
-	return lo.Map(
-		types,
-		func(t bsontype.Type, _ int) string {
-			return bsonTypeString[t]
-		},
-	)
 }

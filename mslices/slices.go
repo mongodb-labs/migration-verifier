@@ -7,7 +7,7 @@ package mslices
 // to capitalize on Go’s type inference, similar to
 // [this declined feature proposal](https://github.com/golang/go/issues/47709).
 func Of[T any](pieces ...T) []T {
-	return append([]T{}, pieces...)
+	return pieces
 }
 
 // ToMap outputs a map that “indexes” the given slice.
@@ -19,4 +19,8 @@ func ToMap[S ~[]E, E any, K comparable](s S, cb func(el E) K) map[K]E {
 	}
 
 	return theMap
+}
+
+func Init[E any, T ~[]E](ref *T) {
+	*ref = make(T, 0)
 }

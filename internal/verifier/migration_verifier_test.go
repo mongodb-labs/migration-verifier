@@ -130,14 +130,14 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 
 	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", nil}},
-		bson.D{{"_id", 123}},
+		bson.D{{"_id", int32(123)}},
 		bson.D{{"_id", primitive.Symbol("oh yeah")}},
 	})
 	suite.Require().NoError(err)
 
 	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", nil}},
-		bson.D{{"_id", 123}},
+		bson.D{{"_id", int32(123)}},
 		bson.D{{"_id", "oh yeah"}},
 	})
 	suite.Require().NoError(err)

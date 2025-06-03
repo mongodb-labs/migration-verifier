@@ -214,23 +214,40 @@ func (p *Partition) filterWithExplicitTypeChecks() bson.D {
 	// So if, for example, the lower is MinKey and the upper is of some
 	// high-sorting type (e.g., ObjectID), then no values of the intermediary
 	// types will match. We accommodate that below.
-	mainQuery := bson.D{{"$and", []bson.D{
-		// All _id values >= lower bound.
-		{{"_id", bson.D{{"$gte", p.Key.Lower}}}},
-
-		// All _id values <= upper bound.
-		{{"_id", bson.D{{"$lte", p.Upper}}}},
+	return bson.D{{"$and", []bson.D{
+		getLowerBoundQueryPredicate(p.Key.Lower),
+		getUpperBoundQueryPredicate(p.Upper),
 	}}}
+}
 
-	betweenTypes, err := getIdBSONTypesBetweenValues(p.Key.Lower, p.Upper)
+func getLowerBoundQueryPredicate(lowerBound any) bson.D {
+	_, greaterTypeStrs, err := splitBSONTypesForId(lowerBound)
 	if err != nil {
-		panic("failed to create find query: " + err.Error())
+		panic(errors.Wrapf(err, "creating lower-bound (%T: %v) query predicate", lowerBound, lowerBound))
 	}
 
 	return bson.D{
 		{"$or", []bson.D{
-			mainQuery,
-			{{"_id", bson.D{{"$type", betweenTypes}}}},
+			// All _id values >= lower bound.
+			{{"_id", bson.D{{"$gte", lowerBound}}}},
+
+			{{"_id", bson.D{{"$type", greaterTypeStrs}}}},
+		}},
+	}
+}
+
+func getUpperBoundQueryPredicate(upperBound any) bson.D {
+	lesserTypeStrs, _, err := splitBSONTypesForId(upperBound)
+	if err != nil {
+		panic(errors.Wrapf(err, "creating lower-bound (%T: %v) query predicate", upperBound, upperBound))
+	}
+
+	return bson.D{
+		{"$or", []bson.D{
+			// All _id values <= upper bound.
+			{{"_id", bson.D{{"$lte", upperBound}}}},
+
+			{{"_id", bson.D{{"$type", lesserTypeStrs}}}},
 		}},
 	}
 }
