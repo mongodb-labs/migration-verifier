@@ -55,7 +55,6 @@ func (verifier *Verifier) verifyShardingIfNeeded(
 
 	if srcIsSharded != dstIsSharded {
 		return []VerificationResult{{
-			ID:        "shardKey",
 			Field:     ShardKeyField,
 			Cluster:   lo.Ternary(srcIsSharded, ClusterTarget, ClusterSource),
 			Details:   Missing,
@@ -84,7 +83,6 @@ func (verifier *Verifier) verifyShardingIfNeeded(
 
 	if !areEqual {
 		return []VerificationResult{{
-			ID:        "shardKey",
 			Field:     ShardKeyField,
 			Details:   fmt.Sprintf("%s: src=%v; dst=%v", Mismatch, srcKey, dstKey),
 			NameSpace: FullName(srcColl),
