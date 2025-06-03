@@ -471,8 +471,9 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 			Field:     fieldPrefix + field,
 			Details:   Missing,
 			Cluster:   ClusterSource,
-			NameSpace: namespace,
-			ID:        id,
+			NameSpace: namespace}
+		if id != nil {
+			result.ID = id
 		}
 
 		results = append(results, result)
@@ -483,8 +484,9 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 			Field:     fieldPrefix + field,
 			Details:   Missing,
 			Cluster:   ClusterTarget,
-			NameSpace: namespace,
-			ID:        id,
+			NameSpace: namespace}
+		if id != nil {
+			result.ID = id
 		}
 
 		results = append(results, result)
@@ -498,8 +500,9 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 			Field:     fieldPrefix + field,
 			Details:   details,
 			Cluster:   ClusterTarget,
-			NameSpace: namespace,
-			ID:        id,
+			NameSpace: namespace}
+		if id != nil {
+			result.ID = id
 		}
 
 		results = append(results, result)
