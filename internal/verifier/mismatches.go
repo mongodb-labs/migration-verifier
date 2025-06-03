@@ -2,7 +2,6 @@ package verifier
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -100,10 +99,6 @@ func recordMismatches(
 	models := lo.Map(
 		problems,
 		func(r VerificationResult, _ int) mongo.WriteModel {
-			if r.ID == nil {
-				panic(fmt.Sprintf("No ID assigned to problem: %+v", r))
-			}
-
 			return &mongo.InsertOneModel{
 				Document: MismatchInfo{
 					Task:   taskID,
