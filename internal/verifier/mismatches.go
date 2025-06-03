@@ -37,7 +37,7 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 		return errors.Wrapf(err, "creating indexes for collection %#q", mismatchesCollectionName)
 	}
 
-	return nil // TODO
+	return nil
 }
 
 func getMismatchesForTasks(

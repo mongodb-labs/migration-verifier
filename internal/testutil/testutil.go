@@ -38,7 +38,10 @@ func SortByListAgg[T any](
 		values,
 		func(v T, i int) bson.D {
 			return bson.D{
-				{"case", bson.D{{"$eq", bson.A{fieldRef, v}}}},
+				{"case", bson.D{{"$eq", bson.A{
+					fieldRef,
+					bson.D{{"$literal", v}},
+				}}}},
 				{"then", i},
 			}
 		},
