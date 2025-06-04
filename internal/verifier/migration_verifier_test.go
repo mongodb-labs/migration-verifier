@@ -9,9 +9,11 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math/rand"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -89,7 +91,8 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 	namespace := dbName + "." + collName
 
 	task := &VerificationTask{
-		Ids: []any{id1, id2},
+		PrimaryKey: primitive.NewObjectID(),
+		Ids:        []any{id1, id2},
 		QueryFilter: QueryFilter{
 			Namespace: namespace,
 			To:        namespace,
@@ -190,7 +193,12 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 		bson.D{{"_id", id + 1}, {"num", 101}, {"name", "dstTest"}},
 	})
 	suite.Require().NoError(err)
-	task := &VerificationTask{Ids: []any{id, id + 1}, QueryFilter: basicQueryFilter("keyhole.dealers")}
+	task := &VerificationTask{
+		PrimaryKey:  primitive.NewObjectID(),
+		Generation:  1,
+		Ids:         []any{id, id + 1},
+		QueryFilter: basicQueryFilter("keyhole.dealers"),
+	}
 
 	// Test fetchDocuments without global filter.
 	verifier.globalFilter = nil
@@ -567,8 +575,8 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		err = cur.Decode(&doc)
 		suite.Require().NoError(err)
 		suite.Require().Equal(expectedIds, doc["_ids"])
-		suite.Require().Equal("added", doc["status"])
-		suite.Require().Equal("verify", doc["type"])
+		suite.Require().EqualValues(verificationTaskAdded, doc["status"])
+		suite.Require().EqualValues(verificationTaskVerifyDocuments, doc["type"])
 		suite.Require().Equal(expectedNamespace, doc["query_filter"].(bson.M)["namespace"])
 	}
 	verifyTask(bson.A{int32(42), int32(43), int32(44)}, "foo.bar")
@@ -703,11 +711,14 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	namespace := "testdb.testns"
 
-	makeDocChannel := func(docs []bson.D) <-chan bson.Raw {
-		theChan := make(chan bson.Raw, len(docs))
+	makeDocChannel := func(docs []bson.D) <-chan docWithTs {
+		theChan := make(chan docWithTs, len(docs))
 
-		for _, doc := range docs {
-			theChan <- testutil.MustMarshal(doc)
+		for d, doc := range docs {
+			theChan <- docWithTs{
+				doc: testutil.MustMarshal(doc),
+				ts:  primitive.Timestamp{1, uint32(d)},
+			}
 		}
 
 		close(theChan)
@@ -738,6 +749,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 				dstChannel := makeDocChannel(dstDocs)
 
 				fauxTask := VerificationTask{
+					PrimaryKey: primitive.NewObjectID(),
 					QueryFilter: QueryFilter{
 						Namespace: namespace,
 						ShardKeys: indexFields,
@@ -795,6 +807,21 @@ func TestVerifierCompareDocs(t *testing.T) {
 	}
 }
 
+func (suite *IntegrationTestSuite) getFailuresForTask(
+	verifier *Verifier,
+	taskID primitive.ObjectID,
+) []VerificationResult {
+	discrepancies, err := getMismatchesForTasks(
+		suite.Context(),
+		verifier.verificationDatabase(),
+		mslices.Of(taskID),
+	)
+
+	require.NoError(suite.T(), err)
+
+	return slices.Collect(maps.Values(discrepancies))[0]
+}
+
 func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
@@ -804,7 +831,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
 	task := &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.sameView",
 			To:        "testDb.sameView"}}
@@ -812,7 +840,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskCompleted, task.Status)
-	suite.Nil(task.FailedDocs)
+	suite.Empty(suite.getFailuresForTask(verifier, task.PrimaryKey))
 
 	// Views must have the same underlying collection
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "wrongColl", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
@@ -820,7 +848,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "wrongColl", "testColl2", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.wrongColl",
 			To:        "testDb.wrongColl"}}
@@ -828,10 +857,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(task.FailedDocs[0].Field, "Options.viewOn")
-		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.wrongColl")
+
+	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(failures[0].Field, "Options.viewOn")
+		suite.Equal(failures[0].Cluster, ClusterTarget)
+		suite.Equal(failures[0].NameSpace, "testDb.wrongColl")
 	}
 
 	// Views must have the same underlying pipeline
@@ -840,7 +871,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "wrongPipeline", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}, {"a", 0}}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.wrongPipeline",
 			To:        "testDb.wrongPipeline"}}
@@ -848,10 +880,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(task.FailedDocs[0].Field, "Options.pipeline")
-		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.wrongPipeline")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(failures[0].Field, "Options.pipeline")
+		suite.Equal(failures[0].Cluster, ClusterTarget)
+		suite.Equal(failures[0].NameSpace, "testDb.wrongPipeline")
 	}
 
 	// Views must have the same underlying options
@@ -865,7 +899,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "missingOptionsSrc", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.missingOptionsSrc",
 			To:        "testDb.missingOptionsSrc"}}
@@ -873,11 +908,13 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
-		suite.Equal(task.FailedDocs[0].Cluster, ClusterSource)
-		suite.Equal(task.FailedDocs[0].Details, "Missing")
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.missingOptionsSrc")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(failures[0].Field, "Options.collation")
+		suite.Equal(failures[0].Cluster, ClusterSource)
+		suite.Equal(failures[0].Details, "Missing")
+		suite.Equal(failures[0].NameSpace, "testDb.missingOptionsSrc")
 	}
 
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation1))
@@ -885,19 +922,21 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.missingOptionsDst",
 			To:        "testDb.missingOptionsDst"}}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
-	suite.Equal(verificationTaskFailed, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
-		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-		suite.Equal(task.FailedDocs[0].Details, "Missing")
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.missingOptionsDst")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(failures[0].Field, "Options.collation")
+		suite.Equal(failures[0].Cluster, ClusterTarget)
+		suite.Equal(failures[0].Details, "Missing")
+		suite.Equal(failures[0].NameSpace, "testDb.missingOptionsDst")
 	}
 
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation1))
@@ -905,7 +944,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.differentOptions",
 			To:        "testDb.differentOptions"}}
@@ -913,10 +953,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(task.FailedDocs[0].Field, "Options.collation")
-		suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-		suite.Equal(task.FailedDocs[0].NameSpace, "testDb.differentOptions")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(failures[0].Field, "Options.collation")
+		suite.Equal(failures[0].Cluster, ClusterTarget)
+		suite.Equal(failures[0].NameSpace, "testDb.differentOptions")
 	}
 }
 
@@ -928,7 +970,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
 	suite.Require().NoError(err)
 	task := &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl",
 			To:        "testDb.testColl"}}
@@ -936,16 +979,19 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	suite.Equal(1, len(task.FailedDocs))
-	suite.Equal(task.FailedDocs[0].Details, Missing)
-	suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.testColl")
+
+	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
+	suite.Equal(1, len(failures))
+	suite.Equal(failures[0].Details, Missing)
+	suite.Equal(failures[0].Cluster, ClusterTarget)
+	suite.Equal(failures[0].NameSpace, "testDb.testColl")
 
 	// Make sure "To" is respected.
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl",
 			To:        "testDb.testCollTo"}}
@@ -953,16 +999,19 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	suite.Equal(1, len(task.FailedDocs))
-	suite.Equal(task.FailedDocs[0].Details, Missing)
-	suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.testCollTo")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	suite.Equal(1, len(failures))
+	suite.Equal(failures[0].Details, Missing)
+	suite.Equal(failures[0].Cluster, ClusterTarget)
+	suite.Equal(failures[0].NameSpace, "testDb.testCollTo")
 
 	// Collection exists only on dest.
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "destOnlyColl")
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.destOnlyColl",
 			To:        "testDb.destOnlyColl"}}
@@ -970,10 +1019,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	suite.Equal(1, len(task.FailedDocs))
-	suite.Equal(task.FailedDocs[0].Details, Missing)
-	suite.Equal(task.FailedDocs[0].Cluster, ClusterSource)
-	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.destOnlyColl")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	suite.Equal(1, len(failures))
+	suite.Equal(failures[0].Details, Missing)
+	suite.Equal(failures[0].Cluster, ClusterSource)
+	suite.Equal(failures[0].NameSpace, "testDb.destOnlyColl")
 
 	// A view and a collection are different.
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "viewOnSrc", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
@@ -981,7 +1032,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "viewOnSrc")
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.viewOnSrc",
 			To:        "testDb.viewOnSrc"}}
@@ -989,10 +1041,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskFailed, task.Status)
-	suite.Equal(1, len(task.FailedDocs))
-	suite.Equal(task.FailedDocs[0].Field, "Type")
-	suite.Equal(task.FailedDocs[0].Cluster, ClusterTarget)
-	suite.Equal(task.FailedDocs[0].NameSpace, "testDb.viewOnSrc")
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	suite.Equal(1, len(failures))
+	suite.Equal(failures[0].Field, "Type")
+	suite.Equal(failures[0].Cluster, ClusterTarget)
+	suite.Equal(failures[0].NameSpace, "testDb.viewOnSrc")
 
 	// Capped should not match uncapped
 	err = suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "cappedOnDst")
@@ -1000,7 +1054,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "cappedOnDst", options.CreateCollection().SetCapped(true).SetSizeInBytes(1024*1024*100))
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.cappedOnDst",
 			To:        "testDb.cappedOnDst"}}
@@ -1010,8 +1065,10 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Equal(verificationTaskFailed, task.Status)
 	// Capped and size should differ
 	var wrongFields []string
-	for _, result := range task.FailedDocs {
-		field := result.Field.(string)
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	for _, result := range failures {
+		field := result.Field
 		suite.Require().NotNil(field)
 		wrongFields = append(wrongFields, field)
 	}
@@ -1019,7 +1076,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 
 	// Default success case
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl",
 			To:        "testDb.testColl"}}
@@ -1030,7 +1088,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 
 	// Neither collection exists success case
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testCollDNE",
 			To:        "testDb.testCollDNE"}}
@@ -1057,7 +1116,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	_, err = dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}})
 	suite.Require().NoError(err)
 	task := &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl1",
 			To:        "testDb.testColl1",
@@ -1067,11 +1127,13 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(srcIndexNames[1], task.FailedDocs[0].ID)
-		suite.Equal(Missing, task.FailedDocs[0].Details)
-		suite.Equal(ClusterTarget, task.FailedDocs[0].Cluster)
-		suite.Equal("testDb.testColl1", task.FailedDocs[0].NameSpace)
+
+	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(srcIndexNames[1], failures[0].ID)
+		suite.Equal(Missing, failures[0].Details)
+		suite.Equal(ClusterTarget, failures[0].Cluster)
+		suite.Equal("testDb.testColl1", failures[0].NameSpace)
 	}
 
 	// Missing index on source
@@ -1087,7 +1149,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	dstIndexNames, err := dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl2",
 			To:        "testDb.testColl2"}}
@@ -1095,11 +1158,15 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal(dstIndexNames[1], task.FailedDocs[0].ID)
-		suite.Equal(Missing, task.FailedDocs[0].Details)
-		suite.Equal(ClusterSource, task.FailedDocs[0].Cluster)
-		suite.Equal("testDb.testColl2", task.FailedDocs[0].NameSpace)
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	suite.T().Logf("failures: %+v", failures)
+
+	if suite.Equal(1, len(failures)) {
+		suite.Equal(dstIndexNames[1], failures[0].ID)
+		suite.Equal(Missing, failures[0].Details)
+		suite.Equal(ClusterSource, failures[0].Cluster)
+		suite.Equal("testDb.testColl2", failures[0].NameSpace)
 	}
 
 	// Different indexes on each
@@ -1115,7 +1182,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	dstIndexNames, err = dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl3",
 			To:        "testDb.testColl3"}}
@@ -1123,18 +1191,20 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
-	if suite.Equal(2, len(task.FailedDocs)) {
-		sort.Slice(task.FailedDocs, func(i, j int) bool {
-			return task.FailedDocs[i].ID.(string) < task.FailedDocs[j].ID.(string)
+
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(2, len(failures)) {
+		sort.Slice(failures, func(i, j int) bool {
+			return failures[i].ID.(string) < failures[j].ID.(string)
 		})
-		suite.Equal(dstIndexNames[1], task.FailedDocs[0].ID)
-		suite.Equal(Missing, task.FailedDocs[0].Details)
-		suite.Equal(ClusterSource, task.FailedDocs[0].Cluster)
-		suite.Equal("testDb.testColl3", task.FailedDocs[0].NameSpace)
-		suite.Equal(srcIndexNames[0], task.FailedDocs[1].ID)
-		suite.Equal(Missing, task.FailedDocs[1].Details)
-		suite.Equal(ClusterTarget, task.FailedDocs[1].Cluster)
-		suite.Equal("testDb.testColl3", task.FailedDocs[1].NameSpace)
+		suite.Equal(dstIndexNames[1], failures[0].ID)
+		suite.Equal(Missing, failures[0].Details)
+		suite.Equal(ClusterSource, failures[0].Cluster)
+		suite.Equal("testDb.testColl3", failures[0].NameSpace)
+		suite.Equal(srcIndexNames[0], failures[1].ID)
+		suite.Equal(Missing, failures[1].Details)
+		suite.Equal(ClusterTarget, failures[1].Cluster)
+		suite.Equal("testDb.testColl3", failures[1].NameSpace)
 	}
 
 	// Indexes with same names are different
@@ -1152,7 +1222,8 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Require().NoError(err)
 	suite.Require().Equal("wrong", dstIndexNames[1])
 	task = &VerificationTask{
-		Status: verificationTaskProcessing,
+		PrimaryKey: primitive.NewObjectID(),
+		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl4",
 			To:        "testDb.testColl4"}}
@@ -1160,11 +1231,12 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
-	if suite.Equal(1, len(task.FailedDocs)) {
-		suite.Equal("wrong", task.FailedDocs[0].ID)
-		suite.Regexp(regexp.MustCompile("^"+Mismatch), task.FailedDocs[0].Details)
-		suite.Equal(ClusterTarget, task.FailedDocs[0].Cluster)
-		suite.Equal("testDb.testColl4", task.FailedDocs[0].NameSpace)
+	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
+	if suite.Equal(1, len(failures)) {
+		suite.Equal("wrong", failures[0].ID)
+		suite.Regexp(regexp.MustCompile("^"+Mismatch), failures[0].Details)
+		suite.Equal(ClusterTarget, failures[0].Cluster)
+		suite.Equal("testDb.testColl4", failures[0].NameSpace)
 	}
 }
 
@@ -1388,11 +1460,31 @@ func (suite *IntegrationTestSuite) TestVerificationStatus() {
 
 	metaColl := verifier.verificationDatabase().Collection(verificationTasksCollection)
 	_, err := metaColl.InsertMany(ctx, []any{
-		bson.M{"generation": 0, "status": "added", "type": "verify"},
-		bson.M{"generation": 0, "status": "processing", "type": "verify"},
-		bson.M{"generation": 0, "status": "failed", "type": "verify"},
-		bson.M{"generation": 0, "status": "mismatch", "type": "verify"},
-		bson.M{"generation": 0, "status": "completed", "type": "verify"},
+		bson.M{
+			"generation": 0,
+			"status":     verificationTaskAdded,
+			"type":       verificationTaskVerifyDocuments,
+		},
+		bson.M{
+			"generation": 0,
+			"status":     verificationTaskProcessing,
+			"type":       verificationTaskVerifyDocuments,
+		},
+		bson.M{
+			"generation": 0,
+			"status":     verificationTaskFailed,
+			"type":       verificationTaskVerifyDocuments,
+		},
+		bson.M{
+			"generation": 0,
+			"status":     verificationTaskMetadataMismatch,
+			"type":       verificationTaskVerifyDocuments,
+		},
+		bson.M{
+			"generation": 0,
+			"status":     verificationTaskCompleted,
+			"type":       verificationTaskVerifyDocuments,
+		},
 	})
 	suite.Require().NoError(err)
 
@@ -1434,10 +1526,19 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	cursor, err := verifier.verificationTaskCollection().Find(
+	sortedTaskTypes := mslices.Of(
+		verificationTaskVerifyDocuments,
+		verificationTaskVerifyCollection,
+	)
+
+	cursor, err := verifier.verificationTaskCollection().Aggregate(
 		ctx,
-		bson.M{"generation": 0},
-		options.Find().SetSort(bson.M{"type": 1}),
+		append(
+			mongo.Pipeline{
+				bson.D{{"$match", bson.D{{"generation", 0}}}},
+			},
+			testutil.SortByListAgg("type", sortedTaskTypes)...,
+		),
 	)
 	suite.Require().NoError(err)
 
@@ -1453,10 +1554,14 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	cursor, err = verifier.verificationTaskCollection().Find(
+	cursor, err = verifier.verificationTaskCollection().Aggregate(
 		ctx,
-		bson.M{"generation": 1},
-		options.Find().SetSort(bson.M{"type": 1}),
+		append(
+			mongo.Pipeline{
+				bson.D{{"$match", bson.D{{"generation", 1}}}},
+			},
+			testutil.SortByListAgg("type", sortedTaskTypes)...,
+		),
 	)
 	suite.Require().NoError(err)
 
