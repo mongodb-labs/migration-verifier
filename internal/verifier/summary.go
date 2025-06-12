@@ -207,14 +207,18 @@ OUTA:
 	printAll = int64(missingOrChangedCount) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
 OUTB:
 	for _, task := range failedTasks {
-		for _, _id := range task.Ids {
+		for _, d := range taskDiscrepancies[task.PrimaryKey] {
+			if !d.IsMissing() {
+				continue
+			}
+
 			if !printAll && missingOrChangedDocsTableRows >= verifier.failureDisplaySize {
 				break OUTB
 			}
 
 			missingOrChangedDocsTableRows++
 			missingOrChangedDocsTable.Append([]string{
-				fmt.Sprintf("%v", _id),
+				fmt.Sprintf("%v", d.ID),
 				fmt.Sprintf("%v", task.QueryFilter.Namespace),
 				fmt.Sprintf("%v", task.QueryFilter.To),
 			})

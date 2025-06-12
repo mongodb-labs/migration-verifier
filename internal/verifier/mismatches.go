@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -9,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
@@ -49,6 +51,11 @@ func getMismatchesForTasks(
 		bson.D{
 			{"task", bson.D{{"$in", taskIDs}}},
 		},
+		options.Find().SetSort(
+			bson.D{
+				{"detail.id", 1},
+			},
+		),
 	)
 
 	if err != nil {
@@ -61,6 +68,10 @@ func getMismatchesForTasks(
 		if cursor.Err() != nil {
 			break
 		}
+
+		rawDoc := bson.Raw{}
+		cursor.Decode(&rawDoc)
+		fmt.Printf("\n=== mismatch: %v\n", rawDoc)
 
 		var d MismatchInfo
 		if err := cursor.Decode(&d); err != nil {
