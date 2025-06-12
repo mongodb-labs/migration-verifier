@@ -144,7 +144,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		missingCount := lo.CountBy(
 			discrepancies,
 			func(d VerificationResult) bool {
-				return d.IsMissingDocument()
+				return d.DocumentIsMissing()
 			},
 		)
 
@@ -171,7 +171,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 OUTA:
 	for _, task := range failedTasks {
 		for _, d := range taskDiscrepancies[task.PrimaryKey] {
-			if d.IsMissingDocument() {
+			if d.DocumentIsMissing() {
 				continue
 			}
 
@@ -208,7 +208,7 @@ OUTA:
 OUTB:
 	for _, task := range failedTasks {
 		for _, d := range taskDiscrepancies[task.PrimaryKey] {
-			if !d.IsMissingDocument() {
+			if !d.DocumentIsMissing() {
 				continue
 			}
 
