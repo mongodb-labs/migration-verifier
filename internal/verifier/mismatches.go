@@ -2,7 +2,6 @@ package verifier
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -68,10 +67,6 @@ func getMismatchesForTasks(
 		if cursor.Err() != nil {
 			break
 		}
-
-		rawDoc := bson.Raw{}
-		cursor.Decode(&rawDoc)
-		fmt.Printf("\n=== mismatch: %v\n", rawDoc)
 
 		var d MismatchInfo
 		if err := cursor.Decode(&d); err != nil {

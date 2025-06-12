@@ -512,3 +512,36 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 
 	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
 }
+
+func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
+	match := bytes.Equal(srcClientDoc, dstClientDoc)
+	if match {
+		return nil, nil
+	}
+	//verifier.logger.Info().Msg("Byte comparison failed for id %s, falling back to field comparison", id)
+
+	mismatch, err := BsonUnorderedCompareRawDocumentWithDetails(srcClientDoc, dstClientDoc)
+	if err != nil {
+		return nil, err
+	}
+	if mismatch == nil {
+		if verifier.ignoreBSONFieldOrder {
+			return nil, nil
+		}
+		dataSize := len(srcClientDoc)
+		if dataSize < len(dstClientDoc) {
+			dataSize = len(dstClientDoc)
+		}
+
+		// If we're respecting field order we have just done a binary compare so we have fields in different order.
+		return []VerificationResult{{
+			ID:        srcClientDoc.Lookup("_id"),
+			Details:   Mismatch + fmt.Sprintf(" : Document %s has fields in different order", srcClientDoc.Lookup("_id")),
+			Cluster:   ClusterTarget,
+			NameSpace: namespace,
+			dataSize:  dataSize,
+		}}, nil
+	}
+	results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, srcClientDoc.Lookup("_id"), "" /* fieldPrefix */)
+	return results, nil
+}

@@ -36,6 +36,6 @@ type VerificationResult struct {
 	DstTimestamp option.Option[primitive.Timestamp]
 }
 
-func (vr VerificationResult) IsMissing() bool {
-	return vr.Details == Missing
+func (vr VerificationResult) IsMissingDocument() bool {
+	return vr.Details == Missing && vr.Field == ""
 }
