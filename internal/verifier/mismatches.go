@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
@@ -49,6 +50,11 @@ func getMismatchesForTasks(
 		bson.D{
 			{"task", bson.D{{"$in", taskIDs}}},
 		},
+		options.Find().SetSort(
+			bson.D{
+				{"detail.id", 1},
+			},
+		),
 	)
 
 	if err != nil {

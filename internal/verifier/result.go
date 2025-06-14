@@ -36,6 +36,12 @@ type VerificationResult struct {
 	DstTimestamp option.Option[primitive.Timestamp]
 }
 
-func (vr VerificationResult) IsMissing() bool {
-	return vr.Details == Missing
+// DocumentIsMissing returns a boolean that indicates whether the
+// VerificationResult indicates a document that is missing on either
+// source or destination.
+func (vr VerificationResult) DocumentIsMissing() bool {
+	// NB: Missing gets set as the Details value when a field is missing
+	// but the document exists. To ascertain that the document is entirely
+	// absent we have to check Field as well.
+	return vr.Details == Missing && vr.Field == ""
 }
