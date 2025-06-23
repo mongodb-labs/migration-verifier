@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -1238,6 +1240,88 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		suite.Equal(ClusterTarget, failures[0].Cluster)
 		suite.Equal("testDb.testColl4", failures[0].NameSpace)
 	}
+}
+
+func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
+	ctx := suite.Context()
+
+	suite.Require().NoError(
+		suite.srcMongoClient.
+			Database("test").
+			Collection("coll").Drop(ctx),
+	)
+	suite.Require().NoError(
+		suite.dstMongoClient.
+			Database("test").
+			Collection("coll").Drop(ctx),
+	)
+
+	_, err := suite.srcMongoClient.
+		Database("test").
+		Collection("coll").
+		InsertMany(
+			ctx,
+			lo.RepeatBy(
+				20,
+				func(index int) any {
+					return bson.D{
+						{"_id", 100000 + index},
+						{"foo", 3},
+					}
+				},
+			),
+		)
+	suite.Require().NoError(err)
+
+	// The first has a mismatched `foo` value,
+	// and the 2nd lacks `foo` entirely.
+	_, err = suite.dstMongoClient.
+		Database("test").
+		Collection("coll").
+		InsertMany(ctx, lo.ToAnySlice([]bson.D{
+			{{"_id", 100000}, {"foo", 1}},
+			{{"_id", 100001}},
+		}))
+	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	verifier.failureDisplaySize = 10
+
+	ns := "test.coll"
+	verifier.SetSrcNamespaces([]string{ns})
+	verifier.SetDstNamespaces([]string{ns})
+	verifier.SetNamespaceMap()
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	builder := &strings.Builder{}
+	_, _, err = verifier.reportDocumentMismatches(ctx, builder)
+	suite.Require().NoError(err)
+
+	suite.Assert().Contains(
+		builder.String(),
+		"100009",
+		"summary should show an early mismatch",
+	)
+
+	suite.Assert().Contains(
+		builder.String(),
+		" 10 ",
+		"summary should show the # of missing docs shown",
+	)
+
+	suite.Assert().Contains(
+		builder.String(),
+		" 18 ",
+		"summary should show the total # of missing/changed documents",
+	)
+
+	suite.Assert().NotContains(
+		builder.String(),
+		"100019",
+		"summary should NOT show a late mismatch",
+	)
 }
 
 func (suite *IntegrationTestSuite) TestVerifierCompareIndexSpecs() {
