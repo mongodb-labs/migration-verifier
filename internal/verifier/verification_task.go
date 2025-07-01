@@ -35,23 +35,34 @@ const (
 	// Task statuses:
 	// --------------------------------------------------
 
-	verificationTaskAdded     verificationTaskStatus = "added"
+	// This means the task is ready for work once a worker thread gets to it.
+	verificationTaskAdded verificationTaskStatus = "added"
+
+	// This means a worker thread is actively processing the task.
+	verificationTaskProcessing verificationTaskStatus = "processing"
+
+	// This means no mismatches were found. (Yay!)
 	verificationTaskCompleted verificationTaskStatus = "completed"
-	verificationTaskFailed    verificationTaskStatus = "failed"
-	// This is used for collection verification, and means the task successfully created the data tasks,
-	// but there were mismatches in the metadata/indexes
+
+	// This can mean a few different things. Generally it means that at least
+	// one mismatch was found. (It does *not* mean that the verifier failed to
+	// complete the verification task.)
+	verificationTaskFailed verificationTaskStatus = "failed"
+
+	// This is used for collection verification. It means the task successfully
+	// created the data tasks, but there were mismatches in the
+	// metadata/indexes.
 	verificationTaskMetadataMismatch verificationTaskStatus = "mismatch"
-	verificationTaskProcessing       verificationTaskStatus = "processing"
 
 	// --------------------------------------------------
 	// Task types:
 	// --------------------------------------------------
 
 	// The “workhorse” task type: verify a partition of documents.
-	verificationTaskVerifyDocuments verificationTaskType = "verify"
+	verificationTaskVerifyDocuments verificationTaskType = "verifyDocuments"
 
 	// A verifyCollection task verifies collection metadata
-	// and inserts verify-documents tasks to verify data ranges.
+	// and, in generation 0, inserts verify-documents tasks for _id ranges.
 	verificationTaskVerifyCollection verificationTaskType = "verifyCollection"
 
 	// The primary task creates a verifyCollection task for each
@@ -61,21 +72,13 @@ const (
 
 // VerificationTask stores source cluster info
 type VerificationTask struct {
-	PrimaryKey any                    `bson:"_id"`
+	PrimaryKey primitive.ObjectID     `bson:"_id"`
 	Type       verificationTaskType   `bson:"type"`
 	Status     verificationTaskStatus `bson:"status"`
 	Generation int                    `bson:"generation"`
 
-	// For failed tasks, this stores the document IDs missing on
-	// one cluster or the other.
+	// For recheck tasks, this stores the document IDs to check.
 	Ids []any `bson:"_ids"`
-
-	// Deprecated: VerificationTask ID field is ignored by the verifier.
-	ID int `bson:"id"`
-
-	// For failed tasks, this stores details on documents that exist on
-	// both clusters but don’t match.
-	FailedDocs []VerificationResult `bson:"failed_docs,omitempty"`
 
 	QueryFilter QueryFilter `bson:"query_filter" json:"query_filter"`
 
@@ -99,14 +102,7 @@ func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
 }
 
 func (t *VerificationTask) IsRecheck() bool {
-	return len(t.Ids) > 0
-}
-
-// VerificationRange stores ID ranges for tasks that can be re-used between runs
-type VerificationRange struct {
-	PrimaryKey primitive.ObjectID `bson:"_id"`
-	StartID    primitive.ObjectID `bson:"start_id"`
-	EndID      primitive.ObjectID `bson:"end_id"`
+	return t.Generation > 0
 }
 
 func (verifier *Verifier) insertCollectionVerificationTask(
@@ -307,10 +303,8 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *Veri
 				bson.M{
 					"$set": bson.M{
 						"status":                 task.Status,
-						"failed_docs":            task.FailedDocs,
 						"source_documents_count": task.SourceDocumentCount,
 						"source_bytes_count":     task.SourceByteCount,
-						"_ids":                   task.Ids,
 					},
 				},
 			)

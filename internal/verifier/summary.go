@@ -15,6 +15,8 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/olekukonko/tablewriter"
+	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/exp/maps"
 )
@@ -47,8 +49,26 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		table := tablewriter.NewWriter(strBuilder)
 		table.SetHeader([]string{"Index", "Cluster", "Field", "Namespace", "Details"})
 
+		taskDiscrepancies, err := getMismatchesForTasks(
+			ctx,
+			verifier.verificationDatabase(),
+			lo.Map(
+				failedTasks,
+				func(ft VerificationTask, _ int) primitive.ObjectID {
+					return ft.PrimaryKey
+				},
+			),
+		)
+		if err != nil {
+			return false, false, errors.Wrapf(
+				err,
+				"fetching %d failed tasks' discrepancies",
+				len(failedTasks),
+			)
+		}
+
 		for _, v := range failedTasks {
-			for _, f := range v.FailedDocs {
+			for _, f := range taskDiscrepancies[v.PrimaryKey] {
 				table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
 			}
 		}
@@ -90,11 +110,46 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	failureTypesTable := tablewriter.NewWriter(strBuilder)
 	failureTypesTable.SetHeader([]string{"Failure Type", "Count"})
 
+	taskDiscrepancies, err := getMismatchesForTasks(
+		ctx,
+		verifier.verificationDatabase(),
+		lo.Map(
+			failedTasks,
+			func(ft VerificationTask, _ int) primitive.ObjectID {
+				return ft.PrimaryKey
+			},
+		),
+	)
+	if err != nil {
+		return false, false, errors.Wrapf(
+			err,
+			"fetching %d failed tasks' discrepancies",
+			len(failedTasks),
+		)
+	}
+
 	contentMismatchCount := 0
 	missingOrChangedCount := 0
 	for _, task := range failedTasks {
-		contentMismatchCount += len(task.FailedDocs)
-		missingOrChangedCount += len(task.Ids)
+		discrepancies, hasDiscrepancies := taskDiscrepancies[task.PrimaryKey]
+		if !hasDiscrepancies {
+			return false, false, errors.Wrapf(
+				err,
+				"task %v is marked %#q but has no recorded discrepancies; internal error?",
+				task.PrimaryKey,
+				task.Status,
+			)
+		}
+
+		missingCount := lo.CountBy(
+			discrepancies,
+			func(d VerificationResult) bool {
+				return d.DocumentIsMissing()
+			},
+		)
+
+		contentMismatchCount += len(discrepancies) - missingCount
+		missingOrChangedCount += missingCount
 	}
 
 	failureTypesTable.Append([]string{
@@ -115,18 +170,22 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	printAll := int64(contentMismatchCount) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
 OUTA:
 	for _, task := range failedTasks {
-		for _, f := range task.FailedDocs {
+		for _, d := range taskDiscrepancies[task.PrimaryKey] {
+			if d.DocumentIsMissing() {
+				continue
+			}
+
 			if !printAll && mismatchedDocsTableRows >= verifier.failureDisplaySize {
 				break OUTA
 			}
 
 			mismatchedDocsTableRows++
 			mismatchedDocsTable.Append([]string{
-				fmt.Sprintf("%v", f.ID),
-				fmt.Sprintf("%v", f.Cluster),
-				fmt.Sprintf("%v", f.Field),
-				fmt.Sprintf("%v", f.NameSpace),
-				fmt.Sprintf("%v", f.Details),
+				fmt.Sprintf("%v", d.ID),
+				fmt.Sprintf("%v", d.Cluster),
+				fmt.Sprintf("%v", d.Field),
+				fmt.Sprintf("%v", d.NameSpace),
+				fmt.Sprintf("%v", d.Details),
 			})
 		}
 	}
@@ -148,14 +207,18 @@ OUTA:
 	printAll = int64(missingOrChangedCount) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
 OUTB:
 	for _, task := range failedTasks {
-		for _, _id := range task.Ids {
+		for _, d := range taskDiscrepancies[task.PrimaryKey] {
+			if !d.DocumentIsMissing() {
+				continue
+			}
+
 			if !printAll && missingOrChangedDocsTableRows >= verifier.failureDisplaySize {
 				break OUTB
 			}
 
 			missingOrChangedDocsTableRows++
 			missingOrChangedDocsTable.Append([]string{
-				fmt.Sprintf("%v", _id),
+				fmt.Sprintf("%v", d.ID),
 				fmt.Sprintf("%v", task.QueryFilter.Namespace),
 				fmt.Sprintf("%v", task.QueryFilter.To),
 			})

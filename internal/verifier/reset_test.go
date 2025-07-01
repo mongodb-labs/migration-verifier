@@ -5,9 +5,10 @@ import (
 	"strings"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/mslices"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
@@ -106,19 +107,36 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	)
 	suite.Require().NoError(err)
 
+	orderedTypes := mslices.Of(
+		verificationTaskPrimary,
+		verificationTaskVerifyDocuments,
+		verificationTaskVerifyCollection,
+	)
+
 	// Contents should just be the primary task and
 	// the completed partition-level.
 	tasksColl := verifier.verificationTaskCollection()
-	cursor, err := tasksColl.Find(
+	cursor, err := tasksColl.Aggregate(
 		ctx,
-		bson.M{},
-		options.Find().SetSort(bson.D{
-			{"type", 1},
-			{"query_filter.namespace", 1},
-			{"status", 1},
-		}),
+		append(
+			append(
+				mongo.Pipeline{
+					{{"$match", bson.D{
+						{"type", bson.D{{"$in", orderedTypes}}},
+					}}},
+				},
+				bson.D{
+					{"$sort", bson.D{
+						{"query_filter.namespace", 1},
+						{"status", 1},
+					}},
+				},
+			),
+			testutil.SortByListAgg("type", orderedTypes)...,
+		),
 	)
 	suite.Require().NoError(err)
+
 	var taskDocs []VerificationTask
 	suite.Require().NoError(cursor.All(ctx, &taskDocs))
 
@@ -186,4 +204,5 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 		ns1,
 		taskDocs[4].QueryFilter.Namespace,
 	)
+
 }

@@ -35,4 +35,6 @@ shift $((OPTIND-1))
 commit=$(git show --no-patch --format='%H')
 buildTime=$(date -u)
 
+printf 'Building migration-verifier …\n\tcommit: %s\n\tbuildTime: %s\n' "$commit" "$buildTime"
+
 GOARCH=${arch:=$(go env GOARCH)} GOOS=${os:=$(go env GOOS)} go build -ldflags="-X 'main.Revision=$commit' -X 'main.BuildTime=$buildTime'" main/migration_verifier.go
