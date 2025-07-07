@@ -27,8 +27,10 @@ jobs:
       - name: Build
         run: |
           for target in $TARGETS; do
-            echo "Building $TARGET …"
-            GOOS=${target%/*} GOARCH=${target#*/} ./build.sh
+            echo "Building $target …"
+            export GOOS=${target%/*}
+            export GOARCH=${target#*/}
+            ./build.sh
             mv migration_verifier migration_verifier_${GOOS}_${GOARCH}
           done
 
