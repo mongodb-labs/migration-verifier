@@ -27,7 +27,6 @@ jobs:
       - name: Build
         run: |
           for target in $TARGETS; do
-            echo "Building $target …"
             export GOOS=${target%/*}
             export GOARCH=${target#*/}
             ./build.sh
