@@ -49,6 +49,7 @@ const (
 // These get set at build time, assuming use of build.sh.
 var Revision = buildVarDefaultStr
 var BuildTime = buildVarDefaultStr
+var Release = buildVarDefaultStr
 
 func main() {
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
@@ -168,7 +169,7 @@ func main() {
 	app := &cli.App{
 		Name:    "migration-verifier",
 		Usage:   "verify migration correctness",
-		Version: fmt.Sprintf("%s, built at %s", Revision, BuildTime),
+		Version: fmt.Sprintf("%s (%s), built at %s", Revision, Release, BuildTime),
 		Flags:   flags,
 		Before: func(cCtx *cli.Context) error {
 			confFile := cCtx.String(configFileFlag)
@@ -217,6 +218,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	v := verifier.NewVerifier(verifierSettings, logPath)
 
 	v.GetLogger().Info().
+		Str("release", Release).
 		Str("revision", Revision).
 		Str("buildTime", BuildTime).
 		Int("processID", os.Getpid()).
