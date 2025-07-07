@@ -5,20 +5,17 @@ on:
     tags:
       - 'v*.*.*'
 
+env:
+  TARGETS: |
+    linux/amd64
+    darwin/arm64
+
 permissions:
   contents: write
 
 jobs:
-  build:
+  build-and-release:
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        target:
-          - os: linux
-            arch: amd64
-          - os: darwin
-            arch: arm64
 
     steps:
       - name: Checkout code
@@ -27,28 +24,15 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
 
-      - name: Build for ${{ matrix.target.os }}/${{ matrix.target.arch }}
+      - name: Build
         run: |
-          GOOS=${{ matrix.target.os }} GOARCH=${{ matrix.target.arch }} ./build.sh
-          mv migration_verifier migration_verifier_${{ matrix.target.os }}_${{ matrix.target.arch }}
+          for target in $TARGETS; do
+            echo "Building $TARGET …"
+            GOOS=${target%/*} GOARCH=${target#*/} ./build.sh
+            mv migration_verifier migration_verifier_${GOOS}_${GOARCH}
+          done
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: binaries
-          path: migration_verifier_${{ matrix.target.os }}_${{ matrix.target.arch }}
-
-  release:
-    runs-on: ubuntu-latest
-    needs: build
-
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: binaries
-
-      - name: Create GitHub Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

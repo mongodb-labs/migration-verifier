@@ -166,10 +166,15 @@ func main() {
 		}),
 	}
 
+	versionStr := Release
+	if !strings.HasPrefix(versionStr, "v") {
+		versionStr += " (" + Revision + ")"
+	}
+
 	app := &cli.App{
 		Name:    "migration-verifier",
 		Usage:   "verify migration correctness",
-		Version: fmt.Sprintf("%s (%s), built at %s", Revision, Release, BuildTime),
+		Version: fmt.Sprintf("%s, built at %s", versionStr, BuildTime),
 		Flags:   flags,
 		Before: func(cCtx *cli.Context) error {
 			confFile := cCtx.String(configFileFlag)
