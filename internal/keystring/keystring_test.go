@@ -60922,7 +60922,7 @@ var testCases = []TestCase{
 
 func TestKeystringDecoder(t *testing.T) {
 	for i, testCase := range testCases {
-		var parsedBson interface{}
+		var parsedBson any
 		if strings.Contains(testCase.Bson, "$numberDecimal") {
 			// NumberDecimal is not supported
 			continue

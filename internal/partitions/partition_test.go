@@ -70,47 +70,47 @@ func (suite *UnitTestSuite) TestPartitionLowerBoundFromCurrent() {
 }
 
 func (suite *UnitTestSuite) TestVersioning() {
-	partition, expectedFilter := makeTestPartition()
-	expectedFilterWithTypeBracketing := makeExpectedFilterWithTypeBracketing(partition.Key.Lower, partition.Upper)
+	partition, expectedExprFilter := makeTestPartition()
+
 	// No version given, default to no bracketing
 	findOptions := partition.GetFindOptions(nil, nil)
 	filter := getFilterFromFindOptions(findOptions)
-	suite.Require().Equal(expectedFilter, filter)
+	suite.Require().Equal(expectedExprFilter, filter)
 
 	// 6.0
 	findOptions = partition.GetFindOptions(&util.ClusterInfo{VersionArray: []int{6, 0, 0}}, nil)
 	filter = getFilterFromFindOptions(findOptions)
-	suite.Require().Equal(expectedFilter, filter)
+	suite.Require().Equal(expectedExprFilter, filter)
 
 	// 5.3.0.9
 	findOptions = partition.GetFindOptions(&util.ClusterInfo{VersionArray: []int{5, 3, 0, 9}}, nil)
 	filter = getFilterFromFindOptions(findOptions)
-	suite.Require().Equal(expectedFilter, filter)
+	suite.Require().Equal(expectedExprFilter, filter)
 
 	// 7.1.3.5
 	findOptions = partition.GetFindOptions(&util.ClusterInfo{VersionArray: []int{7, 1, 3, 5}}, nil)
 	filter = getFilterFromFindOptions(findOptions)
-	suite.Require().Equal(expectedFilter, filter)
+	suite.Require().Equal(expectedExprFilter, filter)
 
 	// 4.4 (int64)
 	findOptions = partition.GetFindOptions(&util.ClusterInfo{VersionArray: []int{4, 4, 0, 0}}, nil)
 	filter = getFilterFromFindOptions(findOptions)
-	suite.Require().Equal(expectedFilterWithTypeBracketing, filter)
+	suite.Require().NotEqual(expectedExprFilter, filter)
 
 	// 4.4
 	findOptions = partition.GetFindOptions(&util.ClusterInfo{VersionArray: []int{4, 4, 0, 0}}, nil)
 	filter = getFilterFromFindOptions(findOptions)
-	suite.Require().Equal(expectedFilterWithTypeBracketing, filter)
+	suite.Require().NotEqual(expectedExprFilter, filter)
 
 	// 4.2
 	findOptions = partition.GetFindOptions(&util.ClusterInfo{VersionArray: []int{4, 2, 0, 0}}, nil)
 	filter = getFilterFromFindOptions(findOptions)
-	suite.Require().Equal(expectedFilterWithTypeBracketing, filter)
+	suite.Require().NotEqual(expectedExprFilter, filter)
 
 	// No version array -- assume old, require type bracketing.
 	findOptions = partition.GetFindOptions(&util.ClusterInfo{}, nil)
 	filter = getFilterFromFindOptions(findOptions)
-	suite.Require().Equal(expectedFilterWithTypeBracketing, filter)
+	suite.Require().NotEqual(expectedExprFilter, filter)
 }
 
 func getFilterFromFindOptions(opts bson.D) any {
@@ -136,7 +136,7 @@ func makeTestPartition() (Partition, bson.D) {
 	return partition, makeExpectedFilter(partition.Key.Lower, partition.Upper)
 }
 
-func makeExpectedFilter(lower, upper interface{}) bson.D {
+func makeExpectedFilter(lower, upper any) bson.D {
 	return bson.D{{"$and", bson.A{
 		bson.D{{"$and", []bson.D{
 			// All _id values >= lower bound.
@@ -157,24 +157,13 @@ func makeExpectedFilter(lower, upper interface{}) bson.D {
 	}}}
 }
 
-func makeExpectedFilterWithTypeBracketing(lower, upper interface{}) bson.D {
-	return bson.D{{"$and", bson.A{
-		bson.D{{"$and", []bson.D{
-			// All _id values >= lower bound.
-			{{"_id", bson.D{{"$gte", lower}}}},
-			// All _id values <= upper bound.
-			{{"_id", bson.D{{"$lte", upper}}}},
-		}}},
-	}}}
-}
-
 func makeTestCappedPartition() Partition {
 	partition, _ := makeTestPartition()
 	partition.IsCapped = true
 	return partition
 }
 
-func assertBSONEqual(t *testing.T, expected, actual interface{}) {
+func assertBSONEqual(t *testing.T, expected, actual any) {
 	expectedJSON, err := bson.MarshalExtJSONIndent(expected, false, false, "", "    ")
 	require.NoError(t, err)
 

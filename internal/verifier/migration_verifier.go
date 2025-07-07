@@ -23,6 +23,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/dustin/go-humanize"
+	clone "github.com/huandu/go-clone/generic"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -41,7 +42,6 @@ type ReadConcernSetting string
 
 const (
 	//TODO: add comments for each of these so the warnings will stop :)
-	Missing           = "Missing"
 	Failed            = "Failed"
 	Mismatch          = "Mismatch"
 	ClusterTarget     = "dstClient"
@@ -70,6 +70,11 @@ const (
 	notOkSymbol = "\u2757" // heavy exclamation mark symbol
 
 	clientAppName = "Migration Verifier"
+
+	progressReportTimeWarnThreshold = 10 * time.Second
+
+	DefaultRecheckMaxSizeMB = 8
+	MaxRecheckMaxSizeMB     = 12
 )
 
 type whichCluster string
@@ -106,17 +111,19 @@ type Verifier struct {
 	// every collection.
 	gen0PendingCollectionTasks atomic.Int32
 
-	generationStartTime        time.Time
-	generationPauseDelayMillis time.Duration
-	workerSleepDelayMillis     time.Duration
-	ignoreBSONFieldOrder       bool
-	verifyAll                  bool
-	startClean                 bool
+	generationStartTime  time.Time
+	generationPauseDelay time.Duration
+	workerSleepDelay     time.Duration
+	ignoreBSONFieldOrder bool
+	verifyAll            bool
+	startClean           bool
 
 	// This would seem more ideal as uint64, but changing it would
 	// trigger several other similar type changes, and that’s not really
 	// worthwhile for now.
 	partitionSizeInBytes int64
+
+	recheckMaxSizeInBytes types.ByteCount
 
 	readPreference *readpref.ReadPref
 
@@ -138,7 +145,7 @@ type Verifier struct {
 	// A user-defined $match-compatible document-level query filter.
 	// The filter is applied to all namespaces in both initial checking and iterative checking.
 	// The verifier only checks documents within the filter.
-	globalFilter map[string]any
+	globalFilter bson.D
 
 	pprofInterval time.Duration
 
@@ -146,6 +153,8 @@ type Verifier struct {
 
 	verificationStatusCheckInterval time.Duration
 }
+
+var _ MigrationVerifierAPI = &Verifier{}
 
 // VerificationStatus holds the Verification Status
 type VerificationStatus struct {
@@ -155,30 +164,6 @@ type VerificationStatus struct {
 	FailedTasks           int `json:"failedTasks"`
 	CompletedTasks        int `json:"completedTasks"`
 	MetadataMismatchTasks int `json:"metadataMismatchTasks"`
-}
-
-// VerificationResult holds the Verification Results.
-type VerificationResult struct {
-
-	// This field gets used differently depending on whether this result
-	// came from a document comparison or something else. If it’s from a
-	// document comparison, it *MUST* be a document ID, not a
-	// documentmap.MapKey, because we query on this to populate verification
-	// tasks for rechecking after a document mismatch. Thus, in sharded
-	// clusters with duplicate document IDs in the same collection, multiple
-	// VerificationResult instances might share the same ID. That’s OK,
-	// though; it’ll just make the recheck include all docs with that ID,
-	// regardless of which ones actually need the recheck.
-	ID interface{}
-
-	Field     interface{}
-	Details   interface{}
-	Cluster   interface{}
-	NameSpace interface{}
-	// The data size of the largest of the mismatched objects.
-	// Note this is not persisted; it is used only to ensure recheck tasks
-	// don't get too large.
-	dataSize int
 }
 
 // VerifierSettings is NewVerifier’s argument.
@@ -199,11 +184,12 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		logger: logger,
 		writer: logWriter,
 
-		phase:                Idle,
-		numWorkers:           NumWorkers,
-		readPreference:       readpref.Primary(),
-		partitionSizeInBytes: 400 * 1024 * 1024,
-		failureDisplaySize:   DefaultFailureDisplaySize,
+		phase:                 Idle,
+		numWorkers:            NumWorkers,
+		readPreference:        readpref.Primary(),
+		partitionSizeInBytes:  400 * 1024 * 1024,
+		recheckMaxSizeInBytes: DefaultRecheckMaxSizeMB * 1024 * 1024,
+		failureDisplaySize:    DefaultFailureDisplaySize,
 
 		readConcernSetting: readConcern,
 
@@ -337,12 +323,17 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 	model := mongo.IndexModel{Keys: bson.M{"generation": 1}}
 	_, err := verifier.verificationTaskCollection().Indexes().CreateOne(ctx, model)
+
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "creating generation index")
 	}
-	model = mongo.IndexModel{Keys: bson.D{{"_id.generation", 1}}}
-	_, err = verifier.verificationDatabase().Collection(recheckQueue).Indexes().CreateOne(ctx, model)
-	return err
+
+	err = createMismatchesCollection(
+		ctx,
+		verifier.verificationDatabase(),
+	)
+
+	return errors.Wrapf(err, "creating discrepancies collection")
 }
 
 func (verifier *Verifier) SetServerPort(port int) {
@@ -353,17 +344,21 @@ func (verifier *Verifier) SetNumWorkers(arg int) {
 	verifier.numWorkers = arg
 }
 
-func (verifier *Verifier) SetGenerationPauseDelayMillis(arg time.Duration) {
-	verifier.generationPauseDelayMillis = arg
+func (verifier *Verifier) SetGenerationPauseDelay(arg time.Duration) {
+	verifier.generationPauseDelay = arg
 }
 
-func (verifier *Verifier) SetWorkerSleepDelayMillis(arg time.Duration) {
-	verifier.workerSleepDelayMillis = arg
+func (verifier *Verifier) SetWorkerSleepDelay(arg time.Duration) {
+	verifier.workerSleepDelay = arg
 }
 
 // SetPartitionSizeMB sets the verifier’s maximum partition size in MiB.
 func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
 	verifier.partitionSizeInBytes = int64(partitionSizeMB) * 1024 * 1024
+}
+
+func (verifier *Verifier) SetRecheckMaxSizeMB(size uint) {
+	verifier.recheckMaxSizeInBytes = types.ByteCount(size) * 1024 * 1024
 }
 
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {
@@ -469,51 +464,8 @@ func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A)
 	return append(predicates, verifier.globalFilter)
 }
 
-func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
-	startAtTs *primitive.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
-	var findOptions bson.D
-	runCommandOptions := options.RunCmd()
-	var andPredicates bson.A
+func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, id any, fieldPrefix string) (results []VerificationResult) {
 
-	if len(task.Ids) > 0 {
-		andPredicates = append(andPredicates, bson.D{{"_id", bson.M{"$in": task.Ids}}})
-		andPredicates = verifier.maybeAppendGlobalFilterToPredicates(andPredicates)
-		findOptions = bson.D{
-			bson.E{"filter", bson.D{{"$and", andPredicates}}},
-		}
-	} else {
-		findOptions = task.QueryFilter.Partition.GetFindOptions(clusterInfo, verifier.maybeAppendGlobalFilterToPredicates(andPredicates))
-	}
-	if verifier.readPreference.Mode() != readpref.PrimaryMode {
-		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
-		if startAtTs != nil {
-
-			// We never want to read before the change stream start time,
-			// or for the last generation, the change stream end time.
-			findOptions = append(
-				findOptions,
-				bson.E{"readConcern", bson.D{
-					{"afterClusterTime", *startAtTs},
-				}},
-			)
-		}
-	}
-	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
-
-	// Suppress this log for recheck tasks because the list of IDs can be
-	// quite long.
-	if len(task.Ids) == 0 {
-		verifier.logger.Debug().
-			Interface("task", task.PrimaryKey).
-			Str("findCmd", fmt.Sprintf("%s", findCmd)).
-			Str("options", fmt.Sprintf("%v", *runCommandOptions)).
-			Msg("getDocuments findCmd.")
-	}
-
-	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
-}
-
-func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, id interface{}, fieldPrefix string) (results []VerificationResult) {
 	for _, field := range mismatch.missingFieldOnSrc {
 		result := VerificationResult{
 			Field:     fieldPrefix + field,
@@ -523,6 +475,7 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 		if id != nil {
 			result.ID = id
 		}
+
 		results = append(results, result)
 	}
 
@@ -535,13 +488,14 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 		if id != nil {
 			result.ID = id
 		}
+
 		results = append(results, result)
 	}
 
 	for _, field := range mismatch.fieldContentsDiffer {
 		srcClientValue := srcClientDoc.Lookup(field)
 		dstClientValue := dstClientDoc.Lookup(field)
-		details := Mismatch + fmt.Sprintf(" : Document %s failed comparison on field %s between srcClient (Type: %s) and dstClient (Type: %s)", id, fieldPrefix+field, srcClientValue.Type, dstClientValue.Type)
+		details := Mismatch + fmt.Sprintf(" : Document %s failed comparison on field %#q between srcClient (Type: %s) and dstClient (Type: %s)", id, fieldPrefix+field, srcClientValue.Type, dstClientValue.Type)
 		result := VerificationResult{
 			Field:     fieldPrefix + field,
 			Details:   details,
@@ -550,42 +504,11 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 		if id != nil {
 			result.ID = id
 		}
+
 		results = append(results, result)
 	}
+
 	return
-}
-
-func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
-	match := bytes.Equal(srcClientDoc, dstClientDoc)
-	if match {
-		return nil, nil
-	}
-	//verifier.logger.Info().Msg("Byte comparison failed for id %s, falling back to field comparison", id)
-
-	mismatch, err := BsonUnorderedCompareRawDocumentWithDetails(srcClientDoc, dstClientDoc)
-	if err != nil {
-		return nil, err
-	}
-	if mismatch == nil {
-		if verifier.ignoreBSONFieldOrder {
-			return nil, nil
-		}
-		dataSize := len(srcClientDoc)
-		if dataSize < len(dstClientDoc) {
-			dataSize = len(dstClientDoc)
-		}
-
-		// If we're respecting field order we have just done a binary compare so we have fields in different order.
-		return []VerificationResult{{
-			ID:        srcClientDoc.Lookup("_id"),
-			Details:   Mismatch + fmt.Sprintf(" : Document %s has fields in different order", srcClientDoc.Lookup("_id")),
-			Cluster:   ClusterTarget,
-			NameSpace: namespace,
-			dataSize:  dataSize,
-		}}, nil
-	}
-	results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, srcClientDoc.Lookup("_id"), "" /* fieldPrefix */)
-	return results, nil
 }
 
 func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, task *VerificationTask) error {
@@ -593,17 +516,63 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 	debugLog := verifier.logger.Debug().
 		Int("workerNum", workerNum).
-		Interface("task", task.PrimaryKey).
+		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace)
 
 	task.augmentLogWithDetails(debugLog)
 
 	debugLog.Msg("Processing document comparison task.")
 
-	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(
-		ctx,
-		task,
-	)
+	var problems []VerificationResult
+	var docsCount types.DocumentCount
+	var bytesCount types.ByteCount
+	var err error
+
+	// Recheck tasks
+	if task.IsRecheck() {
+		idGroups, err := util.SplitArrayByBSONMaxSize(task.Ids, int(verifier.recheckMaxSizeInBytes))
+		if err != nil {
+			return errors.Wrapf(err, "failed to split recheck task %v document IDs", task.PrimaryKey)
+		}
+
+		for _, ids := range idGroups {
+			if len(idGroups) != 1 {
+				verifier.logger.Info().
+					Int("workerNum", workerNum).
+					Any("task", task.PrimaryKey).
+					Str("namespace", task.QueryFilter.Namespace).
+					Int("subsetDocs", len(ids)).
+					Int("totalTaskDocs", len(task.Ids)).
+					Msg("Comparing subset of recheck task’s documents.")
+			}
+
+			miniTask := clone.Clone(*task)
+			miniTask.Ids = ids
+
+			var curProblems []VerificationResult
+			var curDocsCount types.DocumentCount
+			var curBytesCount types.ByteCount
+			curProblems, curDocsCount, curBytesCount, err = verifier.FetchAndCompareDocuments(
+				ctx,
+				workerNum,
+				&miniTask,
+			)
+
+			if err != nil {
+				break
+			}
+
+			problems = append(problems, curProblems...)
+			docsCount += curDocsCount
+			bytesCount += curBytesCount
+		}
+	} else {
+		problems, docsCount, bytesCount, err = verifier.FetchAndCompareDocuments(
+			ctx,
+			workerNum,
+			task,
+		)
+	}
 
 	if err != nil {
 		return errors.Wrapf(
@@ -626,42 +595,28 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		if verifier.lastGeneration {
 			verifier.logger.Error().
 				Int("workerNum", workerNum).
-				Interface("task", task.PrimaryKey).
+				Any("task", task.PrimaryKey).
 				Str("namespace", task.QueryFilter.Namespace).
 				Int("mismatchesCount", len(problems)).
 				Msg("Document(s) mismatched, and this is the final generation.")
 		} else {
 			verifier.logger.Debug().
 				Int("workerNum", workerNum).
-				Interface("task", task.PrimaryKey).
+				Any("task", task.PrimaryKey).
 				Str("namespace", task.QueryFilter.Namespace).
 				Int("mismatchesCount", len(problems)).
 				Msg("Discrepancies found. Will recheck in the next generation.")
 
-			var mismatches []VerificationResult
-			var missingIds []interface{}
 			var dataSizes []int
 
 			// This stores all IDs for the next generation to check.
 			// Its length should equal len(mismatches) + len(missingIds).
-			var idsToRecheck []interface{}
+			var idsToRecheck []any
 
 			for _, mismatch := range problems {
 				idsToRecheck = append(idsToRecheck, mismatch.ID)
 				dataSizes = append(dataSizes, mismatch.dataSize)
-
-				if mismatch.Details == Missing {
-					missingIds = append(missingIds, mismatch.ID)
-				} else {
-					mismatches = append(mismatches, mismatch)
-				}
 			}
-
-			// Update ids of the failed task so that only mismatches and
-			// missing are reported. Matching documents are thus hidden
-			// from the progress report.
-			task.Ids = missingIds
-			task.FailedDocs = mismatches
 
 			// Create a task for the next generation to recheck the
 			// mismatched & missing docs.
@@ -673,6 +628,21 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 					len(idsToRecheck),
 				)
 			}
+		}
+
+		err = recordMismatches(
+			ctx,
+			verifier.metaClient.Database(verifier.metaDBName),
+			task.PrimaryKey,
+			problems,
+		)
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"recording task %s's %d discrepancies",
+				task.PrimaryKey,
+				len(problems),
+			)
 		}
 	}
 
@@ -689,8 +659,10 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
-		Interface("task", task.PrimaryKey).
+		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace).
+		Int64("documentCount", int64(docsCount)).
+		Str("dataSize", reportutils.FmtBytes(bytesCount)).
 		Stringer("timeElapsed", time.Since(start)).
 		Msg("Finished document comparison task.")
 
@@ -843,20 +815,23 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		return []VerificationResult{{
 			NameSpace: srcNs,
 			Cluster:   ClusterSource,
-			Details:   Missing}}, false, nil
+			Details:   Missing,
+		}}, false, nil
 	}
 	if !hasDstSpec {
 		return []VerificationResult{{
 			NameSpace: dstNs,
 			Cluster:   ClusterTarget,
-			Details:   Missing}}, false, nil
+			Details:   Missing,
+		}}, false, nil
 	}
 	if srcSpec.Type != dstSpec.Type {
 		return []VerificationResult{{
 			NameSpace: srcNs,
 			Cluster:   ClusterTarget,
 			Field:     "Type",
-			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Type, dstSpec.Type)}}, false, nil
+			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Type, dstSpec.Type),
+		}}, false, nil
 		// If the types differ, the rest is not important.
 	}
 	var results []VerificationResult
@@ -865,7 +840,8 @@ func (verifier *Verifier) compareCollectionSpecifications(
 			NameSpace: dstNs,
 			Cluster:   ClusterTarget,
 			Field:     "ReadOnly",
-			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Info.ReadOnly, dstSpec.Info.ReadOnly)})
+			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Info.ReadOnly, dstSpec.Info.ReadOnly),
+		})
 	}
 	if !bytes.Equal(srcSpec.Options, dstSpec.Options) {
 		mismatchDetails, err := BsonUnorderedCompareRawDocumentWithDetails(srcSpec.Options, dstSpec.Options)
@@ -881,9 +857,10 @@ func (verifier *Verifier) compareCollectionSpecifications(
 				NameSpace: dstNs,
 				Cluster:   ClusterTarget,
 				Field:     "Options (Field Order Only)",
-				Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Options, dstSpec.Options)})
+				Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Options, dstSpec.Options),
+			})
 		} else {
-			results = append(results, mismatchResultsToVerificationResults(mismatchDetails, srcSpec.Options, dstSpec.Options, srcNs, nil /* id */, "Options.")...)
+			results = append(results, mismatchResultsToVerificationResults(mismatchDetails, srcSpec.Options, dstSpec.Options, srcNs, "spec", "Options.")...)
 		}
 	}
 
@@ -933,7 +910,7 @@ func (verifier *Verifier) ProcessCollectionVerificationTask(
 ) error {
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
-		Interface("task", task.PrimaryKey).
+		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace).
 		Msg("Processing collection.")
 
@@ -1058,15 +1035,17 @@ func (verifier *Verifier) verifyIndexes(
 
 			if !theyMatch {
 				results = append(results, VerificationResult{
+					ID:        indexName,
+					Field:     "index",
 					NameSpace: FullName(dstColl),
 					Cluster:   ClusterTarget,
-					ID:        indexName,
 					Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec, dstSpec),
 				})
 			}
 		} else {
 			results = append(results, VerificationResult{
 				ID:        indexName,
+				Field:     "index",
 				Details:   Missing,
 				Cluster:   ClusterSource,
 				NameSpace: FullName(srcColl),
@@ -1079,6 +1058,7 @@ func (verifier *Verifier) verifyIndexes(
 		if !srcMapUsed[indexName] {
 			results = append(results, VerificationResult{
 				ID:        indexName,
+				Field:     "index",
 				Details:   Missing,
 				Cluster:   ClusterTarget,
 				NameSpace: FullName(dstColl)})
@@ -1153,12 +1133,21 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		)
 	}
 	if specificationProblems != nil {
-		err := insertFailedCollection()
+		err := recordMismatches(
+			ctx,
+			verifier.verificationDatabase(),
+			task.PrimaryKey,
+			specificationProblems,
+		)
+		if err != nil {
+			return errors.Wrapf(err, "recording %#q spec discrepancies", srcNs)
+		}
+
+		err = insertFailedCollection()
 		if err != nil {
 			return err
 		}
 
-		task.FailedDocs = specificationProblems
 		if !verifyData {
 			task.Status = verificationTaskFailed
 			return nil
@@ -1191,7 +1180,17 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 				return err
 			}
 		}
-		task.FailedDocs = append(task.FailedDocs, indexProblems...)
+
+		err := recordMismatches(
+			ctx,
+			verifier.verificationDatabase(),
+			task.PrimaryKey,
+			indexProblems,
+		)
+		if err != nil {
+			return errors.Wrapf(err, "recording %#q index discrepancies", srcNs)
+		}
+
 		task.Status = verificationTaskMetadataMismatch
 	}
 
@@ -1212,7 +1211,16 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			}
 		}
 
-		task.FailedDocs = append(task.FailedDocs, shardingProblems...)
+		err := recordMismatches(
+			ctx,
+			verifier.verificationDatabase(),
+			task.PrimaryKey,
+			shardingProblems,
+		)
+		if err != nil {
+			return errors.Wrapf(err, "recording %#q sharding discrepancies", srcNs)
+		}
+
 		task.Status = verificationTaskMetadataMismatch
 	}
 
@@ -1470,9 +1478,10 @@ func startReport() *strings.Builder {
 	timestampAndSpace := time.Now().Format(timeFormat) + " "
 	divider := strings.Repeat(dividerChar, dividerWidth-len(timestampAndSpace))
 
-	strBuilder.WriteString(fmt.Sprintf(
+	fmt.Fprintf(
+		strBuilder,
 		"\n%s%s\n\n", timestampAndSpace, divider,
-	))
+	)
 
 	return strBuilder
 }
@@ -1500,13 +1509,14 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	strBuilder.WriteString(header + "\n\n")
 
-	now := time.Now()
-	elapsedSinceGenStart := now.Sub(verifier.generationStartTime)
+	reportGenStartTime := time.Now()
+	elapsedSinceGenStart := reportGenStartTime.Sub(verifier.generationStartTime)
 
-	strBuilder.WriteString(fmt.Sprintf(
+	fmt.Fprintf(
+		strBuilder,
 		"Generation time elapsed: %s\n",
 		reportutils.DurationToHMS(elapsedSinceGenStart),
-	))
+	)
 
 	metadataMismatches, anyCollsIncomplete, err := verifier.reportCollectionMetadataMismatches(ctx, strBuilder)
 	if err != nil {
@@ -1519,9 +1529,9 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	case Gen0MetadataAnalysisComplete:
 		fallthrough
 	case GenerationInProgress:
-		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder, now)
+		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder, reportGenStartTime)
 	case GenerationComplete:
-		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder, now)
+		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder, reportGenStartTime)
 	default:
 		panic("Bad generation status: " + genstatus)
 	}
@@ -1531,13 +1541,13 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		return
 	}
 
-	verifier.printChangeEventStatistics(strBuilder, now)
+	verifier.printChangeEventStatistics(strBuilder, reportGenStartTime)
 
 	// Only print the worker status table if debug logging is enabled.
 	if verifier.logger.Debug().Enabled() {
 		switch genstatus {
 		case Gen0MetadataAnalysisComplete, GenerationInProgress:
-			verifier.printWorkerStatus(strBuilder, now)
+			verifier.printWorkerStatus(strBuilder, reportGenStartTime)
 		}
 	}
 
@@ -1575,6 +1585,13 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	}
 
 	strBuilder.WriteString("\n" + statusLine + "\n")
+
+	elapsed := time.Since(reportGenStartTime)
+	if elapsed > progressReportTimeWarnThreshold {
+		verifier.logger.Warn().
+			Stringer("elapsed", elapsed).
+			Msg("Report generation took longer than expected. The metadata database may be under excess load.")
+	}
 
 	verifier.writeStringBuilder(strBuilder)
 }

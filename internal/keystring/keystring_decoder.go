@@ -103,7 +103,7 @@ func (bc bufferConsumer) hasUint8() bool {
 
 func (bc *bufferConsumer) readUint8() (uint8, error) {
 	if bc.index >= len(bc.buf) {
-		return 0, errors.New("Unexpected end of input")
+		return 0, errors.New("unexpected end of input")
 	}
 	bc.index++
 	return bc.buf[bc.index-1], nil
@@ -201,7 +201,7 @@ const (
 	modeNamed    = iota
 )
 
-func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (interface{}, error) {
+func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any, error) {
 	isNegative := false
 	switch ctype {
 	case kMinKey:
@@ -544,11 +544,11 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (inte
 		}
 		return bin, nil
 	default:
-		return nil, fmt.Errorf("Unknown keystring ctype %v", ctype)
+		return nil, fmt.Errorf("unknown keystring ctype %v", ctype)
 	}
 }
 
-func keystringToBsonPartial(version KeyStringVersion, buf *bufferConsumer, mode decodeMode) (interface{}, error) {
+func keystringToBsonPartial(version KeyStringVersion, buf *bufferConsumer, mode decodeMode) (any, error) {
 	contents := bson.D{}
 	for buf.hasUint8() {
 		b, _ := buf.readUint8()
@@ -594,7 +594,7 @@ func keystringToBsonPartial(version KeyStringVersion, buf *bufferConsumer, mode 
 	return contents, nil
 }
 
-func KeystringToBson(version KeyStringVersion, inbuf interface{}) (bson.D, error) {
+func KeystringToBson(version KeyStringVersion, inbuf any) (bson.D, error) {
 	buf, ok := inbuf.([]uint8)
 	if !ok {
 		strbuf, ok := inbuf.(string)

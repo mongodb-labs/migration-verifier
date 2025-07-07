@@ -56,8 +56,8 @@ func BenchmarkGeneric(t *testing.B) {
 
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	verifier.SetNumWorkers(numWorkers)
-	verifier.SetGenerationPauseDelayMillis(0)
-	verifier.SetWorkerSleepDelayMillis(0)
+	verifier.SetGenerationPauseDelay(0)
+	verifier.SetWorkerSleepDelay(0)
 	fmt.Printf("meta uri %s\n", metaUri)
 	err := verifier.SetMetaURI(context.Background(), metaUri)
 	if err != nil {
@@ -72,11 +72,7 @@ func BenchmarkGeneric(t *testing.B) {
 		t.Fatal(err)
 	}
 	verifier.SetMetaDBName(metaDBName)
-	err = verifier.verificationTaskCollection().Drop(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = verifier.verificationDatabase().Collection(recheckQueue).Drop(context.Background())
+	err = verifier.verificationDatabase().Drop(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +83,7 @@ func BenchmarkGeneric(t *testing.B) {
 		qfilter := QueryFilter{Namespace: namespace}
 		task := VerificationTask{QueryFilter: qfilter}
 		// TODO: is this safe?
-		mismatchedIds, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(context.Background(), &task)
+		mismatchedIds, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(context.Background(), 0, &task)
 		if err != nil {
 			t.Fatal(err)
 		}

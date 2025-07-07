@@ -15,6 +15,8 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/olekukonko/tablewriter"
+	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/exp/maps"
 )
@@ -47,8 +49,26 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		table := tablewriter.NewWriter(strBuilder)
 		table.SetHeader([]string{"Index", "Cluster", "Field", "Namespace", "Details"})
 
+		taskDiscrepancies, err := getMismatchesForTasks(
+			ctx,
+			verifier.verificationDatabase(),
+			lo.Map(
+				failedTasks,
+				func(ft VerificationTask, _ int) primitive.ObjectID {
+					return ft.PrimaryKey
+				},
+			),
+		)
+		if err != nil {
+			return false, false, errors.Wrapf(
+				err,
+				"fetching %d failed tasks' discrepancies",
+				len(failedTasks),
+			)
+		}
+
 		for _, v := range failedTasks {
-			for _, f := range v.FailedDocs {
+			for _, f := range taskDiscrepancies[v.PrimaryKey] {
 				table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
 			}
 		}
@@ -90,11 +110,46 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	failureTypesTable := tablewriter.NewWriter(strBuilder)
 	failureTypesTable.SetHeader([]string{"Failure Type", "Count"})
 
+	taskDiscrepancies, err := getMismatchesForTasks(
+		ctx,
+		verifier.verificationDatabase(),
+		lo.Map(
+			failedTasks,
+			func(ft VerificationTask, _ int) primitive.ObjectID {
+				return ft.PrimaryKey
+			},
+		),
+	)
+	if err != nil {
+		return false, false, errors.Wrapf(
+			err,
+			"fetching %d failed tasks' discrepancies",
+			len(failedTasks),
+		)
+	}
+
 	contentMismatchCount := 0
 	missingOrChangedCount := 0
 	for _, task := range failedTasks {
-		contentMismatchCount += len(task.FailedDocs)
-		missingOrChangedCount += len(task.Ids)
+		discrepancies, hasDiscrepancies := taskDiscrepancies[task.PrimaryKey]
+		if !hasDiscrepancies {
+			return false, false, errors.Wrapf(
+				err,
+				"task %v is marked %#q but has no recorded discrepancies; internal error?",
+				task.PrimaryKey,
+				task.Status,
+			)
+		}
+
+		missingCount := lo.CountBy(
+			discrepancies,
+			func(d VerificationResult) bool {
+				return d.DocumentIsMissing()
+			},
+		)
+
+		contentMismatchCount += len(discrepancies) - missingCount
+		missingOrChangedCount += missingCount
 	}
 
 	failureTypesTable.Append([]string{
@@ -115,18 +170,22 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	printAll := int64(contentMismatchCount) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
 OUTA:
 	for _, task := range failedTasks {
-		for _, f := range task.FailedDocs {
+		for _, d := range taskDiscrepancies[task.PrimaryKey] {
+			if d.DocumentIsMissing() {
+				continue
+			}
+
 			if !printAll && mismatchedDocsTableRows >= verifier.failureDisplaySize {
 				break OUTA
 			}
 
 			mismatchedDocsTableRows++
 			mismatchedDocsTable.Append([]string{
-				fmt.Sprintf("%v", f.ID),
-				fmt.Sprintf("%v", f.Cluster),
-				fmt.Sprintf("%v", f.Field),
-				fmt.Sprintf("%v", f.NameSpace),
-				fmt.Sprintf("%v", f.Details),
+				fmt.Sprintf("%v", d.ID),
+				fmt.Sprintf("%v", d.Cluster),
+				fmt.Sprintf("%v", d.Field),
+				fmt.Sprintf("%v", d.NameSpace),
+				fmt.Sprintf("%v", d.Details),
 			})
 		}
 	}
@@ -136,7 +195,7 @@ OUTA:
 		if printAll {
 			strBuilder.WriteString("All documents in tasks in failed status due to differing content:\n")
 		} else {
-			strBuilder.WriteString(fmt.Sprintf("First %d documents in tasks in failed status due to differing content:\n", verifier.failureDisplaySize))
+			fmt.Fprintf(strBuilder, "First %d documents in tasks in failed status due to differing content:\n", verifier.failureDisplaySize)
 		}
 		mismatchedDocsTable.Render()
 	}
@@ -148,14 +207,18 @@ OUTA:
 	printAll = int64(missingOrChangedCount) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
 OUTB:
 	for _, task := range failedTasks {
-		for _, _id := range task.Ids {
+		for _, d := range taskDiscrepancies[task.PrimaryKey] {
+			if !d.DocumentIsMissing() {
+				continue
+			}
+
 			if !printAll && missingOrChangedDocsTableRows >= verifier.failureDisplaySize {
 				break OUTB
 			}
 
 			missingOrChangedDocsTableRows++
 			missingOrChangedDocsTable.Append([]string{
-				fmt.Sprintf("%v", _id),
+				fmt.Sprintf("%v", d.ID),
 				fmt.Sprintf("%v", task.QueryFilter.Namespace),
 				fmt.Sprintf("%v", task.QueryFilter.To),
 			})
@@ -167,7 +230,7 @@ OUTB:
 		if printAll {
 			strBuilder.WriteString("All documents marked missing or changed:\n")
 		} else {
-			strBuilder.WriteString(fmt.Sprintf("First %d documents marked missing or changed:\n", verifier.failureDisplaySize))
+			fmt.Fprintf(strBuilder, "First %d documents marked missing or changed:\n", verifier.failureDisplaySize)
 		}
 		missingOrChangedDocsTable.Render()
 	}
@@ -209,12 +272,13 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 
 	strBuilder.WriteString("\n")
 
-	strBuilder.WriteString(fmt.Sprintf(
+	fmt.Fprintf(
+		strBuilder,
 		"Namespaces completed: %s of %s (%s%%)\n",
 		reportutils.FmtReal(completedNss),
 		reportutils.FmtReal(totalNss),
 		reportutils.FmtPercent(completedNss, totalNss),
-	))
+	)
 
 	elapsed := now.Sub(verifier.generationStartTime)
 
@@ -223,25 +287,28 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 	perSecondDataUnit := reportutils.FindBestUnit(bytesPerSecond)
 
 	if totalDocs > 0 {
-		strBuilder.WriteString(fmt.Sprintf(
+		fmt.Fprintf(
+			strBuilder,
 			"Total source documents compared: %s of %s (%s%%, %s/sec)\n",
 			reportutils.FmtReal(comparedDocs),
 			reportutils.FmtReal(totalDocs),
 			reportutils.FmtPercent(comparedDocs, totalDocs),
 			reportutils.FmtReal(docsPerSecond),
-		))
+		)
 	} else {
-		strBuilder.WriteString(fmt.Sprintf(
+		fmt.Fprintf(
+			strBuilder,
 			"Total source documents compared: %s (%s/sec)\n",
 			reportutils.FmtReal(comparedDocs),
 			reportutils.FmtReal(docsPerSecond),
-		))
+		)
 	}
 
 	if totalBytes > 0 {
 		dataUnit := reportutils.FindBestUnit(totalBytes)
 
-		strBuilder.WriteString(fmt.Sprintf(
+		fmt.Fprintf(
+			strBuilder,
 			"Total size of those documents: %s of %s %s (%s%%, %s %s/sec)\n",
 			reportutils.BytesToUnit(comparedBytes, dataUnit),
 			reportutils.BytesToUnit(totalBytes, dataUnit),
@@ -249,17 +316,18 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 			reportutils.FmtPercent(comparedBytes, totalBytes),
 			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
 			perSecondDataUnit,
-		))
+		)
 	} else {
 		dataUnit := reportutils.FindBestUnit(comparedBytes)
 
-		strBuilder.WriteString(fmt.Sprintf(
+		fmt.Fprintf(
+			strBuilder,
 			"Total size of those documents: %s %s (%s %s/sec)\n",
 			reportutils.BytesToUnit(comparedBytes, dataUnit),
 			dataUnit,
 			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
 			perSecondDataUnit,
-		))
+		)
 	}
 
 	table := tablewriter.NewWriter(strBuilder)
@@ -344,10 +412,11 @@ func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, st
 
 	strBuilder.WriteString("\n")
 
-	strBuilder.WriteString(fmt.Sprintf(
+	fmt.Fprintf(
+		strBuilder,
 		"Namespaces compared: %s\n",
 		reportutils.FmtReal(completedNss),
-	))
+	)
 
 	dataUnit := reportutils.FindBestUnit(comparedBytes)
 
@@ -357,18 +426,20 @@ func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, st
 	bytesPerSecond := float64(comparedBytes) / elapsed.Seconds()
 	perSecondDataUnit := reportutils.FindBestUnit(bytesPerSecond)
 
-	strBuilder.WriteString(fmt.Sprintf(
+	fmt.Fprintf(
+		strBuilder,
 		"Source documents compared: %s (%s/sec)\n",
 		reportutils.FmtReal(comparedDocs),
 		reportutils.FmtReal(docsPerSecond),
-	))
-	strBuilder.WriteString(fmt.Sprintf(
+	)
+	fmt.Fprintf(
+		strBuilder,
 		"Total size of those documents: %s %s (%s %s/sec)\n",
 		reportutils.BytesToUnit(comparedBytes, dataUnit),
 		dataUnit,
 		reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
 		perSecondDataUnit,
-	))
+	)
 
 	return true, nil
 }
@@ -422,13 +493,11 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, n
 			)
 		}
 
-		builder.WriteString(fmt.Sprintf("\n%s change events this generation: %s\n", cluster.title, eventsDescr))
+		fmt.Fprintf(builder, "\n%s change events this generation: %s\n", cluster.title, eventsDescr)
 
 		lag, hasLag := cluster.csReader.GetLag().Get()
 		if hasLag {
-			builder.WriteString(
-				fmt.Sprintf("%s change stream lag: %s\n", cluster.title, reportutils.DurationToHMS(lag)),
-			)
+			fmt.Fprintf(builder, "%s change stream lag: %s\n", cluster.title, reportutils.DurationToHMS(lag))
 		}
 
 		// We only print event breakdowns for the source because we assume that
@@ -477,7 +546,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, n
 func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
 
 	table := tablewriter.NewWriter(builder)
-	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed"})
+	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed", "Detail"})
 
 	wsmap := verifier.workerTracker.Load()
 
@@ -506,15 +575,17 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 				wsmap[w].Namespace,
 				taskIdStr,
 				reportutils.DurationToHMS(now.Sub(wsmap[w].StartTime)),
+				wsmap[w].Detail,
 			},
 		)
 	}
 
-	builder.WriteString(fmt.Sprintf(
+	fmt.Fprintf(
+		builder,
 		"\nActive worker threads (%s of %s):\n",
 		reportutils.FmtReal(activeThreadCount),
 		reportutils.FmtReal(verifier.numWorkers),
-	))
+	)
 
 	table.Render()
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
@@ -16,9 +17,7 @@ import (
 )
 
 const (
-	recheckQueue         = "recheckQueue"
-	maxBSONObjSize       = 16 * 1024 * 1024
-	maxIdsPerRecheckTask = 12 * 1024 * 1024
+	recheckQueueCollectionNameBase = "recheckQueue"
 )
 
 // RecheckPrimaryKey stores the implicit type of recheck to perform
@@ -29,22 +28,25 @@ const (
 // sorting by _id will guarantee that all rechecks for a given
 // namespace appear consecutively.
 type RecheckPrimaryKey struct {
-	Generation        int         `bson:"generation"`
-	SrcDatabaseName   string      `bson:"db"`
-	SrcCollectionName string      `bson:"coll"`
-	DocumentID        interface{} `bson:"docID"`
+	SrcDatabaseName   string `bson:"db"`
+	SrcCollectionName string `bson:"coll"`
+	DocumentID        any    `bson:"docID"`
 }
 
 // RecheckDoc stores the necessary information to know which documents must be rechecked.
 type RecheckDoc struct {
 	PrimaryKey RecheckPrimaryKey `bson:"_id"`
-	DataSize   int               `bson:"dataSize"`
+
+	// NB: Because we don’t update the recheck queue’s documents, this field
+	// and any others that may be added will remain unchanged even if a recheck
+	// is enqueued multiple times for the same document in the same generation.
+	DataSize int `bson:"dataSize"`
 }
 
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	ctx context.Context,
-	namespace string, documentIDs []interface{}, dataSizes []int) error {
+	namespace string, documentIDs []any, dataSizes []int) error {
 	dbName, collName := SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
@@ -87,7 +89,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
 	dbNames []string,
 	collNames []string,
-	documentIDs []interface{},
+	documentIDs []any,
 	dataSizes []int,
 ) error {
 	verifier.mux.Lock()
@@ -100,41 +102,54 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	eg, groupCtx := contextplus.ErrGroup(ctx)
 
+	genCollection := verifier.getRecheckQueueCollection(generation)
+
 	for _, curThreadIndexes := range indexesPerThread {
 		curThreadIndexes := curThreadIndexes
 
 		eg.Go(func() error {
 			models := make([]mongo.WriteModel, len(curThreadIndexes))
 			for m, i := range curThreadIndexes {
-				pk := RecheckPrimaryKey{
-					Generation:        generation,
-					SrcDatabaseName:   dbNames[i],
-					SrcCollectionName: collNames[i],
-					DocumentID:        documentIDs[i],
+				recheckDoc := RecheckDoc{
+					PrimaryKey: RecheckPrimaryKey{
+						SrcDatabaseName:   dbNames[i],
+						SrcCollectionName: collNames[i],
+						DocumentID:        documentIDs[i],
+					},
+					DataSize: dataSizes[i],
 				}
 
-				models[m] = mongo.NewReplaceOneModel().
-
-					// The filter must exclude DataSize; otherwise, if a failed comparison
-					// and a change event happen on the same document for the same
-					// generation, the 2nd insert will fail because a) its filter won’t
-					// match anything, and b) it’ll try to insert a new document with the
-					// same _id as the one that the 1st insert already created.
-					SetFilter(bson.D{{"_id", pk}}).
-					SetReplacement(RecheckDoc{
-						PrimaryKey: pk,
-						DataSize:   dataSizes[i],
-					}).
-					SetUpsert(true)
+				models[m] = mongo.NewInsertOneModel().
+					SetDocument(recheckDoc)
 			}
 
 			retryer := retry.New()
 			err := retryer.WithCallback(
 				func(retryCtx context.Context, _ *retry.FuncInfo) error {
-					_, err := verifier.verificationDatabase().Collection(recheckQueue).BulkWrite(
+					_, err := genCollection.BulkWrite(
 						retryCtx,
 						models,
 						options.BulkWrite().SetOrdered(false),
+					)
+
+					// We expect duplicate-key errors from the above because:
+					//
+					// a) The same document can change multiple times per generation.
+					// b) The source’s changes also happen on the destination, and both
+					//    change streams populate this recheck queue.
+					//
+					// Because of that, we ignore duplicate-key errors. We do *not*, though,
+					// ignore other errors that may accompany duplicate-key errors in the
+					// same server response.
+					//
+					// This does mean that the persisted DataSize _does not change_ after
+					// a document is first inserted. That should matter little, though,
+					// the persisted document size is just an optimization for parallelizing,
+					// and document sizes probably remain stable(-ish) across updates.
+					err = util.TolerateSimpleDuplicateKeyInBulk(
+						verifier.logger,
+						len(models),
+						err,
 					)
 
 					return err
@@ -166,25 +181,22 @@ func (verifier *Verifier) insertRecheckDocs(
 	return nil
 }
 
-// ClearRecheckDocsWhileLocked deletes the previous generation’s recheck
+// DropOldRecheckQueueWhileLocked deletes the previous generation’s recheck
 // documents from the verifier’s metadata.
 //
 // The verifier **MUST** be locked when this function is called (or panic).
-func (verifier *Verifier) ClearRecheckDocsWhileLocked(ctx context.Context) error {
+func (verifier *Verifier) DropOldRecheckQueueWhileLocked(ctx context.Context) error {
 	prevGeneration := verifier.getPreviousGenerationWhileLocked()
 
 	verifier.logger.Debug().
 		Int("previousGeneration", prevGeneration).
 		Msg("Deleting previous generation's enqueued rechecks.")
 
+	genCollection := verifier.getRecheckQueueCollection(prevGeneration)
+
 	return retry.New().WithCallback(
 		func(ctx context.Context, i *retry.FuncInfo) error {
-			_, err := verifier.verificationDatabase().Collection(recheckQueue).DeleteMany(
-				ctx,
-				bson.D{{"_id.generation", prevGeneration}},
-			)
-
-			return err
+			return genCollection.Drop(ctx)
 		},
 		"deleting generation %d's enqueued rechecks",
 		prevGeneration,
@@ -211,14 +223,13 @@ func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
 func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) error {
 	prevGeneration := verifier.getPreviousGenerationWhileLocked()
 
-	findFilter := bson.D{{"_id.generation", prevGeneration}}
-
 	verifier.logger.Debug().
 		Int("priorGeneration", prevGeneration).
 		Msgf("Counting prior generation’s enqueued rechecks.")
 
-	recheckColl := verifier.verificationDatabase().Collection(recheckQueue)
-	rechecksCount, err := recheckColl.CountDocuments(ctx, findFilter)
+	recheckColl := verifier.getRecheckQueueCollection(prevGeneration)
+
+	rechecksCount, err := recheckColl.CountDocuments(ctx, bson.D{})
 	if err != nil {
 		return errors.Wrapf(err,
 			"failed to count generation %d’s rechecks",
@@ -240,23 +251,22 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	//    this to prevent one thread from doing all of the rechecks.
 
 	var prevDBName, prevCollName string
-	var idAccum []interface{}
-	var idLenAccum int
+	var idAccum []any
+	var idsSizer util.BSONArraySizer
 	var totalDocs types.DocumentCount
 	var dataSizeAccum, totalRecheckData int64
 
-	maxDocsPerTask := rechecksCount / int64(verifier.numWorkers)
-
-	if maxDocsPerTask < int64(verifier.numWorkers) {
-		maxDocsPerTask = int64(verifier.numWorkers)
-	}
+	maxDocsPerTask := max(
+		int(rechecksCount)/verifier.numWorkers,
+		verifier.numWorkers,
+	)
 
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
 	// namespace will be consecutive in this query’s result.
 	cursor, err := recheckColl.Find(
 		ctx,
-		findFilter,
+		bson.D{},
 		options.Find().SetSort(bson.D{{"_id", 1}}),
 	)
 	if err != nil {
@@ -287,7 +297,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		}
 
 		verifier.logger.Debug().
-			Interface("task", task.PrimaryKey).
+			Any("task", task.PrimaryKey).
 			Str("namespace", namespace).
 			Int("numDocuments", len(idAccum)).
 			Str("dataSize", reportutils.FmtBytes(dataSizeAccum)).
@@ -305,8 +315,10 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 			return err
 		}
 
-		idRaw := cursor.Current.Lookup("_id", "docID")
-		idLen := len(idRaw.Value)
+		idRaw, err := cursor.Current.LookupErr("_id", "docID")
+		if err != nil {
+			return errors.Wrapf(err, "failed to find docID in enqueued recheck %v", cursor.Current)
+		}
 
 		// We persist rechecks if any of these happen:
 		// - the namespace has changed
@@ -316,8 +328,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		//
 		if doc.PrimaryKey.SrcDatabaseName != prevDBName ||
 			doc.PrimaryKey.SrcCollectionName != prevCollName ||
-			int64(len(idAccum)) > maxDocsPerTask ||
-			idLenAccum >= maxIdsPerRecheckTask ||
+			len(idAccum) > maxDocsPerTask ||
+			types.ByteCount(idsSizer.Len()) >= verifier.recheckMaxSizeInBytes ||
 			dataSizeAccum >= verifier.partitionSizeInBytes {
 
 			err := persistBufferedRechecks()
@@ -327,12 +339,12 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 
 			prevDBName = doc.PrimaryKey.SrcDatabaseName
 			prevCollName = doc.PrimaryKey.SrcCollectionName
-			idLenAccum = 0
+			idsSizer = util.BSONArraySizer{}
 			dataSizeAccum = 0
 			idAccum = idAccum[:0]
 		}
 
-		idLenAccum += idLen
+		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 
@@ -356,4 +368,9 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	}
 
 	return err
+}
+
+func (v *Verifier) getRecheckQueueCollection(generation int) *mongo.Collection {
+	return v.verificationDatabase().
+		Collection(fmt.Sprintf("%s_gen%d", recheckQueueCollectionNameBase, generation))
 }

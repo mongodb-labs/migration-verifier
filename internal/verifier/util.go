@@ -68,9 +68,9 @@ func NewNamespace(db, coll string) *Namespace {
 
 // Refetch contains the data necessary to track a refretch
 type Refetch struct {
-	ID            interface{} `bson:"id"`
-	SrcNamespace  string      `bson:"srcNamespace"`
-	DestNamespace string      `bson:"destNamespace"`
+	ID            any    `bson:"id"`
+	SrcNamespace  string `bson:"srcNamespace"`
+	DestNamespace string `bson:"destNamespace"`
 	Status        string
 }
 

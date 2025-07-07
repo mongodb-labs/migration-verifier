@@ -271,10 +271,9 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	suite.Assert().Equal(
 		bson.M{
-			"db":         suite.DBNameForTest(),
-			"coll":       "testColl",
-			"generation": int32(0),
-			"docID":      "heyhey",
+			"db":    suite.DBNameForTest(),
+			"coll":  "testColl",
+			"docID": "heyhey",
 		},
 		recheckDocs[0]["_id"],
 		"recheck doc should have expected ID",
@@ -297,7 +296,7 @@ func (suite *IntegrationTestSuite) getClusterTime(ctx context.Context, client *m
 func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, verifier *Verifier) []bson.M {
 	recheckDocs := []bson.M{}
 
-	recheckColl := verifier.verificationDatabase().Collection(recheckQueue)
+	recheckColl := verifier.getRecheckQueueCollection(verifier.generation)
 	cursor, err := recheckColl.Find(ctx, bson.D{})
 
 	if !errors.Is(err, mongo.ErrNoDocuments) {
@@ -687,7 +686,11 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 
 func (suite *IntegrationTestSuite) TestCreateForbidden() {
 	ctx := suite.Context()
-	buildInfo, err := util.GetClusterInfo(ctx, suite.srcMongoClient)
+	buildInfo, err := util.GetClusterInfo(
+		ctx,
+		logger.NewDefaultLogger(),
+		suite.srcMongoClient,
+	)
 	suite.Require().NoError(err)
 
 	if buildInfo.VersionArray[0] < 6 {
@@ -724,7 +727,11 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 
 func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 	ctx := suite.Context()
-	buildInfo, err := util.GetClusterInfo(ctx, suite.dstMongoClient)
+	buildInfo, err := util.GetClusterInfo(
+		ctx,
+		logger.NewDefaultLogger(),
+		suite.dstMongoClient,
+	)
 	suite.Require().NoError(err)
 
 	if buildInfo.VersionArray[0] < 6 {
@@ -755,7 +762,7 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 		logBuffer,
 	)
 
-	zlog := verifier.logger.Logger.Output(multiOut)
+	zlog := verifier.logger.Output(multiOut)
 	verifier.logger = logger.NewLogger(&zlog, multiOut)
 
 	// start verifier
@@ -831,7 +838,7 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			recheckColl := verifier.verificationDatabase().Collection(recheckQueue)
+			recheckColl := verifier.getRecheckQueueCollection(verifier.generation)
 			cursor, err := recheckColl.Find(ctx, bson.D{})
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				return false

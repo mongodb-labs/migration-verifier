@@ -35,16 +35,20 @@ const (
 	startClean            = "clean"
 	readPreference        = "readPreference"
 	partitionSizeMB       = "partitionSizeMB"
+	recheckMaxSizeMB      = "recheckMaxSizeMB"
 	checkOnly             = "checkOnly"
 	debugFlag             = "debug"
 	failureDisplaySize    = "failureDisplaySize"
 	ignoreReadConcernFlag = "ignoreReadConcern"
 	configFileFlag        = "configFile"
 	pprofInterval         = "pprofInterval"
+
+	buildVarDefaultStr = "Unknown; build with build.sh."
 )
 
-// This gets set at build time.
-var Revision = "Unknown; build with build.sh."
+// These get set at build time, assuming use of build.sh.
+var Revision = buildVarDefaultStr
+var BuildTime = buildVarDefaultStr
 
 func main() {
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
@@ -86,6 +90,11 @@ func main() {
 			Name:  numWorkers,
 			Value: 10,
 			Usage: "`number` of worker threads to use for verification",
+		}),
+		altsrc.NewUintFlag(cli.UintFlag{
+			Name:  recheckMaxSizeMB,
+			Value: verifier.DefaultRecheckMaxSizeMB,
+			Usage: "Maximum size of a recheck query. Reduce this to limit server memory usage after generation 0.",
 		}),
 		altsrc.NewInt64Flag(cli.Int64Flag{
 			Name:  generationPauseDelay,
@@ -159,7 +168,7 @@ func main() {
 	app := &cli.App{
 		Name:    "migration-verifier",
 		Usage:   "verify migration correctness",
-		Version: Revision,
+		Version: fmt.Sprintf("%s, built at %s", Revision, BuildTime),
 		Flags:   flags,
 		Before: func(cCtx *cli.Context) error {
 			confFile := cCtx.String(configFileFlag)
@@ -209,6 +218,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 
 	v.GetLogger().Info().
 		Str("revision", Revision).
+		Str("buildTime", BuildTime).
 		Int("processID", os.Getpid()).
 		Msg("migration-verifier started.")
 
@@ -216,18 +226,28 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	if err != nil {
 		return nil, err
 	}
-	err = v.SetDstURI(ctx, cCtx.String(dstURI))
+
+	dstConnStr := cCtx.String(dstURI)
+	err = v.SetDstURI(ctx, dstConnStr)
 	if err != nil {
 		return nil, err
 	}
-	err = v.SetMetaURI(ctx, cCtx.String(metaURI))
+
+	metaConnStr := cCtx.String(metaURI)
+	err = v.SetMetaURI(ctx, metaConnStr)
 	if err != nil {
 		return nil, err
 	}
+
+	if dstConnStr == metaConnStr {
+		v.GetLogger().Warn().
+			Msg("Storing migration-verifier’s metadata on the destination can significantly impede performance. Use a dedicated cluster for the metadata if you can.")
+	}
+
 	v.SetServerPort(cCtx.Int(serverPort))
 	v.SetNumWorkers(cCtx.Int(numWorkers))
-	v.SetGenerationPauseDelayMillis(time.Duration(cCtx.Int64(generationPauseDelay)))
-	v.SetWorkerSleepDelayMillis(time.Duration(cCtx.Int64(workerSleepDelay)))
+	v.SetGenerationPauseDelay(time.Duration(cCtx.Int64(generationPauseDelay)) * time.Millisecond)
+	v.SetWorkerSleepDelay(time.Duration(cCtx.Int64(workerSleepDelay)) * time.Millisecond)
 
 	err = v.SetPprofInterval(cCtx.String(pprofInterval))
 	if err != nil {
@@ -241,6 +261,15 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		}
 
 		v.SetPartitionSizeMB(uint32(partitionSizeMB))
+	}
+
+	recheckMaxSizeMBVal := cCtx.Uint(recheckMaxSizeMB)
+	if recheckMaxSizeMBVal != 0 {
+		if recheckMaxSizeMBVal > verifier.MaxRecheckMaxSizeMB {
+			return nil, fmt.Errorf("%#q may not exceed %d", recheckMaxSizeMB, verifier.MaxRecheckMaxSizeMB)
+		}
+
+		v.SetRecheckMaxSizeMB(recheckMaxSizeMBVal)
 	}
 
 	v.SetStartClean(cCtx.Bool(startClean))

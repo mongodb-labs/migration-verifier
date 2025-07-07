@@ -35,23 +35,34 @@ const (
 	// Task statuses:
 	// --------------------------------------------------
 
-	verificationTaskAdded     verificationTaskStatus = "added"
+	// This means the task is ready for work once a worker thread gets to it.
+	verificationTaskAdded verificationTaskStatus = "added"
+
+	// This means a worker thread is actively processing the task.
+	verificationTaskProcessing verificationTaskStatus = "processing"
+
+	// This means no mismatches were found. (Yay!)
 	verificationTaskCompleted verificationTaskStatus = "completed"
-	verificationTaskFailed    verificationTaskStatus = "failed"
-	// This is used for collection verification, and means the task successfully created the data tasks,
-	// but there were mismatches in the metadata/indexes
+
+	// This can mean a few different things. Generally it means that at least
+	// one mismatch was found. (It does *not* mean that the verifier failed to
+	// complete the verification task.)
+	verificationTaskFailed verificationTaskStatus = "failed"
+
+	// This is used for collection verification. It means the task successfully
+	// created the data tasks, but there were mismatches in the
+	// metadata/indexes.
 	verificationTaskMetadataMismatch verificationTaskStatus = "mismatch"
-	verificationTaskProcessing       verificationTaskStatus = "processing"
 
 	// --------------------------------------------------
 	// Task types:
 	// --------------------------------------------------
 
 	// The “workhorse” task type: verify a partition of documents.
-	verificationTaskVerifyDocuments verificationTaskType = "verify"
+	verificationTaskVerifyDocuments verificationTaskType = "verifyDocuments"
 
 	// A verifyCollection task verifies collection metadata
-	// and inserts verify-documents tasks to verify data ranges.
+	// and, in generation 0, inserts verify-documents tasks for _id ranges.
 	verificationTaskVerifyCollection verificationTaskType = "verifyCollection"
 
 	// The primary task creates a verifyCollection task for each
@@ -61,21 +72,13 @@ const (
 
 // VerificationTask stores source cluster info
 type VerificationTask struct {
-	PrimaryKey interface{}            `bson:"_id"`
+	PrimaryKey primitive.ObjectID     `bson:"_id"`
 	Type       verificationTaskType   `bson:"type"`
 	Status     verificationTaskStatus `bson:"status"`
 	Generation int                    `bson:"generation"`
 
-	// For failed tasks, this stores the document IDs missing on
-	// one cluster or the other.
-	Ids []interface{} `bson:"_ids"`
-
-	// Deprecated: VerificationTask ID field is ignored by the verifier.
-	ID int `bson:"id"`
-
-	// For failed tasks, this stores details on documents that exist on
-	// both clusters but don’t match.
-	FailedDocs []VerificationResult `bson:"failed_docs,omitempty"`
+	// For recheck tasks, this stores the document IDs to check.
+	Ids []any `bson:"_ids"`
 
 	QueryFilter QueryFilter `bson:"query_filter" json:"query_filter"`
 
@@ -93,16 +96,13 @@ func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
 		evt.Int("documentCount", len(t.Ids))
 	} else {
 		evt.
-			Interface("minDocID", t.QueryFilter.Partition.Key.Lower).
-			Interface("maxDocID", t.QueryFilter.Partition.Upper)
+			Any("minDocID", t.QueryFilter.Partition.Key.Lower).
+			Any("maxDocID", t.QueryFilter.Partition.Upper)
 	}
 }
 
-// VerificationRange stores ID ranges for tasks that can be re-used between runs
-type VerificationRange struct {
-	PrimaryKey primitive.ObjectID `bson:"_id"`
-	StartID    primitive.ObjectID `bson:"start_id"`
-	EndID      primitive.ObjectID `bson:"end_id"`
+func (t *VerificationTask) IsRecheck() bool {
+	return t.Generation > 0
 }
 
 func (verifier *Verifier) insertCollectionVerificationTask(
@@ -115,7 +115,7 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 		var ok bool
 		dstNamespace, ok = verifier.nsMap.GetDstNamespace(srcNamespace)
 		if !ok {
-			return nil, fmt.Errorf("Could not find Namespace %s", srcNamespace)
+			return nil, fmt.Errorf("could not find Namespace %s", srcNamespace)
 		}
 	}
 
@@ -202,7 +202,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 
 func (verifier *Verifier) InsertDocumentRecheckTask(
 	ctx context.Context,
-	ids []interface{},
+	ids []any,
 	dataSize types.ByteCount,
 	srcNamespace string,
 ) (*VerificationTask, error) {
@@ -211,7 +211,7 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 		var ok bool
 		dstNamespace, ok = verifier.nsMap.GetDstNamespace(srcNamespace)
 		if !ok {
-			return nil, fmt.Errorf("Could not find Namespace %s", srcNamespace)
+			return nil, fmt.Errorf("could not find namespace %s", srcNamespace)
 		}
 	}
 
@@ -303,10 +303,8 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *Veri
 				bson.M{
 					"$set": bson.M{
 						"status":                 task.Status,
-						"failed_docs":            task.FailedDocs,
 						"source_documents_count": task.SourceDocumentCount,
 						"source_bytes_count":     task.SourceByteCount,
-						"_ids":                   task.Ids,
 					},
 				},
 			)

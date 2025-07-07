@@ -4,28 +4,37 @@ import (
 	"context"
 
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mslices"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var (
-	MongosyncMetaDBsPattern = `^mongosync_(internal|reserved)_`
+	MongosyncMetaDBPrefixes = mslices.Of(
+		"mongosync_internal_",
+		"mongosync_reserved_",
+	)
 )
 
 var (
 	// ExcludedSystemDBs are system databases that are excluded from verification.
 	ExcludedSystemDBs = []string{"admin", "config", "local"}
 
-	// ExcludedSystemCollRegex is the regular expression representation of the excluded system collections.
-	ExcludedSystemCollRegex = primitive.Regex{Pattern: `^system[.]`, Options: ""}
+	// ExcludedSystemCollPrefix is the prefix of system collections,
+	// which we ignore.
+	ExcludedSystemCollPrefix = "system."
 )
 
 // Lists all the user collections on a cluster.  Unlike mongosync, we don't use the internal $listCatalog, since we need to
 // work on old versions without that command.  This means this does not run with read concern majority.
-func ListAllUserCollections(ctx context.Context, logger *logger.Logger, client *mongo.Client, includeViews bool,
-	additionalExcludedDBs ...string) ([]string, error) {
+func ListAllUserNamespaces(
+	ctx context.Context,
+	logger *logger.Logger,
+	client *mongo.Client,
+	additionalExcludedDBs ...string,
+) ([]string, error) {
 	excludedDBs := []string{}
 	excludedDBs = append(excludedDBs, additionalExcludedDBs...)
 	excludedDBs = append(excludedDBs, ExcludedSystemDBs...)
@@ -34,9 +43,14 @@ func ListAllUserCollections(ctx context.Context, logger *logger.Logger, client *
 	for _, e := range excludedDBs {
 		excluded = append(excluded, e)
 	}
-	excluded = append(excluded, primitive.Regex{Pattern: MongosyncMetaDBsPattern})
 
-	dbNames, err := client.ListDatabaseNames(ctx, bson.D{{"name", bson.D{{"$nin", excluded}}}})
+	dbNames, err := client.ListDatabaseNames(ctx, bson.D{
+		{"$and", []bson.D{
+			{{"name", bson.D{{"$nin", excluded}}}},
+			util.ExcludePrefixesQuery("name", MongosyncMetaDBPrefixes),
+		}},
+	})
+
 	if err != nil {
 		return nil, err
 	}
@@ -47,17 +61,19 @@ func ListAllUserCollections(ctx context.Context, logger *logger.Logger, client *
 	collectionNamespaces := []string{}
 	for _, dbName := range dbNames {
 		db := client.Database(dbName)
-		filter := bson.D{{"name", bson.D{{"$nin", bson.A{ExcludedSystemCollRegex}}}}}
-		if !includeViews {
-			filter = append(filter, bson.E{"type", bson.D{{"$ne", "view"}}})
-		}
+
+		filter := util.ExcludePrefixesQuery(
+			"name",
+			mslices.Of(ExcludedSystemCollPrefix),
+		)
+
 		specifications, err := db.ListCollectionSpecifications(ctx, filter, options.ListCollections().SetNameOnly(true))
 		if err != nil {
 			return nil, err
 		}
 		logger.Debug().
 			Str("database", dbName).
-			Interface("specifications", specifications).
+			Any("specifications", specifications).
 			Msg("Found database members.")
 
 		for _, spec := range specifications {

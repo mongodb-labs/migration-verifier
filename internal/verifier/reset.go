@@ -56,7 +56,7 @@ func (verifier *Verifier) handleIncompletePrimary(ctx mongo.SessionContext) (boo
 		// Invariant: task status should be “added”.
 		if incompletePrimaries[0].Status != verificationTaskAdded {
 			verifier.logger.Panic().
-				Interface("task", incompletePrimaries[0]).
+				Any("task", incompletePrimaries[0]).
 				Msg("Primary task status has invalid state.")
 		}
 
@@ -82,7 +82,7 @@ func (verifier *Verifier) handleIncompletePrimary(ctx mongo.SessionContext) (boo
 		return true, nil
 	default:
 		verifier.logger.Panic().
-			Interface("tasks", incompletePrimaries).
+			Any("tasks", incompletePrimaries).
 			Msg("Found multiple incomplete primary tasks; there should only be 1.")
 	}
 

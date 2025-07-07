@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
@@ -129,6 +130,9 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 		dbNames, err := client.ListDatabaseNames(ctx, bson.D{})
 		suite.Require().NoError(err)
 		for _, dbName := range dbNames {
+			if dbName == "VERIFIER_TEST_META" {
+				continue
+			}
 			if !suite.initialDbNames.Contains(dbName) {
 				suite.T().Logf("Dropping database %#q, which seems to have been created during test %#q.", dbName, suite.T().Name())
 
@@ -142,6 +146,7 @@ func (suite *IntegrationTestSuite) TearDownTest() {
 func (suite *IntegrationTestSuite) GetTopology(client *mongo.Client) util.ClusterTopology {
 	clusterInfo, err := util.GetClusterInfo(
 		suite.Context(),
+		logger.NewDefaultLogger(),
 		client,
 	)
 	suite.Require().NoError(err, "should fetch src cluster info")
@@ -156,8 +161,8 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	//verifier.SetStartClean(true)
 	verifier.SetNumWorkers(3)
-	verifier.SetGenerationPauseDelayMillis(0)
-	verifier.SetWorkerSleepDelayMillis(0)
+	verifier.SetGenerationPauseDelay(0)
+	verifier.SetWorkerSleepDelay(0)
 
 	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
 
