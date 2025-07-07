@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-and-release-macos:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+
+      - name: Build Linux/x86
+        run: |
+            GOOS=linux GOARCH=amd64 ./build.sh
+            mv migration_verifier migration_verifier_linux_amd64
+
+      - name: Build macOS/ARM
+        run: |
+            GOOS=darwin GOARCH=arm64 ./build.sh
+            mv migration_verifier migration_verifier_macos_arm64
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: |
+            migration_verifier_linux_amd64
+            migration_verifier_macos_arm64
