@@ -1,6 +1,6 @@
 #!/bin/sh
 
-revision=$(git describe --tags --exact-match 2>/dev/null || echo "DEVELOPMENT:" "$(git show --no-patch --format='%H')")
+revision=$(git describe --tags --exact-match 2>/dev/null || echo "DEVELOPMENT:$(git describe --tags)")
 buildTime=$(date -u)
 
 goos=$(go env GOOS)
