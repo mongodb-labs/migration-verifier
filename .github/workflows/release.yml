@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  TARGETS: |
+    linux/amd64
+    linux/arm64
+    darwin/arm64
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+
+      - name: Build
+        run: |
+          for target in $TARGETS; do
+            export GOOS=${target%/*}
+            export GOARCH=${target#*/}
+            ./build.sh
+            mv migration_verifier migration_verifier_${GOOS}_${GOARCH}
+          done
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: migration_verifier_*
