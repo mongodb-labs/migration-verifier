@@ -122,7 +122,8 @@ func main() {
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  docCompareMethod,
 			Usage: "Method to compare documents",
-			Value: string(verifier.DocCompareBinary),
+			//Value: string(verifier.DocCompareBinary),
+			Value: string(verifier.DocCompareToHashedIndexKey),
 		}),
 		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  verifyAll,
