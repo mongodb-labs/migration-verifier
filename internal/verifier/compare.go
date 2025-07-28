@@ -519,7 +519,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 								{"_id", "$$ROOT._id"},
 								{"docHash", bson.D{
 									{"$toHashedIndexKey", bson.D{
-										{"$_internalIndexKeyString", bson.D{
+										{"$_internalKeyStringValue", bson.D{
 											{"input", "$$ROOT"},
 										}},
 									}},
