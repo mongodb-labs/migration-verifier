@@ -166,6 +166,8 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 
 	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
 
+	verifier.SetDocCompareMethod(DocCompareToHashedIndexKey)
+
 	ctx := suite.Context()
 
 	suite.Require().NoError(
