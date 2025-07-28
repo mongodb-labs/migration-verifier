@@ -475,42 +475,113 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 	runCommandOptions := options.RunCmd()
 	var andPredicates bson.A
 
+	var aggOptions bson.D
+
 	if task.IsRecheck() {
 		andPredicates = append(andPredicates, bson.D{{"_id", bson.M{"$in": task.Ids}}})
 		andPredicates = verifier.maybeAppendGlobalFilterToPredicates(andPredicates)
-		findOptions = bson.D{
-			bson.E{"filter", bson.D{{"$and", andPredicates}}},
+		filter := bson.D{{"$and", andPredicates}}
+
+		switch verifier.docCompareMethod.QueryFunction() {
+		case DocQueryFunctionFind:
+			findOptions = bson.D{
+				bson.E{"filter", filter},
+			}
+		case DocQueryFunctionAggregate:
+			aggOptions = bson.D{
+				{"pipeline", bson.D{{"$match", filter}}},
+			}
+		default:
+			panic("bad doc compare query func: " + verifier.docCompareMethod.QueryFunction())
 		}
 	} else {
-		findOptions = task.QueryFilter.Partition.GetFindOptions(clusterInfo, verifier.maybeAppendGlobalFilterToPredicates(andPredicates))
+		pqp := task.QueryFilter.Partition.GetQueryParameters(
+			clusterInfo,
+			verifier.maybeAppendGlobalFilterToPredicates(andPredicates),
+		)
+
+		switch verifier.docCompareMethod.QueryFunction() {
+		case DocQueryFunctionFind:
+			findOptions = pqp.ToFindOptions()
+		case DocQueryFunctionAggregate:
+			aggOptions = pqp.ToAggOptions()
+
+			if verifier.docCompareMethod == DocCompareToHashedIndexKey {
+				for i, el := range aggOptions {
+					if el.Key != "pipeline" {
+						continue
+					}
+
+					aggOptions[i].Value = append(
+						aggOptions[i].Value.(mongo.Pipeline),
+						bson.D{
+							{"$replaceWith", bson.D{
+								{"_id", "$$ROOT._id"},
+								{"docHash", bson.D{
+									{"$toHashedIndexKey", bson.D{
+										{"$_internalIndexKeyString", bson.D{
+											{"input", "$$ROOT"},
+										}},
+									}},
+								}},
+								{"docLen", bson.D{
+									{"$bsonSize", "$$ROOT"},
+								}},
+							}},
+						},
+					)
+				}
+			}
+		default:
+			panic("bad doc compare query func: " + verifier.docCompareMethod.QueryFunction())
+		}
 	}
+
+	var cmd bson.D
+
+	switch verifier.docCompareMethod.QueryFunction() {
+	case DocQueryFunctionFind:
+		cmd = append(
+			bson.D{{"find", collection.Name()}},
+			findOptions...,
+		)
+	case DocQueryFunctionAggregate:
+		cmd = append(
+			bson.D{
+				{"aggregate", collection.Name()},
+				{"cursor", bson.D{}},
+			},
+			aggOptions...,
+		)
+	}
+
 	if verifier.readPreference.Mode() != readpref.PrimaryMode {
 		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
 		if startAtTs != nil {
+			readConcern := bson.D{
+				{"afterClusterTime", *startAtTs},
+			}
 
 			// We never want to read before the change stream start time,
 			// or for the last generation, the change stream end time.
-			findOptions = append(
-				findOptions,
-				bson.E{"readConcern", bson.D{
-					{"afterClusterTime", *startAtTs},
-				}},
+			cmd = append(
+				cmd,
+				bson.E{"readConcern", readConcern},
 			)
 		}
 	}
-	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
 
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
 	if !task.IsRecheck() {
 		verifier.logger.Debug().
 			Any("task", task.PrimaryKey).
-			Str("findCmd", fmt.Sprintf("%s", findCmd)).
+			Str("cmd", fmt.Sprintf("%s", cmd)).
 			Str("options", fmt.Sprintf("%v", *runCommandOptions)).
-			Msg("getDocuments findCmd.")
+			Msg("getDocuments command.")
 	}
 
-	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
+	return collection.Database().RunCommandCursor(ctx, cmd, runCommandOptions)
 }
 
 func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
@@ -525,7 +596,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 		return nil, err
 	}
 	if mismatch == nil {
-		if verifier.ignoreBSONFieldOrder {
+		if verifier.docCompareMethod.ShouldIgnoreFieldOrder() {
 			return nil, nil
 		}
 		dataSize := len(srcClientDoc)

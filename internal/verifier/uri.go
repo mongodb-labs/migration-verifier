@@ -39,7 +39,49 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 		}
 	}
 
+	if !isVersionSupported(clusterInfo.VersionArray) {
+		return errors.Errorf("unsupported source version: %v", clusterInfo.VersionArray)
+	}
+
+	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
+		if !canCompareDocsViaToHashedIndexKey(clusterInfo.VersionArray) {
+			return errors.Errorf("document comparison mode %#q doesn’t work on source version %v", DocCompareToHashedIndexKey, clusterInfo.VersionArray)
+		}
+	}
+
 	return checkURIAgainstServerVersion(uri, clusterInfo)
+}
+
+func canCompareDocsViaToHashedIndexKey(
+	version []int,
+) bool {
+	if version[0] >= 8 {
+		return true
+	}
+
+	switch version[0] {
+	case 7:
+		return version[2] >= 6
+	case 6:
+		return version[2] >= 14
+	case 5:
+		return version[2] >= 25
+	case 4:
+		return version[1] == 4 && version[2] >= 29
+	default:
+		return false
+	}
+}
+
+func isVersionSupported(version []int) bool {
+	if version[0] >= 5 {
+		return true
+	}
+	if version[0] < 4 {
+		return false
+	}
+
+	return version[1] >= 2
 }
 
 func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
@@ -53,6 +95,16 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.dstClient)
 	if err != nil {
 		return errors.Wrap(err, "failed to read destination build info")
+	}
+
+	if !isVersionSupported(clusterInfo.VersionArray) {
+		return errors.Errorf("unsupported destination version: %v", clusterInfo.VersionArray)
+	}
+
+	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
+		if !canCompareDocsViaToHashedIndexKey(clusterInfo.VersionArray) {
+			return errors.Errorf("document comparison mode %#q doesn’t work on destination version %v", DocCompareToHashedIndexKey, clusterInfo.VersionArray)
+		}
 	}
 
 	verifier.dstClusterInfo = &clusterInfo

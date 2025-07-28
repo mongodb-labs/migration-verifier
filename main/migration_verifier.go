@@ -30,7 +30,7 @@ const (
 	srcNamespace          = "srcNamespace"
 	dstNamespace          = "dstNamespace"
 	metaDBName            = "metaDBName"
-	ignoreFieldOrder      = "ignoreFieldOrder"
+	docCompareMethod      = "docCompareMethod"
 	verifyAll             = "verifyAll"
 	startClean            = "clean"
 	readPreference        = "readPreference"
@@ -119,9 +119,10 @@ func main() {
 			Value: "migration_verification_metadata",
 			Usage: "`name` of the database in which to store verification metadata",
 		}),
-		altsrc.NewBoolFlag(cli.BoolFlag{
-			Name:  ignoreFieldOrder,
-			Usage: "Whether or not field order is ignored in documents",
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  docCompareMethod,
+			Usage: "Method to compare documents",
+			Value: string(verifier.DocCompareBinary),
 		}),
 		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  verifyAll,
@@ -285,7 +286,13 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		v.SetNamespaceMap()
 	}
 	v.SetMetaDBName(cCtx.String(metaDBName))
-	v.SetIgnoreBSONFieldOrder(cCtx.Bool(ignoreFieldOrder))
+
+	docCompareMethod := verifier.DocCompareMethod(cCtx.String(docCompareMethod))
+	if !verifier.DocCompareMethods.Contains(docCompareMethod) {
+		return nil, errors.Errorf("invalid doc compare method (%s); valid value are: %v", docCompareMethod, verifier.DocCompareMethods.ToSlice())
+	}
+	v.SetDocCompareMethod(docCompareMethod)
+
 	err = v.SetReadPreference(cCtx.String(readPreference))
 	if err != nil {
 		return nil, err
