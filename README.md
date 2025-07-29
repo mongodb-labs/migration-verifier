@@ -131,7 +131,7 @@ The verifier will now check to completion to make sure that there are no inconsi
 | `--srcNamespace <namespaces>`           | source namespaces to check                                                                                                                                                                  |
 | `--dstNamespace <namespaces>`           | destination namespaces to check                                                                                                                                                             |
 | `--metaDBName <name>`                   | name of the database in which to store verification metadata (default: "migration_verification_metadata")                                                                                   |
-| `--ignoreFieldOrder`                    | Whether or not field order is ignored in documents                                                                                                                                          |
+| `--docCompareMethod`                    | How to compare documents. See below for details.                                                                                                                                        |
 | `--verifyAll`                           | If set, verify all user namespaces                                                                                                                                                          |
 | `--clean`                               | If set, drop all previous verification metadata before starting                                                                                                                             |
 | `--readPreference <value>`              | Read preference for reading data from clusters. May be 'primary', 'secondary', 'primaryPreferred', 'secondaryPreferred', or 'nearest' (default: "primary")                                  |
@@ -311,6 +311,38 @@ The migration-verifier periodically persists its change stream’s resume token 
 The migration-verifier optimizes for the case where a migration’s initial sync is completed **and** change events are relatively infrequent. If you start verification before initial sync finishes, or if the source cluster is too busy, the verification may freeze.
 
 The migration-verifier is also rather resource-hungry. To mitigate this, try limiting its number of workers (i.e., `--numWorkers`), its partition size (`--partitionSizeMB`), and/or its process group’s resource limits (see the `ulimit` command in POSIX OSes).
+
+# Document comparison methods
+
+## `binary`
+
+The default. This establishes full binary equivalence, including field order and all types.
+
+## `ignoreFieldOrder`
+
+Like `binary` but ignores the ordering of fields. Incurs extra overhead on this host.
+
+## `toHashedIndexKey`
+
+Compares document hashes (and lengths) rather than full documents. This dramatically shrinks the data sent to migration-verifier, which can dramatically shorten verification time.
+
+It carries a few downsides, though:
+
+### Lost precision
+
+This method ignores certain type changes if the underlying value remains the same. For example, if a Long changes to a Double, and the two values are identical, `toHashedIndexKey` will not notice the discrepancy.
+
+The discrepancy _will_, though, usually be seen if the BSON types are of different lengths. For example, if a Long changes to Decimal, `toHashedIndexKey` will notice that.
+
+If, however, _multiple_ numeric type changes happen, then `toHashedIndexKey` will only notice the discrepancy if the total document length changes. For example, if an Int changes to a Long, but elsewhere a Long changes to an Int, that will evade notice.
+
+The above are all, of course, **highly** unlikely in real-world migrations.
+
+### Lost reporting
+
+Full-document verification methods allow migration-verifier to diagnose mismatches, e.g., by identifying specific changed fields. The only such detail that `toHashedIndexKey` can discern, though, is a change in document length.
+
+Additionally, because the amount of data sent to migration-verifier doesn’t actually reflect the documents’ size, no meaningful statistics are shown concerning the collection data size. Document counts, of course, are still shown.
 
 # Known Issues
 

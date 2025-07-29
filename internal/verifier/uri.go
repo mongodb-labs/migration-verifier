@@ -49,7 +49,32 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 		}
 	}
 
+	verifier.maybeSuggestHashedComparisonOptimization()
+
 	return checkURIAgainstServerVersion(uri, clusterInfo)
+}
+
+func (verifier *Verifier) maybeSuggestHashedComparisonOptimization() {
+	if verifier.srcClusterInfo == nil || verifier.dstClusterInfo == nil {
+		// We’re not ready yet.
+		return
+	}
+
+	if verifier.docCompareMethod != DocCompareDefault {
+		// User already gave a non-default comparison method.
+		return
+	}
+
+	if !canCompareDocsViaToHashedIndexKey(verifier.srcClusterInfo.VersionArray) {
+		return
+	}
+
+	if !canCompareDocsViaToHashedIndexKey(verifier.dstClusterInfo.VersionArray) {
+		return
+	}
+
+	verifier.logger.Info().
+		Msg("Source & destination cluster seem recent enough to use hashed document comparison, which dramatically accelerates verification. See README for details.")
 }
 
 func canCompareDocsViaToHashedIndexKey(

@@ -523,19 +523,19 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 					aggOptions[i].Value = append(
 						aggOptions[i].Value.(mongo.Pipeline),
 						bson.D{
-							{"$replaceWith", append(
-								replacementDoc,
-								bson.E{"docHash", bson.D{
+							{"$replaceWith", bson.D{
+								{"k", replacementDoc},
+								{"h", bson.D{
 									{"$toHashedIndexKey", bson.D{
 										{"$_internalKeyStringValue", bson.D{
 											{"input", "$$ROOT"},
 										}},
 									}},
 								}},
-								bson.E{"docLen", bson.D{
+								{"l", bson.D{
 									{"$bsonSize", "$$ROOT"},
 								}},
-							)},
+							}},
 						},
 					)
 				}

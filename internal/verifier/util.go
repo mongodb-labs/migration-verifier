@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
@@ -93,6 +94,10 @@ type QueryFilter struct {
 }
 
 func (qf QueryFilter) GetDocKeyFields() []string {
+	if len(qf.ShardKeys) > 0 && qf.ShardKeys[0] == "_id" {
+		return slices.Clone(qf.ShardKeys)
+	}
+
 	return append(
 		[]string{"_id"},
 		qf.ShardKeys...,
