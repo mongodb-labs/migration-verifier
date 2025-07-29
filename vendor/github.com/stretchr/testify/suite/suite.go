@@ -22,13 +22,9 @@ var matchMethod = flag.String("testify.m", "", "regular expression to select tes
 // retrieving the current *testing.T context.
 type Suite struct {
 	*assert.Assertions
-
 	mu      sync.RWMutex
 	require *require.Assertions
 	t       *testing.T
-
-	// Parent suite to have access to the implemented methods of parent struct
-	s TestingSuite
 }
 
 // T retrieves the current *testing.T context.
@@ -47,18 +43,12 @@ func (suite *Suite) SetT(t *testing.T) {
 	suite.require = require.New(t)
 }
 
-// SetS needs to set the current test suite as parent
-// to get access to the parent methods
-func (suite *Suite) SetS(s TestingSuite) {
-	suite.s = s
-}
-
 // Require returns a require context for suite.
 func (suite *Suite) Require() *require.Assertions {
 	suite.mu.Lock()
 	defer suite.mu.Unlock()
 	if suite.require == nil {
-		panic("'Require' must not be called before 'Run' or 'SetT'")
+		suite.require = require.New(suite.T())
 	}
 	return suite.require
 }
@@ -72,19 +62,17 @@ func (suite *Suite) Assert() *assert.Assertions {
 	suite.mu.Lock()
 	defer suite.mu.Unlock()
 	if suite.Assertions == nil {
-		panic("'Assert' must not be called before 'Run' or 'SetT'")
+		suite.Assertions = assert.New(suite.T())
 	}
 	return suite.Assertions
 }
 
 func recoverAndFailOnPanic(t *testing.T) {
-	t.Helper()
 	r := recover()
 	failOnPanic(t, r)
 }
 
 func failOnPanic(t *testing.T, r interface{}) {
-	t.Helper()
 	if r != nil {
 		t.Errorf("test panicked: %v\n%s", r, debug.Stack())
 		t.FailNow()
@@ -97,21 +85,9 @@ func failOnPanic(t *testing.T, r interface{}) {
 // Provides compatibility with go test pkg -run TestSuite/TestName/SubTestName.
 func (suite *Suite) Run(name string, subtest func()) bool {
 	oldT := suite.T()
-
+	defer suite.SetT(oldT)
 	return oldT.Run(name, func(t *testing.T) {
 		suite.SetT(t)
-		defer suite.SetT(oldT)
-
-		defer recoverAndFailOnPanic(t)
-
-		if setupSubTest, ok := suite.s.(SetupSubTest); ok {
-			setupSubTest.SetupSubTest()
-		}
-
-		if tearDownSubTest, ok := suite.s.(TearDownSubTest); ok {
-			defer tearDownSubTest.TearDownSubTest()
-		}
-
 		subtest()
 	})
 }
@@ -122,7 +98,6 @@ func Run(t *testing.T, suite TestingSuite) {
 	defer recoverAndFailOnPanic(t)
 
 	suite.SetT(t)
-	suite.SetS(suite)
 
 	var suiteSetupDone bool
 
@@ -167,8 +142,6 @@ func Run(t *testing.T, suite TestingSuite) {
 				suite.SetT(t)
 				defer recoverAndFailOnPanic(t)
 				defer func() {
-					t.Helper()
-
 					r := recover()
 
 					if stats != nil {
