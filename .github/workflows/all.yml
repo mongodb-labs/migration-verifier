@@ -115,7 +115,7 @@ jobs:
           MVTEST_META: mongodb://localhost:27040
 
       - name: Test with toHashedIndexKey comparison
-        if: ${{matrix.mongodb_versions[0] >= 4.4 && matrix.mongodb_versions[1] >= 4.4}}
+        if: ${{!startsWith(matrix.mongodb_versions[0],'4.2') && !startsWith(matrix.mongodb_versions[1],'4.2')}}
         run: go test -v ./... -race
         env:
           MVTEST_DOC_COMPARISON_METHOD: toHashedIndexKey
