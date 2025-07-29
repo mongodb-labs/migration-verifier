@@ -304,34 +304,43 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		)
 	}
 
-	if totalBytes > 0 {
-		dataUnit := reportutils.FindBestUnit(totalBytes)
+	showDataTotals := verifier.docCompareMethod.ComparesFullDocuments()
 
-		fmt.Fprintf(
-			strBuilder,
-			"Total size of those documents: %s of %s %s (%s%%, %s %s/sec)\n",
-			reportutils.BytesToUnit(comparedBytes, dataUnit),
-			reportutils.BytesToUnit(totalBytes, dataUnit),
-			dataUnit,
-			reportutils.FmtPercent(comparedBytes, totalBytes),
-			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
-			perSecondDataUnit,
-		)
-	} else {
-		dataUnit := reportutils.FindBestUnit(comparedBytes)
+	if showDataTotals {
+		if totalBytes > 0 {
+			dataUnit := reportutils.FindBestUnit(totalBytes)
 
-		fmt.Fprintf(
-			strBuilder,
-			"Total size of those documents: %s %s (%s %s/sec)\n",
-			reportutils.BytesToUnit(comparedBytes, dataUnit),
-			dataUnit,
-			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
-			perSecondDataUnit,
-		)
+			fmt.Fprintf(
+				strBuilder,
+				"Total size of those documents: %s of %s %s (%s%%, %s %s/sec)\n",
+				reportutils.BytesToUnit(comparedBytes, dataUnit),
+				reportutils.BytesToUnit(totalBytes, dataUnit),
+				dataUnit,
+				reportutils.FmtPercent(comparedBytes, totalBytes),
+				reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
+				perSecondDataUnit,
+			)
+		} else {
+			dataUnit := reportutils.FindBestUnit(comparedBytes)
+
+			fmt.Fprintf(
+				strBuilder,
+				"Total size of those documents: %s %s (%s %s/sec)\n",
+				reportutils.BytesToUnit(comparedBytes, dataUnit),
+				dataUnit,
+				reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
+				perSecondDataUnit,
+			)
+		}
 	}
 
 	table := tablewriter.NewWriter(strBuilder)
-	table.SetHeader([]string{"Src Namespace", "Src Docs Compared", "Src Data Compared"})
+
+	headers := []string{"Src Namespace", "Src Docs Compared"}
+	if showDataTotals {
+		headers = append(headers, "Src Data Compared")
+	}
+	table.SetHeader(headers)
 
 	tableHasRows := false
 
@@ -342,8 +351,9 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 
 		tableHasRows = true
 
+		row := []string{result.Namespace}
+
 		var docsCell string
-		var dataCell string
 
 		if result.TotalDocs > 0 {
 			docsCell = fmt.Sprintf("%s of %s (%s%%)",
@@ -355,25 +365,33 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 			docsCell = reportutils.FmtReal(result.DocsCompared)
 		}
 
-		if result.TotalBytes > 0 {
-			dataUnit := reportutils.FindBestUnit(result.TotalBytes)
+		row = append(row, docsCell)
 
-			dataCell = fmt.Sprintf("%s of %s %s (%s%%)",
-				reportutils.BytesToUnit(result.BytesCompared, dataUnit),
-				reportutils.BytesToUnit(result.TotalBytes, dataUnit),
-				dataUnit,
-				reportutils.FmtPercent(result.BytesCompared, result.TotalBytes),
-			)
-		} else {
-			dataUnit := reportutils.FindBestUnit(result.BytesCompared)
+		if showDataTotals {
+			var dataCell string
 
-			dataCell = fmt.Sprintf("%s %s",
-				reportutils.BytesToUnit(result.BytesCompared, dataUnit),
-				dataUnit,
-			)
+			if result.TotalBytes > 0 {
+				dataUnit := reportutils.FindBestUnit(result.TotalBytes)
+
+				dataCell = fmt.Sprintf("%s of %s %s (%s%%)",
+					reportutils.BytesToUnit(result.BytesCompared, dataUnit),
+					reportutils.BytesToUnit(result.TotalBytes, dataUnit),
+					dataUnit,
+					reportutils.FmtPercent(result.BytesCompared, result.TotalBytes),
+				)
+			} else {
+				dataUnit := reportutils.FindBestUnit(result.BytesCompared)
+
+				dataCell = fmt.Sprintf("%s %s",
+					reportutils.BytesToUnit(result.BytesCompared, dataUnit),
+					dataUnit,
+				)
+			}
+
+			row = append(row, dataCell)
 		}
 
-		table.Append([]string{result.Namespace, docsCell, dataCell})
+		table.Append(row)
 	}
 
 	if tableHasRows {
@@ -432,14 +450,17 @@ func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, st
 		reportutils.FmtReal(comparedDocs),
 		reportutils.FmtReal(docsPerSecond),
 	)
-	fmt.Fprintf(
-		strBuilder,
-		"Total size of those documents: %s %s (%s %s/sec)\n",
-		reportutils.BytesToUnit(comparedBytes, dataUnit),
-		dataUnit,
-		reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
-		perSecondDataUnit,
-	)
+
+	if verifier.docCompareMethod.ComparesFullDocuments() {
+		fmt.Fprintf(
+			strBuilder,
+			"Total size of those documents: %s %s (%s %s/sec)\n",
+			reportutils.BytesToUnit(comparedBytes, dataUnit),
+			dataUnit,
+			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
+			perSecondDataUnit,
+		)
+	}
 
 	return true, nil
 }

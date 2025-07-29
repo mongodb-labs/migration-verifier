@@ -1,6 +1,8 @@
 package verifier
 
-import mapset "github.com/deckarep/golang-set/v2"
+import (
+	mapset "github.com/deckarep/golang-set/v2"
+)
 
 type DocCompareMethod string
 type DocQueryFunction string
@@ -22,6 +24,10 @@ var DocCompareMethods = mapset.NewSet(
 
 func (dcm DocCompareMethod) ShouldIgnoreFieldOrder() bool {
 	return dcm == DocCompareIgnoreOrder
+}
+
+func (dcm DocCompareMethod) ComparesFullDocuments() bool {
+	return dcm == DocCompareBinary || dcm == DocCompareIgnoreOrder
 }
 
 func (dcm DocCompareMethod) QueryFunction() DocQueryFunction {
