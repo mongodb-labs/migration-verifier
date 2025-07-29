@@ -69,7 +69,7 @@ jobs:
 
     name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}${{ matrix.toHashedIndexKey && ', hashed doc comparison' || '' }}
 
-    if: ${{!matrix.mongodb_versions.skipHashed || !matrix.toHashedIndexKey}}
+    if: ${{ ! matrix.mongodb_versions.skipHashed || ! matrix.toHashedIndexKey }}
 
     steps:
       - run: uname -a
