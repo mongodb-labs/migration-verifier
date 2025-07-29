@@ -528,7 +528,6 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 	var bytesCount types.ByteCount
 	var err error
 
-	// Recheck tasks
 	if task.IsRecheck() {
 		var idGroups [][]any
 		idGroups, err = util.SplitArrayByBSONMaxSize(task.Ids, int(verifier.recheckMaxSizeInBytes))

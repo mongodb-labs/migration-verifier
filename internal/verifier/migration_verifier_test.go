@@ -68,6 +68,37 @@ func TestIntegration(t *testing.T) {
 	suite.Run(t, testSuite)
 }
 
+func (suite *IntegrationTestSuite) TestProcessVerifyTask_Failure() {
+	verifier := suite.BuildVerifier()
+	ctx := suite.Context()
+	t := suite.T()
+
+	dbName := suite.DBNameForTest()
+	collName := "coll"
+
+	namespace := dbName + "." + collName
+
+	task := &VerificationTask{
+		PrimaryKey: primitive.NewObjectID(),
+		QueryFilter: QueryFilter{
+			Partition: &partitions.Partition{
+				Key: partitions.PartitionKey{
+					Lower: 123,
+				},
+				Upper: 234,
+			},
+			Namespace: namespace,
+			To:        namespace,
+		},
+	}
+
+	err := verifier.ProcessVerifyTask(ctx, 12, task)
+
+	expectedIDHex := task.PrimaryKey.Hex()
+
+	assert.ErrorContains(t, err, expectedIDHex)
+}
+
 func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
