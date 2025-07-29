@@ -7,13 +7,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-env:
-  SRC_REPLSET: mongodb://localhost:27020,localhost:27021,localhost:27022
-  SRC_SHARDED: mongodb://localhost:27020
-  DST_REPLSET: mongodb://localhost:27030,localhost:27031,localhost:27032
-  DST_SHARDED: mongodb://localhost:27030
-
-
 jobs:
   basics:
     strategy:
@@ -23,47 +16,70 @@ jobs:
 
           # Testing fallback when `hello` isn’t implemented
           # (but appendOplogNote is).
-          - mongodb_versions: { src: '4.2.5', dst: '6.0', skipHashed: true }
+          - mongodb_versions: [ '4.2.5', '6.0' ]
             topology:
               name: replset
+              srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
+              dstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
 
+        exclude:
+          - mongodb_versions: [ '4.2', '4.2' ]
+            toHashedIndexKey: true
+
+          - mongodb_versions: [ '4.2', '4.4' ]
+            toHashedIndexKey: true
+          - mongodb_versions: [ '4.2', '5.0' ]
+            toHashedIndexKey: true
+          - mongodb_versions: [ '4.2', '6.0' ]
+            toHashedIndexKey: true
+
+        # versions are: source, destination
         mongodb_versions:
-        - { src: '4.2', dst: '4.2', skipHashed: true }
-        - { src: '4.2', dst: '4.4', skipHashed: true }
-        - { src: '4.2', dst: '5.0', skipHashed: true }
-        - { src: '4.2', dst: '6.0', skipHashed: true }
+          - [ '4.2', '4.2' ]
+          - [ '4.2', '4.4' ]
+          - [ '4.2', '5.0' ]
+          - [ '4.2', '6.0' ]
 
-        - { src: '4.4', dst: '4.4' }
-        - { src: '4.4', dst: '5.0' }
-        - { src: '4.4', dst: '6.0' }
+          - [ '4.4', '4.4' ]
+          - [ '4.4', '5.0' ]
+          - [ '4.4', '6.0' ]
 
-        - { src: '5.0', dst: '5.0' }
-        - { src: '5.0', dst: '6.0' }
-        - { src: '5.0', dst: '7.0' }
+          - [ '5.0', '5.0' ]
+          - [ '5.0', '6.0' ]
+          - [ '5.0', '7.0' ]
 
-        - { src: '6.0', dst: '6.0' }
-        - { src: '6.0', dst: '7.0' }
-        - { src: '6.0', dst: '8.0' }
+          - [ '6.0', '6.0' ]
+          - [ '6.0', '7.0' ]
+          - [ '6.0', '8.0' ]
 
-        - { src: '7.0', dst: '7.0' }
-        - { src: '7.0', dst: '8.0' }
+          - [ '7.0', '7.0' ]
+          - [ '7.0', '8.0' ]
 
-        - { src: '8.0', dst: '8.0' }
+          - [ '8.0', '8.0' ]
 
         toHashedIndexKey: [true, false]
 
         topology:
           - name: replset
+            srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
+            dstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
 
           - name: replset-to-sharded
+            dstArgs: --sharded 2
+            srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
+            dstConnStr: mongodb://localhost:27030
 
           - name: sharded
+            srcArgs: --sharded 2
+            dstArgs: --sharded 2
+            srcConnStr: mongodb://localhost:27020
+            dstConnStr: mongodb://localhost:27030
 
     # Ubuntu 24 lacks OpenSSL 1.1.1’s libcrypto, which pre-v6 MongoDB
     # versions need.
     runs-on: ubuntu-22.04
 
-    name: ${{ matrix.mongodb_versions.src }} to ${{ matrix.mongodb_versions.dst }}, ${{ matrix.topology.name }}${{ matrix.toHashedIndexKey && ', hashed doc comparison' || '' }}
+    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}${{ matrix.toHashedIndexKey && ', hashed doc compare' || '' }}
 
     steps:
       - run: uname -a
@@ -85,11 +101,11 @@ jobs:
                 echo pipx install 'mtools[all]'
             } | parallel
 
-      - name: Install MongoDB ${{ matrix.mongodb_versions.src }} (source)
-        run: yes | m ${{ matrix.mongodb_versions.src }} && dirname $(readlink $(which mongod)) > .srcpath
+      - name: Install MongoDB ${{ matrix.mongodb_versions[0] }} (source)
+        run: yes | m ${{ matrix.mongodb_versions[0] }} && dirname $(readlink $(which mongod)) > .srcpath
 
-      - name: Install MongoDB ${{ matrix.mongodb_versions.dst }} (destination)
-        run: yes | m ${{ matrix.mongodb_versions.dst }} && dirname $(readlink $(which mongod)) > .dstpath
+      - name: Install MongoDB ${{ matrix.mongodb_versions[1] }} (destination)
+        run: yes | m ${{ matrix.mongodb_versions[1] }} && dirname $(readlink $(which mongod)) > .dstpath
 
       - name: Install latest stable MongoDB (metadata)
         run: yes | m stable && dirname $(readlink $(which mongod)) > .metapath
@@ -98,8 +114,8 @@ jobs:
         run: |-
             {
                 echo ./build.sh
-                echo mlaunch init --binarypath $(cat .srcpath) --port 27020 --dir src --replicaset ${{ matrix.topology.name == 'sharded' && '--sharded 2' || '' }}
-                echo mlaunch init --binarypath $(cat .dstpath) --port 27030 --dir dst --replicaset ${{ (matrix.topology.name == 'replset-to-sharded' || matrix.topology.name == 'sharded') && '--sharded 2' || '' }}
+                echo mlaunch init --binarypath $(cat .srcpath) --port 27020 --dir src --replicaset ${{ matrix.topology.srcArgs }}
+                echo mlaunch init --binarypath $(cat .dstpath) --port 27030 --dir dst --replicaset ${{ matrix.topology.dstArgs }}
                 echo mlaunch init --binarypath $(cat .metapath) --port 27040 --dir meta --replicaset --nodes 1
             } | parallel
 
@@ -107,6 +123,6 @@ jobs:
         run: go test -v ./... -race
         env:
           MVTEST_DOC_COMPARISON_METHOD: ${{matrix.toHashedIndexKey && 'toHashedIndexKey' || ''}}
-          MVTEST_SRC: ${{ (matrix.toplogy.name == 'replset' || matrix.topology.name == 'replset-to-sharded') && env.SRC_REPLSET || matrix.topology.name == 'sharded' && env.SRC_REPLSET || 'unknown' }}
-          MVTEST_DST: ${{ matrix.toplogy.name == 'replset' && env.DST_REPLSET || (matrix.topology.name == 'replset-to-sharded' || matrix.topology.name == 'sharded') && env.DST_SHARDED || 'unknown' }}
+          MVTEST_SRC: ${{matrix.topology.srcConnStr}}
+          MVTEST_DST: ${{matrix.topology.dstConnStr}}
           MVTEST_META: mongodb://localhost:27040
