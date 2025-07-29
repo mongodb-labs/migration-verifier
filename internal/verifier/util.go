@@ -92,6 +92,13 @@ type QueryFilter struct {
 	To        string `bson:"to,omitempty" json:"to,omitempty"`
 }
 
+func (qf QueryFilter) GetDocKeyFields() []string {
+	return append(
+		[]string{"_id"},
+		qf.ShardKeys...,
+	)
+}
+
 func (verifier *Verifier) doInMetaTransaction(
 	ctx context.Context,
 	todo func(context.Context, mongo.SessionContext) error,

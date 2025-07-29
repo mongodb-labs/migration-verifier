@@ -14,6 +14,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -105,9 +106,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	var srcDocCount types.DocumentCount
 	var srcByteCount types.ByteCount
 
-	mapKeyFieldNames := make([]string, 1+len(task.QueryFilter.ShardKeys))
-	mapKeyFieldNames[0] = "_id"
-	copy(mapKeyFieldNames[1:], task.QueryFilter.ShardKeys)
+	mapKeyFieldNames := task.QueryFilter.GetDocKeyFields()
 
 	namespace := task.QueryFilter.Namespace
 
@@ -512,22 +511,31 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 						continue
 					}
 
+					replacementDoc := bson.D(lo.Map(
+						task.QueryFilter.GetDocKeyFields(),
+						func(f string, _ int) bson.E {
+							// NB: This is OK because shard key fields
+							// can’t contain fields with dots.
+							return bson.E{f, "$$ROOT." + f}
+						},
+					))
+
 					aggOptions[i].Value = append(
 						aggOptions[i].Value.(mongo.Pipeline),
 						bson.D{
-							{"$replaceWith", bson.D{
-								{"_id", "$$ROOT._id"},
-								{"docHash", bson.D{
+							{"$replaceWith", append(
+								replacementDoc,
+								bson.E{"docHash", bson.D{
 									{"$toHashedIndexKey", bson.D{
 										{"$_internalKeyStringValue", bson.D{
 											{"input", "$$ROOT"},
 										}},
 									}},
 								}},
-								{"docLen", bson.D{
+								bson.E{"docLen", bson.D{
 									{"$bsonSize", "$$ROOT"},
 								}},
-							}},
+							)},
 						},
 					)
 				}
@@ -574,9 +582,16 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
 	if !task.IsRecheck() {
+
+		extJSON, _ := bson.MarshalExtJSON(cmd, true, false)
+
 		verifier.logger.Debug().
 			Any("task", task.PrimaryKey).
-			Str("cmd", fmt.Sprintf("%s", cmd)).
+			Str("cmd", lo.Ternary(
+				extJSON == nil,
+				fmt.Sprintf("%s", cmd),
+				string(extJSON),
+			)).
 			Str("options", fmt.Sprintf("%v", *runCommandOptions)).
 			Msg("getDocuments command.")
 	}
