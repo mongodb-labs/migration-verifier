@@ -511,8 +511,11 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 						continue
 					}
 
-					replacementDoc := bson.D(lo.Map(
-						task.QueryFilter.GetDocKeyFields(),
+					extraShardKeyFields := bson.D(lo.Map(
+						lo.Without(
+							task.QueryFilter.GetDocKeyFields(),
+							"_id",
+						),
 						func(f string, _ int) bson.E {
 							// NB: This is OK because shard key fields
 							// can’t contain fields with dots.
@@ -524,7 +527,8 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 						aggOptions[i].Value.(mongo.Pipeline),
 						bson.D{
 							{"$replaceWith", bson.D{
-								{"k", replacementDoc},
+								{"_id", "$$ROOT._id"},
+								{"k", extraShardKeyFields},
 								{"h", bson.D{
 									{"$toHashedIndexKey", bson.D{
 										{"$_internalKeyStringValue", bson.D{
