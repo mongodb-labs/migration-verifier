@@ -488,7 +488,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 			}
 		case DocQueryFunctionAggregate:
 			aggOptions = bson.D{
-				{"pipeline", bson.D{{"$match", filter}}},
+				{"pipeline", mongo.Pipeline{{{"$match", filter}}}},
 			}
 		default:
 			panic("bad doc compare query func: " + verifier.docCompareMethod.QueryFunction())
@@ -582,7 +582,6 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
 	if !task.IsRecheck() {
-
 		extJSON, _ := bson.MarshalExtJSON(cmd, true, false)
 
 		verifier.logger.Debug().

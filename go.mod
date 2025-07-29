@@ -15,7 +15,7 @@ require (
 	github.com/rs/zerolog v1.34.0
 	github.com/samber/lo v1.47.0
 	github.com/samber/mo v1.13.0
-	github.com/stretchr/testify v1.8.0
+	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli v1.22.9
 	go.mongodb.org/mongo-driver v1.17.1
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
