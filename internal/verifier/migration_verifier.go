@@ -528,9 +528,9 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 	var bytesCount types.ByteCount
 	var err error
 
-	// Recheck tasks
 	if task.IsRecheck() {
-		idGroups, err := util.SplitArrayByBSONMaxSize(task.Ids, int(verifier.recheckMaxSizeInBytes))
+		var idGroups [][]any
+		idGroups, err = util.SplitArrayByBSONMaxSize(task.Ids, int(verifier.recheckMaxSizeInBytes))
 		if err != nil {
 			return errors.Wrapf(err, "failed to split recheck task %v document IDs", task.PrimaryKey)
 		}
