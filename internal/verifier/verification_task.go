@@ -291,8 +291,6 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 		verifier.generation,
 	).Run(ctx, verifier.logger)
 
-	fmt.Printf("==== FindNextVerifyTaskAndUpdate err: %v\n\n", err)
-
 	return option.FromPointer(task), err
 }
 

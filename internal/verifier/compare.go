@@ -603,7 +603,16 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 	if match {
 		return nil, nil
 	}
-	//verifier.logger.Info().Msg("Byte comparison failed for id %s, falling back to field comparison", id)
+
+	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
+		// With hash comparison, mismatches are opaque.
+		return []VerificationResult{{
+			ID:        srcClientDoc.Lookup("_id"),
+			Details:   Mismatch,
+			Cluster:   ClusterTarget,
+			NameSpace: namespace,
+		}}, nil
+	}
 
 	mismatch, err := BsonUnorderedCompareRawDocumentWithDetails(srcClientDoc, dstClientDoc)
 	if err != nil {
@@ -613,10 +622,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 		if verifier.docCompareMethod.ShouldIgnoreFieldOrder() {
 			return nil, nil
 		}
-		dataSize := len(srcClientDoc)
-		if dataSize < len(dstClientDoc) {
-			dataSize = len(dstClientDoc)
-		}
+		dataSize := max(len(srcClientDoc), len(dstClientDoc))
 
 		// If we're respecting field order we have just done a binary compare so we have fields in different order.
 		return []VerificationResult{{
