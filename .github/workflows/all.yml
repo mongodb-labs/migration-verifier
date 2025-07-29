@@ -113,3 +113,12 @@ jobs:
           MVTEST_SRC: ${{matrix.topology.srcConnStr}}
           MVTEST_DST: ${{matrix.topology.dstConnStr}}
           MVTEST_META: mongodb://localhost:27040
+
+      - name: Test with toHashedIndexKey comparison
+        if: ${{matrix.mongodb_versions[0] >= 4.4 && matrix.mongodb_versions[1] >= 4.4}}
+        run: go test -v ./... -race
+        env:
+          MVTEST_DOC_COMPARISON_METHOD: toHashedIndexKey
+          MVTEST_SRC: ${{matrix.topology.srcConnStr}}
+          MVTEST_DST: ${{matrix.topology.dstConnStr}}
+          MVTEST_META: mongodb://localhost:27040

@@ -14,6 +14,8 @@ const (
 
 	DocQueryFunctionFind      DocQueryFunction = "find"
 	DocQueryFunctionAggregate DocQueryFunction = "aggregate"
+
+	DocCompareDefault = DocCompareBinary
 )
 
 var DocCompareMethods = mapset.NewSet(

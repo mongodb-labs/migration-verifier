@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
 
@@ -166,7 +167,14 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 
 	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
 
-	verifier.SetDocCompareMethod(DocCompareToHashedIndexKey)
+	docCompareMethod := DocCompareDefault
+	envDocCompareMethod := os.Getenv("MVTEST_DOC_COMPARISON_METHOD")
+	if envDocCompareMethod != "" {
+		docCompareMethod = DocCompareMethod(envDocCompareMethod)
+
+		// Forgo validation because the tested code should do that.
+	}
+	verifier.SetDocCompareMethod(docCompareMethod)
 
 	ctx := suite.Context()
 
