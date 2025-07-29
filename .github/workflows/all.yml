@@ -67,7 +67,7 @@ jobs:
     # versions need.
     runs-on: ubuntu-22.04
 
-    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}${{matrix.toHashedIndexKey ? ', hashed doc comparison' : ''}}
+    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}${{ matrix.toHashedIndexKey && ", hashed doc comparison" || "" }}
 
     if: ${{!matrix.mongodb_versions.skipHashed || !matrix.toHashedIndexKey}}
 
@@ -112,7 +112,7 @@ jobs:
       - name: Test
         run: go test -v ./... -race
         env:
-          MVTEST_DOC_COMPARISON_METHOD: ${{matrix.toHashedIndexKey ? 'toHashedIndexKey' : ''}}
+          MVTEST_DOC_COMPARISON_METHOD: ${{matrix.toHashedIndexKey && 'toHashedIndexKey' || ''}}
           MVTEST_SRC: ${{matrix.topology.srcConnStr}}
           MVTEST_DST: ${{matrix.topology.dstConnStr}}
           MVTEST_META: mongodb://localhost:27040
