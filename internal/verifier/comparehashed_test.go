@@ -9,7 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// TestCompare_HighFloats_Hashed ensures that $toHashedIndexKey-based
+// TestCompare_Hashed ensures that $toHashedIndexKey-based
 // verification detects certain mismatches.
 func (suite *IntegrationTestSuite) TestCompare_Hashed() {
 	ctx := suite.Context()
@@ -22,12 +22,19 @@ func (suite *IntegrationTestSuite) TestCompare_Hashed() {
 		srcVal any
 		dstVal any
 	}{
+		// Plain $toHashedIndexKey treats these the same; the code uses
+		// $_internalKeyStringValue to disambiguate them.
 		{"high float", math.Pow(2, 70), math.Pow(2, 71)},
-		{"int vs long", int32(42), int64(42)},
-		{"int vs double", int32(42), float64(42)},
-		{"int vs decimal128", int32(42), decimal128_42},
-		{"long vs decimal128", int64(42), decimal128_42},
-		{"double vs decimal128", float64(42), decimal128_42},
+
+		// Again, plain $toHashedIndexKey yields the same hash from all
+		// of these values. These we can disambiguate by checking the
+		// document length. (That, of course, won’t catch long-vs.-double
+		// since those are same-length types.)
+		{"int to long", int32(42), int64(42)},
+		{"int to double", int32(42), float64(42)},
+		{"int to decimal128", int32(42), decimal128_42},
+		{"long to decimal128", int64(42), decimal128_42},
+		{"double to decimal128", float64(42), decimal128_42},
 	}
 
 	for _, curCase := range cases {
