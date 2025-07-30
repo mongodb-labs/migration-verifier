@@ -505,45 +505,74 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 		case DocQueryFunctionAggregate:
 			aggOptions = pqp.ToAggOptions()
 
-			if verifier.docCompareMethod == DocCompareToHashedIndexKey {
-				for i, el := range aggOptions {
-					if el.Key != "pipeline" {
-						continue
-					}
+			if verifier.docCompareMethod != DocCompareToHashedIndexKey {
+				panic("unknown aggregate compare method: " + verifier.docCompareMethod)
+			}
 
-					replacementDoc := bson.D(lo.Map(
+			// This pipeline converts each document to just its shard key fields
+			// and “.h” and “.l” for hash & length, respectively.
+			//
+			// This way the verifier’s logic for indexing based on shard key
+			// fields works without modification for hash-based comparison.
+			addDotPipeline := mongo.Pipeline{
+				{{"$replaceWith", append(
+					lo.Map(
 						task.QueryFilter.GetDocKeyFields(),
 						func(f string, _ int) bson.E {
-							// NB: This is OK because shard key fields
-							// can’t contain fields with dots.
-							return bson.E{f, "$$ROOT." + f}
+							return bson.E{"_" + f, "$$ROOT." + f}
 						},
-					))
-
-					aggOptions[i].Value = append(
-						aggOptions[i].Value.(mongo.Pipeline),
-						bson.D{
-							{"$replaceWith", append(
-								replacementDoc,
-
-								// Shard-key fields cannot contain dots,
-								// so we can use those to differentiate
-								// our special fields here:
-								bson.E{".h", bson.D{
-									{"$toHashedIndexKey", bson.D{
-										{"$_internalKeyStringValue", bson.D{
-											{"input", "$$ROOT"},
-										}},
-									}},
-								}},
-								bson.E{".len", bson.D{
-									{"$bsonSize", "$$ROOT"},
-								}},
-							)},
+					),
+					bson.E{"hash", bson.D{
+						{"$toHashedIndexKey", bson.D{
+							{"$_internalKeyStringValue", bson.D{
+								{"input", "$$ROOT"},
+							}},
+						}},
+					}},
+					bson.E{"length", bson.D{{"$bsonSize", "$$ROOT"}}},
+				)}},
+				{{"$replaceWith", bson.D{
+					{"$setField", bson.D{
+						{"field", bson.D{{"$literal", ".h"}}},
+						{"input", "$$ROOT"},
+						{"value", "$hash"},
+					}},
+				}}},
+				{{"$replaceWith", bson.D{
+					{"$setField", bson.D{
+						{"field", bson.D{{"$literal", ".l"}}},
+						{"input", "$$ROOT"},
+						{"value", "$length"},
+					}},
+				}}},
+				{{"$set", append(
+					lo.Flatten(lo.Map(
+						task.QueryFilter.GetDocKeyFields(),
+						func(f string, _ int) []bson.E {
+							return []bson.E{
+								{f, "$_" + f},
+								{"_" + f, "$$REMOVE"},
+							}
 						},
-					)
-				}
+					)),
+					bson.E{"hash", "$$REMOVE"},
+					bson.E{"length", "$$REMOVE"},
+				)}},
 			}
+
+			for i, el := range aggOptions {
+				if el.Key != "pipeline" {
+					continue
+				}
+
+				aggOptions[i].Value = append(
+					aggOptions[i].Value.(mongo.Pipeline),
+					addDotPipeline...,
+				)
+
+				break
+			}
+
 		default:
 			panic("bad doc compare query func: " + verifier.docCompareMethod.QueryFunction())
 		}
