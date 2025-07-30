@@ -119,7 +119,17 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// b) compares the new doc against its previously-received, cached
 	//    counterpart and records any mismatch.
 	handleNewDoc := func(curDocWithTs docWithTs, isSrc bool) error {
-		mapKey := getMapKey(curDocWithTs.doc, mapKeyFieldNames)
+		docKeyDoc := curDocWithTs.doc
+
+		switch verifier.docCompareMethod {
+		case DocCompareBinary, DocCompareIgnoreOrder:
+			// nothing
+		case DocCompareToHashedIndexKey:
+			docKeyDoc = docKeyDoc.Lookup("docKey").Document()
+		default:
+			panic("bad docCompareMethod: " + verifier.docCompareMethod)
+		}
+		mapKey := getMapKey(docKeyDoc, mapKeyFieldNames)
 
 		var ourMap, theirMap map[string]docWithTs
 
@@ -509,57 +519,6 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 				panic("unknown aggregate compare method: " + verifier.docCompareMethod)
 			}
 
-			// This pipeline converts each document to just its shard key fields
-			// and “.h” and “.l” for hash & length, respectively.
-			//
-			// This way the verifier’s logic for indexing based on shard key
-			// fields works without modification for hash-based comparison.
-			addDotPipeline := mongo.Pipeline{
-				{{"$replaceWith", append(
-					lo.Map(
-						task.QueryFilter.GetDocKeyFields(),
-						func(f string, _ int) bson.E {
-							return bson.E{"_" + f, "$$ROOT." + f}
-						},
-					),
-					bson.E{"hash", bson.D{
-						{"$toHashedIndexKey", bson.D{
-							{"$_internalKeyStringValue", bson.D{
-								{"input", "$$ROOT"},
-							}},
-						}},
-					}},
-					bson.E{"length", bson.D{{"$bsonSize", "$$ROOT"}}},
-				)}},
-				{{"$replaceWith", bson.D{
-					{"$setField", bson.D{
-						{"field", bson.D{{"$literal", ".h"}}},
-						{"input", "$$ROOT"},
-						{"value", "$hash"},
-					}},
-				}}},
-				{{"$replaceWith", bson.D{
-					{"$setField", bson.D{
-						{"field", bson.D{{"$literal", ".l"}}},
-						{"input", "$$ROOT"},
-						{"value", "$length"},
-					}},
-				}}},
-				{{"$set", append(
-					lo.Flatten(lo.Map(
-						task.QueryFilter.GetDocKeyFields(),
-						func(f string, _ int) []bson.E {
-							return []bson.E{
-								{f, "$_" + f},
-								{"_" + f, "$$REMOVE"},
-							}
-						},
-					)),
-					bson.E{"hash", "$$REMOVE"},
-					bson.E{"length", "$$REMOVE"},
-				)}},
-			}
-
 			for i, el := range aggOptions {
 				if el.Key != "pipeline" {
 					continue
@@ -567,7 +526,22 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 
 				aggOptions[i].Value = append(
 					aggOptions[i].Value.(mongo.Pipeline),
-					addDotPipeline...,
+					bson.D{{"$replaceWith", bson.D{
+						{"docKey", bson.D(lo.Map(
+							task.QueryFilter.GetDocKeyFields(),
+							func(f string, _ int) bson.E {
+								return bson.E{f, "$$ROOT." + f}
+							},
+						))},
+						{"hash", bson.D{
+							{"$toHashedIndexKey", bson.D{
+								{"$_internalKeyStringValue", bson.D{
+									{"input", "$$ROOT"},
+								}},
+							}},
+						}},
+						{"length", bson.D{{"$bsonSize", "$$ROOT"}}},
+					}}},
 				)
 
 				break
@@ -640,7 +614,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
 		// With hash comparison, mismatches are opaque.
 		return []VerificationResult{{
-			ID:        srcClientDoc.Lookup("_id"),
+			ID:        srcClientDoc.Lookup("docKey", "_id"),
 			Details:   Mismatch,
 			Cluster:   ClusterTarget,
 			NameSpace: namespace,
