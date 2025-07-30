@@ -1,8 +1,6 @@
 package partitions
 
 import (
-	"testing"
-
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
