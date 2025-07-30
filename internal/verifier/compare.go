@@ -133,7 +133,17 @@ func (verifier *Verifier) compareDocsFromChannels(
 		default:
 			panic("bad docCompareMethod: " + verifier.docCompareMethod)
 		}
-		mapKey := getMapKey(docKeyDoc, mapKeyFieldNames)
+		docKeyValues := lo.Map(
+			mapKeyFieldNames,
+			func(fieldName string, _ int) bson.RawValue {
+				return getDocKeyFieldFromComparison(
+					verifier.docCompareMethod,
+					curDocWithTs.doc,
+					fieldName,
+				)
+			},
+		)
+		mapKey := getMapKey(docKeyValues)
 
 		var ourMap, theirMap map[string]docWithTs
 
@@ -278,6 +288,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 			err := handleNewDoc(srcDocWithTs, true)
 
 			if err != nil {
+
 				return nil, 0, 0, errors.Wrapf(
 					err,
 					"comparer thread failed to handle %#q's source doc (task: %s) with ID %v",
@@ -342,6 +353,21 @@ func (verifier *Verifier) compareDocsFromChannels(
 	}
 
 	return results, srcDocCount, srcByteCount, nil
+}
+
+func getDocKeyFieldFromComparison(
+	docCompareMethod DocCompareMethod,
+	doc bson.Raw,
+	fieldName string,
+) bson.RawValue {
+	switch docCompareMethod {
+	case DocCompareBinary, DocCompareIgnoreOrder:
+		return doc.Lookup(fieldName)
+	case DocCompareToHashedIndexKey:
+		return doc.Lookup("docKey", fieldName)
+	default:
+		panic("bad doc compare method: " + docCompareMethod)
+	}
 }
 
 func simpleTimerReset(t *time.Timer, dur time.Duration) {
@@ -470,10 +496,9 @@ func iterateCursorToChannel(
 	return errors.Wrap(cursor.Err(), "failed to iterate cursor")
 }
 
-func getMapKey(doc bson.Raw, fieldNames []string) string {
+func getMapKey(docKeyValues []bson.RawValue) string {
 	var keyBuffer bytes.Buffer
-	for _, keyName := range fieldNames {
-		value := doc.Lookup(keyName)
+	for _, value := range docKeyValues {
 		keyBuffer.Grow(1 + len(value.Value))
 		keyBuffer.WriteByte(byte(value.Type))
 		keyBuffer.Write(value.Value)
@@ -618,7 +643,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
 		// With hash comparison, mismatches are opaque.
 		return []VerificationResult{{
-			ID:        srcClientDoc.Lookup("docKey", "_id"),
+			ID:        getDocKeyFieldFromComparison(verifier.docCompareMethod, srcClientDoc, "_id"),
 			Details:   Mismatch,
 			Cluster:   ClusterTarget,
 			NameSpace: namespace,
