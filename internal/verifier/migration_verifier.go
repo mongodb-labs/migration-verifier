@@ -574,8 +574,6 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		)
 	}
 
-	fmt.Printf("..... problems: %+v\n\n", problems)
-
 	if err != nil {
 		return errors.Wrapf(
 			err,
