@@ -6,6 +6,7 @@ import (
 	"math"
 	_ "net/http/pprof"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
+	"github.com/samber/lo"
 	"github.com/urfave/cli"
 	"github.com/urfave/cli/altsrc"
 )
@@ -120,9 +122,17 @@ func main() {
 			Usage: "`name` of the database in which to store verification metadata",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  docCompareMethod,
-			Usage: "Method to compare documents",
-			Value: string(verifier.DocCompareDefault),
+			Name: docCompareMethod,
+			Usage: "Method to compare documents. One of: " + strings.Join(
+				lo.Map(
+					verifier.DocCompareMethods,
+					func(dcm verifier.DocCompareMethod, _ int) string {
+						return string(dcm)
+					},
+				),
+				", ",
+			),
+			Value: string(verifier.DocCompareMethods[0]),
 		}),
 		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  verifyAll,
@@ -288,8 +298,8 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	v.SetMetaDBName(cCtx.String(metaDBName))
 
 	docCompareMethod := verifier.DocCompareMethod(cCtx.String(docCompareMethod))
-	if !verifier.DocCompareMethods.Contains(docCompareMethod) {
-		return nil, errors.Errorf("invalid doc compare method (%s); valid value are: %v", docCompareMethod, verifier.DocCompareMethods.ToSlice())
+	if !slices.Contains(verifier.DocCompareMethods, docCompareMethod) {
+		return nil, errors.Errorf("invalid doc compare method (%s); valid value are: %v", docCompareMethod, verifier.DocCompareMethods)
 	}
 	v.SetDocCompareMethod(docCompareMethod)
 

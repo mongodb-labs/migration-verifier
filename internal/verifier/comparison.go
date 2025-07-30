@@ -1,8 +1,6 @@
 package verifier
 
-import (
-	mapset "github.com/deckarep/golang-set/v2"
-)
+import "github.com/10gen/migration-verifier/mslices"
 
 type DocCompareMethod string
 type DocQueryFunction string
@@ -14,11 +12,9 @@ const (
 
 	DocQueryFunctionFind      DocQueryFunction = "find"
 	DocQueryFunctionAggregate DocQueryFunction = "aggregate"
-
-	DocCompareDefault = DocCompareBinary
 )
 
-var DocCompareMethods = mapset.NewSet(
+var DocCompareMethods = mslices.Of(
 	DocCompareBinary,
 	DocCompareIgnoreOrder,
 	DocCompareToHashedIndexKey,

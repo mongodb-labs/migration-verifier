@@ -123,7 +123,7 @@ jobs:
       - name: Test
         run: go test -v ./... -race
         env:
-          MVTEST_DOC_COMPARISON_METHOD: ${{matrix.toHashedIndexKey && 'toHashedIndexKey' || ''}}
+          MVTEST_DOC_COMPARE_METHOD: ${{matrix.toHashedIndexKey && 'toHashedIndexKey' || ''}}
           MVTEST_SRC: ${{matrix.topology.srcConnStr}}
           MVTEST_DST: ${{matrix.topology.dstConnStr}}
           MVTEST_META: mongodb://localhost:27040
