@@ -125,7 +125,11 @@ func (verifier *Verifier) compareDocsFromChannels(
 		case DocCompareBinary, DocCompareIgnoreOrder:
 			// nothing
 		case DocCompareToHashedIndexKey:
-			docKeyDoc = docKeyDoc.Lookup("docKey").Document()
+			var ok bool
+			docKeyDoc, ok = docKeyDoc.Lookup("docKey").DocumentOK()
+			if !ok {
+				return errors.Errorf("%#q is not an embedded document (doc: %v)", "docKey", docKeyDoc)
+			}
 		default:
 			panic("bad docCompareMethod: " + verifier.docCompareMethod)
 		}
