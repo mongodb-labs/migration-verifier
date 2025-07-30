@@ -324,7 +324,7 @@ Like `binary` but ignores the ordering of fields. Incurs extra overhead on this 
 
 ## `toHashedIndexKey`
 
-Compares document hashes (and lengths) rather than full documents. This dramatically shrinks the data sent to migration-verifier, which can dramatically shorten verification time.
+Compares document hashes (and lengths) rather than full documents. This minimizes the data sent to migration-verifier, which can dramatically shorten verification time.
 
 It carries a few downsides, though:
 
