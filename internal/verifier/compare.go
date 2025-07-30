@@ -23,7 +23,10 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-const readTimeout = 10 * time.Minute
+const (
+	readTimeout     = 10 * time.Minute
+	docKeyInCompare = "k"
+)
 
 type docWithTs struct {
 	doc bson.Raw
@@ -119,20 +122,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// b) compares the new doc against its previously-received, cached
 	//    counterpart and records any mismatch.
 	handleNewDoc := func(curDocWithTs docWithTs, isSrc bool) error {
-		docKeyDoc := curDocWithTs.doc
-
-		switch verifier.docCompareMethod {
-		case DocCompareBinary, DocCompareIgnoreOrder:
-			// nothing
-		case DocCompareToHashedIndexKey:
-			var ok bool
-			docKeyDoc, ok = docKeyDoc.Lookup("docKey").DocumentOK()
-			if !ok {
-				return errors.Errorf("%#q is not an embedded document (doc: %v)", "docKey", docKeyDoc)
-			}
-		default:
-			panic("bad docCompareMethod: " + verifier.docCompareMethod)
-		}
 		docKeyValues := lo.Map(
 			mapKeyFieldNames,
 			func(fieldName string, _ int) bson.RawValue {
@@ -372,7 +361,7 @@ func getDocKeyFieldFromComparison(
 	case DocCompareBinary, DocCompareIgnoreOrder:
 		return doc.Lookup(fieldName)
 	case DocCompareToHashedIndexKey:
-		return doc.Lookup("docKey", fieldName)
+		return doc.Lookup(docKeyInCompare, fieldName)
 	default:
 		panic("bad doc compare method: " + docCompareMethod)
 	}
@@ -637,20 +626,21 @@ func transformPipelineForToHashedIndexKey(
 	return append(
 		slices.Clone(in),
 		bson.D{{"$replaceWith", bson.D{
-			{"docKey", bson.D(lo.Map(
+			// Single-letter field names minimize the document size.
+			{docKeyInCompare, bson.D(lo.Map(
 				task.QueryFilter.GetDocKeyFields(),
 				func(f string, _ int) bson.E {
 					return bson.E{f, "$$ROOT." + f}
 				},
 			))},
-			{"hash", bson.D{
+			{"h", bson.D{
 				{"$toHashedIndexKey", bson.D{
 					{"$_internalKeyStringValue", bson.D{
 						{"input", "$$ROOT"},
 					}},
 				}},
 			}},
-			{"length", bson.D{{"$bsonSize", "$$ROOT"}}},
+			{"s", bson.D{{"$bsonSize", "$$ROOT"}}},
 		}}},
 	)
 }
