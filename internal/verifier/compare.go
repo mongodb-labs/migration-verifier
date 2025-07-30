@@ -328,7 +328,11 @@ func (verifier *Verifier) compareDocsFromChannels(
 		results = append(
 			results,
 			VerificationResult{
-				ID:           docWithTs.doc.Lookup("_id"),
+				ID: getDocKeyFieldFromComparison(
+					verifier.docCompareMethod,
+					docWithTs.doc,
+					"_id",
+				),
 				Details:      Missing,
 				Cluster:      ClusterTarget,
 				NameSpace:    namespace,
@@ -342,7 +346,11 @@ func (verifier *Verifier) compareDocsFromChannels(
 		results = append(
 			results,
 			VerificationResult{
-				ID:           docWithTs.doc.Lookup("_id"),
+				ID: getDocKeyFieldFromComparison(
+					verifier.docCompareMethod,
+					docWithTs.doc,
+					"_id",
+				),
 				Details:      Missing,
 				Cluster:      ClusterSource,
 				NameSpace:    namespace,
@@ -527,7 +535,10 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 			}
 		case DocQueryFunctionAggregate:
 			aggOptions = bson.D{
-				{"pipeline", mongo.Pipeline{{{"$match", filter}}}},
+				{"pipeline", transformPipelineForToHashedIndexKey(
+					mongo.Pipeline{{{"$match", filter}}},
+					task,
+				)},
 			}
 		default:
 			panic("bad doc compare query func: " + verifier.docCompareMethod.QueryFunction())
@@ -553,24 +564,9 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 					continue
 				}
 
-				aggOptions[i].Value = append(
+				aggOptions[i].Value = transformPipelineForToHashedIndexKey(
 					aggOptions[i].Value.(mongo.Pipeline),
-					bson.D{{"$replaceWith", bson.D{
-						{"docKey", bson.D(lo.Map(
-							task.QueryFilter.GetDocKeyFields(),
-							func(f string, _ int) bson.E {
-								return bson.E{f, "$$ROOT." + f}
-							},
-						))},
-						{"hash", bson.D{
-							{"$toHashedIndexKey", bson.D{
-								{"$_internalKeyStringValue", bson.D{
-									{"input", "$$ROOT"},
-								}},
-							}},
-						}},
-						{"length", bson.D{{"$bsonSize", "$$ROOT"}}},
-					}}},
+					task,
 				)
 
 				break
@@ -632,6 +628,31 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 	}
 
 	return collection.Database().RunCommandCursor(ctx, cmd, runCommandOptions)
+}
+
+func transformPipelineForToHashedIndexKey(
+	in mongo.Pipeline,
+	task *VerificationTask,
+) mongo.Pipeline {
+	return append(
+		slices.Clone(in),
+		bson.D{{"$replaceWith", bson.D{
+			{"docKey", bson.D(lo.Map(
+				task.QueryFilter.GetDocKeyFields(),
+				func(f string, _ int) bson.E {
+					return bson.E{f, "$$ROOT." + f}
+				},
+			))},
+			{"hash", bson.D{
+				{"$toHashedIndexKey", bson.D{
+					{"$_internalKeyStringValue", bson.D{
+						{"input", "$$ROOT"},
+					}},
+				}},
+			}},
+			{"length", bson.D{{"$bsonSize", "$$ROOT"}}},
+		}}},
+	)
 }
 
 func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
