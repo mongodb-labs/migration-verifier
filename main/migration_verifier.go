@@ -132,7 +132,7 @@ func main() {
 				),
 				", ",
 			),
-			Value: string(verifier.DocCompareMethods[0]),
+			Value: string(verifier.DocCompareDefault),
 		}),
 		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  verifyAll,

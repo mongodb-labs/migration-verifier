@@ -24,8 +24,12 @@ import (
 )
 
 const (
-	readTimeout     = 10 * time.Minute
-	docKeyInCompare = "k"
+	readTimeout = 10 * time.Minute
+
+	// When comparing documents via hash, we store the document key as an
+	// embedded document. This is the name of the field that stores the
+	// document key.
+	docKeyInHashedCompare = "k"
 )
 
 type docWithTs struct {
@@ -361,7 +365,7 @@ func getDocKeyFieldFromComparison(
 	case DocCompareBinary, DocCompareIgnoreOrder:
 		return doc.Lookup(fieldName)
 	case DocCompareToHashedIndexKey:
-		return doc.Lookup(docKeyInCompare, fieldName)
+		return doc.Lookup(docKeyInHashedCompare, fieldName)
 	default:
 		panic("bad doc compare method: " + docCompareMethod)
 	}
@@ -627,7 +631,7 @@ func transformPipelineForToHashedIndexKey(
 		slices.Clone(in),
 		bson.D{{"$replaceWith", bson.D{
 			// Single-letter field names minimize the document size.
-			{docKeyInCompare, bson.D(lo.Map(
+			{docKeyInHashedCompare, bson.D(lo.Map(
 				task.QueryFilter.GetDocKeyFields(),
 				func(f string, _ int) bson.E {
 					return bson.E{f, "$$ROOT." + f}

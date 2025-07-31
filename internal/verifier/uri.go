@@ -61,7 +61,7 @@ func (verifier *Verifier) maybeSuggestHashedComparisonOptimization() {
 		return
 	}
 
-	if verifier.docCompareMethod != DocCompareMethods[0] {
+	if verifier.docCompareMethod != DocCompareDefault {
 		// User already gave a non-default comparison method.
 		return
 	}

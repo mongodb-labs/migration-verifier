@@ -167,7 +167,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 
 	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
 
-	docCompareMethod := DocCompareMethods[0]
+	docCompareMethod := DocCompareDefault
 	envDocCompareMethod := os.Getenv("MVTEST_DOC_COMPARE_METHOD")
 	if envDocCompareMethod != "" {
 		docCompareMethod = DocCompareMethod(envDocCompareMethod)

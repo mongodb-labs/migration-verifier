@@ -14,10 +14,14 @@ const (
 	DocQueryFunctionAggregate DocQueryFunction = "aggregate"
 )
 
-var DocCompareMethods = mslices.Of(
-	DocCompareBinary,
-	DocCompareIgnoreOrder,
-	DocCompareToHashedIndexKey,
+var (
+	DocCompareMethods = mslices.Of(
+		DocCompareBinary,
+		DocCompareIgnoreOrder,
+		DocCompareToHashedIndexKey,
+	)
+
+	DocCompareDefault = DocCompareMethods[0]
 )
 
 func (dcm DocCompareMethod) ShouldIgnoreFieldOrder() bool {
