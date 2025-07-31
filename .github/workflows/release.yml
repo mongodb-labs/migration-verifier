@@ -27,6 +27,8 @@ jobs:
 
       - name: Build
         run: |
+          set -o errexit
+          git tag -l
           git tag -l --format='%(contents)' $(git describe --exact-match) > RELEASE-NOTES
           for target in $TARGETS; do
             export GOOS=${target%/*}
