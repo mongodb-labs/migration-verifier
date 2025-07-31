@@ -94,7 +94,7 @@ type QueryFilter struct {
 }
 
 func (qf QueryFilter) GetDocKeyFields() []string {
-	if len(qf.ShardKeys) > 0 && qf.ShardKeys[0] == "_id" {
+	if slices.Contains(qf.ShardKeys, "_id") {
 		return slices.Clone(qf.ShardKeys)
 	}
 
