@@ -1,16 +1,12 @@
 # Releasing Migration Verifier
 
-To release Migration Verifier, just create a lightweight git tag, thus:
+To release Migration Verifier, create an annotated git tag, thus:
 ```
-git tag v0.0.2
+git tag -a v0.0.2
 ```
-… and push it to upstream.
+The tag contents will be the release notes. See prior releases for the format.
+Once you’re done, push your tag to upstream. A pre-configured GitHub Action
+will create the release.
 
-Versions **MUST** start with a `v` and follow
+**IMPORTANT:** Versions **MUST** start with a `v` and follow
 [semantic versioning](https://semver.org/).
-
-An automated release process will build binaries and make them available
-for download. Check GitHub Actions for progress.
-
-Note that this process **DOES NOT** create release notes. Users should peruse
-the repository’s commit history for changes.
