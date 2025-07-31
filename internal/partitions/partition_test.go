@@ -1,53 +1,12 @@
 package partitions
 
 import (
-	"testing"
-
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
-
-// Test that a partion can generate a correct filter with a lower bound for collection copy.
-func (suite *UnitTestSuite) TestPartitionFindCmd() {
-	suite.Run("normal partition", func() {
-		partition, expectedFilter := makeTestPartition()
-		startAt := &primitive.Timestamp{42, 43}
-		expectedFind := bson.D{
-			{"find", partition.Ns.Coll},
-			{"collectionUUID", partition.Key.SourceUUID},
-			{"readConcern", bson.D{
-				{"level", "majority"},
-				{"afterClusterTime", startAt},
-			}},
-			{"noCursorTimeout", true},
-			{"sort", bson.D{{"_id", 1}}},
-			{"hint", bson.D{{"_id", 1}}},
-			{"filter", expectedFilter},
-		}
-		actual := partition.FindCmd(suite.Logger(), startAt)
-		assertBSONEqual(suite.T(), expectedFind, actual)
-	})
-	suite.Run("capped partition", func() {
-		partition := makeTestCappedPartition()
-		startAt := &primitive.Timestamp{42, 43}
-
-		expectedFind := bson.D{
-			{"find", partition.Ns.Coll},
-			{"collectionUUID", partition.Key.SourceUUID},
-			{"readConcern", bson.D{
-				{"level", "majority"},
-				{"afterClusterTime", startAt},
-			}},
-			{"noCursorTimeout", true},
-			{"sort", bson.D{{"$natural", 1}}},
-		}
-		actual := partition.FindCmd(suite.Logger(), startAt)
-		assertBSONEqual(suite.T(), expectedFind, actual)
-	})
-}
 
 func (suite *UnitTestSuite) TestPartitionLowerBoundFromCurrent() {
 	expectLowerBound := int32(5)
@@ -73,42 +32,42 @@ func (suite *UnitTestSuite) TestVersioning() {
 	partition, expectedExprFilter := makeTestPartition()
 
 	// No version given, default to no bracketing
-	findOptions := partition.GetFindOptions(nil, nil)
+	findOptions := partition.GetQueryParameters(nil, nil).ToFindOptions()
 	filter := getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedExprFilter, filter)
 
 	// 6.0
-	findOptions = partition.GetFindOptions(&util.ClusterInfo{VersionArray: []int{6, 0, 0}}, nil)
+	findOptions = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{6, 0, 0}}, nil).ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedExprFilter, filter)
 
 	// 5.3.0.9
-	findOptions = partition.GetFindOptions(&util.ClusterInfo{VersionArray: []int{5, 3, 0, 9}}, nil)
+	findOptions = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{5, 3, 0, 9}}, nil).ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedExprFilter, filter)
 
 	// 7.1.3.5
-	findOptions = partition.GetFindOptions(&util.ClusterInfo{VersionArray: []int{7, 1, 3, 5}}, nil)
+	findOptions = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{7, 1, 3, 5}}, nil).ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedExprFilter, filter)
 
 	// 4.4 (int64)
-	findOptions = partition.GetFindOptions(&util.ClusterInfo{VersionArray: []int{4, 4, 0, 0}}, nil)
+	findOptions = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{4, 4, 0, 0}}, nil).ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().NotEqual(expectedExprFilter, filter)
 
 	// 4.4
-	findOptions = partition.GetFindOptions(&util.ClusterInfo{VersionArray: []int{4, 4, 0, 0}}, nil)
+	findOptions = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{4, 4, 0, 0}}, nil).ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().NotEqual(expectedExprFilter, filter)
 
 	// 4.2
-	findOptions = partition.GetFindOptions(&util.ClusterInfo{VersionArray: []int{4, 2, 0, 0}}, nil)
+	findOptions = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{4, 2, 0, 0}}, nil).ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().NotEqual(expectedExprFilter, filter)
 
 	// No version array -- assume old, require type bracketing.
-	findOptions = partition.GetFindOptions(&util.ClusterInfo{}, nil)
+	findOptions = partition.GetQueryParameters(&util.ClusterInfo{}, nil).ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().NotEqual(expectedExprFilter, filter)
 }
@@ -161,14 +120,4 @@ func makeTestCappedPartition() Partition {
 	partition, _ := makeTestPartition()
 	partition.IsCapped = true
 	return partition
-}
-
-func assertBSONEqual(t *testing.T, expected, actual any) {
-	expectedJSON, err := bson.MarshalExtJSONIndent(expected, false, false, "", "    ")
-	require.NoError(t, err)
-
-	actualJSON, err := bson.MarshalExtJSONIndent(actual, false, false, "", "    ")
-	require.NoError(t, err)
-
-	assert.Equal(t, string(expectedJSON), string(actualJSON))
 }

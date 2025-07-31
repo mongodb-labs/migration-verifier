@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 
+	"github.com/10gen/migration-verifier/internal/comparehashed"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -39,7 +40,53 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 		}
 	}
 
+	if !isVersionSupported(clusterInfo.VersionArray) {
+		return errors.Errorf("unsupported source version: %v", clusterInfo.VersionArray)
+	}
+
+	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
+		if !comparehashed.CanCompareDocsViaToHashedIndexKey(clusterInfo.VersionArray) {
+			return errors.Errorf("document comparison mode %#q doesn’t work on source version %v", DocCompareToHashedIndexKey, clusterInfo.VersionArray)
+		}
+	}
+
+	verifier.maybeSuggestHashedComparisonOptimization()
+
 	return checkURIAgainstServerVersion(uri, clusterInfo)
+}
+
+func (verifier *Verifier) maybeSuggestHashedComparisonOptimization() {
+	if verifier.srcClusterInfo == nil || verifier.dstClusterInfo == nil {
+		// We’re not ready yet.
+		return
+	}
+
+	if verifier.docCompareMethod != DocCompareDefault {
+		// User already gave a non-default comparison method.
+		return
+	}
+
+	if !comparehashed.CanCompareDocsViaToHashedIndexKey(verifier.srcClusterInfo.VersionArray) {
+		return
+	}
+
+	if !comparehashed.CanCompareDocsViaToHashedIndexKey(verifier.dstClusterInfo.VersionArray) {
+		return
+	}
+
+	verifier.logger.Info().
+		Msg("Source & destination cluster seem recent enough to use hashed document comparison, which dramatically accelerates verification. See README for details.")
+}
+
+func isVersionSupported(version []int) bool {
+	if version[0] >= 5 {
+		return true
+	}
+	if version[0] < 4 {
+		return false
+	}
+
+	return version[1] >= 2
 }
 
 func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
@@ -53,6 +100,16 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.dstClient)
 	if err != nil {
 		return errors.Wrap(err, "failed to read destination build info")
+	}
+
+	if !isVersionSupported(clusterInfo.VersionArray) {
+		return errors.Errorf("unsupported destination version: %v", clusterInfo.VersionArray)
+	}
+
+	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
+		if !comparehashed.CanCompareDocsViaToHashedIndexKey(clusterInfo.VersionArray) {
+			return errors.Errorf("document comparison mode %#q doesn’t work on destination version %v", DocCompareToHashedIndexKey, clusterInfo.VersionArray)
+		}
 	}
 
 	verifier.dstClusterInfo = &clusterInfo

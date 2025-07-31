@@ -180,7 +180,7 @@ func (r *Retryer) runRetryLoop(
 
 		// Not a transient error? Fail immediately.
 		if !r.shouldRetryWithSleep(logger, sleepTime, descriptions, cbErr) {
-			return groupErr.errFromCallback
+			return cbErr
 		}
 
 		// Our error is transient. If we've exhausted the allowed time

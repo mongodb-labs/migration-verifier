@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
@@ -90,6 +91,17 @@ type QueryFilter struct {
 	ShardKeys []string
 	Namespace string `bson:"namespace"    json:"namespace"`
 	To        string `bson:"to,omitempty" json:"to,omitempty"`
+}
+
+func (qf QueryFilter) GetDocKeyFields() []string {
+	if slices.Contains(qf.ShardKeys, "_id") {
+		return slices.Clone(qf.ShardKeys)
+	}
+
+	return append(
+		[]string{"_id"},
+		qf.ShardKeys...,
+	)
 }
 
 func (verifier *Verifier) doInMetaTransaction(

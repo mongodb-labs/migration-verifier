@@ -620,7 +620,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 func TestVerifierCompareDocs(t *testing.T) {
 	id := rand.Intn(1000)
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
-	verifier.SetIgnoreBSONFieldOrder(true)
+	verifier.SetDocCompareMethod(DocCompareIgnoreOrder)
 
 	type compareTest struct {
 		label       string
@@ -760,7 +760,13 @@ func TestVerifierCompareDocs(t *testing.T) {
 	}
 
 	for _, curTest := range compareTests {
-		verifier.SetIgnoreBSONFieldOrder(!curTest.checkOrder)
+		verifier.SetDocCompareMethod(
+			lo.Ternary(
+				!curTest.checkOrder,
+				DocCompareIgnoreOrder,
+				DocCompareBinary,
+			),
+		)
 
 		indexFields := curTest.indexFields
 		if indexFields == nil {
@@ -1799,7 +1805,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
 	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})
 	verifier.SetNamespaceMap()
-	verifier.SetIgnoreBSONFieldOrder(true)
+	verifier.SetDocCompareMethod(DocCompareIgnoreOrder)
 	// Set this value low to test the verifier with multiple partitions.
 	verifier.partitionSizeInBytes = 50
 

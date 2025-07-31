@@ -114,7 +114,7 @@ type Verifier struct {
 	generationStartTime  time.Time
 	generationPauseDelay time.Duration
 	workerSleepDelay     time.Duration
-	ignoreBSONFieldOrder bool
+	docCompareMethod     DocCompareMethod
 	verifyAll            bool
 	startClean           bool
 
@@ -377,8 +377,8 @@ func (verifier *Verifier) SetMetaDBName(arg string) {
 	verifier.metaDBName = arg
 }
 
-func (verifier *Verifier) SetIgnoreBSONFieldOrder(arg bool) {
-	verifier.ignoreBSONFieldOrder = arg
+func (verifier *Verifier) SetDocCompareMethod(method DocCompareMethod) {
+	verifier.docCompareMethod = method
 }
 
 func (verifier *Verifier) SetVerifyAll(arg bool) {

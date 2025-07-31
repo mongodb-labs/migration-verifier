@@ -6,6 +6,7 @@ import (
 	"math"
 	_ "net/http/pprof"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
+	"github.com/samber/lo"
 	"github.com/urfave/cli"
 	"github.com/urfave/cli/altsrc"
 )
@@ -30,7 +32,7 @@ const (
 	srcNamespace          = "srcNamespace"
 	dstNamespace          = "dstNamespace"
 	metaDBName            = "metaDBName"
-	ignoreFieldOrder      = "ignoreFieldOrder"
+	docCompareMethod      = "docCompareMethod"
 	verifyAll             = "verifyAll"
 	startClean            = "clean"
 	readPreference        = "readPreference"
@@ -119,9 +121,18 @@ func main() {
 			Value: "migration_verification_metadata",
 			Usage: "`name` of the database in which to store verification metadata",
 		}),
-		altsrc.NewBoolFlag(cli.BoolFlag{
-			Name:  ignoreFieldOrder,
-			Usage: "Whether or not field order is ignored in documents",
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name: docCompareMethod,
+			Usage: "Method to compare documents. One of: " + strings.Join(
+				lo.Map(
+					verifier.DocCompareMethods,
+					func(dcm verifier.DocCompareMethod, _ int) string {
+						return string(dcm)
+					},
+				),
+				", ",
+			),
+			Value: string(verifier.DocCompareDefault),
 		}),
 		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  verifyAll,
@@ -285,7 +296,13 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		v.SetNamespaceMap()
 	}
 	v.SetMetaDBName(cCtx.String(metaDBName))
-	v.SetIgnoreBSONFieldOrder(cCtx.Bool(ignoreFieldOrder))
+
+	docCompareMethod := verifier.DocCompareMethod(cCtx.String(docCompareMethod))
+	if !slices.Contains(verifier.DocCompareMethods, docCompareMethod) {
+		return nil, errors.Errorf("invalid doc compare method (%s); valid value are: %v", docCompareMethod, verifier.DocCompareMethods)
+	}
+	v.SetDocCompareMethod(docCompareMethod)
+
 	err = v.SetReadPreference(cCtx.String(readPreference))
 	if err != nil {
 		return nil, err

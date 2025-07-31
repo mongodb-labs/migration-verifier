@@ -14,6 +14,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -22,7 +23,14 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-const readTimeout = 10 * time.Minute
+const (
+	readTimeout = 10 * time.Minute
+
+	// When comparing documents via hash, we store the document key as an
+	// embedded document. This is the name of the field that stores the
+	// document key.
+	docKeyInHashedCompare = "k"
+)
 
 type docWithTs struct {
 	doc bson.Raw
@@ -105,9 +113,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	var srcDocCount types.DocumentCount
 	var srcByteCount types.ByteCount
 
-	mapKeyFieldNames := make([]string, 1+len(task.QueryFilter.ShardKeys))
-	mapKeyFieldNames[0] = "_id"
-	copy(mapKeyFieldNames[1:], task.QueryFilter.ShardKeys)
+	mapKeyFieldNames := task.QueryFilter.GetDocKeyFields()
 
 	namespace := task.QueryFilter.Namespace
 
@@ -120,7 +126,17 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// b) compares the new doc against its previously-received, cached
 	//    counterpart and records any mismatch.
 	handleNewDoc := func(curDocWithTs docWithTs, isSrc bool) error {
-		mapKey := getMapKey(curDocWithTs.doc, mapKeyFieldNames)
+		docKeyValues := lo.Map(
+			mapKeyFieldNames,
+			func(fieldName string, _ int) bson.RawValue {
+				return getDocKeyFieldFromComparison(
+					verifier.docCompareMethod,
+					curDocWithTs.doc,
+					fieldName,
+				)
+			},
+		)
+		mapKey := getMapKey(docKeyValues)
 
 		var ourMap, theirMap map[string]docWithTs
 
@@ -265,6 +281,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 			err := handleNewDoc(srcDocWithTs, true)
 
 			if err != nil {
+
 				return nil, 0, 0, errors.Wrapf(
 					err,
 					"comparer thread failed to handle %#q's source doc (task: %s) with ID %v",
@@ -304,7 +321,11 @@ func (verifier *Verifier) compareDocsFromChannels(
 		results = append(
 			results,
 			VerificationResult{
-				ID:           docWithTs.doc.Lookup("_id"),
+				ID: getDocKeyFieldFromComparison(
+					verifier.docCompareMethod,
+					docWithTs.doc,
+					"_id",
+				),
 				Details:      Missing,
 				Cluster:      ClusterTarget,
 				NameSpace:    namespace,
@@ -318,7 +339,11 @@ func (verifier *Verifier) compareDocsFromChannels(
 		results = append(
 			results,
 			VerificationResult{
-				ID:           docWithTs.doc.Lookup("_id"),
+				ID: getDocKeyFieldFromComparison(
+					verifier.docCompareMethod,
+					docWithTs.doc,
+					"_id",
+				),
 				Details:      Missing,
 				Cluster:      ClusterSource,
 				NameSpace:    namespace,
@@ -329,6 +354,21 @@ func (verifier *Verifier) compareDocsFromChannels(
 	}
 
 	return results, srcDocCount, srcByteCount, nil
+}
+
+func getDocKeyFieldFromComparison(
+	docCompareMethod DocCompareMethod,
+	doc bson.Raw,
+	fieldName string,
+) bson.RawValue {
+	switch docCompareMethod {
+	case DocCompareBinary, DocCompareIgnoreOrder:
+		return doc.Lookup(fieldName)
+	case DocCompareToHashedIndexKey:
+		return doc.Lookup(docKeyInHashedCompare, fieldName)
+	default:
+		panic("bad doc compare method: " + docCompareMethod)
+	}
 }
 
 func simpleTimerReset(t *time.Timer, dur time.Duration) {
@@ -457,10 +497,9 @@ func iterateCursorToChannel(
 	return errors.Wrap(cursor.Err(), "failed to iterate cursor")
 }
 
-func getMapKey(doc bson.Raw, fieldNames []string) string {
+func getMapKey(docKeyValues []bson.RawValue) string {
 	var keyBuffer bytes.Buffer
-	for _, keyName := range fieldNames {
-		value := doc.Lookup(keyName)
+	for _, value := range docKeyValues {
 		keyBuffer.Grow(1 + len(value.Value))
 		keyBuffer.WriteByte(byte(value.Type))
 		keyBuffer.Write(value.Value)
@@ -475,42 +514,139 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 	runCommandOptions := options.RunCmd()
 	var andPredicates bson.A
 
+	var aggOptions bson.D
+
 	if task.IsRecheck() {
 		andPredicates = append(andPredicates, bson.D{{"_id", bson.M{"$in": task.Ids}}})
 		andPredicates = verifier.maybeAppendGlobalFilterToPredicates(andPredicates)
-		findOptions = bson.D{
-			bson.E{"filter", bson.D{{"$and", andPredicates}}},
+		filter := bson.D{{"$and", andPredicates}}
+
+		switch verifier.docCompareMethod.QueryFunction() {
+		case DocQueryFunctionFind:
+			findOptions = bson.D{
+				bson.E{"filter", filter},
+			}
+		case DocQueryFunctionAggregate:
+			aggOptions = bson.D{
+				{"pipeline", transformPipelineForToHashedIndexKey(
+					mongo.Pipeline{{{"$match", filter}}},
+					task,
+				)},
+			}
+		default:
+			panic("bad doc compare query func: " + verifier.docCompareMethod.QueryFunction())
 		}
 	} else {
-		findOptions = task.QueryFilter.Partition.GetFindOptions(clusterInfo, verifier.maybeAppendGlobalFilterToPredicates(andPredicates))
+		pqp := task.QueryFilter.Partition.GetQueryParameters(
+			clusterInfo,
+			verifier.maybeAppendGlobalFilterToPredicates(andPredicates),
+		)
+
+		switch verifier.docCompareMethod.QueryFunction() {
+		case DocQueryFunctionFind:
+			findOptions = pqp.ToFindOptions()
+		case DocQueryFunctionAggregate:
+			aggOptions = pqp.ToAggOptions()
+
+			if verifier.docCompareMethod != DocCompareToHashedIndexKey {
+				panic("unknown aggregate compare method: " + verifier.docCompareMethod)
+			}
+
+			for i, el := range aggOptions {
+				if el.Key != "pipeline" {
+					continue
+				}
+
+				aggOptions[i].Value = transformPipelineForToHashedIndexKey(
+					aggOptions[i].Value.(mongo.Pipeline),
+					task,
+				)
+
+				break
+			}
+
+		default:
+			panic("bad doc compare query func: " + verifier.docCompareMethod.QueryFunction())
+		}
 	}
+
+	var cmd bson.D
+
+	switch verifier.docCompareMethod.QueryFunction() {
+	case DocQueryFunctionFind:
+		cmd = append(
+			bson.D{{"find", collection.Name()}},
+			findOptions...,
+		)
+	case DocQueryFunctionAggregate:
+		cmd = append(
+			bson.D{
+				{"aggregate", collection.Name()},
+				{"cursor", bson.D{}},
+			},
+			aggOptions...,
+		)
+	}
+
 	if verifier.readPreference.Mode() != readpref.PrimaryMode {
 		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
 		if startAtTs != nil {
+			readConcern := bson.D{
+				{"afterClusterTime", *startAtTs},
+			}
 
 			// We never want to read before the change stream start time,
 			// or for the last generation, the change stream end time.
-			findOptions = append(
-				findOptions,
-				bson.E{"readConcern", bson.D{
-					{"afterClusterTime", *startAtTs},
-				}},
+			cmd = append(
+				cmd,
+				bson.E{"readConcern", readConcern},
 			)
 		}
 	}
-	findCmd := append(bson.D{{"find", collection.Name()}}, findOptions...)
 
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
 	if !task.IsRecheck() {
+		extJSON, _ := bson.MarshalExtJSON(cmd, true, false)
+
 		verifier.logger.Debug().
 			Any("task", task.PrimaryKey).
-			Str("findCmd", fmt.Sprintf("%s", findCmd)).
+			Str("cmd", lo.Ternary(
+				extJSON == nil,
+				fmt.Sprintf("%s", cmd),
+				string(extJSON),
+			)).
 			Str("options", fmt.Sprintf("%v", *runCommandOptions)).
-			Msg("getDocuments findCmd.")
+			Msg("getDocuments command.")
 	}
 
-	return collection.Database().RunCommandCursor(ctx, findCmd, runCommandOptions)
+	return collection.Database().RunCommandCursor(ctx, cmd, runCommandOptions)
+}
+
+func transformPipelineForToHashedIndexKey(
+	in mongo.Pipeline,
+	task *VerificationTask,
+) mongo.Pipeline {
+	return append(
+		slices.Clone(in),
+		bson.D{{"$replaceWith", bson.D{
+			// Single-letter field names minimize the document size.
+			{docKeyInHashedCompare, bson.D(lo.Map(
+				task.QueryFilter.GetDocKeyFields(),
+				func(f string, _ int) bson.E {
+					return bson.E{f, "$$ROOT." + f}
+				},
+			))},
+			{"h", bson.D{
+				{"$toHashedIndexKey", bson.D{
+					{"$_internalKeyStringValue", bson.D{
+						{"input", "$$ROOT"},
+					}},
+				}},
+			}},
+			{"s", bson.D{{"$bsonSize", "$$ROOT"}}},
+		}}},
+	)
 }
 
 func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
@@ -518,20 +654,26 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 	if match {
 		return nil, nil
 	}
-	//verifier.logger.Info().Msg("Byte comparison failed for id %s, falling back to field comparison", id)
+
+	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
+		// With hash comparison, mismatches are opaque.
+		return []VerificationResult{{
+			ID:        getDocKeyFieldFromComparison(verifier.docCompareMethod, srcClientDoc, "_id"),
+			Details:   Mismatch,
+			Cluster:   ClusterTarget,
+			NameSpace: namespace,
+		}}, nil
+	}
 
 	mismatch, err := BsonUnorderedCompareRawDocumentWithDetails(srcClientDoc, dstClientDoc)
 	if err != nil {
 		return nil, err
 	}
 	if mismatch == nil {
-		if verifier.ignoreBSONFieldOrder {
+		if verifier.docCompareMethod.ShouldIgnoreFieldOrder() {
 			return nil, nil
 		}
-		dataSize := len(srcClientDoc)
-		if dataSize < len(dstClientDoc) {
-			dataSize = len(dstClientDoc)
-		}
+		dataSize := max(len(srcClientDoc), len(dstClientDoc))
 
 		// If we're respecting field order we have just done a binary compare so we have fields in different order.
 		return []VerificationResult{{
