@@ -27,6 +27,7 @@ jobs:
 
       - name: Build
         run: |
+          git tag -l --format='%(contents)' $(git describe --exact-match) > RELEASE-NOTES
           for target in $TARGETS; do
             export GOOS=${target%/*}
             export GOARCH=${target#*/}
@@ -39,4 +40,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          body_path: RELEASE-NOTES
           files: migration_verifier_*
