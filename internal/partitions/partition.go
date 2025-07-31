@@ -152,7 +152,6 @@ func (p *Partition) GetQueryParameters(clusterInfo *util.ClusterInfo, filterAndP
 	if p == nil {
 		if len(filterAndPredicates) > 0 {
 			params.filter = option.Some(bson.D{{"$and", filterAndPredicates}})
-			return params
 		}
 
 		return params
