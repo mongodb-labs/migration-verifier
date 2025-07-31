@@ -4,6 +4,8 @@ import (
 	"math"
 
 	"github.com/10gen/migration-verifier/internal/comparehashed"
+	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/util"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -13,6 +15,18 @@ import (
 // verification detects certain mismatches.
 func (suite *IntegrationTestSuite) TestCompare_Hashed() {
 	ctx := suite.Context()
+
+	buildInfo, err := util.GetClusterInfo(
+		ctx,
+		logger.NewDefaultLogger(),
+		suite.srcMongoClient,
+	)
+	suite.Require().NoError(err)
+
+	// We only check the source since the destination should be more recent.
+	if !comparehashed.CanCompareDocsViaToHashedIndexKey(buildInfo.VersionArray) {
+		suite.T().Skipf("source (%v) can’t do hashed comparison", buildInfo.VersionArray)
+	}
 
 	decimal128_42, err := primitive.ParseDecimal128("42")
 	suite.Require().NoError(err, "should parse `42` as decimal128")
@@ -72,10 +86,6 @@ func (suite *IntegrationTestSuite) TestCompare_Hashed() {
 					"should drop verification metadata database",
 				)
 
-				// We only check the source since the destination should be more recent.
-				if !comparehashed.CanCompareDocsViaToHashedIndexKey(verifier.srcClusterInfo.VersionArray) {
-					suite.T().Skipf("source (%v) can’t do hashed comparison", verifier.srcClusterInfo.VersionArray)
-				}
 				ns := srcColl.Database().Name() + "." + srcColl.Name()
 				verifier.SetSrcNamespaces([]string{ns})
 				verifier.SetDstNamespaces([]string{ns})
