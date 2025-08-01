@@ -21,9 +21,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
+
+      - name: Get tag name
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -35,7 +35,7 @@ jobs:
           echo ------
           git describe
           echo "github-ref=$GITHUB_REF"
-          git tag -l --format='%(contents)' $(git describe --exact-match) > RELEASE-NOTES
+          git tag -l --format='%(contents)' "$TAG_NAME" > RELEASE-NOTES
           for target in $TARGETS; do
             export GOOS=${target%/*}
             export GOARCH=${target#*/}
