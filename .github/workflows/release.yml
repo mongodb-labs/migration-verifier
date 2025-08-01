@@ -21,12 +21,25 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # NB: actions/checkout quietly fetches all tags as lightweight tags,
+      # even if they’re annotated upstream. That, of course, prevents use
+      # of the tag message as release notes. This works around that.
+      #
+      # See https://github.com/actions/checkout/issues/290 for details.
+      - name: Fetch tags
+        run: git fetch --tags --force
 
       - name: Set up Go
         uses: actions/setup-go@v4
 
       - name: Build
         run: |
+          set -o errexit
+          TAG_NAME=$(git describe --exact-match)
+          git tag --list --format='%(contents)' "$TAG_NAME" > RELEASE-NOTES
           for target in $TARGETS; do
             export GOOS=${target%/*}
             export GOARCH=${target#*/}
@@ -39,4 +52,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          body_path: RELEASE-NOTES
           files: migration_verifier_*
