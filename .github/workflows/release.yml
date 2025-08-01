@@ -31,9 +31,6 @@ jobs:
       - name: Build
         run: |
           set -o errexit
-          git tag -l
-          echo ------
-          git describe
           echo "github-ref=$GITHUB_REF"
           git tag -l --format='%(contents)' "$TAG_NAME" > RELEASE-NOTES
           for target in $TARGETS; do
