@@ -27,20 +27,13 @@ jobs:
       - name: Fetch tags
         run: git fetch --tags --force
 
-      - name: Get tag name
-        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-
-      - name: Show tag type
-        run: git cat-file -t "refs/tags/$TAG_NAME"
-
       - name: Set up Go
         uses: actions/setup-go@v4
 
       - name: Build
         run: |
           set -o errexit
-          echo "github-ref=$GITHUB_REF"
-          echo "tag-name=$TAG_NAME"
+          TAG_NAME=$(git describe --exact-match)
           git tag -l --format='%(contents)' "$TAG_NAME" > RELEASE-NOTES
           cat RELEASE-NOTES
           for target in $TARGETS; do
