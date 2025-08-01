@@ -39,7 +39,7 @@ jobs:
         run: |
           set -o errexit
           TAG_NAME=$(git describe --exact-match)
-          git tag -l --format='%(contents)' "$TAG_NAME" > RELEASE-NOTES
+          git tag --list --format='%(contents)' "$TAG_NAME" > RELEASE-NOTES
           for target in $TARGETS; do
             export GOOS=${target%/*}
             export GOARCH=${target#*/}
