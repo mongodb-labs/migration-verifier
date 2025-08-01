@@ -24,6 +24,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      # NB: actions/checkout quietly fetches all tags as lightweight tags,
+      # even if they’re annotated upstream. This works around that.
+      #
+      # See https://github.com/actions/checkout/issues/290 for details.
       - name: Fetch tags
         run: git fetch --tags --force
 
