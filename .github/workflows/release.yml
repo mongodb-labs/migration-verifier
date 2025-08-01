@@ -35,6 +35,7 @@ jobs:
         run: |
           set -o errexit
           echo "github-ref=$GITHUB_REF"
+          echo "tag-name=$TAG_NAME"
           git tag -l --format='%(contents)' "$TAG_NAME" > RELEASE-NOTES
           cat RELEASE-NOTES
           for target in $TARGETS; do
