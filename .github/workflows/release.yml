@@ -28,6 +28,9 @@ jobs:
       - name: Get tag name
         run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
+      - name: Show tag type
+        run: git cat-file -t "refs/tags/$TAG_NAME"
+
       - name: Set up Go
         uses: actions/setup-go@v4
 
