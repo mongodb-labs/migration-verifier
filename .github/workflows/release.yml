@@ -33,6 +33,7 @@ jobs:
           git tag -l
           git describe
           git show
+          git show v0.0.3-alpha6
           git tag -l --format='%(contents)' $(git describe --exact-match) > RELEASE-NOTES
           for target in $TARGETS; do
             export GOOS=${target%/*}
