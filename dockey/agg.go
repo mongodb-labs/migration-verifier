@@ -1,74 +1,44 @@
 package dockey
 
 import (
+	"strconv"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
 )
 
+// This function is important enough that we test it directly.
+// NOTE: The document contains base64-encoded names.
 func ExtractDocKeyAgg(fieldNames []string) bson.D {
 	return extractDocKeyFromAgg(fieldNames, "$$ROOT")
 }
 
 func extractDocKeyFromAgg(fieldNames []string, rootExpr any) bson.D {
-	var docKeyPieces [][2]any
+	var docKeyNumKeys bson.D
+	numToKeyLookup := bson.M{}
 
-	for _, name := range fieldNames {
+	for n, name := range fieldNames {
 		var valExpr = extractKeyValueAgg(name, rootExpr)
 
-		docKeyPieces = append(docKeyPieces, [...]any{name, valExpr})
+		nStr := strconv.Itoa(n)
+		docKeyNumKeys = append(docKeyNumKeys, bson.E{nStr, valExpr})
+		numToKeyLookup[nStr] = name
 	}
 
 	return bson.D{
-		{"$arrayToObject", bson.A{docKeyPieces}},
-	}
-}
-
-func existsAgg(fieldName string, baseDocExpr any) bson.D {
-	base, remainder, hasDot := strings.Cut(fieldName, ".")
-
-	fieldExpr := bson.D{
-		{"$getField", bson.D{
-			{"field", fieldName},
-			{"input", baseDocExpr},
-		}},
-	}
-
-	if !hasDot {
-		return bson.D{
-			{"$ne", bson.A{
-				"missing",
-				bson.D{{"$type", fieldExpr}},
-			}},
-		}
-	}
-
-	embDocExpr := bson.D{
-		{"$getField", bson.D{
-			{"field", base},
-			{"input", baseDocExpr},
-		}},
-	}
-
-	return bson.D{
-		{"$cond", bson.D{
-			{"if", bson.D{
-				{"$ne", bson.A{
-					"missing",
-					bson.D{{"$type", fieldExpr}},
+		{"$arrayToObject", bson.D{
+			{"$map", bson.D{
+				{"input", bson.D{
+					{"$objectToArray", docKeyNumKeys},
 				}},
-			}},
-			{"then", true},
-			{"else", bson.D{
-				{"$cond", bson.D{
-					{"if", bson.D{
-						{"$eq", bson.A{
-							"object",
-							bson.D{{"$type", embDocExpr}},
+				{"in", bson.D{
+					{"k", bson.D{
+						{"$getField", bson.D{
+							{"field", "$$this.k"},
+							{"input", numToKeyLookup},
 						}},
 					}},
-					{"then", extractKeyValueAgg(remainder, embDocExpr)},
-					{"else", false},
+					{"v", "$$this.v"},
 				}},
 			}},
 		}},
