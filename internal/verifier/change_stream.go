@@ -23,14 +23,12 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-type modifyEventHandling string
+type ddlEventHandling string
 
 const (
 	fauxDocSizeForDeleteEvents = 1024
 
-	modifyEventType = "modify"
-
-	onModifyEventIgnore modifyEventHandling = "ignore"
+	onDDLEventAllow ddlEventHandling = "allow"
 )
 
 var supportedEventOpTypes = mapset.NewSet(
@@ -101,7 +99,7 @@ type ChangeStreamReader struct {
 
 	lag *msync.TypedAtomic[option.Option[time.Duration]]
 
-	onModifyEvent modifyEventHandling
+	onDDLEvent ddlEventHandling
 }
 
 func (verifier *Verifier) initializeChangeStreamReaders() {
@@ -134,7 +132,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		handlerError:         util.NewEventual[error](),
 		doneChan:             make(chan struct{}),
 		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
-		onModifyEvent:        onModifyEventIgnore,
+		onDDLEvent:           onDDLEventAllow,
 	}
 }
 
@@ -381,14 +379,16 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		opType := changeEvents[eventsRead].OpType
 		if !supportedEventOpTypes.Contains(opType) {
 
-			// We expect modify events on the destination as part of finalizing
+			// We expect certain DDL events on the destination as part of
 			// a migration. For example, mongosync enables indexes’ uniqueness
-			// constraints and sets capped collection sizes.
-			if opType == modifyEventType && csr.onModifyEvent == onModifyEventIgnore {
+			// constraints and sets capped collection sizes, and sometimes
+			// indexes are created after initial sync.
+
+			if csr.onDDLEvent == onDDLEventAllow {
 				csr.logger.Info().
 					Stringer("changeStream", csr).
 					Stringer("event", cs.Current).
-					Msg("This event is probably internal to the migration. Ignoring.")
+					Msg("Ignoring event with unrecognized type on destination. (It’s assumedly internal to the migration.)")
 
 				// Discard this event, then keep reading.
 				changeEvents = changeEvents[:len(changeEvents)-1]

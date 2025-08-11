@@ -784,6 +784,20 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 		"should alter capped size",
 	)
 
+	_, err = suite.dstMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection("mycoll").
+		Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys: bson.D{
+				{"foo", 1},
+				{"barbar", 1},
+			},
+		},
+	)
+	suite.Require().NoError(err, "should create index")
+
 	err = verifier.WritesOff(ctx)
 	if err == nil {
 		err = verifierRunner.Await()
@@ -795,6 +809,12 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 		logBuffer.String(),
 		"cappedSize",
 		"modify event should be recorded in log",
+	)
+
+	suite.Assert().Contains(
+		logBuffer.String(),
+		"barbar_1",
+		"createIndexes event should be recorded in log",
 	)
 }
 
