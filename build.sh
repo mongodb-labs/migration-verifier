@@ -6,6 +6,8 @@ buildTime=$(date -u)
 goos=$(go env GOOS)
 goarch=$(go env GOARCH)
 
+export CGO_ENABLED=0
+
 printf 'Building migration-verifier for %s/%s …\n' "$goos" "$goarch"
 printf '\tRevision: %s\n' "$revision"
 printf '\tBuild Time: %s\n' "$buildTime"
