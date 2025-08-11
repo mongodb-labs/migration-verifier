@@ -631,12 +631,9 @@ func transformPipelineForToHashedIndexKey(
 		slices.Clone(in),
 		bson.D{{"$replaceWith", bson.D{
 			// Single-letter field names minimize the document size.
-			{docKeyInHashedCompare, bson.D(lo.Map(
+			{docKeyInHashedCompare, extractDocKeyAgg(
 				task.QueryFilter.GetDocKeyFields(),
-				func(f string, _ int) bson.E {
-					return bson.E{f, "$$ROOT." + f}
-				},
-			))},
+			)},
 			{"h", bson.D{
 				{"$toHashedIndexKey", bson.D{
 					{"$_internalKeyStringValue", bson.D{
