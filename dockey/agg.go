@@ -15,30 +15,47 @@ func ExtractDocKeyAgg(fieldNames []string) bson.D {
 
 func extractDocKeyFromAgg(fieldNames []string, rootExpr any) bson.D {
 	var docKeyNumKeys bson.D
-	numToKeyLookup := bson.M{}
+	numToKeyLookup := map[string]string{}
 
 	for n, name := range fieldNames {
 		var valExpr = extractKeyValueAgg(name, rootExpr)
+
+		// Aggregation forbids direct creation of an object with dotted keys.
+		// So here we create an object with numeric keys, then below we’ll
+		// map the numeric keys back to the real ones.
 
 		nStr := strconv.Itoa(n)
 		docKeyNumKeys = append(docKeyNumKeys, bson.E{nStr, valExpr})
 		numToKeyLookup[nStr] = name
 	}
 
+	// Now convert the numeric keys back to the real ones.
+	return mapObjectKeysAgg(docKeyNumKeys, numToKeyLookup)
+}
+
+// Potentially reusable:
+func mapObjectKeysAgg(expr any, mapping map[string]string) bson.D {
 	return bson.D{
 		{"$arrayToObject", bson.D{
 			{"$map", bson.D{
 				{"input", bson.D{
-					{"$objectToArray", docKeyNumKeys},
+					{"$objectToArray", expr},
 				}},
 				{"in", bson.D{
-					{"k", bson.D{
-						{"$getField", bson.D{
-							{"field", "$$this.k"},
-							{"input", numToKeyLookup},
+					{"$let", bson.D{
+						{"vars", bson.D{
+							{"keyLookup", mapping},
+						}},
+						{"in", bson.D{
+							{"k", bson.D{
+								{"$getField", bson.D{
+									{"field", "$$this.k"},
+									{"input", "$$keyLookup"},
+								}},
+							}},
+							{"v", "$$this.v"},
 						}},
 					}},
-					{"v", "$$this.v"},
 				}},
 			}},
 		}},
