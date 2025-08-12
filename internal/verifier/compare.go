@@ -8,6 +8,7 @@ import (
 
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/dockey"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
@@ -631,8 +632,9 @@ func transformPipelineForToHashedIndexKey(
 		slices.Clone(in),
 		bson.D{{"$replaceWith", bson.D{
 			// Single-letter field names minimize the document size.
-			{docKeyInHashedCompare, extractDocKeyAgg(
+			{docKeyInHashedCompare, dockey.ExtractDocKeyAgg(
 				task.QueryFilter.GetDocKeyFields(),
+				"$$ROOT",
 			)},
 			{"h", bson.D{
 				{"$toHashedIndexKey", bson.D{

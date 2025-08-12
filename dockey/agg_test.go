@@ -53,7 +53,7 @@ func TestExtractDocKeyAgg(t *testing.T) {
 	).Err(),
 	)
 
-	computedDocKeyAgg := extractDocKeyFromAgg(
+	computedDocKeyAgg := ExtractDocKeyAgg(
 		mslices.Of("foo.bar.baz", "_id"),
 		"$$ROOT.fullDocument",
 	)
