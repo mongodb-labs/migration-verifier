@@ -105,10 +105,12 @@ func TestExtractDocKeyAgg(t *testing.T) {
 		err := db.Drop(ctx)
 		if err != nil {
 			t.Logf("WARNING: Failed to drop DB %#q: %v", db.Name(), err)
+		} else {
+			t.Logf("Dropped DB %#q", db.Name())
 		}
 	}()
 
-	coll := db.Collection("Stuff")
+	coll := db.Collection("stuff")
 
 	// For sharded, pre-v8 clusters we need to create the collection first.
 	require.NoError(db.CreateCollection(ctx, coll.Name()))
