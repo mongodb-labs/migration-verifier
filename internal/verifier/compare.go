@@ -16,7 +16,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -660,15 +659,18 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
 	if !task.IsRecheck() {
-		extJSON, _ := bson.MarshalExtJSON(cmd, true, false)
 
-		verifier.logger.Debug().
-			Any("task", task.PrimaryKey).
-			Str("cmd", lo.Ternary(
-				extJSON == nil,
-				fmt.Sprintf("%s", cmd),
-				string(extJSON),
-			)).
+		evt := verifier.logger.Debug().
+			Any("task", task.PrimaryKey)
+
+		extJSON, err := bson.MarshalExtJSON(cmd, true, false)
+		if err != nil {
+			evt = evt.Str("cmd", fmt.Sprintf("%s", cmd))
+		} else {
+			evt = evt.RawJSON("cmd", extJSON)
+		}
+
+		evt.
 			Str("options", fmt.Sprintf("%v", *runCommandOptions)).
 			Msg("getDocuments command.")
 	}

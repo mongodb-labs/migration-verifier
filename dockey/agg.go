@@ -56,19 +56,22 @@ func mapObjectKeysAgg(expr any, mapping map[string]string) bson.D {
 				{"input", bson.D{
 					{"$objectToArray", expr},
 				}},
+				{"as", "pair"},
 				{"in", bson.D{
 					{"$let", bson.D{
 						{"vars", bson.D{
 							{"keyLookup", mapping},
+							{"numericKey", "$$pair.k"},
+							{"value", "$$pair.v"},
 						}},
 						{"in", bson.D{
 							{"k", bson.D{
 								{"$getField", bson.D{
-									{"field", "$$this.k"},
+									{"field", "$$numericKey"},
 									{"input", "$$keyLookup"},
 								}},
 							}},
-							{"v", "$$this.v"},
+							{"v", "$$value"},
 						}},
 					}},
 				}},
