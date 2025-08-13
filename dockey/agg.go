@@ -3,9 +3,12 @@
 package dockey
 
 import (
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -50,27 +53,42 @@ func ExtractDocKeyAgg(fieldNames []string, docExpr any) bson.D {
 
 // Potentially reusable:
 func mapObjectKeysAgg(expr any, mapping map[string]string) bson.D {
+	// We would ideally pass mapping into the aggregation and $getField
+	// to get the mapped key, but pre-v8 server versions required $getField’s
+	// field parameter to be a constant. So we use a $switch instead.
+	mapAgg := bson.D{
+		{"$switch", bson.D{
+			{"branches", lo.Map(
+				slices.Collect(maps.Keys(mapping)),
+				func(key string, _ int) bson.D {
+					return bson.D{
+						{"case", bson.D{
+							{"$eq", bson.A{
+								key,
+								"$$numericKey",
+							}},
+						}},
+						{"then", mapping[key]},
+					}
+				},
+			)},
+		}},
+	}
+
 	return bson.D{
 		{"$arrayToObject", bson.D{
 			{"$map", bson.D{
 				{"input", bson.D{
 					{"$objectToArray", expr},
 				}},
-				{"as", "pair"},
 				{"in", bson.D{
 					{"$let", bson.D{
 						{"vars", bson.D{
-							{"keyLookup", mapping},
-							{"numericKey", "$$pair.k"},
-							{"value", "$$pair.v"},
+							{"numericKey", "$$this.k"},
+							{"value", "$$this.v"},
 						}},
 						{"in", bson.D{
-							{"k", bson.D{
-								{"$getField", bson.D{
-									{"field", "$$numericKey"},
-									{"input", "$$keyLookup"},
-								}},
-							}},
+							{"k", mapAgg},
 							{"v", "$$value"},
 						}},
 					}},
