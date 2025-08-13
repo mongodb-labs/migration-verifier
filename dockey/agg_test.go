@@ -94,6 +94,12 @@ func TestExtractDocKeyAgg(t *testing.T) {
 		t.Skip("Skipping against unsharded cluster.")
 	}
 
+	// Pre-v6 clusters’ `documentKey` in the change stream is unreliable.
+	// See SERVER-61892.
+	if clusterInfo.VersionArray[0] < 6 {
+		t.Skip("Skipping against pre-v6 cluster.")
+	}
+
 	db := client.Database(t.Name())
 	defer func() {
 		err := db.Drop(ctx)
