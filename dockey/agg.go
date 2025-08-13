@@ -55,7 +55,8 @@ func ExtractDocKeyAgg(fieldNames []string, docExpr any) bson.D {
 func mapObjectKeysAgg(expr any, mapping map[string]string) bson.D {
 	// We would ideally pass mapping into the aggregation and $getField
 	// to get the mapped key, but pre-v8 server versions required $getField’s
-	// field parameter to be a constant. So we use a $switch instead.
+	// field parameter to be a constant. (And pre-v5 didn’t have $getField
+	// at all.) So we use a $switch instead.
 	mapAgg := bson.D{
 		{"$switch", bson.D{
 			{"branches", lo.Map(
@@ -98,26 +99,44 @@ func mapObjectKeysAgg(expr any, mapping map[string]string) bson.D {
 	}
 }
 
+func getFieldPolyfillAgg(docExpr, fieldExpr any) bson.D {
+	return bson.D{
+		{"$arrayElemAt", bson.A{
+			bson.D{
+				{"$map", bson.D{
+					{"input", bson.D{
+						{"$filter", bson.D{
+							{"input", bson.D{
+								{"$objectToArray", docExpr},
+							}},
+							{"as", "pair"},
+							{"cond", bson.D{
+								{"$eq", bson.A{
+									"$$pair.k",
+									fieldExpr,
+								}},
+							}},
+						}},
+					}},
+					{"as", "pair"},
+					{"in", "$$pair.v"},
+				}},
+			},
+			0,
+		}},
+	}
+}
+
 func extractKeyValueAgg(fieldName string, baseDocExpr any) any {
 	base, remainder, hasDot := strings.Cut(fieldName, ".")
 
-	fieldExpr := bson.D{
-		{"$getField", bson.D{
-			{"field", fieldName},
-			{"input", baseDocExpr},
-		}},
-	}
+	fieldExpr := getFieldPolyfillAgg(baseDocExpr, fieldName)
 
 	if !hasDot {
 		return fieldExpr
 	}
 
-	embDocExpr := bson.D{
-		{"$getField", bson.D{
-			{"field", base},
-			{"input", baseDocExpr},
-		}},
-	}
+	embDocExpr := getFieldPolyfillAgg(baseDocExpr, base)
 
 	return bson.D{
 		{"$cond", bson.D{

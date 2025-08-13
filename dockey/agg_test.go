@@ -106,6 +106,10 @@ func TestExtractDocKeyAgg(t *testing.T) {
 
 	// For sharded, pre-v8 clusters we need to create the collection first.
 	require.NoError(db.CreateCollection(ctx, coll.Name()))
+	require.NoError(client.Database("admin").RunCommand(
+		ctx,
+		bson.D{{"enableSharding", db.Name()}},
+	).Err())
 
 	require.NoError(client.Database("admin").RunCommand(
 		ctx,
