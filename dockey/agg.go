@@ -99,6 +99,9 @@ func mapObjectKeysAgg(expr any, mapping map[string]string) bson.D {
 	}
 }
 
+// Potentially reusable: a polyfill for $getField. This is useful even with
+// server versions that have $getField because that operator required a
+// constant for the field reference prior to v8.
 func getFieldPolyfillAgg(docExpr, fieldExpr any) bson.D {
 	return bson.D{
 		{"$arrayElemAt", bson.A{
