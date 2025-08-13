@@ -95,7 +95,12 @@ func TestExtractDocKeyAgg(t *testing.T) {
 	}
 
 	db := client.Database(t.Name())
-	defer db.Drop(ctx)
+	defer func() {
+		err := db.Drop(ctx)
+		if err != nil {
+			t.Logf("WARNING: Failed to drop DB %#q: %v", db.Name(), err)
+		}
+	}()
 
 	coll := db.Collection("Stuff")
 	require.NoError(client.Database("admin").RunCommand(
