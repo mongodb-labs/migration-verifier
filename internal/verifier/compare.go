@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/dockey"
+	"github.com/10gen/migration-verifier/dockeys"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
@@ -127,16 +128,15 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// b) compares the new doc against its previously-received, cached
 	//    counterpart and records any mismatch.
 	handleNewDoc := func(curDocWithTs docWithTs, isSrc bool) error {
-		docKeyValues := lo.Map(
+		docKeyValues, err := getDocKeyValues(
+			verifier.docCompareMethod,
+			curDocWithTs.doc,
 			mapKeyFieldNames,
-			func(fieldName string, _ int) bson.RawValue {
-				return getDocKeyFieldFromComparison(
-					verifier.docCompareMethod,
-					curDocWithTs.doc,
-					fieldName,
-				)
-			},
 		)
+		if err != nil {
+			return errors.Wrapf(err, "extracting doc key (fields: %v) values from doc %+v", mapKeyFieldNames, curDocWithTs.doc)
+		}
+
 		mapKey := getMapKey(docKeyValues)
 
 		var ourMap, theirMap map[string]docWithTs
@@ -370,6 +370,58 @@ func getDocKeyFieldFromComparison(
 	default:
 		panic("bad doc compare method: " + docCompareMethod)
 	}
+}
+
+func getDocKeyValues(
+	docCompareMethod DocCompareMethod,
+	doc bson.Raw,
+	fieldNames []string,
+) ([]bson.RawValue, error) {
+	var docKey bson.Raw
+
+	switch docCompareMethod {
+	case DocCompareBinary, DocCompareIgnoreOrder:
+		dk, err := dockeys.ExtractDocumentKey(fieldNames, doc)
+		if err != nil {
+			return nil, errors.Wrapf(err, "extracting doc key (fields: %v) from doc %+v", fieldNames, doc)
+		}
+
+		docKey = bson.Raw(dk.Bytes())
+	case DocCompareToHashedIndexKey:
+		docKeyVal, err := doc.LookupErr(docKeyInHashedCompare)
+		if err != nil {
+			return nil, errors.Wrapf(err, "fetching %#q from doc %v", docKeyInHashedCompare, doc)
+		}
+
+		var isDoc bool
+		docKey, isDoc = docKeyVal.DocumentOK()
+		if !isDoc {
+			return nil, fmt.Errorf(
+				"%#q in doc %v is type %s but should be %s",
+				docKeyInHashedCompare,
+				doc,
+				docKeyVal.Type,
+				bson.TypeEmbeddedDocument,
+			)
+		}
+	}
+
+	var values []bson.RawValue
+	els, err := docKey.Elements()
+	if err != nil {
+		return nil, errors.Wrapf(err, "parsing doc key (%+v) of doc %+v", docKey, doc)
+	}
+
+	for _, el := range els {
+		val, err := el.ValueErr()
+		if err != nil {
+			return nil, errors.Wrapf(err, "parsing doc key element (%+v) of doc %+v", el, doc)
+		}
+
+		values = append(values, val)
+	}
+
+	return values, nil
 }
 
 func simpleTimerReset(t *time.Timer, dur time.Duration) {

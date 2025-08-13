@@ -1,3 +1,5 @@
+// Package dockey contains logic related to document key determination.
+
 package dockey
 
 import (

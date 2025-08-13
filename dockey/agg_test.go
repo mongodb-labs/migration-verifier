@@ -14,6 +14,62 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+var testCases = []struct {
+	doc    bson.D
+	docKey bson.D
+}{
+	{
+		doc: bson.D{
+			{"foo", bson.D{
+				{"bar", bson.D{{"baz", 1}}},
+				{"bar.baz", 2},
+			}},
+			{"foo.bar", bson.D{{"baz", 3}}},
+			{"foo.bar.baz", 4},
+		},
+		docKey: bson.D{
+			{"foo.bar.baz", int32(4)},
+		},
+	},
+	{
+		doc: bson.D{
+			{"foo", bson.D{
+				{"bar", bson.D{{"baz", 1}}},
+				{"bar.baz", 2},
+			}},
+			{"foo.bar", bson.D{{"baz", 3}}},
+		},
+		docKey: bson.D{
+			{"foo.bar.baz", int32(2)},
+		},
+	},
+	{
+		doc: bson.D{
+			{"foo", bson.D{
+				{"bar", bson.D{{"baz", 1}}},
+			}},
+			{"foo.bar", bson.D{{"baz", 3}}},
+		},
+		docKey: bson.D{
+			{"foo.bar.baz", int32(1)},
+		},
+	},
+	{
+		doc: bson.D{
+			{"foo.bar", bson.D{{"baz", 3}}},
+		},
+		docKey: bson.D{}, // _id only
+	},
+	{
+		doc: bson.D{
+			{"foo", bson.D{{"bar.baz", nil}}},
+		},
+		docKey: bson.D{
+			{"foo.bar.baz", nil},
+		},
+	},
+}
+
 func TestExtractDocKeyAgg(t *testing.T) {
 	ctx := t.Context()
 

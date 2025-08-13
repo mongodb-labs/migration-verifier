@@ -1,12 +1,16 @@
-package dockey
+// Package dockeys was copied from mongosync@5b99bac58405b and tweaked
+// not to depend on mongosync’s shardkeys package but instead just to take
+// a slice of field names.
+package dockeys
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 // DocumentKey represents a document key from the change stream.
@@ -18,41 +22,44 @@ func NewDocumentKey(raw bson.Raw) DocumentKey {
 	return DocumentKey(raw)
 }
 
-// ExtractDocumentKey takes a shard key pattern and a document and returns its
+// ExtractDocumentKey takes a slice of shard key fields and a document and returns its
 // DocumentKey. This is a reimplementation of the same method in the server,
 // so that we can reliably generate document keys even without a change
 // stream.
-func ExtractDocumentKey(pattern Pattern, input bson.Raw) (DocumentKey, error) {
-	builder, err := extractShardKey(pattern, input)
+func ExtractDocumentKey(fields []string, inputBytes []byte) (DocumentKey, error) {
+	input := bson.Raw(inputBytes)
+
+	builder, err := extractShardKey(fields, input)
 	if err != nil {
 		return nil, err
 	}
 
-	if !pattern.ContainsID() {
+	if !slices.Contains(fields, "_id") {
 		id, err := input.LookupErr("_id")
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get document _id")
 		}
 
-		val := bsoncore.Value{Type: id.Type, Data: id.Value}
+		val := bsoncore.Value{Type: bsoncore.Type(id.Type), Data: id.Value}
 		builder.AppendValue("_id", val)
 	}
 
 	return DocumentKey(builder.Build()), nil
 }
 
-// extractShardKey does the shard-key part of the document key extraction.
-func extractShardKey(pattern Pattern, input bson.Raw) (*bsoncore.DocumentBuilder, error) {
+// extractShardKey does the shard-key part of the document key extraction. This code is a
+// reimplementation of the server's extractElementsBasedOnTemplate function (in
+// dotted_path_support.cpp), which is called from getDocumentKey in op_observer_util.cpp (which is
+// used by the change stream to generate document keys).
+func extractShardKey(fields []string, input bson.Raw) (*bsoncore.DocumentBuilder, error) {
 	db := bsoncore.NewDocumentBuilder()
 
-	if pattern.IsEmpty() {
+	if len(fields) == 0 {
 		return db, nil
 	}
 
 	// For every element of the shard key pattern:
-	for _, e := range pattern.Elements() {
-		key := e.Key()
-
+	for _, key := range fields {
 		rv, err := extractElementAtDottedPath(key, input)
 
 		switch {
@@ -70,7 +77,7 @@ func extractShardKey(pattern Pattern, input bson.Raw) (*bsoncore.DocumentBuilder
 
 		default:
 			// We found the element; add it to the result.
-			val := bsoncore.Value{Type: rv.Type, Data: rv.Value}
+			val := bsoncore.Value{Type: bsoncore.Type(rv.Type), Data: rv.Value}
 			db.AppendValue(key, val)
 		}
 	}
@@ -79,6 +86,8 @@ func extractShardKey(pattern Pattern, input bson.Raw) (*bsoncore.DocumentBuilder
 	return db, nil
 }
 
+// This code is a reimplementation of the server's extractElementAtDottedPath function in
+// dotted_path_support.cpp.
 func extractElementAtDottedPath(path string, input bson.Raw) (bson.RawValue, error) {
 	// First, try to look up the field verbatim. We must do this because field
 	// names can have dots in them: a shard key pattern like {"a.b": 1} will
@@ -102,7 +111,7 @@ func extractElementAtDottedPath(path string, input bson.Raw) (bson.RawValue, err
 		if !ok {
 			return rv, bsoncore.InvalidDepthTraversalError{
 				Key:  left,
-				Type: el.Type,
+				Type: bsoncore.Type(el.Type),
 			}
 		}
 
