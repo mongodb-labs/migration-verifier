@@ -8,13 +8,14 @@ import (
 
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/dockey"
+	"github.com/10gen/migration-verifier/dockeys"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -126,16 +127,15 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// b) compares the new doc against its previously-received, cached
 	//    counterpart and records any mismatch.
 	handleNewDoc := func(curDocWithTs docWithTs, isSrc bool) error {
-		docKeyValues := lo.Map(
+		docKeyValues, err := getDocKeyValues(
+			verifier.docCompareMethod,
+			curDocWithTs.doc,
 			mapKeyFieldNames,
-			func(fieldName string, _ int) bson.RawValue {
-				return getDocKeyFieldFromComparison(
-					verifier.docCompareMethod,
-					curDocWithTs.doc,
-					fieldName,
-				)
-			},
 		)
+		if err != nil {
+			return errors.Wrapf(err, "extracting doc key (fields: %v) values from doc %+v", mapKeyFieldNames, curDocWithTs.doc)
+		}
+
 		mapKey := getMapKey(docKeyValues)
 
 		var ourMap, theirMap map[string]docWithTs
@@ -369,6 +369,58 @@ func getDocKeyFieldFromComparison(
 	default:
 		panic("bad doc compare method: " + docCompareMethod)
 	}
+}
+
+func getDocKeyValues(
+	docCompareMethod DocCompareMethod,
+	doc bson.Raw,
+	fieldNames []string,
+) ([]bson.RawValue, error) {
+	var docKey bson.Raw
+
+	switch docCompareMethod {
+	case DocCompareBinary, DocCompareIgnoreOrder:
+		dk, err := dockeys.ExtractDocumentKey(fieldNames, doc)
+		if err != nil {
+			return nil, errors.Wrapf(err, "extracting doc key (fields: %v) from doc %+v", fieldNames, doc)
+		}
+
+		docKey = bson.Raw(dk.Bytes())
+	case DocCompareToHashedIndexKey:
+		docKeyVal, err := doc.LookupErr(docKeyInHashedCompare)
+		if err != nil {
+			return nil, errors.Wrapf(err, "fetching %#q from doc %v", docKeyInHashedCompare, doc)
+		}
+
+		var isDoc bool
+		docKey, isDoc = docKeyVal.DocumentOK()
+		if !isDoc {
+			return nil, fmt.Errorf(
+				"%#q in doc %v is type %s but should be %s",
+				docKeyInHashedCompare,
+				doc,
+				docKeyVal.Type,
+				bson.TypeEmbeddedDocument,
+			)
+		}
+	}
+
+	var values []bson.RawValue
+	els, err := docKey.Elements()
+	if err != nil {
+		return nil, errors.Wrapf(err, "parsing doc key (%+v) of doc %+v", docKey, doc)
+	}
+
+	for _, el := range els {
+		val, err := el.ValueErr()
+		if err != nil {
+			return nil, errors.Wrapf(err, "parsing doc key element (%+v) of doc %+v", el, doc)
+		}
+
+		values = append(values, val)
+	}
+
+	return values, nil
 }
 
 func simpleTimerReset(t *time.Timer, dur time.Duration) {
@@ -607,15 +659,18 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
 	if !task.IsRecheck() {
-		extJSON, _ := bson.MarshalExtJSON(cmd, true, false)
 
-		verifier.logger.Debug().
-			Any("task", task.PrimaryKey).
-			Str("cmd", lo.Ternary(
-				extJSON == nil,
-				fmt.Sprintf("%s", cmd),
-				string(extJSON),
-			)).
+		evt := verifier.logger.Debug().
+			Any("task", task.PrimaryKey)
+
+		extJSON, err := bson.MarshalExtJSON(cmd, true, false)
+		if err != nil {
+			evt = evt.Str("cmd", fmt.Sprintf("%s", cmd))
+		} else {
+			evt = evt.RawJSON("cmd", extJSON)
+		}
+
+		evt.
 			Str("options", fmt.Sprintf("%v", *runCommandOptions)).
 			Msg("getDocuments command.")
 	}
@@ -631,12 +686,10 @@ func transformPipelineForToHashedIndexKey(
 		slices.Clone(in),
 		bson.D{{"$replaceWith", bson.D{
 			// Single-letter field names minimize the document size.
-			{docKeyInHashedCompare, bson.D(lo.Map(
+			{docKeyInHashedCompare, dockey.ExtractDocKeyAgg(
 				task.QueryFilter.GetDocKeyFields(),
-				func(f string, _ int) bson.E {
-					return bson.E{f, "$$ROOT." + f}
-				},
-			))},
+				"$$ROOT",
+			)},
 			{"h", bson.D{
 				{"$toHashedIndexKey", bson.D{
 					{"$_internalKeyStringValue", bson.D{
