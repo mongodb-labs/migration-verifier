@@ -1,9 +1,10 @@
-package dockey
+package verifier
 
 import (
 	"os"
 	"testing"
 
+	"github.com/10gen/migration-verifier/dockey"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
@@ -130,7 +131,7 @@ func TestExtractDocKeyAgg(t *testing.T) {
 	).Err(),
 	)
 
-	computedDocKeyAgg := ExtractDocKeyAgg(
+	computedDocKeyAgg := dockey.ExtractDocKeyAgg(
 		mslices.Of("foo.bar.baz", "_id"),
 		"$$ROOT.fullDocument",
 	)

@@ -1,4 +1,5 @@
 // Package dockey contains logic related to document key determination.
+// Its tests use a cluster and thus are stored in internal/verifier.
 
 package dockey
 
