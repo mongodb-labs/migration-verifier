@@ -125,6 +125,10 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 		{{"_id", 33}, {"foo", bson.D{{"bar", bson.D{{"baz", 200}}}}}},
 	}
 
+	shardKey := bson.D{
+		{"foo.bar.baz", 1},
+	}
+
 	for _, coll := range mslices.Of(srcColl, dstColl) {
 		db := coll.Database()
 		client := db.Client()
@@ -140,9 +144,7 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 			ctx,
 			bson.D{
 				{"shardCollection", db.Name() + "." + coll.Name()},
-				{"key", bson.D{
-					{"foo.bar.baz", 1},
-				}},
+				{"key", shardKey},
 			},
 		).Err(),
 		)
@@ -181,6 +183,12 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 		QueryFilter: QueryFilter{
 			Namespace: dbName + "." + collName,
 			To:        dbName + "." + collName,
+			ShardKeys: lo.Map(
+				shardKey,
+				func(el bson.E, _ int) string {
+					return el.Key
+				},
+			),
 			Partition: &partitions.Partition{
 				Key: partitions.PartitionKey{
 					Lower: primitive.MinKey{},
