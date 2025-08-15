@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/dockey"
-	"github.com/10gen/migration-verifier/dockeys"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
@@ -21,6 +21,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 	"golang.org/x/exp/slices"
 )
 
@@ -321,10 +322,9 @@ func (verifier *Verifier) compareDocsFromChannels(
 		results = append(
 			results,
 			VerificationResult{
-				ID: getDocKeyFieldFromComparison(
+				ID: getDocIdFromComparison(
 					verifier.docCompareMethod,
 					docWithTs.doc,
-					"_id",
 				),
 				Details:      Missing,
 				Cluster:      ClusterTarget,
@@ -339,10 +339,9 @@ func (verifier *Verifier) compareDocsFromChannels(
 		results = append(
 			results,
 			VerificationResult{
-				ID: getDocKeyFieldFromComparison(
+				ID: getDocIdFromComparison(
 					verifier.docCompareMethod,
 					docWithTs.doc,
-					"_id",
 				),
 				Details:      Missing,
 				Cluster:      ClusterSource,
@@ -356,16 +355,15 @@ func (verifier *Verifier) compareDocsFromChannels(
 	return results, srcDocCount, srcByteCount, nil
 }
 
-func getDocKeyFieldFromComparison(
+func getDocIdFromComparison(
 	docCompareMethod DocCompareMethod,
 	doc bson.Raw,
-	fieldName string,
 ) bson.RawValue {
 	switch docCompareMethod {
 	case DocCompareBinary, DocCompareIgnoreOrder:
-		return doc.Lookup(fieldName)
+		return doc.Lookup("_id")
 	case DocCompareToHashedIndexKey:
-		return doc.Lookup(docKeyInHashedCompare, fieldName)
+		return doc.Lookup(docKeyInHashedCompare, "_id")
 	default:
 		panic("bad doc compare method: " + docCompareMethod)
 	}
@@ -380,12 +378,11 @@ func getDocKeyValues(
 
 	switch docCompareMethod {
 	case DocCompareBinary, DocCompareIgnoreOrder:
-		dk, err := dockeys.ExtractDocumentKey(fieldNames, doc)
+		var err error
+		docKey, err = extractDocKeyFromDoc(fieldNames, doc)
 		if err != nil {
-			return nil, errors.Wrapf(err, "extracting doc key (fields: %v) from doc %+v", fieldNames, doc)
+			return nil, err
 		}
-
-		docKey = bson.Raw(dk.Bytes())
 	case DocCompareToHashedIndexKey:
 		docKeyVal, err := doc.LookupErr(docKeyInHashedCompare)
 		if err != nil {
@@ -421,6 +418,36 @@ func getDocKeyValues(
 	}
 
 	return values, nil
+}
+
+// This extracts the document key from a document gets its field names.
+//
+// NB: This avoids the problem documented in SERVER-109340; as a result,
+// the returned key may not always match the change stream’s `documentKey`
+// (because the server misreports its own sharding logic).
+func extractDocKeyFromDoc(
+	fieldNames []string,
+	doc bson.Raw,
+) (bson.Raw, error) {
+	var dk bson.D
+	for _, field := range fieldNames {
+		parts := strings.Split(field, ".")
+		val, err := doc.LookupErr(parts...)
+		if errors.Is(err, bsoncore.ErrElementNotFound) {
+			continue
+		} else if err == nil {
+			dk = append(dk, bson.E{field, val})
+		} else {
+			return nil, errors.Wrapf(err, "extracting doc key field %#q from doc %+v", field, doc)
+		}
+	}
+
+	docKey, err := bson.Marshal(dk)
+	if err != nil {
+		return nil, errors.Wrapf(err, "marshaling doc key %v from doc %v", dk, docKey)
+	}
+
+	return docKey, nil
 }
 
 func simpleTimerReset(t *time.Timer, dur time.Duration) {
@@ -711,7 +738,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
 		// With hash comparison, mismatches are opaque.
 		return []VerificationResult{{
-			ID:        getDocKeyFieldFromComparison(verifier.docCompareMethod, srcClientDoc, "_id"),
+			ID:        getDocIdFromComparison(verifier.docCompareMethod, srcClientDoc),
 			Details:   Mismatch,
 			Cluster:   ClusterTarget,
 			NameSpace: namespace,

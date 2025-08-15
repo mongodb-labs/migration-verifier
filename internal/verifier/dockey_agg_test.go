@@ -2,7 +2,6 @@ package verifier
 
 import (
 	"os"
-	"testing"
 
 	"github.com/10gen/migration-verifier/dockey"
 	"github.com/10gen/migration-verifier/internal/logger"
@@ -29,7 +28,7 @@ var testCases = []struct {
 			{"foo.bar.baz", 4},
 		},
 		docKey: bson.D{
-			{"foo.bar.baz", int32(4)},
+			{"foo.bar.baz", int32(1)},
 		},
 	},
 	{
@@ -41,29 +40,25 @@ var testCases = []struct {
 			{"foo.bar", bson.D{{"baz", 3}}},
 		},
 		docKey: bson.D{
-			{"foo.bar.baz", int32(2)},
-		},
-	},
-	{
-		doc: bson.D{
-			{"foo", bson.D{
-				{"bar", bson.D{{"baz", 1}}},
-			}},
-			{"foo.bar", bson.D{{"baz", 3}}},
-		},
-		docKey: bson.D{
 			{"foo.bar.baz", int32(1)},
 		},
 	},
 	{
 		doc: bson.D{
+			{"foo", bson.D{
+				{"bar.baz", 2},
+			}},
 			{"foo.bar", bson.D{{"baz", 3}}},
 		},
-		docKey: bson.D{}, // _id only
+		docKey: bson.D{
+			{}, // _id only
+		},
 	},
 	{
 		doc: bson.D{
-			{"foo", bson.D{{"bar.baz", nil}}},
+			{"foo", bson.D{
+				{"bar", bson.D{{"baz", nil}}},
+			}},
 		},
 		docKey: bson.D{
 			{"foo.bar.baz", nil},
@@ -71,7 +66,9 @@ var testCases = []struct {
 	},
 }
 
-func TestExtractDocKeyAgg(t *testing.T) {
+func (suite *IntegrationTestSuite) TestExtractDocKeyAgg() {
+	t := suite.T()
+
 	ctx := t.Context()
 
 	require := require.New(t)
