@@ -757,12 +757,8 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 		return nil, nil, 0, 0, err
 	}
 
-	// The partitioner doles out ranges to replicators; we don't use that functionality so we just pass
-	// one "replicator".
-	replicator1 := partitions.Replicator{ID: "verifier"}
-	replicators := []partitions.Replicator{replicator1}
 	partitionList, srcDocs, srcBytes, err := partitions.PartitionCollectionWithSize(
-		ctx, namespaceAndUUID, verifier.srcClient, replicators, verifier.logger, verifier.partitionSizeInBytes, verifier.globalFilter)
+		ctx, namespaceAndUUID, verifier.srcClient, verifier.logger, verifier.partitionSizeInBytes, verifier.globalFilter)
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
