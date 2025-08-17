@@ -28,13 +28,13 @@ const (
 	// possible that $sample does a collection scan if the number of documents increases very quickly, but
 	// that should be very rare.
 	//
-	defaultSampleRate = 0.04
+	sampleRate = 0.04
 
 	//
 	// The minimum number of documents $sample requires in order to use a pseudo-random cursor.
 	// See: https://docs.mongodb.com/manual/reference/operator/aggregation/sample/#behavior
 	//
-	defaultSampleMinNumDocs = 101
+	sampleMinNumDocs = 101
 
 	//
 	// The maximum number of documents to sample per partition. Previously this is set to 10.
@@ -133,8 +133,6 @@ func PartitionCollectionWithSize(
 		ctx,
 		uuidEntry,
 		srcClient,
-		defaultSampleRate,
-		defaultSampleMinNumDocs,
 		partitionSizeInBytes,
 		subLogger,
 		globalFilter,
@@ -151,8 +149,6 @@ func PartitionCollectionWithSize(
 			ctx,
 			uuidEntry,
 			srcClient,
-			defaultSampleRate,
-			defaultSampleMinNumDocs,
 			partitionSizeInBytes,
 			subLogger,
 			nil,
@@ -170,8 +166,6 @@ func partitionCollectionWithParameters(
 	ctx context.Context,
 	uuidEntry *uuidutil.NamespaceAndUUID,
 	srcClient *mongo.Client,
-	sampleRate float64,
-	sampleMinNumDocs int,
 	partitionSizeInBytes int64,
 	subLogger *logger.Logger,
 	globalFilter bson.D,
