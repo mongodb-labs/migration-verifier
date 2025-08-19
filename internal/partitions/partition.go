@@ -234,46 +234,44 @@ func getExplicitTypeCheckPredicates(lower any, upperOpt option.Option[any]) ([]b
 		rangePredicate = bson.D{{"_id", bson.D{{"$gte", lower}}}}
 	}
 
-	if upper, has := upperOpt.Get(); has {
-		upperRV, err := mbson.ConvertToRawValue(upper)
+	upper := upperOpt.OrElse(primitive.MaxKey{})
+
+	upperRV, err := mbson.ConvertToRawValue(upper)
+	if err != nil {
+		return nil, errors.Wrapf(err, "converting upper bound (%T: %v) to %T", upper, upper, upperRV)
+	}
+
+	if upperRV.Type != bson.TypeMaxKey {
+		typesBelowUpper, typesAboveUpper, err := getTypeBracketExcludedBSONTypes(upper)
 		if err != nil {
-			return nil, errors.Wrapf(err, "converting upper bound (%T: %v) to %T", upper, upper, upperRV)
+			return nil, errors.Wrapf(err, "getting types around upper bound (%T: %v)", upper, upper)
 		}
 
-		if upperRV.Type != bson.TypeMaxKey {
-			typesBelowUpper, typesAboveUpper, err := getTypeBracketExcludedBSONTypes(upper)
-			if err != nil {
-				return nil, errors.Wrapf(err, "getting types around upper bound (%T: %v)", upper, upper)
-			}
-
-			if slices.Contains(typesAboveUpper, lowerRV.Type) {
-				return nil, fmt.Errorf(
-					"lower bound’s BSON type (%s) sorts later than upper bound’s (%s)",
-					lowerRV.Type,
-					upperRV.Type,
-				)
-			}
-
-			bothLimitsPredicate := mslices.Compact(
-				mslices.Of(
-					rangePredicate,
-					bson.D{{"_id", bson.D{{"$lte", upper}}}},
-				),
+		if slices.Contains(typesAboveUpper, lowerRV.Type) {
+			return nil, fmt.Errorf(
+				"lower bound’s BSON type (%s) sorts later than upper bound’s (%s)",
+				lowerRV.Type,
+				upperRV.Type,
 			)
-
-			if slices.Contains(typesBelowUpper, lowerRV.Type) {
-				betweenTypes = lo.Intersect(betweenTypes, typesBelowUpper)
-				// If the limits’ types don’t sort together, then we OR the
-				// predicates together. This is correct because, in a non-$expr
-				// query, “foo > 5” means “foo > 5 AND foo is numeric”.
-				orPredicates = bothLimitsPredicate
-			} else {
-				// If the limits sort together, then we AND them together.
-				return bothLimitsPredicate, nil
-			}
 		}
-	} else {
-		orPredicates = mslices.Of(rangePredicate)
+
+		bothLimitsPredicate := mslices.Compact(
+			mslices.Of(
+				rangePredicate,
+				bson.D{{"_id", bson.D{{"$lte", upper}}}},
+			),
+		)
+
+		if slices.Contains(typesBelowUpper, lowerRV.Type) {
+			betweenTypes = lo.Intersect(betweenTypes, typesBelowUpper)
+			// If the limits’ types don’t sort together, then we OR the
+			// predicates together. This is correct because, in a non-$expr
+			// query, “foo > 5” means “foo > 5 AND foo is numeric”.
+			orPredicates = bothLimitsPredicate
+		} else {
+			// If the limits sort together, then we AND them together.
+			return bothLimitsPredicate, nil
+		}
 	}
 
 	if len(betweenTypes) > 0 {

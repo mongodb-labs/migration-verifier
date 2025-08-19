@@ -178,20 +178,31 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	})
 	suite.Require().NoError(err)
 
-	results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
-	suite.Require().NoError(err)
-	suite.Assert().EqualValues(2, docCount, "docs count")
-	suite.Assert().Greater(int(byteCount), 1, "byte count")
-	suite.Assert().Empty(results, "expect no mismatches")
+	suite.Run(
+		"MinKey to 999",
+		func() {
+			results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
+			suite.Require().NoError(err)
+			suite.Assert().EqualValues(2, docCount, "docs count")
+			suite.Assert().Greater(int(byteCount), 1, "byte count")
+			suite.Assert().Empty(results, "expect no mismatches")
+		},
+	)
 
 	task.QueryFilter.Partition.Key.Lower = int64(999)
 	task.QueryFilter.Partition.Upper = primitive.MaxKey{}
 
-	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
-	suite.Require().NoError(err)
-	suite.Assert().EqualValues(1, docCount, "docs count")
-	suite.Assert().Greater(int(byteCount), 1, "byte count")
-	suite.Assert().Len(results, 2, "expect mismatches")
+	suite.Run(
+		"MaxKey to 999",
+		func() {
+			results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
+			suite.Require().NoError(err)
+			suite.Assert().EqualValues(1, docCount, "docs count")
+			suite.Assert().Greater(int(byteCount), 1, "byte count")
+			suite.Assert().Len(results, 2, "expect mismatches from 999 to MaxKey")
+		},
+	)
+
 }
 
 func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
