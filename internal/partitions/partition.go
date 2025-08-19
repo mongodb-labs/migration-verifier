@@ -144,7 +144,7 @@ func (p *Partition) GetQueryParameters(clusterInfo *util.ClusterInfo, filterAndP
 		// that a given document spends cached in memory.
 		params.sortField = option.Some("_id")
 
-		newPredicates, err := FilterIdBounds(clusterInfo, p.Key.Lower, option.Some(p.Upper))
+		newPredicates, err := FilterIdBounds(clusterInfo, p.Key.Lower, p.Upper)
 		if err != nil {
 			return PartitionQueryParameters{}, err
 		}
@@ -166,7 +166,10 @@ func (p *Partition) GetQueryParameters(clusterInfo *util.ClusterInfo, filterAndP
 	return params, nil
 }
 
-func FilterIdBounds(clusterInfo *util.ClusterInfo, lower any, upperOpt option.Option[any]) ([]bson.D, error) {
+// FilterIdBounds returns a slice of query predicates that, when ANDed together,
+// effect a non-type-bracketed query for all values between the given boundaries
+// (inclusive). The query will NOT require fetching full documents.
+func FilterIdBounds(clusterInfo *util.ClusterInfo, lower, upper any) ([]bson.D, error) {
 	// For non-capped collections, the cursor should use the ID filter and the _id index.
 	// Get the bounded query filter from the partition to be used in the Find command.
 	useExprFind := true
@@ -180,13 +183,13 @@ func FilterIdBounds(clusterInfo *util.ClusterInfo, lower any, upperOpt option.Op
 	}
 
 	getPredicatesFunc := lo.Ternary(useExprFind, getExprPredicates, getExplicitTypeCheckPredicates)
-	return getPredicatesFunc(lower, upperOpt)
+	return getPredicatesFunc(lower, upper)
 }
 
 // This returns a range filter on _id to be used in a Find query for the
 // partition.  This filter will properly handle mixed-type _ids, but on server versions
 // < 5.0, will not use indexes and thus will be very slow.
-func getExprPredicates(lower any, upperOpt option.Option[any]) ([]bson.D, error) {
+func getExprPredicates(lower, upper any) ([]bson.D, error) {
 	// We use $expr to avoid type bracketing and allow comparison of different _id types,
 	// and $literal to avoid MQL injection from an _id's value.
 	predicates := []bson.D{{
@@ -199,17 +202,15 @@ func getExprPredicates(lower any, upperOpt option.Option[any]) ([]bson.D, error)
 	}}
 
 	// All _id values <= upper bound.
-	if upper, has := upperOpt.Get(); has {
-		predicates = append(
-			predicates,
-			bson.D{{"$expr", bson.D{
-				{"$lte", bson.A{
-					"$_id",
-					bson.D{{"$literal", upper}},
-				}},
-			}}},
-		)
-	}
+	predicates = append(
+		predicates,
+		bson.D{{"$expr", bson.D{
+			{"$lte", bson.A{
+				"$_id",
+				bson.D{{"$literal", upper}},
+			}},
+		}}},
+	)
 
 	return predicates, nil
 }
@@ -217,7 +218,7 @@ func getExprPredicates(lower any, upperOpt option.Option[any]) ([]bson.D, error)
 // getExplicitTypeCheckPredicates compensates for the server’s type bracketing
 // by matching _id types between the partition’s min & max boundaries.
 // It should yield the same result as filterWithExpr.
-func getExplicitTypeCheckPredicates(lower any, upperOpt option.Option[any]) ([]bson.D, error) {
+func getExplicitTypeCheckPredicates(lower, upper any) ([]bson.D, error) {
 	_, betweenTypes, err := getTypeBracketExcludedBSONTypes(lower)
 	if err != nil {
 		return nil, errors.Wrapf(err, "getting types above lower bound (%T: %v)", lower, lower)
@@ -233,8 +234,6 @@ func getExplicitTypeCheckPredicates(lower any, upperOpt option.Option[any]) ([]b
 	if lowerRV.Type != bson.TypeMinKey {
 		rangePredicate = bson.D{{"_id", bson.D{{"$gte", lower}}}}
 	}
-
-	upper := upperOpt.OrElse(primitive.MaxKey{})
 
 	upperRV, err := mbson.ConvertToRawValue(upper)
 	if err != nil {
