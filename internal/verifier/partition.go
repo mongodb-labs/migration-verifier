@@ -77,10 +77,14 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 	}
 
 	if lowerBound, has := lowerBoundOpt.Get(); has {
+		verifier.logger.Info().
+			Any("resumeFrom", lowerBound).
+			Msg("Resuming partitioning from last-created partition’s upper bound.")
+
 		predicates, err := partitions.FilterIdBounds(
 			verifier.srcClusterInfo,
 			lowerBound,
-			option.None[any](),
+			primitive.MaxKey{},
 		)
 		if err != nil {
 			return 0, 0, 0, errors.Wrapf(err, "getting lower-bound filter predicate (%v)", lowerBound)
