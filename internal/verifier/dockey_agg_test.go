@@ -30,6 +30,8 @@ func (suite *IntegrationTestSuite) TestExtractTrueDocKeyAgg() {
 		}
 	}()
 
+	// Insert into a real collection so that we can test on
+	// server versions that lack the $documents aggregation stage.
 	coll := db.Collection("stuff")
 
 	_, err := coll.InsertMany(
