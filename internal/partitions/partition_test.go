@@ -32,42 +32,58 @@ func (suite *UnitTestSuite) TestVersioning() {
 	partition, expectedExprFilter := makeTestPartition()
 
 	// No version given, default to no bracketing
-	findOptions := partition.GetQueryParameters(nil, nil).ToFindOptions()
+	qp, err := partition.GetQueryParameters(nil, nil)
+	suite.Require().NoError(err)
+	findOptions := qp.ToFindOptions()
 	filter := getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedExprFilter, filter)
 
 	// 6.0
-	findOptions = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{6, 0, 0}}, nil).ToFindOptions()
+	qp, err = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{6, 0, 0}}, nil)
+	suite.Require().NoError(err)
+	findOptions = qp.ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedExprFilter, filter)
 
 	// 5.3.0.9
-	findOptions = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{5, 3, 0, 9}}, nil).ToFindOptions()
+	qp, err = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{5, 3, 0, 9}}, nil)
+	suite.Require().NoError(err)
+	findOptions = qp.ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedExprFilter, filter)
 
 	// 7.1.3.5
-	findOptions = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{7, 1, 3, 5}}, nil).ToFindOptions()
+	qp, err = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{7, 1, 3, 5}}, nil)
+	suite.Require().NoError(err)
+	findOptions = qp.ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().Equal(expectedExprFilter, filter)
 
 	// 4.4 (int64)
-	findOptions = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{4, 4, 0, 0}}, nil).ToFindOptions()
+	qp, err = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{4, 4, 0, 0}}, nil)
+	suite.Require().NoError(err)
+	findOptions = qp.ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().NotEqual(expectedExprFilter, filter)
 
 	// 4.4
-	findOptions = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{4, 4, 0, 0}}, nil).ToFindOptions()
+	qp, err = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{4, 4, 0, 0}}, nil)
+	suite.Require().NoError(err)
+	findOptions = qp.ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().NotEqual(expectedExprFilter, filter)
 
 	// 4.2
-	findOptions = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{4, 2, 0, 0}}, nil).ToFindOptions()
+	qp, err = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{4, 2, 0, 0}}, nil)
+	suite.Require().NoError(err)
+	findOptions = qp.ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().NotEqual(expectedExprFilter, filter)
 
 	// No version array -- assume old, require type bracketing.
-	findOptions = partition.GetQueryParameters(&util.ClusterInfo{}, nil).ToFindOptions()
+	qp, err = partition.GetQueryParameters(&util.ClusterInfo{}, nil)
+	suite.Require().NoError(err)
+	findOptions = qp.ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
 	suite.Require().NotEqual(expectedExprFilter, filter)
 }
