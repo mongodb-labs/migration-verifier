@@ -9,7 +9,7 @@ import "reflect"
 // to capitalize on Go’s type inference, similar to
 // [this declined feature proposal](https://github.com/golang/go/issues/47709).
 func Of[T any](pieces ...T) []T {
-	return pieces
+	return slices.Clone(pieces)
 }
 
 // ToMap outputs a map that “indexes” the given slice.
