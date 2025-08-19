@@ -152,43 +152,79 @@ func (suite *IntegrationTestSuite) TestPartitionQueriesAvoidFetch() {
 
 	predicates, err := partitions.FilterIdBounds(
 		verifier.srcClusterInfo,
-		primitive.Null{},
-		"hey",
+		"aaa",
+		primitive.Symbol("zzz"),
 	)
 	suite.Require().NoError(err)
 
 	db := verifier.srcClient.Database(suite.DBNameForTest())
 	coll := db.Collection("stuff")
 
-	_, err = coll.InsertOne(ctx, bson.D{})
+	_, err = coll.InsertMany(
+		ctx,
+		lo.RepeatBy(
+			100000,
+			func(_ int) any {
+				return bson.D{}
+			},
+		),
+	)
 	suite.Require().NoError(err)
 
-	findExplain := db.RunCommand(
-		ctx,
+	verifyCommandNoFetch := func(cmd bson.D) {
+		explainResult := db.RunCommand(
+			ctx,
+			bson.D{
+				{"explain", cmd},
+				{"verbosity", "queryPlanner"},
+			},
+		)
+		raw, err := explainResult.Raw()
+		suite.Require().NoError(err)
+
+		winningPlan, err := raw.LookupErr("queryPlanner", "winningPlan")
+		suite.Require().NoError(err)
+
+		cmdJSON, err := bson.MarshalExtJSON(cmd, true, false)
+		suite.Require().NoError(err)
+
+		extJSON, err := bson.MarshalExtJSON(winningPlan, true, false)
+		suite.Require().NoError(err)
+		suite.Assert().NotContains(
+			string(extJSON),
+			"FETCH",
+			"query’s winning plan should not FETCH (query: %s)",
+			cmdJSON,
+		)
+	}
+
+	verifyCommandNoFetch(
 		bson.D{
-			{"explain", bson.D{
-				{"find", coll.Name()},
-				//{"projection", bson.D{{"_id", 1}}},
-				{"filter", bson.D{
-					{"$and", predicates},
-				}},
-				{"returnKey", true},
-				{"hint", bson.D{{"_id", 1}}},
+			{"find", coll.Name()},
+			{"projection", bson.D{{"_id", 1}}},
+			{"filter", bson.D{
+				{"$and", predicates},
 			}},
+			//{"returnKey", true},
+			{"hint", bson.D{{"_id", 1}}},
 		},
 	)
-	raw, err := findExplain.Raw()
-	suite.Require().NoError(err)
 
-	winningPlan, err := raw.LookupErr("queryPlanner", "winningPlan")
-	suite.Require().NoError(err)
+	verifyCommandNoFetch(
+		bson.D{
+			{"aggregate", coll.Name()},
+			{"cursor", bson.D{}},
+			{"pipeline", mongo.Pipeline{
+				{{"$sort", bson.D{{"_id", 1}}}},
+				{{"$project", bson.D{{"_id", 1}}}},
+				{{"$match", bson.D{
+					{"$and", predicates},
+				}}},
+			}},
 
-	extJSON, err := bson.MarshalExtJSON(winningPlan, true, false)
-	suite.Require().NoError(err)
-	suite.Assert().NotContains(
-		string(extJSON),
-		"FETCH",
-		"find query’s winning plan should not FETCH",
+			//{"returnKey", true},
+			{"hint", bson.D{{"_id", 1}}},
+		},
 	)
 }
 
