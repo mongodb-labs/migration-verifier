@@ -1,6 +1,9 @@
 package mslices
 
-import "reflect"
+import (
+	"reflect"
+	"slices"
+)
 
 // This package complements the Go standard library’s package of the
 // same name with broadly-useful tools that the standard library lacks.
