@@ -20,6 +20,7 @@ var testCases = []struct {
 }{
 	{
 		doc: bson.D{
+			{"_id", "abc"},
 			{"foo", bson.D{
 				{"bar", bson.D{{"baz", 1}}},
 				{"bar.baz", 2},
@@ -28,11 +29,13 @@ var testCases = []struct {
 			{"foo.bar.baz", 4},
 		},
 		docKey: bson.D{
+			{"_id", "abc"},
 			{"foo.bar.baz", int32(1)},
 		},
 	},
 	{
 		doc: bson.D{
+			{"_id", "bbb"},
 			{"foo", bson.D{
 				{"bar", bson.D{{"baz", 1}}},
 				{"bar.baz", 2},
@@ -40,27 +43,31 @@ var testCases = []struct {
 			{"foo.bar", bson.D{{"baz", 3}}},
 		},
 		docKey: bson.D{
+			{"_id", "bbb"},
 			{"foo.bar.baz", int32(1)},
 		},
 	},
 	{
 		doc: bson.D{
+			{"_id", "ccc"},
 			{"foo", bson.D{
 				{"bar.baz", 2},
 			}},
 			{"foo.bar", bson.D{{"baz", 3}}},
 		},
 		docKey: bson.D{
-			{}, // _id only
+			{"_id", "ccc"},
 		},
 	},
 	{
 		doc: bson.D{
+			{"_id", "ddd"},
 			{"foo", bson.D{
 				{"bar", bson.D{{"baz", nil}}},
 			}},
 		},
 		docKey: bson.D{
+			{"_id", "ddd"},
 			{"foo.bar.baz", nil},
 		},
 	},
@@ -129,8 +136,8 @@ func (suite *IntegrationTestSuite) TestExtractDocKeyAgg() {
 	)
 
 	computedDocKeyAgg := dockey.ExtractTrueDocKeyAgg(
-		mslices.Of("foo.bar.baz", "_id"),
-		"$$ROOT.fullDocument",
+		mslices.Of("_id", "foo.bar.baz"),
+		"$fullDocument",
 	)
 
 	ejson, _ := bson.MarshalExtJSON(computedDocKeyAgg, true, false)
@@ -172,7 +179,7 @@ func (suite *IntegrationTestSuite) TestExtractDocKeyAgg() {
 
 			assert.Equal(
 				t,
-				event.DocumentKey,
+				curCase.docKey,
 				event.ComputedDocKey,
 				"checking computed doc key for %v against server",
 				curCase.doc,
