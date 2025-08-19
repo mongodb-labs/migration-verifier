@@ -423,7 +423,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		suite.Assert().ElementsMatch(
 			tc.before,
 			before,
-			"before %T",
+			"types that precede %T",
 			tc.value,
 		)
 
