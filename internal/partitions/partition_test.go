@@ -2,31 +2,9 @@ package partitions
 
 import (
 	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
-
-func (suite *UnitTestSuite) TestPartitionLowerBoundFromCurrent() {
-	expectLowerBound := int32(5)
-	current := bson.D{bson.E{"_id", expectLowerBound}, {"anotherField", "hello"}}
-	rawCurrent, err := bson.Marshal(current)
-	require.NoError(suite.T(), err)
-	suite.Run("normal partition", func() {
-		partition, _ := makeTestPartition()
-		lowerBound, err := partition.lowerBoundFromCurrent(rawCurrent)
-		require.NoError(suite.T(), err)
-		require.NotNil(suite.T(), lowerBound)
-		assert.Equal(suite.T(), expectLowerBound, lowerBound)
-	})
-	suite.Run("capped partition", func() {
-		partition := makeTestCappedPartition()
-		lowerBound, err := partition.lowerBoundFromCurrent(rawCurrent)
-		require.NoError(suite.T(), err)
-		require.Nil(suite.T(), lowerBound)
-	})
-}
 
 func (suite *UnitTestSuite) TestVersioning() {
 	partition, expectedExprFilter := makeTestPartition()
@@ -112,28 +90,20 @@ func makeTestPartition() (Partition, bson.D) {
 }
 
 func makeExpectedFilter(lower, upper any) bson.D {
-	return bson.D{{"$and", bson.A{
-		bson.D{{"$and", []bson.D{
-			// All _id values >= lower bound.
-			{{"$expr", bson.D{
-				{"$gte", bson.A{
-					"$_id",
-					bson.D{{"$literal", lower}},
-				}},
-			}}},
-			// All _id values <= upper bound.
-			{{"$expr", bson.D{
-				{"$lte", bson.A{
-					"$_id",
-					bson.D{{"$literal", upper}},
-				}},
-			}}},
+	return bson.D{{"$and", []bson.D{
+		// All _id values >= lower bound.
+		{{"$expr", bson.D{
+			{"$gte", bson.A{
+				"$_id",
+				bson.D{{"$literal", lower}},
+			}},
+		}}},
+		// All _id values <= upper bound.
+		{{"$expr", bson.D{
+			{"$lte", bson.A{
+				"$_id",
+				bson.D{{"$literal", upper}},
+			}},
 		}}},
 	}}}
-}
-
-func makeTestCappedPartition() Partition {
-	partition, _ := makeTestPartition()
-	partition.IsCapped = true
-	return partition
 }

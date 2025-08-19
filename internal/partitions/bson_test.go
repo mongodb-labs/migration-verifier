@@ -7,173 +7,400 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 	for _, tc := range []struct {
 		value  any
-		before []string
-		after  []string
+		before []bsontype.Type
+		after  []bsontype.Type
 	}{
 		{
 			value:  primitive.MinKey{},
-			before: []string{},
-			after: typesToStrings(lo.Without(
+			before: []bsontype.Type{},
+			after: lo.Without(
 				bsonTypeSortOrder,
 				bson.TypeMinKey,
-			)),
+			),
 		},
 
 		{
 			value:  primitive.Null{},
-			before: typesToStrings(mslices.Of(bson.TypeMinKey)),
-			after: typesToStrings(lo.Without(
+			before: mslices.Of(bson.TypeMinKey),
+			after: lo.Without(
 				bsonTypeSortOrder,
 				bson.TypeMinKey,
 				bson.TypeNull,
-			)),
+			),
 		},
 
 		{
 			value: int32(1),
-			before: typesToStrings(
-				mslices.Of(
-					bson.TypeMinKey,
-					bson.TypeNull,
-				),
+			before: mslices.Of(
+				bson.TypeMinKey,
+				bson.TypeNull,
 			),
-			after: typesToStrings(
-				append(
-					slices.Clone(stringTypes),
-					bson.TypeEmbeddedDocument,
-					bson.TypeBinary,
-					bson.TypeObjectID,
-					bson.TypeBoolean,
-					bson.TypeDateTime,
-					bson.TypeTimestamp,
-					bson.TypeDBPointer,
-					bson.TypeJavaScript,
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
-				),
+			after: append(
+				slices.Clone(stringTypes),
+				bson.TypeEmbeddedDocument,
+				bson.TypeBinary,
+				bson.TypeObjectID,
+				bson.TypeBoolean,
+				bson.TypeDateTime,
+				bson.TypeTimestamp,
+				bson.TypeDBPointer,
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
 			),
 		},
 
 		{
 			value: int64(1),
-			before: typesToStrings(
-				mslices.Of(
-					bson.TypeMinKey,
-					bson.TypeNull,
-				),
+			before: mslices.Of(
+				bson.TypeMinKey,
+				bson.TypeNull,
 			),
-			after: typesToStrings(
-				append(
-					slices.Clone(stringTypes),
-					bson.TypeEmbeddedDocument,
-					bson.TypeBinary,
-					bson.TypeObjectID,
-					bson.TypeBoolean,
-					bson.TypeDateTime,
-					bson.TypeTimestamp,
-					bson.TypeDBPointer,
-					bson.TypeJavaScript,
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
-				),
+			after: append(
+				slices.Clone(stringTypes),
+				bson.TypeEmbeddedDocument,
+				bson.TypeBinary,
+				bson.TypeObjectID,
+				bson.TypeBoolean,
+				bson.TypeDateTime,
+				bson.TypeTimestamp,
+				bson.TypeDBPointer,
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
 			),
 		},
 
 		{
 			value: float64(1),
-			before: typesToStrings(
-				mslices.Of(
-					bson.TypeMinKey,
-					bson.TypeNull,
-				),
+			before: mslices.Of(
+				bson.TypeMinKey,
+				bson.TypeNull,
 			),
-			after: typesToStrings(
-				append(
-					slices.Clone(stringTypes),
-					bson.TypeEmbeddedDocument,
-					bson.TypeBinary,
-					bson.TypeObjectID,
-					bson.TypeBoolean,
-					bson.TypeDateTime,
-					bson.TypeTimestamp,
-					bson.TypeDBPointer,
-					bson.TypeJavaScript,
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
-				),
+			after: append(
+				slices.Clone(stringTypes),
+				bson.TypeEmbeddedDocument,
+				bson.TypeBinary,
+				bson.TypeObjectID,
+				bson.TypeBoolean,
+				bson.TypeDateTime,
+				bson.TypeTimestamp,
+				bson.TypeDBPointer,
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
 			),
 		},
 
 		{
 			value: primitive.Decimal128{},
-			before: typesToStrings(
-				mslices.Of(
-					bson.TypeMinKey,
-					bson.TypeNull,
-				),
+			before: mslices.Of(
+				bson.TypeMinKey,
+				bson.TypeNull,
 			),
-			after: typesToStrings(
-				append(
-					slices.Clone(stringTypes),
-					bson.TypeEmbeddedDocument,
-					bson.TypeBinary,
-					bson.TypeObjectID,
-					bson.TypeBoolean,
-					bson.TypeDateTime,
-					bson.TypeTimestamp,
-					bson.TypeDBPointer,
-					bson.TypeJavaScript,
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
-				),
+			after: append(
+				slices.Clone(stringTypes),
+				bson.TypeEmbeddedDocument,
+				bson.TypeBinary,
+				bson.TypeObjectID,
+				bson.TypeBoolean,
+				bson.TypeDateTime,
+				bson.TypeTimestamp,
+				bson.TypeDBPointer,
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
 			),
 		},
 
 		{
 			value: "",
-			before: typesToStrings(
-				append(
-					mslices.Of(
-						bson.TypeMinKey,
-						bson.TypeNull,
-					),
-					numericTypes...,
-				),
-			),
-			after: typesToStrings(
+			before: append(
 				mslices.Of(
-					bson.TypeEmbeddedDocument,
-					bson.TypeBinary,
-					bson.TypeObjectID,
-					bson.TypeBoolean,
-					bson.TypeDateTime,
-					bson.TypeTimestamp,
-					bson.TypeDBPointer,
-					bson.TypeJavaScript,
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
+					bson.TypeMinKey,
+					bson.TypeNull,
 				),
+				numericTypes...,
+			),
+			after: mslices.Of(
+				bson.TypeEmbeddedDocument,
+				bson.TypeBinary,
+				bson.TypeObjectID,
+				bson.TypeBoolean,
+				bson.TypeDateTime,
+				bson.TypeTimestamp,
+				bson.TypeDBPointer,
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
 			),
 		},
 
 		{
 			value: primitive.Symbol(""),
-			before: typesToStrings(
-				append(
-					mslices.Of(
-						bson.TypeMinKey,
-						bson.TypeNull,
-					),
-					numericTypes...,
+			before: append(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
 				),
+				numericTypes...,
 			),
-			after: typesToStrings(
+			after: mslices.Of(
+				bson.TypeEmbeddedDocument,
+				bson.TypeBinary,
+				bson.TypeObjectID,
+				bson.TypeBoolean,
+				bson.TypeDateTime,
+				bson.TypeTimestamp,
+				bson.TypeDBPointer,
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
+			),
+		},
+
+		{
+			value: bson.D{},
+			before: lo.Flatten(mslices.Of(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+				numericTypes,
+				stringTypes,
+			)),
+			after: mslices.Of(
+				bson.TypeBinary,
+				bson.TypeObjectID,
+				bson.TypeBoolean,
+				bson.TypeDateTime,
+				bson.TypeTimestamp,
+				bson.TypeDBPointer,
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
+			),
+		},
+
+		{
+			value: []byte{},
+			before: lo.Flatten(mslices.Of(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+				numericTypes,
+				stringTypes,
+				mslices.Of(
+					bson.TypeEmbeddedDocument,
+				),
+			)),
+			after: mslices.Of(
+				bson.TypeObjectID,
+				bson.TypeBoolean,
+				bson.TypeDateTime,
+				bson.TypeTimestamp,
+				bson.TypeDBPointer,
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
+			),
+		},
+
+		{
+			value: primitive.ObjectID{},
+			before: lo.Flatten(mslices.Of(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+				numericTypes,
+				stringTypes,
+				mslices.Of(
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+				),
+			)),
+			after: mslices.Of(
+				bson.TypeBoolean,
+				bson.TypeDateTime,
+				bson.TypeTimestamp,
+				bson.TypeDBPointer,
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
+			),
+		},
+
+		{
+			value: true,
+			before: lo.Flatten(mslices.Of(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+				numericTypes,
+				stringTypes,
+				mslices.Of(
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+				),
+			)),
+			after: mslices.Of(
+				bson.TypeDateTime,
+				bson.TypeTimestamp,
+				bson.TypeDBPointer,
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
+			),
+		},
+
+		{
+			value: time.Now(),
+			before: lo.Flatten(mslices.Of(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+				numericTypes,
+				stringTypes,
+				mslices.Of(
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+				),
+			)),
+			after: mslices.Of(
+				bson.TypeTimestamp,
+				bson.TypeDBPointer,
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
+			),
+		},
+
+		{
+			value: primitive.Timestamp{},
+			before: lo.Flatten(mslices.Of(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+				numericTypes,
+				stringTypes,
+				mslices.Of(
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+				),
+			)),
+			after: mslices.Of(
+				bson.TypeDBPointer,
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
+			),
+		},
+
+		{
+			value: primitive.DBPointer{},
+			before: lo.Flatten(mslices.Of(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+				numericTypes,
+				stringTypes,
+				mslices.Of(
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+				),
+			)),
+
+			after: mslices.Of(
+				bson.TypeJavaScript,
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
+			),
+		},
+
+		{
+			value: primitive.JavaScript(""),
+			before: lo.Flatten(mslices.Of(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+				numericTypes,
+				stringTypes,
+				mslices.Of(
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+				),
+			)),
+
+			after: mslices.Of(
+				bson.TypeCodeWithScope,
+				bson.TypeMaxKey,
+			),
+		},
+
+		{
+			value: primitive.CodeWithScope{Scope: bson.D{}},
+			before: lo.Flatten(mslices.Of(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+				numericTypes,
+				stringTypes,
+				mslices.Of(
+					bson.TypeEmbeddedDocument,
+					bson.TypeBinary,
+					bson.TypeObjectID,
+					bson.TypeBoolean,
+					bson.TypeDateTime,
+					bson.TypeTimestamp,
+					bson.TypeDBPointer,
+					bson.TypeJavaScript,
+				),
+			)),
+
+			after: mslices.Of(
+				bson.TypeMaxKey,
+			),
+		},
+
+		{
+			value: primitive.MaxKey{},
+			before: lo.Flatten(mslices.Of(
+				mslices.Of(
+					bson.TypeMinKey,
+					bson.TypeNull,
+				),
+				numericTypes,
+				stringTypes,
 				mslices.Of(
 					bson.TypeEmbeddedDocument,
 					bson.TypeBinary,
@@ -184,294 +411,10 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 					bson.TypeDBPointer,
 					bson.TypeJavaScript,
 					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
 				),
-			),
-		},
+			)),
 
-		{
-			value: bson.D{},
-			before: typesToStrings(
-				lo.Flatten(mslices.Of(
-					mslices.Of(
-						bson.TypeMinKey,
-						bson.TypeNull,
-					),
-					numericTypes,
-					stringTypes,
-				)),
-			),
-			after: typesToStrings(
-				mslices.Of(
-					bson.TypeBinary,
-					bson.TypeObjectID,
-					bson.TypeBoolean,
-					bson.TypeDateTime,
-					bson.TypeTimestamp,
-					bson.TypeDBPointer,
-					bson.TypeJavaScript,
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
-				),
-			),
-		},
-
-		{
-			value: []byte{},
-			before: typesToStrings(
-				lo.Flatten(mslices.Of(
-					mslices.Of(
-						bson.TypeMinKey,
-						bson.TypeNull,
-					),
-					numericTypes,
-					stringTypes,
-					mslices.Of(
-						bson.TypeEmbeddedDocument,
-					),
-				)),
-			),
-			after: typesToStrings(
-				mslices.Of(
-					bson.TypeObjectID,
-					bson.TypeBoolean,
-					bson.TypeDateTime,
-					bson.TypeTimestamp,
-					bson.TypeDBPointer,
-					bson.TypeJavaScript,
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
-				),
-			),
-		},
-
-		{
-			value: primitive.ObjectID{},
-			before: typesToStrings(
-				lo.Flatten(mslices.Of(
-					mslices.Of(
-						bson.TypeMinKey,
-						bson.TypeNull,
-					),
-					numericTypes,
-					stringTypes,
-					mslices.Of(
-						bson.TypeEmbeddedDocument,
-						bson.TypeBinary,
-					),
-				)),
-			),
-			after: typesToStrings(
-				mslices.Of(
-					bson.TypeBoolean,
-					bson.TypeDateTime,
-					bson.TypeTimestamp,
-					bson.TypeDBPointer,
-					bson.TypeJavaScript,
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
-				),
-			),
-		},
-
-		{
-			value: true,
-			before: typesToStrings(
-				lo.Flatten(mslices.Of(
-					mslices.Of(
-						bson.TypeMinKey,
-						bson.TypeNull,
-					),
-					numericTypes,
-					stringTypes,
-					mslices.Of(
-						bson.TypeEmbeddedDocument,
-						bson.TypeBinary,
-						bson.TypeObjectID,
-					),
-				)),
-			),
-			after: typesToStrings(
-				mslices.Of(
-					bson.TypeDateTime,
-					bson.TypeTimestamp,
-					bson.TypeDBPointer,
-					bson.TypeJavaScript,
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
-				),
-			),
-		},
-
-		{
-			value: time.Now(),
-			before: typesToStrings(
-				lo.Flatten(mslices.Of(
-					mslices.Of(
-						bson.TypeMinKey,
-						bson.TypeNull,
-					),
-					numericTypes,
-					stringTypes,
-					mslices.Of(
-						bson.TypeEmbeddedDocument,
-						bson.TypeBinary,
-						bson.TypeObjectID,
-						bson.TypeBoolean,
-					),
-				)),
-			),
-			after: typesToStrings(
-				mslices.Of(
-					bson.TypeTimestamp,
-					bson.TypeDBPointer,
-					bson.TypeJavaScript,
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
-				),
-			),
-		},
-
-		{
-			value: primitive.Timestamp{},
-			before: typesToStrings(
-				lo.Flatten(mslices.Of(
-					mslices.Of(
-						bson.TypeMinKey,
-						bson.TypeNull,
-					),
-					numericTypes,
-					stringTypes,
-					mslices.Of(
-						bson.TypeEmbeddedDocument,
-						bson.TypeBinary,
-						bson.TypeObjectID,
-						bson.TypeBoolean,
-						bson.TypeDateTime,
-					),
-				)),
-			),
-			after: typesToStrings(
-				mslices.Of(
-					bson.TypeDBPointer,
-					bson.TypeJavaScript,
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
-				),
-			),
-		},
-
-		{
-			value: primitive.DBPointer{},
-			before: typesToStrings(
-				lo.Flatten(mslices.Of(
-					mslices.Of(
-						bson.TypeMinKey,
-						bson.TypeNull,
-					),
-					numericTypes,
-					stringTypes,
-					mslices.Of(
-						bson.TypeEmbeddedDocument,
-						bson.TypeBinary,
-						bson.TypeObjectID,
-						bson.TypeBoolean,
-						bson.TypeDateTime,
-						bson.TypeTimestamp,
-					),
-				)),
-			),
-			after: typesToStrings(
-				mslices.Of(
-					bson.TypeJavaScript,
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
-				),
-			),
-		},
-
-		{
-			value: primitive.JavaScript(""),
-			before: typesToStrings(
-				lo.Flatten(mslices.Of(
-					mslices.Of(
-						bson.TypeMinKey,
-						bson.TypeNull,
-					),
-					numericTypes,
-					stringTypes,
-					mslices.Of(
-						bson.TypeEmbeddedDocument,
-						bson.TypeBinary,
-						bson.TypeObjectID,
-						bson.TypeBoolean,
-						bson.TypeDateTime,
-						bson.TypeTimestamp,
-						bson.TypeDBPointer,
-					),
-				)),
-			),
-			after: typesToStrings(
-				mslices.Of(
-					bson.TypeCodeWithScope,
-					bson.TypeMaxKey,
-				),
-			),
-		},
-
-		{
-			value: primitive.CodeWithScope{Scope: bson.D{}},
-			before: typesToStrings(
-				lo.Flatten(mslices.Of(
-					mslices.Of(
-						bson.TypeMinKey,
-						bson.TypeNull,
-					),
-					numericTypes,
-					stringTypes,
-					mslices.Of(
-						bson.TypeEmbeddedDocument,
-						bson.TypeBinary,
-						bson.TypeObjectID,
-						bson.TypeBoolean,
-						bson.TypeDateTime,
-						bson.TypeTimestamp,
-						bson.TypeDBPointer,
-						bson.TypeJavaScript,
-					),
-				)),
-			),
-			after: typesToStrings(
-				mslices.Of(
-					bson.TypeMaxKey,
-				),
-			),
-		},
-
-		{
-			value: primitive.MaxKey{},
-			before: typesToStrings(
-				lo.Flatten(mslices.Of(
-					mslices.Of(
-						bson.TypeMinKey,
-						bson.TypeNull,
-					),
-					numericTypes,
-					stringTypes,
-					mslices.Of(
-						bson.TypeEmbeddedDocument,
-						bson.TypeBinary,
-						bson.TypeObjectID,
-						bson.TypeBoolean,
-						bson.TypeDateTime,
-						bson.TypeTimestamp,
-						bson.TypeDBPointer,
-						bson.TypeJavaScript,
-						bson.TypeCodeWithScope,
-					),
-				)),
-			),
-			after: []string{},
+			after: []bsontype.Type{},
 		},
 	} {
 		before, after, err := getTypeBracketExcludedBSONTypes(tc.value)

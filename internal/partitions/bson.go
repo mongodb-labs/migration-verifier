@@ -91,7 +91,7 @@ var bsonTypeString = map[bsontype.Type]string{
 // This is kind of like strings.Cut() but against the sort-ordered list of BSON
 // types, except that if the given value is a number or string-like, then other
 // “like” types will not be in the returned slices.
-func getTypeBracketExcludedBSONTypes(val any) ([]string, []string, error) {
+func getTypeBracketExcludedBSONTypes(val any) ([]bsontype.Type, []bsontype.Type, error) {
 	bsonType, _, err := bson.MarshalValue(val)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "marshaling min value (%v)", val)
@@ -120,7 +120,7 @@ func getTypeBracketExcludedBSONTypes(val any) ([]string, []string, error) {
 		later = lo.Without(later, stringTypes...)
 	}
 
-	return typesToStrings(earlier), typesToStrings(later), nil
+	return earlier, later, nil
 }
 
 func typesToStrings(in []bsontype.Type) []string {

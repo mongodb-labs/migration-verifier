@@ -6,6 +6,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -71,31 +72,6 @@ func (p *Partition) getIndexKeyBoundString(bound any) string {
 	default:
 		return fmt.Sprintf("%v", b)
 	}
-}
-
-// lowerBoundFromCurrent takes the current value of a cursor and returns the value to save as
-// the lower bound for the cursor. For capped collections, this is `nil`. For others it's the
-// value of the `_id` field.
-func (p *Partition) lowerBoundFromCurrent(current bson.Raw) (any, error) {
-	if p.IsCapped {
-		return nil, nil
-	}
-
-	if len(current) == 0 {
-		return nil, nil
-	}
-
-	var doc bson.M
-	err := bson.Unmarshal(current, &doc)
-	if err != nil {
-		return nil, errors.Wrap(err, "error unmarshaling raw document to bson.M")
-	}
-
-	if id, ok := doc["_id"]; ok {
-		return id, nil
-	}
-
-	return nil, errors.New("could not find an '_id' element in the raw document")
 }
 
 type PartitionQueryParameters struct {
@@ -207,9 +183,9 @@ func FilterIdBounds(clusterInfo *util.ClusterInfo, lower any, upperOpt option.Op
 	return getPredicatesFunc(lower, upperOpt)
 }
 
-// filterWithExpr returns a range filter on _id to be used in a Find query for the
+// This returns a range filter on _id to be used in a Find query for the
 // partition.  This filter will properly handle mixed-type _ids, but on server versions
-// < 5.0, will not use indexes and thus will be very slow
+// < 5.0, will not use indexes and thus will be very slow.
 func getExprPredicates(lower any, upperOpt option.Option[any]) ([]bson.D, error) {
 	// We use $expr to avoid type bracketing and allow comparison of different _id types,
 	// and $literal to avoid MQL injection from an _id's value.
@@ -238,7 +214,7 @@ func getExprPredicates(lower any, upperOpt option.Option[any]) ([]bson.D, error)
 	return predicates, nil
 }
 
-// filterWithExplicitTypeChecks compensates for the server’s type bracketing
+// getExplicitTypeCheckPredicates compensates for the server’s type bracketing
 // by matching _id types between the partition’s min & max boundaries.
 // It should yield the same result as filterWithExpr.
 func getExplicitTypeCheckPredicates(lower any, upperOpt option.Option[any]) ([]bson.D, error) {
@@ -247,95 +223,60 @@ func getExplicitTypeCheckPredicates(lower any, upperOpt option.Option[any]) ([]b
 		return nil, errors.Wrapf(err, "getting types above lower bound (%T: %v)", lower, lower)
 	}
 
-	var rangePredicates []bson.D
+	var rangePredicate bson.D
+	var orPredicates []bson.D
 
 	lowerRV, err := mbson.ConvertToRawValue(lower)
 	if err != nil {
 		return nil, errors.Wrapf(err, "converting lower bound (%T: %v) to %T", lower, lower, lowerRV)
 	}
 	if lowerRV.Type != bson.TypeMinKey {
-		rangePredicates = append(
-			rangePredicates,
-			bson.D{{"_id", bson.D{{"$gte", lower}}}},
-		)
+		rangePredicate = bson.D{{"_id", bson.D{{"$gte", lower}}}}
 	}
 
 	if upper, has := upperOpt.Get(); has {
-		typesBelowUpper, _, err := getTypeBracketExcludedBSONTypes(upper)
-		if err != nil {
-			return nil, errors.Wrapf(err, "getting types below upper bound (%T: %v)", upper, upper)
-		}
-
-		betweenTypes = lo.Intersect(betweenTypes, typesBelowUpper)
-
 		upperRV, err := mbson.ConvertToRawValue(upper)
 		if err != nil {
 			return nil, errors.Wrapf(err, "converting upper bound (%T: %v) to %T", upper, upper, upperRV)
 		}
 
 		if upperRV.Type != bson.TypeMaxKey {
-			rangePredicates = append(
-				rangePredicates,
+			typesBelowUpper, typesAboveUpper, err := getTypeBracketExcludedBSONTypes(upper)
+			if err != nil {
+				return nil, errors.Wrapf(err, "getting types around upper bound (%T: %v)", upper, upper)
+			}
+
+			if slices.Contains(typesAboveUpper, lowerRV.Type) {
+				return nil, fmt.Errorf(
+					"lower bound’s BSON type (%s) sorts later than upper bound’s (%s)",
+					lowerRV.Type,
+					upperRV.Type,
+				)
+			}
+
+			bothLimitsPredicate := mslices.Of(
+				rangePredicate,
 				bson.D{{"_id", bson.D{{"$lte", upper}}}},
 			)
+
+			if slices.Contains(typesBelowUpper, lowerRV.Type) {
+				// If the limits’ types don’t sort together, then we OR the
+				// predicates together. This is correct because, in a non-$expr
+				// query, “foo > 5” means “foo > 5 AND foo is numeric”.
+				orPredicates = bothLimitsPredicate
+			} else {
+				// If the limits sort together, then we AND them together.
+				return bothLimitsPredicate, nil
+			}
 		}
 	}
 
-	if len(betweenTypes) == 0 {
-		// These are ANDed together, so just return them.
-		return rangePredicates, nil
+	if len(betweenTypes) > 0 {
+		orPredicates = append(
+			orPredicates,
+			bson.D{{"_id", bson.D{{"$type", betweenTypes}}}},
+		)
 	}
-
-	orPredicates := []bson.D{{{"_id", bson.D{{"$type", betweenTypes}}}}}
-
-	var rangePredicateInOr bson.D
-
-	switch len(rangePredicates) {
-	case 2:
-		rangePredicateInOr = bson.D{{"$and", rangePredicates}}
-	case 1:
-		rangePredicateInOr = rangePredicates[0]
-	default:
-		panic(fmt.Sprintf("bad # of range predicates: %+v", rangePredicates))
-	}
-
-	orPredicates = append(orPredicates, rangePredicateInOr)
 
 	return []bson.D{{{"$or", orPredicates}}}, nil
-}
-
-func getGTEQueryPredicate(boundary any) bson.D {
-	_, greaterTypeStrs, err := getTypeBracketExcludedBSONTypes(boundary)
-	if err != nil {
-		panic(errors.Wrapf(err, "creating query predicate: gte (%T: %v)", boundary, boundary))
-	}
-
-	return bson.D{
-		{"$or", []bson.D{
-			// All _id values >= lower bound.
-			{{"_id", bson.D{{"$gte", boundary}}}},
-
-			// All BSON types above the _id’s type *and* not checked
-			// in the _id comparison.
-			{{"_id", bson.D{{"$type", greaterTypeStrs}}}},
-		}},
-	}
-}
-
-func getLTEQueryPredicate(boundary any) bson.D {
-	lesserTypeStrs, _, err := getTypeBracketExcludedBSONTypes(boundary)
-	if err != nil {
-		panic(errors.Wrapf(err, "creating query predicate: lte (%T: %v)", boundary, boundary))
-	}
-
-	return bson.D{
-		{"$or", []bson.D{
-			// All _id values <= upper bound.
-			{{"_id", bson.D{{"$lte", boundary}}}},
-
-			// All BSON types below the _id’s type *and* not checked
-			// in the _id comparison.
-			{{"_id", bson.D{{"$type", lesserTypeStrs}}}},
-		}},
-	}
 }
