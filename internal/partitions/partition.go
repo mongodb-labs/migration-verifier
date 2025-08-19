@@ -271,6 +271,8 @@ func getExplicitTypeCheckPredicates(lower, upper any) ([]bson.D, error) {
 			// If the limits sort together, then we AND them together.
 			return bothLimitsPredicate, nil
 		}
+	} else {
+		orPredicates = mslices.Of(rangePredicate)
 	}
 
 	if len(betweenTypes) > 0 {

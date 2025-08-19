@@ -146,6 +146,52 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 	assert.NotEmpty(t, results, "should find a problem")
 }
 
+func (suite *IntegrationTestSuite) TestPartitionQueriesAvoidFetch() {
+	ctx := suite.T().Context()
+	verifier := suite.BuildVerifier()
+
+	predicates, err := partitions.FilterIdBounds(
+		verifier.srcClusterInfo,
+		primitive.Null{},
+		"hey",
+	)
+	suite.Require().NoError(err)
+
+	db := verifier.srcClient.Database(suite.DBNameForTest())
+	coll := db.Collection("stuff")
+
+	_, err = coll.InsertOne(ctx, bson.D{})
+	suite.Require().NoError(err)
+
+	findExplain := db.RunCommand(
+		ctx,
+		bson.D{
+			{"explain", bson.D{
+				{"find", coll.Name()},
+				//{"projection", bson.D{{"_id", 1}}},
+				{"filter", bson.D{
+					{"$and", predicates},
+				}},
+				{"returnKey", true},
+				{"hint", bson.D{{"_id", 1}}},
+			}},
+		},
+	)
+	raw, err := findExplain.Raw()
+	suite.Require().NoError(err)
+
+	winningPlan, err := raw.LookupErr("queryPlanner", "winningPlan")
+	suite.Require().NoError(err)
+
+	extJSON, err := bson.MarshalExtJSON(winningPlan, true, false)
+	suite.Require().NoError(err)
+	suite.Assert().NotContains(
+		string(extJSON),
+		"FETCH",
+		"find query’s winning plan should not FETCH",
+	)
+}
+
 func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
@@ -213,6 +259,13 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 			lower:     primitive.Null{},
 			upper:     "aaa",
 			docsCount: 2,
+		},
+		{
+			label:      "0 to MaxKey",
+			lower:      0,
+			upper:      primitive.MaxKey{},
+			docsCount:  2,
+			mismatches: 2,
 		},
 		{
 			label:      "long 999 to MaxKey",
