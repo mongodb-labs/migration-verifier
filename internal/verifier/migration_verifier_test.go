@@ -150,17 +150,10 @@ func (suite *IntegrationTestSuite) TestPartitionQueriesAvoidFetch() {
 	ctx := suite.T().Context()
 	verifier := suite.BuildVerifier()
 
-	predicates, err := partitions.FilterIdBounds(
-		verifier.srcClusterInfo,
-		"aaa",
-		primitive.Symbol("zzz"),
-	)
-	suite.Require().NoError(err)
-
 	db := verifier.srcClient.Database(suite.DBNameForTest())
 	coll := db.Collection("stuff")
 
-	_, err = coll.InsertMany(
+	_, err := coll.InsertMany(
 		ctx,
 		lo.RepeatBy(
 			100000,
@@ -188,44 +181,96 @@ func (suite *IntegrationTestSuite) TestPartitionQueriesAvoidFetch() {
 		cmdJSON, err := bson.MarshalExtJSON(cmd, true, false)
 		suite.Require().NoError(err)
 
-		extJSON, err := bson.MarshalExtJSON(winningPlan, true, false)
+		planJSON, err := bson.MarshalExtJSON(winningPlan, true, false)
 		suite.Require().NoError(err)
+
+		fmt.Printf("--- cmd: %s\n", cmdJSON)
+		fmt.Printf("--- plan: %s\n", winningPlan)
+
 		suite.Assert().NotContains(
-			string(extJSON),
+			string(planJSON),
 			"FETCH",
 			"query’s winning plan should not FETCH (query: %s)",
 			cmdJSON,
 		)
 	}
 
-	verifyCommandNoFetch(
-		bson.D{
-			{"find", coll.Name()},
-			{"projection", bson.D{{"_id", 1}}},
-			{"filter", bson.D{
-				{"$and", predicates},
-			}},
-			//{"returnKey", true},
-			{"hint", bson.D{{"_id", 1}}},
-		},
-	)
+	// These were found via manual inspection. Note that some type combos
+	// do perform a FETCH, but these have been found not to.
+	//
+	// For posterity, combos seen to cause a FETCH include:
+	// - string & symbol (??? these sort together …)
+	// - null & date
+	// - minkey & embedded document
+	testCases := [][2]any{
+		{1, bson.D{{"wut", 2}}},
+		{777, primitive.DateTime(0)},
+		{123, float64(234)},
+		{"aaa", "zzz"},
+		{"aaa", bson.D{{"foo", 123}}},
+		{345, "bbb"},
+		{456, []byte{}},
+		{[]byte("abc"), []byte("xyz")},
+		{[]byte{}, primitive.NewObjectID()},
+		{primitive.DateTime(0), primitive.Timestamp{}},
+	}
 
-	verifyCommandNoFetch(
-		bson.D{
-			{"aggregate", coll.Name()},
-			{"cursor", bson.D{}},
-			{"pipeline", mongo.Pipeline{
-				{{"$sort", bson.D{{"_id", 1}}}},
-				{{"$project", bson.D{{"_id", 1}}}},
-				{{"$match", bson.D{
-					{"$and", predicates},
-				}}},
-			}},
+	for _, curCase := range testCases {
+		for _, val := range curCase {
+			_, err := coll.ReplaceOne(
+				ctx,
+				bson.D{{"_id", val}},
+				bson.D{{"_id", val}},
+				options.Replace().SetUpsert(true),
+			)
+			suite.Require().NoError(err)
+		}
 
-			//{"returnKey", true},
-			{"hint", bson.D{{"_id", 1}}},
-		},
-	)
+		suite.Run(
+			fmt.Sprintf(
+				"%v (%T) to %v (%T)",
+				curCase[0], curCase[0],
+				curCase[1], curCase[1],
+			),
+			func() {
+				predicates, err := partitions.FilterIdBounds(
+					verifier.srcClusterInfo,
+					curCase[0],
+					curCase[1],
+				)
+				suite.Require().NoError(err)
+
+				verifyCommandNoFetch(
+					bson.D{
+						{"find", coll.Name()},
+						{"projection", bson.D{{"_id", 1}}},
+						{"filter", bson.D{
+							{"$and", predicates},
+						}},
+						//{"returnKey", true},
+						{"hint", bson.D{{"_id", 1}}},
+					},
+				)
+
+				verifyCommandNoFetch(
+					bson.D{
+						{"aggregate", coll.Name()},
+						{"cursor", bson.D{}},
+						{"pipeline", mongo.Pipeline{
+							{{"$sort", bson.D{{"_id", 1}}}},
+							{{"$project", bson.D{{"_id", 1}}}},
+							{{"$match", bson.D{
+								{"$and", predicates},
+							}}},
+						}},
+
+						//{"returnKey", true},
+						{"hint", bson.D{{"_id", 1}}},
+					},
+				)
+			},
+		)
+	}
 }
 
 func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
