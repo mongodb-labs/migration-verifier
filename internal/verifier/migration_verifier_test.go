@@ -166,7 +166,7 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 			admin.RunCommand(ctx, bson.D{
 				{"moveChunk", db.Name() + "." + coll.Name()},
 				{"to", shardIds[0]},
-				{"find", bson.D{{keyField, primitive.MinKey{}}}},
+				{"find", bson.D{{keyField, 149}}},
 			}).Err(),
 		)
 
@@ -174,7 +174,7 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 			admin.RunCommand(ctx, bson.D{
 				{"moveChunk", db.Name() + "." + coll.Name()},
 				{"to", shardIds[1]},
-				{"find", bson.D{{keyField, primitive.MaxKey{}}}},
+				{"find", bson.D{{keyField, 151}}},
 			}).Err(),
 		)
 
