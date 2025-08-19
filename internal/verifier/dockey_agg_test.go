@@ -170,7 +170,7 @@ func (suite *IntegrationTestSuite) TestExtractDocKeyAgg() {
 			require.NoError(bson.Unmarshal(changes.Current, &event))
 
 			if event.OperationType != "insert" {
-				t.Logf("Ignoring irrelevant-seeing event: %v", changes.Current)
+				t.Logf("Ignoring irrelevant-seeming event: %v", changes.Current)
 				continue
 			}
 
