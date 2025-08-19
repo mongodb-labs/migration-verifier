@@ -98,7 +98,7 @@ func (suite *IntegrationTestSuite) TestExtractDocKeyAgg() {
 		t.Skip("Skipping against pre-v6 cluster.")
 	}
 
-	db := client.Database(t.Name())
+	db := client.Database(suite.DBNameForTest())
 	defer func() {
 		err := db.Drop(ctx)
 		if err != nil {
