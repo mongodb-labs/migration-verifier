@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
@@ -21,7 +20,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
-	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
 	"golang.org/x/exp/slices"
 )
 
@@ -380,7 +378,7 @@ func getDocKeyValues(
 	case DocCompareBinary, DocCompareIgnoreOrder:
 		// If we have the full document, create the document key manually:
 		var err error
-		docKey, err = extractTrueDocKeyFromDoc(fieldNames, doc)
+		docKey, err = dockey.ExtractTrueDocKeyFromDoc(fieldNames, doc)
 		if err != nil {
 			return nil, err
 		}
@@ -421,42 +419,6 @@ func getDocKeyValues(
 	}
 
 	return values, nil
-}
-
-// This extracts the document key from a document gets its field names.
-//
-// NB: This avoids the problem documented in SERVER-109340; as a result,
-// the returned key may not always match the change stream’s `documentKey`
-// (because the server misreports its own sharding logic).
-func extractTrueDocKeyFromDoc(
-	fieldNames []string,
-	doc bson.Raw,
-) (bson.Raw, error) {
-	var dk bson.D
-	for _, field := range fieldNames {
-
-		// This is how sharding routes documents: it always
-		// splits on the dot and looks deeply into the document.
-		parts := strings.Split(field, ".")
-		val, err := doc.LookupErr(parts...)
-
-		if errors.Is(err, bsoncore.ErrElementNotFound) {
-			// If the document lacks a value for this field
-			// then don’t add it to the document key.
-			continue
-		} else if err == nil {
-			dk = append(dk, bson.E{field, val})
-		} else {
-			return nil, errors.Wrapf(err, "extracting doc key field %#q from doc %+v", field, doc)
-		}
-	}
-
-	docKey, err := bson.Marshal(dk)
-	if err != nil {
-		return nil, errors.Wrapf(err, "marshaling doc key %v from doc %v", dk, docKey)
-	}
-
-	return docKey, nil
 }
 
 func simpleTimerReset(t *time.Timer, dur time.Duration) {
