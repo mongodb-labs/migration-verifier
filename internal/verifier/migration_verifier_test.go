@@ -152,27 +152,31 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 		shardIds := getShardIds(suite.T(), client)
 
 		admin := client.Database("admin")
-		splitKey := bson.D{{"foo.bar.baz", 150}}
+		keyField := "foo.bar.baz"
+		splitKey := bson.D{{keyField, 150}}
+
 		require.NoError(
 			admin.RunCommand(ctx, bson.D{
-				{"moveRange", db.Name() + "." + coll.Name()},
-				{"toShard", shardIds[0]},
-				{"max", splitKey},
+				{"split", db.Name() + "." + coll.Name()},
+				{"middle", splitKey},
 			}).Err(),
 		)
 
 		require.NoError(
 			admin.RunCommand(ctx, bson.D{
-				{"moveRange", db.Name() + "." + coll.Name()},
-				{"toShard", shardIds[1]},
-				{"min", splitKey},
+				{"moveChunk", db.Name() + "." + coll.Name()},
+				{"to", shardIds[0]},
+				{"find", bson.D{{keyField, primitive.MinKey{}}}},
 			}).Err(),
 		)
 
-		fmt.Printf("inserting: %v\n\n", docs)
-
-		//fmt.Printf("-------- apused\n")
-		//time.Sleep(15 * time.Second)
+		require.NoError(
+			admin.RunCommand(ctx, bson.D{
+				{"moveChunk", db.Name() + "." + coll.Name()},
+				{"to", shardIds[1]},
+				{"find", bson.D{{keyField, primitive.MaxKey{}}}},
+			}).Err(),
+		)
 
 		_, err := coll.InsertMany(ctx, lo.ToAnySlice(lo.Shuffle(docs)))
 		require.NoError(err, "should insert all docs")
