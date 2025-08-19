@@ -128,7 +128,7 @@ func (suite *IntegrationTestSuite) TestExtractDocKeyAgg() {
 	).Err(),
 	)
 
-	computedDocKeyAgg := dockey.ExtractDocKeyAgg(
+	computedDocKeyAgg := dockey.ExtractTrueDocKeyAgg(
 		mslices.Of("foo.bar.baz", "_id"),
 		"$$ROOT.fullDocument",
 	)

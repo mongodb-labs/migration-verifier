@@ -12,13 +12,13 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// ExtractDocKeyAgg returns an aggregation expression that extracts the
+// ExtractTrueDocKeyAgg returns an aggregation expression that extracts the
 // document key from the document to which the `docExpr` refers.
 //
 // NB: This avoids the problem documented in SERVER-109340; as a result,
 // the returned key may not always match the change stream’s `documentKey`
 // (because the server misreports its own sharding logic).
-func ExtractDocKeyAgg(fieldNames []string, docExpr string) bson.D {
+func ExtractTrueDocKeyAgg(fieldNames []string, docExpr string) bson.D {
 	var docKeyNumKeys bson.D
 	numToKeyLookup := map[string]string{}
 

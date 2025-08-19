@@ -378,12 +378,15 @@ func getDocKeyValues(
 
 	switch docCompareMethod {
 	case DocCompareBinary, DocCompareIgnoreOrder:
+		// If we have the full document, create the document key manually:
 		var err error
-		docKey, err = extractDocKeyFromDoc(fieldNames, doc)
+		docKey, err = extractTrueDocKeyFromDoc(fieldNames, doc)
 		if err != nil {
 			return nil, err
 		}
 	case DocCompareToHashedIndexKey:
+		// If we have a hash, then the aggregation should have extracted the
+		// document key for us.
 		docKeyVal, err := doc.LookupErr(docKeyInHashedCompare)
 		if err != nil {
 			return nil, errors.Wrapf(err, "fetching %#q from doc %v", docKeyInHashedCompare, doc)
@@ -425,15 +428,21 @@ func getDocKeyValues(
 // NB: This avoids the problem documented in SERVER-109340; as a result,
 // the returned key may not always match the change stream’s `documentKey`
 // (because the server misreports its own sharding logic).
-func extractDocKeyFromDoc(
+func extractTrueDocKeyFromDoc(
 	fieldNames []string,
 	doc bson.Raw,
 ) (bson.Raw, error) {
 	var dk bson.D
 	for _, field := range fieldNames {
+
+		// This is how sharding routes documents: it always
+		// splits on the dot and looks deeply into the document.
 		parts := strings.Split(field, ".")
 		val, err := doc.LookupErr(parts...)
+
 		if errors.Is(err, bsoncore.ErrElementNotFound) {
+			// If the document lacks a value for this field
+			// then don’t add it to the document key.
 			continue
 		} else if err == nil {
 			dk = append(dk, bson.E{field, val})
@@ -713,7 +722,7 @@ func transformPipelineForToHashedIndexKey(
 		slices.Clone(in),
 		bson.D{{"$replaceWith", bson.D{
 			// Single-letter field names minimize the document size.
-			{docKeyInHashedCompare, dockey.ExtractDocKeyAgg(
+			{docKeyInHashedCompare, dockey.ExtractTrueDocKeyAgg(
 				task.QueryFilter.GetDocKeyFields(),
 				"$$ROOT",
 			)},
