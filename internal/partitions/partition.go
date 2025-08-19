@@ -254,12 +254,15 @@ func getExplicitTypeCheckPredicates(lower any, upperOpt option.Option[any]) ([]b
 				)
 			}
 
-			bothLimitsPredicate := mslices.Of(
-				rangePredicate,
-				bson.D{{"_id", bson.D{{"$lte", upper}}}},
+			bothLimitsPredicate := mslices.Compact(
+				mslices.Of(
+					rangePredicate,
+					bson.D{{"_id", bson.D{{"$lte", upper}}}},
+				),
 			)
 
 			if slices.Contains(typesBelowUpper, lowerRV.Type) {
+				betweenTypes = lo.Intersect(betweenTypes, typesBelowUpper)
 				// If the limits’ types don’t sort together, then we OR the
 				// predicates together. This is correct because, in a non-$expr
 				// query, “foo > 5” means “foo > 5 AND foo is numeric”.
@@ -269,14 +272,17 @@ func getExplicitTypeCheckPredicates(lower any, upperOpt option.Option[any]) ([]b
 				return bothLimitsPredicate, nil
 			}
 		}
+	} else {
+		orPredicates = mslices.Of(rangePredicate)
 	}
 
 	if len(betweenTypes) > 0 {
+
 		orPredicates = append(
 			orPredicates,
-			bson.D{{"_id", bson.D{{"$type", betweenTypes}}}},
+			bson.D{{"_id", bson.D{{"$type", typesToStrings(betweenTypes)}}}},
 		)
 	}
 
-	return []bson.D{{{"$or", orPredicates}}}, nil
+	return []bson.D{{{"$or", mslices.Compact(orPredicates)}}}, nil
 }
