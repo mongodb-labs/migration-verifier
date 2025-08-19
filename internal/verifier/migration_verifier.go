@@ -1224,33 +1224,47 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	// matches between soruce & destination. Now we can partition the collection.
 
 	if task.Generation == 0 {
-		partitions, shardKeys, docsCount, bytesCount, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
-		if err != nil {
-			return errors.Wrapf(
-				err,
-				"failed to partition collection %#q",
-				srcNs,
-			)
+		var partitionsCount int
+		var docsCount types.DocumentCount
+		var bytesCount types.ByteCount
+
+		if verifier.srcHasSampleRate() {
+			var err error
+			partitionsCount, docsCount, bytesCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task)
+			if err != nil {
+				return errors.Wrapf(err, "partitioning %#q via $sampleRate", srcNs)
+			}
+		} else {
+			var partitions []*partitions.Partition
+			var shardKeys []string
+
+			partitions, shardKeys, docsCount, bytesCount, err = verifier.partitionAndInspectNamespace(ctx, srcNs)
+			if err != nil {
+				return errors.Wrapf(err, "partitioning %#q via $sample", srcNs)
+			}
+
+			partitionsCount = len(partitions)
+
+			for _, partition := range partitions {
+				_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeys, dstNs)
+				if err != nil {
+					return errors.Wrapf(
+						err,
+						"failed to insert a partition task for namespace %#q",
+						srcNs,
+					)
+				}
+			}
 		}
+
 		verifier.logger.Debug().
 			Int("workerNum", workerNum).
 			Str("namespace", srcNs).
-			Int("partitionsCount", len(partitions)).
+			Int("partitionsCount", partitionsCount).
 			Msg("Divided collection into partitions.")
 
 		task.SourceDocumentCount = docsCount
 		task.SourceByteCount = bytesCount
-
-		for _, partition := range partitions {
-			_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeys, dstNs)
-			if err != nil {
-				return errors.Wrapf(
-					err,
-					"failed to insert a partition task for namespace %#q",
-					srcNs,
-				)
-			}
-		}
 	}
 
 	if task.Status == verificationTaskProcessing {
