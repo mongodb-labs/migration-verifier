@@ -14,6 +14,7 @@ import (
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
@@ -616,13 +617,12 @@ func getMidIDBounds(
 		WithCallback(
 			func(ctx context.Context, ri *retry.FuncInfo) error {
 				ri.Log(logger.Logger, "aggregate", "source", srcDB.Name(), collName, "Retrieving mid _id partition bounds using $sample.")
-				cursor, cmdErr :=
-					srcDB.RunCommandCursor(ctx, bson.D{
-						{"aggregate", collName},
-						{"pipeline", pipeline},
-						{"allowDiskUse", true},
-						{"cursor", bson.D{}},
-					})
+				cursor, cmdErr := ForPartitionAggregation(srcDB.Collection(collName)).
+					Aggregate(
+						ctx,
+						pipeline,
+						options.Aggregate().SetAllowDiskUse(true),
+					)
 
 				if cmdErr != nil {
 					return errors.Wrapf(cmdErr, "failed to $sample and $bucketAuto documents for source namespace '%s.%s'", srcDB.Name(), collName)

@@ -14,8 +14,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readconcern"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
 func (verifier *Verifier) findLatestPartitionUpperBound(
@@ -137,14 +135,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 		)
 	}
 
-	cursor, err := srcColl.
-		Database().
-		Collection(
-			srcColl.Name(),
-			options.Collection().
-				SetReadConcern(readconcern.Available()).
-				SetReadPreference(readpref.Nearest()),
-		).Aggregate(
+	cursor, err := partitions.ForPartitionAggregation(srcColl).Aggregate(
 		ctx,
 		pipeline,
 		options.Aggregate().

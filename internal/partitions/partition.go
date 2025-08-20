@@ -13,7 +13,21 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
+
+func ForPartitionAggregation(coll *mongo.Collection) *mongo.Collection {
+	return coll.
+		Database().
+		Collection(
+			coll.Name(),
+			options.Collection().
+				SetReadConcern(readconcern.Available()).
+				SetReadPreference(readpref.Nearest()),
+		)
+}
 
 // PartitionKey represents the _id of a partition document stored in the destination.
 type PartitionKey struct {

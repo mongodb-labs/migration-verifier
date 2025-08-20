@@ -1282,14 +1282,7 @@ func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*Verificat
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
-			cursor, err := taskCollection.
-				Database().
-				Collection(
-					taskCollection.Name(),
-					options.Collection().
-						SetReadConcern(readconcern.Available()).
-						SetReadPreference(readpref.Nearest()),
-				).Aggregate(
+			cursor, err := taskCollection.Aggregate(
 				ctx,
 				[]bson.M{
 					{
