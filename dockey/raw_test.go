@@ -50,7 +50,7 @@ func TestExtractTrueDocKeyFromDoc(t *testing.T) {
 	assert.Panics(
 		t,
 		func() {
-			ExtractTrueDocKeyFromDoc(
+			_, _ = ExtractTrueDocKeyFromDoc(
 				[]string{"foo", "bar", "foo"},
 				bson.Raw{0},
 			)
