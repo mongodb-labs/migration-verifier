@@ -624,7 +624,8 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 	wsmap := verifier.workerTracker.Load()
 
 	activeThreadCount := 0
-	for w, workerStats := range wsmap {
+	for w := range verifier.numWorkers {
+		workerStats := wsmap[w]
 		if workerStats.TaskID == nil {
 			continue
 		}
@@ -662,12 +663,7 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 		)
 	}
 
-	fmt.Fprintf(
-		builder,
-		"\nActive worker threads (%s of %s):\n",
-		reportutils.FmtReal(activeThreadCount),
-		reportutils.FmtReal(verifier.numWorkers),
-	)
+	fmt.Fprintf(builder, "\nWorker thread details:\n")
 
 	table.Render()
 }
