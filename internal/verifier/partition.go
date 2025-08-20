@@ -163,6 +163,13 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		)
 	}
 
+	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(
+		ctx,
+		verifier.logger,
+		verifier.srcClientDatabase(srcColl.Database().Name()),
+		srcColl.Name(),
+	)
+
 	cursor, err := partitions.ForPartitionAggregation(srcColl).Aggregate(
 		ctx,
 		pipeline,
@@ -185,7 +192,8 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	createAndInsertPartition := func(lowerBound, upperBound any) error {
 		partition := partitions.Partition{
 			Key: partitions.PartitionKey{
-				Lower: lowerBound,
+				SourceUUID: namespaceAndUUID.UUID,
+				Lower:      lowerBound,
 			},
 			Ns: &partitions.Namespace{
 				srcColl.Database().Name(),
