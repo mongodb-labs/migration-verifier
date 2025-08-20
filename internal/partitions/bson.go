@@ -85,8 +85,8 @@ var bsonTypeString = map[bsontype.Type]string{
 // This returns BSON types that the server’s type bracketing excludes from
 // query results when matching against the given value.
 //
-// The returned slices are types before & after, respectively. They are
-// strings rather than bsontype.Type to facilitate easy insertion into queries.
+// The returned slices are types before & after, respectively. They require
+// transformation (e.g., via typesToStrings()) before insertion into queries.
 //
 // This is kind of like strings.Cut() but against the sort-ordered list of BSON
 // types, except that if the given value is a number or string-like, then other

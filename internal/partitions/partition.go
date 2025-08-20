@@ -217,7 +217,7 @@ func getExprPredicates(lower, upper any) ([]bson.D, error) {
 
 // getExplicitTypeCheckPredicates compensates for the server’s type bracketing
 // by matching _id types between the partition’s min & max boundaries.
-// It should yield the same result as filterWithExpr.
+// It should yield the same result as getExprPredicates.
 func getExplicitTypeCheckPredicates(lower, upper any) ([]bson.D, error) {
 	_, betweenTypes, err := getTypeBracketExcludedBSONTypes(lower)
 	if err != nil {
