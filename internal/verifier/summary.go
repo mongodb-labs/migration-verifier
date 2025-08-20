@@ -240,7 +240,7 @@ OUTB:
 
 // Boolean returned indicates whether this generation has any tasks.
 func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuilder *strings.Builder, now time.Time) (bool, error) {
-	stats, err := verifier.GetNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -403,7 +403,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 }
 
 func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, strBuilder *strings.Builder, now time.Time) (bool, error) {
-	stats, err := verifier.GetNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
 	if err != nil {
 		return false, err
 	}

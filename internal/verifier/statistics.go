@@ -168,10 +168,10 @@ const perNsStatsPipelineTemplate = `[
 var templateOnce sync.Once
 var jsonTemplate *template.Template
 
-// GetNamespaceStatistics queries the verifier’s metadata for statistics
+// GetPersistedNamespaceStatistics queries the verifier’s metadata for statistics
 // on progress for each namespace. The returned array is sorted by
 // Namespace and contains one entry for each namespace.
-func (verifier *Verifier) GetNamespaceStatistics(ctx context.Context) ([]NamespaceStats, error) {
+func (verifier *Verifier) GetPersistedNamespaceStatistics(ctx context.Context) ([]NamespaceStats, error) {
 	generation, _ := verifier.getGeneration()
 
 	templateOnce.Do(func() {
