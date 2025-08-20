@@ -3,15 +3,23 @@ package verifier
 import (
 	"github.com/10gen/migration-verifier/dockey"
 	"github.com/10gen/migration-verifier/dockey/test"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"golang.org/x/exp/slices"
 )
 
 func (suite *IntegrationTestSuite) TestExtractTrueDocKeyAgg() {
+	suite.testExtractTrueDocKeyAgg(false)
+}
+
+func (suite *IntegrationTestSuite) TestExtractTrueDocKeyAgg_Reverse() {
+	suite.testExtractTrueDocKeyAgg(true)
+}
+
+func (suite *IntegrationTestSuite) testExtractTrueDocKeyAgg(reverseYN bool) {
 	t := suite.T()
 
 	ctx := t.Context()
@@ -45,8 +53,13 @@ func (suite *IntegrationTestSuite) TestExtractTrueDocKeyAgg() {
 	)
 	require.NoError(err, "should insert")
 
+	fieldNames := slices.Clone(test.FieldNames)
+	if reverseYN {
+		slices.Reverse(fieldNames)
+	}
+
 	computedDocKeyAgg := dockey.ExtractTrueDocKeyAgg(
-		mslices.Of("_id", "foo.bar.baz"),
+		fieldNames,
 		"$$ROOT",
 	)
 
@@ -64,9 +77,14 @@ func (suite *IntegrationTestSuite) TestExtractTrueDocKeyAgg() {
 	require.Len(computedDocKeys, len(test.TestCases))
 
 	for c, curCase := range test.TestCases {
+		expectedDocKey := slices.Clone(curCase.DocKey)
+		if reverseYN {
+			slices.Reverse(expectedDocKey)
+		}
+
 		assert.Equal(
 			suite.T(),
-			curCase.DocKey,
+			expectedDocKey,
 			computedDocKeys[c],
 			"doc key for %+v",
 			curCase.Doc,

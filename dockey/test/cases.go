@@ -1,6 +1,7 @@
 package test
 
 import (
+	"github.com/10gen/migration-verifier/mslices"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -8,6 +9,8 @@ type TestCase struct {
 	Doc    bson.D
 	DocKey bson.D
 }
+
+var FieldNames = mslices.Of("_id", "foo.bar.baz")
 
 var TestCases = []TestCase{
 	{
