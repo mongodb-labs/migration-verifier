@@ -766,7 +766,7 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 	if len(partitionList) == 0 {
 		partitionList = []*partitions.Partition{{
 			Key: partitions.PartitionKey{
-				SourceUUID:  namespaceAndUUID.UUID,
+				SourceUUID: namespaceAndUUID.UUID,
 			},
 			Ns: &partitions.Namespace{
 				DB:   namespaceAndUUID.DBName,
@@ -1235,6 +1235,9 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 				return errors.Wrapf(err, "partitioning %#q via $sampleRate", srcNs)
 			}
 		} else {
+			verifier.logger.Warn().
+				Msg("Source MongoDB version lacks $sampleRate. Using legacy partitioning logic. This may cause imbalanced partitions, which will impede performance.")
+
 			var partitions []*partitions.Partition
 			var shardKeys []string
 

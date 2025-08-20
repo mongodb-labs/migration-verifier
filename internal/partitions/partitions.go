@@ -309,7 +309,8 @@ func partitionCollectionWithParameters(
 
 	for i := 0; i < len(allIDBounds)-1; i++ {
 		partitionKey := PartitionKey{
-			Lower: allIDBounds[i],
+			SourceUUID: uuidEntry.UUID,
+			Lower:      allIDBounds[i],
 		}
 		partition := &Partition{
 			Key:      partitionKey,
