@@ -587,10 +587,13 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 			panic("bad doc compare query func: " + verifier.docCompareMethod.QueryFunction())
 		}
 	} else {
-		pqp := task.QueryFilter.Partition.GetQueryParameters(
+		pqp, err := task.QueryFilter.Partition.GetQueryParameters(
 			clusterInfo,
 			verifier.maybeAppendGlobalFilterToPredicates(andPredicates),
 		)
+		if err != nil {
+			return nil, errors.Wrapf(err, "getting query parameters for task: %+v", task)
+		}
 
 		switch verifier.docCompareMethod.QueryFunction() {
 		case DocQueryFunctionFind:

@@ -1,5 +1,10 @@
 package mslices
 
+import (
+	"reflect"
+	"slices"
+)
+
 // This package complements the Go standard library’s package of the
 // same name with broadly-useful tools that the standard library lacks.
 
@@ -7,7 +12,7 @@ package mslices
 // to capitalize on Go’s type inference, similar to
 // [this declined feature proposal](https://github.com/golang/go/issues/47709).
 func Of[T any](pieces ...T) []T {
-	return append([]T{}, pieces...)
+	return slices.Clone(pieces)
 }
 
 // ToMap outputs a map that “indexes” the given slice.
@@ -19,4 +24,22 @@ func ToMap[S ~[]E, E any, K comparable](s S, cb func(el E) K) map[K]E {
 	}
 
 	return theMap
+}
+
+// Compact is like samber/lo’s function of the same name, but this
+// allows any type, not just comparable.
+func Compact[T any, S ~[]T](slc S) S {
+	var ret S
+
+	for _, el := range slc {
+		if !isZero(el) {
+			ret = append(ret, el)
+		}
+	}
+
+	return ret
+}
+
+func isZero[T any](val T) bool {
+	return reflect.ValueOf(&val).Elem().IsZero()
 }

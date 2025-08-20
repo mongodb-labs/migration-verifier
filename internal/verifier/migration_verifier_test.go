@@ -308,20 +308,80 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	})
 	suite.Require().NoError(err)
 
-	results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
-	suite.Require().NoError(err)
-	suite.Assert().EqualValues(2, docCount, "docs count")
-	suite.Assert().Greater(int(byteCount), 1, "byte count")
-	suite.Assert().Empty(results, "expect no mismatches")
+	cases := []struct {
+		label                 string
+		lower, upper          any
+		docsCount, mismatches int
+	}{
+		{
+			label:     "MinKey to int 999",
+			lower:     primitive.MinKey{},
+			upper:     int32(999),
+			docsCount: 2,
+		},
+		{
+			label:     "between numeric types",
+			lower:     int64(123),
+			upper:     float64(9999),
+			docsCount: 1,
+		},
+		{
+			label:     "between adjacent types",
+			lower:     int64(1),
+			upper:     "hey",
+			docsCount: 1,
+		},
+		{
+			label:      "between non-adjacent types, including type of upper",
+			lower:      primitive.Null{},
+			upper:      "zzzz",
+			docsCount:  3,
+			mismatches: 2,
+		},
+		{
+			label:     "between non-adjacent types, excluding type of upper",
+			lower:     primitive.Null{},
+			upper:     "aaa",
+			docsCount: 2,
+		},
+		{
+			label:      "0 to MaxKey",
+			lower:      0,
+			upper:      primitive.MaxKey{},
+			docsCount:  2,
+			mismatches: 2,
+		},
+		{
+			label:      "long 999 to MaxKey",
+			lower:      int64(999),
+			upper:      primitive.MaxKey{},
+			docsCount:  1,
+			mismatches: 2,
+		},
+	}
 
-	task.QueryFilter.Partition.Key.Lower = int64(999)
-	task.QueryFilter.Partition.Upper = primitive.MaxKey{}
+	for _, curCase := range cases {
+		task.QueryFilter.Partition.Key.Lower = curCase.lower
+		task.QueryFilter.Partition.Upper = curCase.upper
 
-	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
-	suite.Require().NoError(err)
-	suite.Assert().EqualValues(1, docCount, "docs count")
-	suite.Assert().Greater(int(byteCount), 1, "byte count")
-	suite.Assert().Len(results, 2, "expect mismatches")
+		suite.Run(
+			curCase.label,
+			func() {
+				results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
+				suite.Require().NoError(err)
+
+				suite.Assert().EqualValues(curCase.docsCount, docCount, "docs count")
+
+				if docCount > 0 {
+					suite.Assert().Greater(int(byteCount), 1, "byte count")
+				} else {
+					suite.Assert().Zero(byteCount, "byte count")
+				}
+
+				suite.Assert().Len(results, curCase.mismatches, "expected mismatches")
+			},
+		)
+	}
 }
 
 func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
