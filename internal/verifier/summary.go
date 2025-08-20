@@ -282,6 +282,19 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 
 	elapsed := now.Sub(verifier.generationStartTime)
 
+	activeWorkers, curWorkerDocs, curWorkerBytes := verifier.getGeneralWorkerStats()
+
+	if activeWorkers > 0 {
+		fmt.Fprintf(
+			strBuilder,
+			"Currently-active document-comparing threads: %d",
+			activeWorkers,
+		)
+	}
+
+	comparedDocs += curWorkerDocs
+	comparedBytes += curWorkerBytes
+
 	docsPerSecond := float64(comparedDocs) / elapsed.Seconds()
 	bytesPerSecond := float64(comparedBytes) / elapsed.Seconds()
 	perSecondDataUnit := reportutils.FindBestUnit(bytesPerSecond)
@@ -564,6 +577,31 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, n
 	}
 }
 
+// This returns:
+// - total active threads
+// - total docs
+// - total bytes
+func (verifier *Verifier) getGeneralWorkerStats() (int, types.DocumentCount, types.ByteCount) {
+	activeThreadCount := 0
+	var totalDocs types.DocumentCount
+	var totalBytes types.ByteCount
+
+	wsmap := verifier.workerTracker.Load()
+
+	for _, workerStats := range wsmap {
+		if workerStats.TaskID == nil {
+			continue
+		}
+
+		activeThreadCount++
+
+		totalDocs += workerStats.SrcDocCount
+		totalBytes += workerStats.SrcByteCount
+	}
+
+	return activeThreadCount, totalDocs, totalBytes
+}
+
 func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
 
 	table := tablewriter.NewWriter(builder)
@@ -572,8 +610,8 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 	wsmap := verifier.workerTracker.Load()
 
 	activeThreadCount := 0
-	for w := 0; w <= verifier.numWorkers; w++ {
-		if wsmap[w].TaskID == nil {
+	for w, workerStats := range wsmap {
+		if workerStats.TaskID == nil {
 			continue
 		}
 
@@ -581,22 +619,31 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 
 		var taskIdStr string
 
-		switch id := wsmap[w].TaskID.(type) {
+		switch id := workerStats.TaskID.(type) {
 		case primitive.ObjectID:
 			theBytes, _ := id.MarshalText()
 
 			taskIdStr = string(theBytes)
 		default:
-			taskIdStr = fmt.Sprintf("%s", wsmap[w].TaskID)
+			taskIdStr = fmt.Sprintf("%s", workerStats.TaskID)
+		}
+
+		var detail string
+		if workerStats.TaskType == verificationTaskVerifyDocuments {
+			detail = fmt.Sprintf(
+				"%s documents (%s)",
+				reportutils.FmtReal(workerStats.SrcDocCount),
+				reportutils.FmtBytes(workerStats.SrcByteCount),
+			)
 		}
 
 		table.Append(
 			[]string{
 				reportutils.FmtReal(w),
-				wsmap[w].Namespace,
+				workerStats.Namespace,
 				taskIdStr,
-				reportutils.DurationToHMS(now.Sub(wsmap[w].StartTime)),
-				wsmap[w].Detail,
+				reportutils.DurationToHMS(now.Sub(workerStats.StartTime)),
+				detail,
 			},
 		)
 	}
