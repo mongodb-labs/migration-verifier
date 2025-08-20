@@ -169,6 +169,9 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		verifier.srcClientDatabase(srcColl.Database().Name()),
 		srcColl.Name(),
 	)
+	if err != nil {
+		return 0, 0, 0, errors.Wrapf(err, "fetching %#q’s UUID on source", srcNs)
+	}
 
 	cursor, err := partitions.ForPartitionAggregation(srcColl).Aggregate(
 		ctx,
