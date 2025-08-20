@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
@@ -56,6 +57,32 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 	srcColl := verifier.srcClientCollection(task)
 	srcNs := FullName(srcColl)
 
+	var partitionsCount int
+	var docCount types.DocumentCount
+	var byteCount types.ByteCount
+
+	err := retry.New().WithCallback(
+		func(ctx context.Context, fi *retry.FuncInfo) error {
+			var err error
+
+			partitionsCount, docCount, byteCount, err = verifier.createPartitionTasksWithSampleRateRetryable(ctx, task)
+
+			return err
+		},
+		"partitioning %#q",
+		srcNs,
+	).Run(ctx, verifier.logger)
+
+	return partitionsCount, docCount, byteCount, err
+}
+
+func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
+	ctx context.Context,
+	task *VerificationTask,
+) (int, types.DocumentCount, types.ByteCount, error) {
+	srcColl := verifier.srcClientCollection(task)
+	srcNs := FullName(srcColl)
+
 	shardKeys, err := verifier.getShardKeyFields(
 		ctx,
 		&uuidutil.NamespaceAndUUID{
@@ -69,6 +96,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 
 	pipeline := mongo.Pipeline{
 		{{"$project", bson.D{{"_id", 1}}}},
+		{{"$sort", bson.D{{"_id", 1}}}},
 	}
 
 	lowerBoundOpt, err := verifier.findLatestPartitionUpperBound(ctx, srcNs)
@@ -140,6 +168,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 		pipeline,
 		options.Aggregate().
 			SetBatchSize(1).
+			SetAllowDiskUse(true).
 			SetHint(bson.D{{"_id", 1}}),
 	)
 	if err != nil {
