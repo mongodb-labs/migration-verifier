@@ -1,9 +1,11 @@
 package dockey
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
 )
@@ -17,6 +19,8 @@ func ExtractTrueDocKeyFromDoc(
 	fieldNames []string,
 	doc bson.Raw,
 ) (bson.Raw, error) {
+	assertFieldNameUniqueness(fieldNames)
+
 	var dk bson.D
 	for _, field := range fieldNames {
 
@@ -42,4 +46,10 @@ func ExtractTrueDocKeyFromDoc(
 	}
 
 	return docKey, nil
+}
+
+func assertFieldNameUniqueness(fieldNames []string) {
+	if len(lo.Uniq(fieldNames)) != len(fieldNames) {
+		panic(fmt.Sprintf("Duplicate field names: %v", fieldNames))
+	}
 }

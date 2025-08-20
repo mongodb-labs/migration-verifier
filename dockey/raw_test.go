@@ -47,4 +47,14 @@ func TestExtractTrueDocKeyFromDoc(t *testing.T) {
 		}
 	}
 
+	assert.Panics(
+		t,
+		func() {
+			ExtractTrueDocKeyFromDoc(
+				[]string{"foo", "bar", "foo"},
+				bson.Raw{0},
+			)
+		},
+		"duplicate field name should cause panic",
+	)
 }
