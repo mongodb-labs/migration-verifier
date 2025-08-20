@@ -99,6 +99,136 @@ func (suite *IntegrationTestSuite) TestProcessVerifyTask_Failure() {
 	assert.ErrorContains(t, err, expectedIDHex)
 }
 
+func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
+	ctx := suite.T().Context()
+	require := require.New(suite.T())
+
+	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
+		if suite.GetTopology(client) != util.TopologySharded {
+			suite.T().Skip("sharded clusters required")
+		}
+	}
+
+	dbName := suite.DBNameForTest()
+	collName := "coll"
+
+	verifier := suite.BuildVerifier()
+	srcColl := verifier.srcClient.Database(dbName).Collection(collName)
+	dstColl := verifier.dstClient.Database(dbName).Collection(collName)
+
+	docs := []bson.D{
+		// NB: It’s not possible to test with /foo.bar.baz or /foo/bar.baz
+		// because the server (as of v8) will route those to the same shard.
+		// Only /foo/bar/baz actually gets routed as per the shard key, so
+		// only that value can create a duplicate ID.
+		{{"_id", 33}, {"foo", bson.D{{"bar", bson.D{{"baz", 100}}}}}},
+		{{"_id", 33}, {"foo", bson.D{{"bar", bson.D{{"baz", 200}}}}}},
+	}
+
+	shardKey := bson.D{
+		{"foo.bar.baz", 1},
+	}
+
+	for _, coll := range mslices.Of(srcColl, dstColl) {
+		db := coll.Database()
+		client := db.Client()
+
+		// For sharded, pre-v8 clusters we need to create the collection first.
+		require.NoError(db.CreateCollection(ctx, coll.Name()))
+		require.NoError(client.Database("admin").RunCommand(
+			ctx,
+			bson.D{{"enableSharding", db.Name()}},
+		).Err())
+
+		require.NoError(client.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"shardCollection", db.Name() + "." + coll.Name()},
+				{"key", shardKey},
+			},
+		).Err(),
+		)
+
+		shardIds := getShardIds(suite.T(), client)
+
+		admin := client.Database("admin")
+		keyField := "foo.bar.baz"
+		splitKey := bson.D{{keyField, 150}}
+
+		require.NoError(
+			admin.RunCommand(ctx, bson.D{
+				{"split", db.Name() + "." + coll.Name()},
+				{"middle", splitKey},
+			}).Err(),
+		)
+
+		require.NoError(
+			admin.RunCommand(ctx, bson.D{
+				{"moveChunk", db.Name() + "." + coll.Name()},
+				{"to", shardIds[0]},
+				{"find", bson.D{{keyField, 149}}},
+			}).Err(),
+		)
+
+		require.NoError(
+			admin.RunCommand(ctx, bson.D{
+				{"moveChunk", db.Name() + "." + coll.Name()},
+				{"to", shardIds[1]},
+				{"find", bson.D{{keyField, 151}}},
+			}).Err(),
+		)
+
+		_, err := coll.InsertMany(ctx, lo.ToAnySlice(lo.Shuffle(docs)))
+		require.NoError(err, "should insert all docs")
+	}
+
+	task := &VerificationTask{
+		PrimaryKey: primitive.NewObjectID(),
+		QueryFilter: QueryFilter{
+			Namespace: dbName + "." + collName,
+			To:        dbName + "." + collName,
+			ShardKeys: lo.Map(
+				shardKey,
+				func(el bson.E, _ int) string {
+					return el.Key
+				},
+			),
+			Partition: &partitions.Partition{
+				Key: partitions.PartitionKey{
+					Lower: primitive.MinKey{},
+				},
+				Upper: primitive.MaxKey{},
+			},
+		},
+	}
+
+	results, docCount, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
+	require.NoError(err, "should fetch & compare")
+	assert.EqualValues(suite.T(), len(docs), docCount, "expected # of docs")
+	assert.Empty(suite.T(), results, "should find no problem")
+}
+
+func getShardIds(t *testing.T, client *mongo.Client) []string {
+	res, err := runListShards(t.Context(), logger.NewDefaultLogger(), client)
+	require.NoError(t, err)
+
+	type shardData struct {
+		Id string `bson:"_id"`
+	}
+	var parsed struct {
+		Shards []shardData
+	}
+
+	require.NoError(t, res.Decode(&parsed))
+
+	return lo.Map(
+		parsed.Shards,
+		func(sd shardData, _ int) string {
+			return sd.Id
+		},
+	)
+}
+
 func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
