@@ -767,7 +767,7 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 		partitionList = []*partitions.Partition{{
 			Key: partitions.PartitionKey{
 				SourceUUID:  namespaceAndUUID.UUID,
-				MongosyncID: "verifier"},
+			},
 			Ns: &partitions.Namespace{
 				DB:   namespaceAndUUID.DBName,
 				Coll: namespaceAndUUID.CollName}}}
