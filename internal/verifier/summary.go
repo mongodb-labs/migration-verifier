@@ -625,8 +625,7 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 
 	activeThreadCount := 0
 	for w := range verifier.numWorkers {
-		workerStats := wsmap[w]
-		if workerStats.TaskID == nil {
+		if wsmap[w].TaskID == nil {
 			continue
 		}
 
@@ -634,30 +633,30 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 
 		var taskIdStr string
 
-		switch id := workerStats.TaskID.(type) {
+		switch id := wsmap[w].TaskID.(type) {
 		case primitive.ObjectID:
 			theBytes, _ := id.MarshalText()
 
 			taskIdStr = string(theBytes)
 		default:
-			taskIdStr = fmt.Sprintf("%s", workerStats.TaskID)
+			taskIdStr = fmt.Sprintf("%s", wsmap[w].TaskID)
 		}
 
 		var detail string
-		if workerStats.TaskType == verificationTaskVerifyDocuments {
+		if wsmap[w].TaskType == verificationTaskVerifyDocuments {
 			detail = fmt.Sprintf(
 				"%s documents (%s)",
-				reportutils.FmtReal(workerStats.SrcDocCount),
-				reportutils.FmtBytes(workerStats.SrcByteCount),
+				reportutils.FmtReal(wsmap[w].SrcDocCount),
+				reportutils.FmtBytes(wsmap[w].SrcByteCount),
 			)
 		}
 
 		table.Append(
 			[]string{
 				reportutils.FmtReal(w),
-				workerStats.Namespace,
+				wsmap[w].Namespace,
 				taskIdStr,
-				reportutils.DurationToHMS(now.Sub(workerStats.StartTime)),
+				reportutils.DurationToHMS(now.Sub(wsmap[w].StartTime)),
 				detail,
 			},
 		)
