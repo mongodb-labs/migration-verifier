@@ -25,7 +25,7 @@ func ForPartitionAggregation(coll *mongo.Collection) *mongo.Collection {
 			coll.Name(),
 			options.Collection().
 				SetReadConcern(readconcern.Available()).
-				SetReadPreference(readpref.Nearest()),
+				SetReadPreference(readpref.SecondaryPreferred()),
 		)
 }
 
