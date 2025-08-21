@@ -9,7 +9,6 @@ import (
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/dockey"
-	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -231,13 +230,10 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 					srcDocCount++
 					srcByteCount += types.ByteCount(len(srcDocWithTs.doc))
-					verifier.workerTracker.SetDetail(
+					verifier.workerTracker.SetSrcCounts(
 						workerNum,
-						fmt.Sprintf(
-							"%s documents (%s)",
-							reportutils.FmtReal(srcDocCount),
-							reportutils.FmtBytes(srcByteCount),
-						),
+						srcDocCount,
+						srcByteCount,
 					)
 				}
 

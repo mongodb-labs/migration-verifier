@@ -240,7 +240,7 @@ OUTB:
 
 // Boolean returned indicates whether this generation has any tasks.
 func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuilder *strings.Builder, now time.Time) (bool, error) {
-	stats, err := verifier.GetNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -281,6 +281,25 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 	)
 
 	elapsed := now.Sub(verifier.generationStartTime)
+
+	var activeWorkers int
+	perNamespaceWorkerStats := verifier.getPerNamespaceWorkerStats()
+	for _, nsWorkerStats := range perNamespaceWorkerStats {
+		for _, workerStats := range nsWorkerStats {
+			activeWorkers++
+			comparedDocs += workerStats.SrcDocCount
+			comparedBytes += workerStats.SrcByteCount
+		}
+	}
+
+	if activeWorkers > 0 {
+		fmt.Fprintf(
+			strBuilder,
+			"Active document comparison threads: %d of %d\n",
+			activeWorkers,
+			verifier.numWorkers,
+		)
+	}
 
 	docsPerSecond := float64(comparedDocs) / elapsed.Seconds()
 	bytesPerSecond := float64(comparedBytes) / elapsed.Seconds()
@@ -336,7 +355,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 
 	table := tablewriter.NewWriter(strBuilder)
 
-	headers := []string{"Src Namespace", "Src Docs Compared"}
+	headers := []string{"Src Namespace", "Threads", "Src Docs Compared"}
 	if showDataTotals {
 		headers = append(headers, "Src Data Compared")
 	}
@@ -351,18 +370,32 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 
 		tableHasRows = true
 
-		row := []string{result.Namespace}
+		var threads int
+
+		docsCompared := result.DocsCompared
+		bytesCompared := result.BytesCompared
+
+		if nsWorkerStats, ok := perNamespaceWorkerStats[result.Namespace]; ok {
+			threads = len(nsWorkerStats)
+
+			for _, workerStats := range nsWorkerStats {
+				docsCompared += workerStats.SrcDocCount
+				bytesCompared += workerStats.SrcByteCount
+			}
+		}
+
+		row := []string{result.Namespace, reportutils.FmtReal(threads)}
 
 		var docsCell string
 
 		if result.TotalDocs > 0 {
 			docsCell = fmt.Sprintf("%s of %s (%s%%)",
-				reportutils.FmtReal(result.DocsCompared),
+				reportutils.FmtReal(docsCompared),
 				reportutils.FmtReal(result.TotalDocs),
-				reportutils.FmtPercent(result.DocsCompared, result.TotalDocs),
+				reportutils.FmtPercent(docsCompared, result.TotalDocs),
 			)
 		} else {
-			docsCell = reportutils.FmtReal(result.DocsCompared)
+			docsCell = reportutils.FmtReal(docsCompared)
 		}
 
 		row = append(row, docsCell)
@@ -374,16 +407,16 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 				dataUnit := reportutils.FindBestUnit(result.TotalBytes)
 
 				dataCell = fmt.Sprintf("%s of %s %s (%s%%)",
-					reportutils.BytesToUnit(result.BytesCompared, dataUnit),
+					reportutils.BytesToUnit(bytesCompared, dataUnit),
 					reportutils.BytesToUnit(result.TotalBytes, dataUnit),
 					dataUnit,
-					reportutils.FmtPercent(result.BytesCompared, result.TotalBytes),
+					reportutils.FmtPercent(bytesCompared, result.TotalBytes),
 				)
 			} else {
-				dataUnit := reportutils.FindBestUnit(result.BytesCompared)
+				dataUnit := reportutils.FindBestUnit(bytesCompared)
 
 				dataCell = fmt.Sprintf("%s %s",
-					reportutils.BytesToUnit(result.BytesCompared, dataUnit),
+					reportutils.BytesToUnit(bytesCompared, dataUnit),
 					dataUnit,
 				)
 			}
@@ -403,7 +436,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 }
 
 func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, strBuilder *strings.Builder, now time.Time) (bool, error) {
-	stats, err := verifier.GetNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -564,6 +597,25 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, n
 	}
 }
 
+func (verifier *Verifier) getPerNamespaceWorkerStats() map[string][]WorkerStatus {
+	wsmap := verifier.workerTracker.Load()
+
+	retMap := map[string][]WorkerStatus{}
+
+	for _, workerStats := range wsmap {
+		if workerStats.TaskID == nil {
+			continue
+		}
+
+		retMap[workerStats.Namespace] = append(
+			retMap[workerStats.Namespace],
+			workerStats,
+		)
+	}
+
+	return retMap
+}
+
 func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
 
 	table := tablewriter.NewWriter(builder)
@@ -572,7 +624,7 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 	wsmap := verifier.workerTracker.Load()
 
 	activeThreadCount := 0
-	for w := 0; w <= verifier.numWorkers; w++ {
+	for w := range verifier.numWorkers {
 		if wsmap[w].TaskID == nil {
 			continue
 		}
@@ -590,23 +642,27 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 			taskIdStr = fmt.Sprintf("%s", wsmap[w].TaskID)
 		}
 
+		var detail string
+		if wsmap[w].TaskType == verificationTaskVerifyDocuments {
+			detail = fmt.Sprintf(
+				"%s documents (%s)",
+				reportutils.FmtReal(wsmap[w].SrcDocCount),
+				reportutils.FmtBytes(wsmap[w].SrcByteCount),
+			)
+		}
+
 		table.Append(
 			[]string{
 				reportutils.FmtReal(w),
 				wsmap[w].Namespace,
 				taskIdStr,
 				reportutils.DurationToHMS(now.Sub(wsmap[w].StartTime)),
-				wsmap[w].Detail,
+				detail,
 			},
 		)
 	}
 
-	fmt.Fprintf(
-		builder,
-		"\nActive worker threads (%s of %s):\n",
-		reportutils.FmtReal(activeThreadCount),
-		reportutils.FmtReal(verifier.numWorkers),
-	)
+	fmt.Fprintf(builder, "\nWorker thread details:\n")
 
 	table.Render()
 }

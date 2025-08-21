@@ -3,6 +3,7 @@ package verifier
 import (
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/msync"
 	"golang.org/x/exp/maps"
 )
@@ -20,11 +21,12 @@ type WorkerStatusMap = map[int]WorkerStatus
 // WorkerStatus details the work that an individual worker thread
 // is doing.
 type WorkerStatus struct {
-	TaskID    any
-	TaskType  verificationTaskType
-	Namespace string
-	StartTime time.Time
-	Detail    string
+	TaskID       any
+	StartTime    time.Time
+	TaskType     verificationTaskType
+	Namespace    string
+	SrcDocCount  types.DocumentCount
+	SrcByteCount types.ByteCount
 }
 
 // NewWorkerTracker creates and returns a WorkerTracker.
@@ -52,10 +54,11 @@ func (wt *WorkerTracker) Set(workerNum int, task VerificationTask) {
 	})
 }
 
-func (wt *WorkerTracker) SetDetail(workerNum int, detail string) {
+func (wt *WorkerTracker) SetSrcCounts(workerNum int, docs types.DocumentCount, bytes types.ByteCount) {
 	wt.guard.Store(func(m WorkerStatusMap) WorkerStatusMap {
 		status := m[workerNum]
-		status.Detail = detail
+		status.SrcDocCount = docs
+		status.SrcByteCount = bytes
 		m[workerNum] = status
 
 		return m

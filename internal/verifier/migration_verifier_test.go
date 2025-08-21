@@ -471,7 +471,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	)
 }
 
-func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
+func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
 
@@ -522,7 +522,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Recheck() {
 		suite.Require().NoError(verifier.GenerateRecheckTasksWhileLocked(ctx))
 	}()
 
-	stats, err := verifier.GetNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -547,7 +547,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
 
-	stats, err := verifier.GetNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -565,7 +565,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	task1, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll1")
 	suite.Require().NoError(err)
 
-	stats, err = verifier.GetNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -593,7 +593,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	err = verifier.UpdateVerificationTask(ctx, task1)
 	suite.Require().NoError(err)
 
-	stats, err = verifier.GetNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -643,7 +643,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 		task2parts[i] = task2part
 	}
 
-	stats, err = verifier.GetNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -671,7 +671,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	err = verifier.UpdateVerificationTask(ctx, task1parts[0])
 	suite.Require().NoError(err)
 
-	stats, err = verifier.GetNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -710,7 +710,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	err = verifier.UpdateVerificationTask(ctx, task2parts[1])
 	suite.Require().NoError(err)
 
-	stats, err = verifier.GetNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
