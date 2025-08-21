@@ -7,6 +7,8 @@ import (
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
 const (
@@ -51,4 +53,32 @@ func GetShardKey(
 	}
 
 	return option.Some(key), nil
+}
+
+// Used in tests:
+func DisableBalancing(ctx context.Context, coll *mongo.Collection) error {
+	client := coll.Database().Client()
+	configDB := client.Database("config")
+
+	ns := FullName(coll)
+
+	_, err := configDB.
+		Collection(
+			"collections",
+			options.Collection().SetWriteConcern(writeconcern.Majority()),
+		).
+		UpdateOne(
+			ctx,
+			bson.D{{"_id", ns}},
+			bson.D{
+				{"$set", bson.D{
+					{"noBalance", true},
+				}},
+			},
+		)
+
+	if err != nil {
+		return errors.Wrapf(err, "disabling %#q’s shard balancing", ns)
+	}
+	return nil
 }
