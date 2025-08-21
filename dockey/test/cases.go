@@ -52,6 +52,7 @@ var TestCases = []TestCase{
 		},
 		DocKey: bson.D{
 			{"_id", "ccc"},
+			{"foo.bar.baz", nil},
 		},
 	},
 	{
@@ -73,6 +74,7 @@ var TestCases = []TestCase{
 		},
 		DocKey: bson.D{
 			{"_id", "eee"},
+			{"foo.bar.baz", nil},
 		},
 	},
 }

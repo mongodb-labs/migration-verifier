@@ -23,6 +23,7 @@ func ExtractTrueDocKeyFromDoc(
 
 	var dk bson.D
 	for _, field := range fieldNames {
+		var val bson.RawValue
 
 		// This is how sharding routes documents: it always
 		// splits on the dot and looks deeply into the document.
@@ -31,13 +32,13 @@ func ExtractTrueDocKeyFromDoc(
 
 		if errors.Is(err, bsoncore.ErrElementNotFound) || errors.As(err, &bsoncore.InvalidDepthTraversalError{}) {
 			// If the document lacks a value for this field
-			// then don’t add it to the document key.
-			continue
-		} else if err == nil {
-			dk = append(dk, bson.E{field, val})
-		} else {
+			// then make it null in the document key.
+			val = bson.RawValue{Type: bson.TypeNull}
+		} else if err != nil {
 			return nil, errors.Wrapf(err, "extracting doc key field %#q from doc %+v", field, doc)
 		}
+
+		dk = append(dk, bson.E{field, val})
 	}
 
 	docKey, err := bson.Marshal(dk)
