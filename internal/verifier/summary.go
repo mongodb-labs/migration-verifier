@@ -542,7 +542,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, n
 			eventsDescr = fmt.Sprintf(
 				"%s total (%s/sec), across %s namespace(s)",
 				reportutils.FmtReal(totalEvents),
-				reportutils.FmtReal(util.Divide(totalEvents, elapsed.Seconds())),
+				reportutils.FmtReal(util.DivideToF64(totalEvents, elapsed.Seconds())),
 				reportutils.FmtReal(activeNamespacesCount),
 			)
 		}

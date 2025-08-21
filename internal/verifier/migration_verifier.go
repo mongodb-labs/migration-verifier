@@ -757,12 +757,8 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 		return nil, nil, 0, 0, err
 	}
 
-	// The partitioner doles out ranges to replicators; we don't use that functionality so we just pass
-	// one "replicator".
-	replicator1 := partitions.Replicator{ID: "verifier"}
-	replicators := []partitions.Replicator{replicator1}
 	partitionList, srcDocs, srcBytes, err := partitions.PartitionCollectionWithSize(
-		ctx, namespaceAndUUID, verifier.srcClient, replicators, verifier.logger, verifier.partitionSizeInBytes, verifier.globalFilter)
+		ctx, namespaceAndUUID, verifier.srcClient, verifier.logger, verifier.partitionSizeInBytes, verifier.globalFilter)
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
@@ -770,8 +766,8 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 	if len(partitionList) == 0 {
 		partitionList = []*partitions.Partition{{
 			Key: partitions.PartitionKey{
-				SourceUUID:  namespaceAndUUID.UUID,
-				MongosyncID: "verifier"},
+				SourceUUID: namespaceAndUUID.UUID,
+			},
 			Ns: &partitions.Namespace{
 				DB:   namespaceAndUUID.DBName,
 				Coll: namespaceAndUUID.CollName}}}
@@ -1228,33 +1224,50 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	// matches between soruce & destination. Now we can partition the collection.
 
 	if task.Generation == 0 {
-		partitions, shardKeys, docsCount, bytesCount, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
-		if err != nil {
-			return errors.Wrapf(
-				err,
-				"failed to partition collection %#q",
-				srcNs,
-			)
+		var partitionsCount int
+		var docsCount types.DocumentCount
+		var bytesCount types.ByteCount
+
+		if verifier.srcHasSampleRate() {
+			var err error
+			partitionsCount, docsCount, bytesCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task)
+			if err != nil {
+				return errors.Wrapf(err, "partitioning %#q via $sampleRate", srcNs)
+			}
+		} else {
+			verifier.logger.Warn().
+				Msg("Source MongoDB version lacks $sampleRate. Using legacy partitioning logic. This may cause imbalanced partitions, which will impede performance.")
+
+			var partitions []*partitions.Partition
+			var shardKeys []string
+
+			partitions, shardKeys, docsCount, bytesCount, err = verifier.partitionAndInspectNamespace(ctx, srcNs)
+			if err != nil {
+				return errors.Wrapf(err, "partitioning %#q via $sample", srcNs)
+			}
+
+			partitionsCount = len(partitions)
+
+			for _, partition := range partitions {
+				_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeys, dstNs)
+				if err != nil {
+					return errors.Wrapf(
+						err,
+						"failed to insert a partition task for namespace %#q",
+						srcNs,
+					)
+				}
+			}
 		}
+
 		verifier.logger.Debug().
 			Int("workerNum", workerNum).
 			Str("namespace", srcNs).
-			Int("partitionsCount", len(partitions)).
+			Int("partitionsCount", partitionsCount).
 			Msg("Divided collection into partitions.")
 
 		task.SourceDocumentCount = docsCount
 		task.SourceByteCount = bytesCount
-
-		for _, partition := range partitions {
-			_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeys, dstNs)
-			if err != nil {
-				return errors.Wrapf(
-					err,
-					"failed to insert a partition task for namespace %#q",
-					srcNs,
-				)
-			}
-		}
 	}
 
 	if task.Status == verificationTaskProcessing {

@@ -103,9 +103,8 @@ func getFilterFromFindOptions(opts bson.D) any {
 func (suite *UnitTestSuite) makeTestPartition() (Partition, bson.D) {
 	partition := Partition{
 		Key: PartitionKey{
-			SourceUUID:  util.NewUUID(),
-			Lower:       primitive.ObjectID([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}),
-			MongosyncID: "",
+			SourceUUID: util.NewUUID(),
+			Lower:      primitive.ObjectID([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}),
 		},
 		Ns:    &Namespace{DB: "testDB", Coll: "testColl"},
 		Upper: primitive.ObjectID([12]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2}),

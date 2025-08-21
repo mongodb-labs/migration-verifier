@@ -3,6 +3,7 @@ package partitions
 import (
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
@@ -13,13 +14,27 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
+
+func ForPartitionAggregation(coll *mongo.Collection) *mongo.Collection {
+	return coll.
+		Database().
+		Collection(
+			coll.Name(),
+			options.Collection().
+				SetReadConcern(readconcern.Available()).
+				SetReadPreference(
+					readpref.SecondaryPreferred(readpref.WithMaxStaleness(90*time.Second))),
+		)
+}
 
 // PartitionKey represents the _id of a partition document stored in the destination.
 type PartitionKey struct {
-	SourceUUID  util.UUID `bson:"srcUUID"`
-	MongosyncID string    `bson:"id"`
-	Lower       any       `bson:"lowerBound"`
+	SourceUUID util.UUID `bson:"srcUUID"`
+	Lower      any       `bson:"lowerBound"`
 }
 
 // Namespace stores the database and collection name of the namespace being copied.
@@ -46,8 +61,8 @@ type Partition struct {
 // String returns a string representation of the partition.
 func (p *Partition) String() string {
 	return fmt.Sprintf(
-		"{db: %s, coll: %s, collUUID: %s, mongosyncID: %s, lower: %s, upper: %s}",
-		p.Ns.DB, p.Ns.Coll, p.Key.SourceUUID, p.Key.MongosyncID, p.GetLowerBoundString(), p.GetUpperBoundString())
+		"{db: %s, coll: %s, collUUID: %s, lower: %s, upper: %s}",
+		p.Ns.DB, p.Ns.Coll, p.Key.SourceUUID, p.GetLowerBoundString(), p.GetUpperBoundString())
 }
 
 // GetLowerBoundString returns the string representation of this partition's lower bound.

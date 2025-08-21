@@ -3,7 +3,6 @@ package partitions
 import (
 	"context"
 	"fmt"
-	"math/rand"
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/reportutils"
@@ -15,6 +14,7 @@ import (
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
@@ -29,13 +29,13 @@ const (
 	// possible that $sample does a collection scan if the number of documents increases very quickly, but
 	// that should be very rare.
 	//
-	defaultSampleRate = 0.04
+	sampleRate = 0.04
 
 	//
 	// The minimum number of documents $sample requires in order to use a pseudo-random cursor.
 	// See: https://docs.mongodb.com/manual/reference/operator/aggregation/sample/#behavior
 	//
-	defaultSampleMinNumDocs = 101
+	sampleMinNumDocs = 101
 
 	//
 	// The maximum number of documents to sample per partition. Previously this is set to 10.
@@ -69,13 +69,6 @@ const (
 	//
 	defaultPartitionSizeInBytes = 400 * 1024 * 1024 // = 400 MB
 )
-
-// Replicator contains the id of a mongosync replicator.
-// It is used here to avoid changing the interface of partitioning (from the mongosync version)
-// overmuch.
-type Replicator struct {
-	ID string `bson:"id"`
-}
 
 // Partitions is a slice of partitions.
 type Partitions struct {
@@ -123,7 +116,6 @@ func PartitionCollectionWithSize(
 	ctx context.Context,
 	uuidEntry *uuidutil.NamespaceAndUUID,
 	srcClient *mongo.Client,
-	replicatorList []Replicator,
 	subLogger *logger.Logger,
 	partitionSizeInBytes int64,
 	globalFilter bson.D,
@@ -138,13 +130,10 @@ func PartitionCollectionWithSize(
 		partitionSizeInBytes = defaultPartitionSizeInBytes
 	}
 
-	partitions, docCount, byteCount, err := PartitionCollectionWithParameters(
+	partitions, docCount, byteCount, err := partitionCollectionWithParameters(
 		ctx,
 		uuidEntry,
 		srcClient,
-		replicatorList,
-		defaultSampleRate,
-		defaultSampleMinNumDocs,
 		partitionSizeInBytes,
 		subLogger,
 		globalFilter,
@@ -157,13 +146,10 @@ func PartitionCollectionWithSize(
 			Str("filter", fmt.Sprintf("%+v", globalFilter)).
 			Msg("Timed out while partitioning with filter. Continuing by partitioning without the filter.")
 
-		return PartitionCollectionWithParameters(
+		return partitionCollectionWithParameters(
 			ctx,
 			uuidEntry,
 			srcClient,
-			replicatorList,
-			defaultSampleRate,
-			defaultSampleMinNumDocs,
 			partitionSizeInBytes,
 			subLogger,
 			nil,
@@ -173,17 +159,14 @@ func PartitionCollectionWithSize(
 	return partitions, docCount, byteCount, err
 }
 
-// PartitionCollectionWithParameters is the implementation for
+// partitionCollectionWithParameters is the implementation for
 // PartitionCollection. It is only directly used in integration tests.
-// See PartitionCollectionWithParameters for a description of inputs
+// See partitionCollectionWithParameters for a description of inputs
 // & outputs. (Alas, the parameter order differs slightly here …)
-func PartitionCollectionWithParameters(
+func partitionCollectionWithParameters(
 	ctx context.Context,
 	uuidEntry *uuidutil.NamespaceAndUUID,
 	srcClient *mongo.Client,
-	replicatorList []Replicator,
-	sampleRate float64,
-	sampleMinNumDocs int,
 	partitionSizeInBytes int64,
 	subLogger *logger.Logger,
 	globalFilter bson.D,
@@ -315,9 +298,6 @@ func PartitionCollectionWithParameters(
 			Msg("_id bounds should outnumber partitions by 1.")
 	}
 
-	// Choose a random index to start to avoid over-assigning partitions to a specific replicator.
-	// rand.Int() generates non-negative integers only.
-	replIndex := rand.Int() % len(replicatorList)
 	subLogger.Debug().
 		Int("numPartitions", len(allIDBounds)-1).
 		Str("namespace", uuidEntry.DBName+"."+uuidEntry.CollName).
@@ -329,9 +309,8 @@ func PartitionCollectionWithParameters(
 
 	for i := 0; i < len(allIDBounds)-1; i++ {
 		partitionKey := PartitionKey{
-			SourceUUID:  uuidEntry.UUID,
-			MongosyncID: replicatorList[replIndex].ID,
-			Lower:       allIDBounds[i],
+			SourceUUID: uuidEntry.UUID,
+			Lower:      allIDBounds[i],
 		}
 		partition := &Partition{
 			Key:      partitionKey,
@@ -340,8 +319,6 @@ func PartitionCollectionWithParameters(
 			IsCapped: isCapped,
 		}
 		partitions = append(partitions, partition)
-
-		replIndex = (replIndex + 1) % len(replicatorList)
 	}
 
 	return partitions, types.DocumentCount(collDocCount), types.ByteCount(collSizeInBytes), nil
@@ -641,13 +618,12 @@ func getMidIDBounds(
 		WithCallback(
 			func(ctx context.Context, ri *retry.FuncInfo) error {
 				ri.Log(logger.Logger, "aggregate", "source", srcDB.Name(), collName, "Retrieving mid _id partition bounds using $sample.")
-				cursor, cmdErr :=
-					srcDB.RunCommandCursor(ctx, bson.D{
-						{"aggregate", collName},
-						{"pipeline", pipeline},
-						{"allowDiskUse", true},
-						{"cursor", bson.D{}},
-					})
+				cursor, cmdErr := ForPartitionAggregation(srcDB.Collection(collName)).
+					Aggregate(
+						ctx,
+						pipeline,
+						options.Aggregate().SetAllowDiskUse(true),
+					)
 
 				if cmdErr != nil {
 					return errors.Wrapf(cmdErr, "failed to $sample and $bucketAuto documents for source namespace '%s.%s'", srcDB.Name(), collName)

@@ -95,7 +95,7 @@ func BytesToUnit[T num16Plus](count T, unit DataUnit) string {
 		panic(fmt.Sprintf("Missing unit in unitSize: %s", unit))
 	}
 
-	return FmtReal(util.Divide(count, myUnitSize))
+	return FmtReal(util.DivideToF64(count, myUnitSize))
 }
 
 // FmtReal provides a standard formatting of real numbers, with a consistent
@@ -128,7 +128,7 @@ func roundFloat(val float64, precision uint) float64 {
 }
 
 func fmtQuotient[T, U realNum](dividend T, divisor U) string {
-	return FmtReal(util.Divide(dividend, divisor))
+	return FmtReal(util.DivideToF64(dividend, divisor))
 }
 
 // FmtPercent returns a stringified percentage without a trailing `%`,
