@@ -89,18 +89,6 @@ func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
 		},
 	}
 
-	/*
-		_, err := verifier.verificationTaskCollection().InsertOne(
-			ctx,
-			task,
-		)
-		require.NoError(err, "should insert collection task")
-
-		require.NoError(
-			verifier.ProcessCollectionVerificationTask(ctx, 0, task),
-			"task should succeed",
-		)
-	*/
 	partitions, docs, bytes, err := verifier.createPartitionTasksWithSampleRate(ctx, task)
 	require.NoError(err, "should partition collection")
 

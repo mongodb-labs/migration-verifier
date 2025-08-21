@@ -95,7 +95,8 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	}
 
 	pipeline := mongo.Pipeline{
-		// NB: $sort MUST precede $project in order to avoid a blocking sort.
+		// NB: $sort MUST precede $project in order to avoid a blocking sort
+		// in pre-v6 server versions.
 		{{"$sort", bson.D{{"_id", 1}}}},
 		{{"$project", bson.D{{"_id", 1}}}},
 	}
@@ -198,11 +199,12 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	}
 
 	idealNumPartitions := util.Divide(collBytes, idealPartitionBytes)
-	docsPerPartition := util.Divide(docsCount, idealNumPartitions)
 
 	// We only want to go in here when the collection has enough data
 	// to justify partitioning.
-	if docsPerPartition > 1 {
+	if idealNumPartitions < 2 {
+		docsPerPartition := util.Divide(docsCount, idealNumPartitions)
+
 		sampleRate := util.Divide(1, docsPerPartition)
 
 		if sampleRate > 0 && sampleRate < 1 {
