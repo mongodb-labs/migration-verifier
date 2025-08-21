@@ -198,14 +198,14 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		return nil
 	}
 
-	idealNumPartitions := util.Divide(collBytes, idealPartitionBytes)
+	idealNumPartitions := util.DivideToF64(collBytes, idealPartitionBytes)
 
 	// We only want to go in here when the collection has enough data
 	// to justify partitioning.
 	if idealNumPartitions > 1 {
-		docsPerPartition := util.Divide(docsCount, idealNumPartitions)
+		docsPerPartition := util.DivideToF64(docsCount, idealNumPartitions)
 
-		sampleRate := util.Divide(1, docsPerPartition)
+		sampleRate := util.DivideToF64(1, docsPerPartition)
 
 		if sampleRate > 0 && sampleRate < 1 {
 			pipeline = append(
