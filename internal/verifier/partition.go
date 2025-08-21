@@ -95,8 +95,9 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	}
 
 	pipeline := mongo.Pipeline{
-		{{"$project", bson.D{{"_id", 1}}}},
+		// NB: $sort MUST precede $project in order to avoid a blocking sort.
 		{{"$sort", bson.D{{"_id", 1}}}},
+		{{"$project", bson.D{{"_id", 1}}}},
 	}
 
 	lowerBoundOpt, err := verifier.findLatestPartitionUpperBound(ctx, srcNs)
@@ -147,21 +148,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		return 0, 0, 0, errors.Wrapf(err, "getting %#q’s size", srcNs)
 	}
 
-	idealNumPartitions := util.Divide(collBytes, idealPartitionBytes)
-
-	docsPerPartition := util.Divide(docsCount, idealNumPartitions)
-	sampleRate := util.Divide(1, docsPerPartition)
-
-	if sampleRate > 0 && sampleRate < 1 {
-		pipeline = append(
-			pipeline,
-			bson.D{
-				{"$match", bson.D{
-					{"$sampleRate", sampleRate},
-				}},
-			},
-		)
-	}
+	dstNs := FullName(verifier.dstClientCollection(task))
 
 	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(
 		ctx,
@@ -173,24 +160,9 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		return 0, 0, 0, errors.Wrapf(err, "fetching %#q’s UUID on source", srcNs)
 	}
 
-	cursor, err := partitions.ForPartitionAggregation(srcColl).Aggregate(
-		ctx,
-		pipeline,
-		options.Aggregate().
-			SetBatchSize(1).
-			SetAllowDiskUse(true).
-			SetHint(bson.D{{"_id", 1}}),
-	)
-	if err != nil {
-		return 0, 0, 0, errors.Wrapf(err, "opening %#q’s sampling cursor", srcNs)
-	}
-
-	defer cursor.Close(ctx)
-	cursor.SetBatchSize(1)
-
-	dstNs := FullName(verifier.dstClientCollection(task))
-
 	partitionsCount := 0
+
+	lowerBound := lowerBoundOpt.OrElse(primitive.MinKey{})
 
 	createAndInsertPartition := func(lowerBound, upperBound any) error {
 		partition := partitions.Partition{
@@ -225,24 +197,56 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		return nil
 	}
 
-	lowerBound := lowerBoundOpt.OrElse(primitive.MinKey{})
+	idealNumPartitions := util.Divide(collBytes, idealPartitionBytes)
+	docsPerPartition := util.Divide(docsCount, idealNumPartitions)
 
-	for cursor.Next(ctx) {
-		upperBound, err := cursor.Current.LookupErr("_id")
-		if err != nil {
-			return 0, 0, 0, errors.Wrapf(err, "fetching %#q from %#q’s sampling cursor", "_id", srcNs)
+	// We only want to go in here when the collection has enough data
+	// to justify partitioning.
+	if docsPerPartition > 1 {
+		sampleRate := util.Divide(1, docsPerPartition)
+
+		if sampleRate > 0 && sampleRate < 1 {
+			pipeline = append(
+				pipeline,
+				bson.D{
+					{"$match", bson.D{
+						{"$sampleRate", sampleRate},
+					}},
+				},
+			)
 		}
 
-		err = createAndInsertPartition(lowerBound, upperBound)
+		cursor, err := partitions.ForPartitionAggregation(srcColl).Aggregate(
+			ctx,
+			pipeline,
+			options.Aggregate().
+				SetBatchSize(1).
+				SetHint(bson.D{{"_id", 1}}),
+		)
 		if err != nil {
-			return 0, 0, 0, err
+			return 0, 0, 0, errors.Wrapf(err, "opening %#q’s sampling cursor", srcNs)
 		}
 
-		lowerBound = upperBound
-	}
+		defer cursor.Close(ctx)
+		cursor.SetBatchSize(1)
 
-	if cursor.Err() != nil {
-		return 0, 0, 0, errors.Wrapf(err, "iterating %#q’s sampling cursor", srcNs)
+		for cursor.Next(ctx) {
+			upperBound, err := cursor.Current.LookupErr("_id")
+			if err != nil {
+				return 0, 0, 0, errors.Wrapf(err, "fetching %#q from %#q’s sampling cursor", "_id", srcNs)
+			}
+
+			err = createAndInsertPartition(lowerBound, upperBound)
+			if err != nil {
+				return 0, 0, 0, err
+			}
+
+			lowerBound = upperBound
+		}
+
+		if cursor.Err() != nil {
+			return 0, 0, 0, errors.Wrapf(err, "iterating %#q’s sampling cursor", srcNs)
+		}
 	}
 
 	err = createAndInsertPartition(lowerBound, primitive.MaxKey{})

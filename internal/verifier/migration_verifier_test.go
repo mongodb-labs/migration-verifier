@@ -68,6 +68,68 @@ func TestIntegration(t *testing.T) {
 	suite.Run(t, testSuite)
 }
 
+func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
+	ctx := suite.Context()
+	require := require.New(suite.T())
+
+	verifier := suite.BuildVerifier()
+
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	collName := "stuff"
+	require.NoError(db.CreateCollection(ctx, collName))
+
+	task := &VerificationTask{
+		PrimaryKey: primitive.NewObjectID(),
+		Generation: 0,
+		Status:     verificationTaskAdded,
+		Type:       verificationTaskVerifyCollection,
+		QueryFilter: QueryFilter{
+			Namespace: db.Name() + "." + collName,
+			To:        db.Name() + "." + collName,
+		},
+	}
+
+	/*
+		_, err := verifier.verificationTaskCollection().InsertOne(
+			ctx,
+			task,
+		)
+		require.NoError(err, "should insert collection task")
+
+		require.NoError(
+			verifier.ProcessCollectionVerificationTask(ctx, 0, task),
+			"task should succeed",
+		)
+	*/
+	partitions, docs, bytes, err := verifier.createPartitionTasksWithSampleRate(ctx, task)
+	require.NoError(err, "should partition collection")
+
+	assert.EqualValues(suite.T(), 1, partitions, "should be 1 partition")
+	assert.Zero(suite.T(), docs, "should be 0 docs")
+	assert.Zero(suite.T(), bytes, "should be 0 bytes")
+
+	taskOpt, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
+	require.NoError(err, "should look up task")
+
+	foundTask, gotTask := taskOpt.Get()
+	require.True(gotTask, "should find task")
+
+	require.Equal(verificationTaskVerifyDocuments, foundTask.Type, "task type")
+	assert.Equal(
+		suite.T(),
+		primitive.MinKey{},
+		foundTask.QueryFilter.Partition.Key.Lower,
+		"min bound",
+	)
+
+	assert.Equal(
+		suite.T(),
+		primitive.MaxKey{},
+		foundTask.QueryFilter.Partition.Upper,
+		"max bound",
+	)
+}
+
 func (suite *IntegrationTestSuite) TestProcessVerifyTask_Failure() {
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
