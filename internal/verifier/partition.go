@@ -202,7 +202,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 	// We only want to go in here when the collection has enough data
 	// to justify partitioning.
-	if idealNumPartitions < 2 {
+	if idealNumPartitions > 1 {
 		docsPerPartition := util.Divide(docsCount, idealNumPartitions)
 
 		sampleRate := util.Divide(1, docsPerPartition)
