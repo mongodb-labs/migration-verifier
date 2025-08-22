@@ -162,70 +162,115 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 	dbName := suite.DBNameForTest()
 	collName := "coll"
 
-	verifier := suite.BuildVerifier()
-	srcColl := verifier.srcClient.Database(dbName).Collection(collName)
-	dstColl := verifier.dstClient.Database(dbName).Collection(collName)
-
 	docs := []bson.D{
-		// NB: It’s not possible to test with /foo.bar.baz or /foo/bar.baz
-		// because the server (as of v8) will route those to the same shard.
-		// Only /foo/bar/baz actually gets routed as per the shard key, so
-		// only that value can create a duplicate ID.
-		{{"_id", 33}, {"foo", bson.D{{"bar", bson.D{{"baz", 100}}}}}},
-		{{"_id", 33}, {"foo", bson.D{{"bar", bson.D{{"baz", 200}}}}}},
+		{{"_id", 33}, {"foo", bson.D{{"bar", 100}}}},
+		{{"_id", 33}, {"foo", bson.D{{"bar", 200}}}},
 	}
 
 	shardKey := bson.D{
-		{"foo.bar.baz", 1},
+		{"foo.bar", 1},
 	}
 
-	for _, coll := range mslices.Of(srcColl, dstColl) {
-		db := coll.Database()
-		client := db.Client()
+	keyField := shardKey[0].Key
+	splitKey := bson.D{{keyField, 150}}
 
-		// For sharded, pre-v8 clusters we need to create the collection first.
-		require.NoError(db.CreateCollection(ctx, coll.Name()))
-		require.NoError(client.Database("admin").RunCommand(
-			ctx,
-			bson.D{{"enableSharding", db.Name()}},
-		).Err())
+	clientsWithLabels := []struct {
+		label  string
+		client *mongo.Client
+	}{
+		{"source", suite.srcMongoClient},
+		{"destination", suite.dstMongoClient},
+	}
 
-		require.NoError(client.Database("admin").RunCommand(
-			ctx,
-			bson.D{
-				{"shardCollection", db.Name() + "." + coll.Name()},
-				{"key", shardKey},
-			},
-		).Err(),
-		)
+	for _, clientWithLabel := range clientsWithLabels {
+		client := clientWithLabel.client
+		clientLabel := clientWithLabel.label
+
+		db := client.Database(dbName)
+		coll := db.Collection(collName)
+
+		// The DB shouldn’t exist anyway, but just in case.
+		require.NoError(db.Drop(ctx), "should drop database")
 
 		shardIds := getShardIds(suite.T(), client)
 
 		admin := client.Database("admin")
-		keyField := "foo.bar.baz"
-		splitKey := bson.D{{keyField, 150}}
+
+		require.NoError(admin.RunCommand(
+			ctx,
+			bson.D{
+				{"enableSharding", db.Name()},
+			},
+		).Err())
+
+		require.NoError(
+			admin.RunCommand(
+				ctx,
+				bson.D{
+					{"shardCollection", FullName(coll)},
+					{"key", shardKey},
+				},
+			).Err(),
+			"should shard collection on %s",
+			clientLabel,
+		)
+
+		require.NoError(
+			util.DisableBalancing(ctx, coll),
+			"should disable %#q’s balancing on %s",
+			FullName(coll),
+			clientLabel,
+		)
 
 		require.NoError(
 			admin.RunCommand(ctx, bson.D{
-				{"split", db.Name() + "." + coll.Name()},
+				{"split", FullName(coll)},
 				{"middle", splitKey},
 			}).Err(),
+			"should split on %s",
+			clientLabel,
 		)
 
-		require.NoError(
-			admin.RunCommand(ctx, bson.D{
-				{"moveChunk", db.Name() + "." + coll.Name()},
-				{"to", shardIds[0]},
-				{"find", bson.D{{keyField, 149}}},
-			}).Err(),
+		require.Eventually(
+			func() bool {
+				err := admin.RunCommand(ctx, bson.D{
+					{"moveChunk", FullName(coll)},
+					{"find", bson.D{{keyField, 149}}},
+					{"to", shardIds[0]},
+					{"_waitForDelete", true},
+				}).Err()
+
+				if err != nil {
+					suite.T().Logf("Failed to move %s’s lower chunk to shard %#q: %v", clientLabel, shardIds[0], err)
+					return false
+				}
+
+				return true
+			},
+			5*time.Minute,
+			time.Second,
+			"Should move lower chunk to the 1st shard",
 		)
 
-		require.NoError(
-			admin.RunCommand(ctx, bson.D{
-				{"moveChunk", db.Name() + "." + coll.Name()},
-				{"to", shardIds[1]},
-				{"find", bson.D{{keyField, 151}}},
-			}).Err(),
+		require.Eventually(
+			func() bool {
+				err := admin.RunCommand(ctx, bson.D{
+					{"moveChunk", FullName(coll)},
+					{"find", bson.D{{keyField, 151}}},
+					{"to", shardIds[1]},
+					{"_waitForDelete", true},
+				}).Err()
+
+				if err != nil {
+					suite.T().Logf("Failed to move %s’s upper chunk to shard %#q: %v", clientLabel, shardIds[1], err)
+					return false
+				}
+
+				return true
+			},
+			5*time.Minute,
+			time.Second,
+			"Should move upper chunk to the 2nd shard",
 		)
 
 		_, err := coll.InsertMany(ctx, lo.ToAnySlice(lo.Shuffle(docs)))
@@ -252,6 +297,7 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 		},
 	}
 
+	verifier := suite.BuildVerifier()
 	results, docCount, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
 	require.NoError(err, "should fetch & compare")
 	assert.EqualValues(suite.T(), len(docs), docCount, "expected # of docs")
