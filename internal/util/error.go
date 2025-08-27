@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/mmongo"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/x/mongo/driver"
@@ -454,4 +455,37 @@ func getErrorRaw(err error) bson.Raw {
 // IsStaleClusterTimeError returns true if this is a StaleClusterTimeError.
 func IsStaleClusterTimeError(err error) bool {
 	return GetErrorCode(err) == 209
+}
+
+// If a BulkWrite comes back with no write concern error and a nonempty
+// list of write errors, and all of the write errors are duplicate-key, then
+// this returns nil. Otherwise it returns the given error.
+func TolerateSimpleDuplicateKeyInBulk(
+	logger *logger.Logger,
+	docsCount int,
+	err error,
+) error {
+	bwe := mongo.BulkWriteException{}
+	if errors.As(err, &bwe) && bwe.WriteConcernError == nil {
+		writeCodes := lo.Map(
+			bwe.WriteErrors,
+			func(we mongo.BulkWriteError, _ int) int {
+				return we.Code
+			},
+		)
+
+		codesSet := mapset.NewSet(writeCodes...)
+		if codesSet.Cardinality() == 1 && writeCodes[0] == DuplicateKeyErrCode {
+			// This will be fairly common since we now listen for change events
+			// on both source & destination, so use trace level here.
+			logger.Trace().
+				Int("documentsSubmitted", docsCount).
+				Int("duplicates", len(writeCodes)).
+				Msg("Ignoring duplicate key error on recheck inserts.")
+
+			err = nil
+		}
+	}
+
+	return err
 }
