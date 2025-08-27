@@ -106,57 +106,50 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	for _, curThreadIndexes := range indexesPerThread {
 		eg.Go(func() error {
-			models := make([]mongo.WriteModel, len(curThreadIndexes))
-			for m, i := range curThreadIndexes {
-				recheckDoc := RecheckDoc{
-					PrimaryKey: RecheckPrimaryKey{
-						SrcDatabaseName:   dbNames[i],
-						SrcCollectionName: collNames[i],
-						DocumentID:        documentIDs[i],
-					},
-					DataSize: dataSizes[i],
-				}
-
-				models[m] = mongo.NewInsertOneModel().
-					SetDocument(recheckDoc)
-			}
+			recheckDocs := lo.Map(
+				curThreadIndexes,
+				func(_, i int) RecheckDoc {
+					return RecheckDoc{
+						PrimaryKey: RecheckPrimaryKey{
+							SrcDatabaseName:   dbNames[i],
+							SrcCollectionName: collNames[i],
+							DocumentID:        documentIDs[i],
+						},
+						DataSize: dataSizes[i],
+					}
+				},
+			)
 
 			retryer := retry.New()
 			err := retryer.WithCallback(
 				func(retryCtx context.Context, _ *retry.FuncInfo) error {
-					_, err := genCollection.BulkWrite(
-						retryCtx,
-						models,
-						options.BulkWrite().SetOrdered(false),
+					cursor, err := verifier.verificationDatabase().Aggregate(
+						ctx,
+						mongo.Pipeline{
+							{{"$documents", bson.D{{"$literal", recheckDocs}}}},
+							{{"$merge", bson.D{
+								{"into", genCollection.Name()},
+								{"whenMatched", "replace"},
+							}}},
+						},
 					)
+					if err != nil {
+						return errors.Wrapf(err, "persisting %d recheck(s)", len(recheckDocs))
+					}
 
-					// We expect duplicate-key errors from the above because:
-					//
-					// a) The same document can change multiple times per generation.
-					// b) The source’s changes also happen on the destination, and both
-					//    change streams populate this recheck queue.
-					//
-					// Because of that, we ignore duplicate-key errors. We do *not*, though,
-					// ignore other errors that may accompany duplicate-key errors in the
-					// same server response.
-					//
-					// This does mean that the persisted DataSize _does not change_ after
-					// a document is first inserted. That should matter little, though,
-					// the persisted document size is just an optimization for parallelizing,
-					// and document sizes probably remain stable(-ish) across updates.
-					err = util.TolerateSimpleDuplicateKeyInBulk(
-						verifier.logger,
-						len(models),
-						err,
-					)
+					if cursor.ID() > 0 {
+						verifier.logger.Warn().Msg("$merge returned non-empty cursor?!?")
+					}
+
+					cursor.Close(ctx)
 
 					return err
 				},
 				"persisting %d recheck(s)",
-				len(models),
+				len(recheckDocs),
 			).Run(groupCtx, verifier.logger)
 
-			return errors.Wrapf(err, "failed to persist %d recheck(s) for generation %d", len(models), generation)
+			return errors.Wrapf(err, "persisting %d recheck(s)", len(recheckDocs))
 		})
 	}
 
