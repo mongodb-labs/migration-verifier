@@ -446,9 +446,9 @@ func (verifier *Verifier) getGenerationWhileLocked() (int, bool) {
 
 	// As long as no other goroutine has locked the mux this will
 	// usefully panic if the caller neglected the lock.
-	wasUnlocked := verifier.mux.TryRLock()
+	wasUnlocked := verifier.mux.TryLock()
 	if wasUnlocked {
-		verifier.mux.RUnlock()
+		verifier.mux.Unlock()
 		panic("getGenerationWhileLocked() while unlocked")
 	}
 

@@ -92,8 +92,8 @@ func (verifier *Verifier) insertRecheckDocs(
 	documentIDs []any,
 	dataSizes []int,
 ) error {
-	verifier.mux.Lock()
-	defer verifier.mux.Unlock()
+	verifier.mux.RLock()
+	defer verifier.mux.RUnlock()
 
 	generation, _ := verifier.getGenerationWhileLocked()
 
@@ -105,8 +105,6 @@ func (verifier *Verifier) insertRecheckDocs(
 	genCollection := verifier.getRecheckQueueCollection(generation)
 
 	for _, curThreadIndexes := range indexesPerThread {
-		curThreadIndexes := curThreadIndexes
-
 		eg.Go(func() error {
 			models := make([]mongo.WriteModel, len(curThreadIndexes))
 			for m, i := range curThreadIndexes {
@@ -162,9 +160,7 @@ func (verifier *Verifier) insertRecheckDocs(
 		})
 	}
 
-	err := eg.Wait()
-
-	if err != nil {
+	if err := eg.Wait(); err != nil {
 		return errors.Wrapf(
 			err,
 			"failed to persist %d recheck(s) for generation %d",

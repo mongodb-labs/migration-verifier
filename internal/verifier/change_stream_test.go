@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
@@ -85,31 +86,67 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
 		"updateDescription",
 		"update description should be filtered out",
 	)
+}
 
-	/*
-	   suite.Assert().Contains(
+func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
+	ctx := suite.Context()
 
-	   	,
-	   	bson.D{
-	   		{"$match", bson.D{{"ns.db", bson.D{{"$ne", metaDBName}}}}},
-	   	},
+	verifier := suite.BuildVerifier()
+	if !verifier.srcChangeStreamReader.hasBsonSize() {
+		suite.T().Skip("Need a source version that has $bsonSize")
+	}
 
-	   )
-	   verifier.srcChangeStreamReader.namespaces = []string{"foo.bar", "foo.baz", "test.car", "test.chaz"}
-	   suite.Assert().Contains(
+	srcColl := verifier.srcClient.Database(suite.DBNameForTest()).Collection("coll")
 
-	   	verifier.srcChangeStreamReader.GetChangeStreamFilter(),
-	   	bson.D{{"$match", bson.D{
-	   		{"$or", []bson.D{
-	   			{{"ns", bson.D{{"db", "foo"}, {"coll", "bar"}}}},
-	   			{{"ns", bson.D{{"db", "foo"}, {"coll", "baz"}}}},
-	   			{{"ns", bson.D{{"db", "test"}, {"coll", "car"}}}},
-	   			{{"ns", bson.D{{"db", "test"}, {"coll", "chaz"}}}},
-	   		}},
-	   	}}},
+	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", 123}})
+	suite.Require().NoError(err)
 
-	   )
-	*/
+	verifier.srcChangeStreamReader.namespaces = mslices.Of(FullName(srcColl))
+
+	filter := verifier.srcChangeStreamReader.GetChangeStreamFilter()
+
+	cs, err := suite.srcMongoClient.Watch(
+		ctx,
+		filter,
+		options.ChangeStream().SetFullDocument("updateLookup"),
+	)
+	suite.Require().NoError(err)
+	defer cs.Close(ctx)
+
+	// Now create a large document and verify that the corresponding event
+	// does NOT contain that full document but _does_ contain the document’s
+	// length.
+
+	_, err = srcColl.InsertOne(ctx, bson.D{
+		{"_id", "abc"},
+		{"bigstring", strings.Repeat("x", 10_000)},
+	})
+	suite.Require().NoError(err)
+
+	suite.Require().True(cs.Next(ctx), "should get event")
+
+	suite.Require().Equal(
+		"abc",
+		cs.Current.Lookup("documentKey", "_id").StringValue(),
+		"event should reference expected document",
+	)
+	suite.Assert().Less(len(cs.Current), 10_000, "event should not be large")
+
+	parsed := ParsedEvent{}
+	suite.Require().NoError(cs.Decode(&parsed))
+	suite.Require().Equal("insert", parsed.OpType)
+
+	suite.Require().True(parsed.FullDocLen.IsSome(), "full doc len should be in event")
+	suite.Assert().Greater(parsed.FullDocLen.MustGet(), types.ByteCount(10_000))
+
+	_, err = srcColl.DeleteOne(ctx, bson.D{{"_id", "abc"}})
+	suite.Require().NoError(err)
+
+	suite.Require().True(cs.Next(ctx), "should get event")
+	parsed = ParsedEvent{}
+	suite.Require().NoError(cs.Decode(&parsed))
+	suite.Require().Equal("delete", parsed.OpType)
+	suite.Require().True(parsed.FullDocLen.IsNone(), "full doc len not in delete")
 }
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
