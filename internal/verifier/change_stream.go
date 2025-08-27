@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
@@ -40,12 +41,13 @@ var supportedEventOpTypes = mapset.NewSet(
 
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
 type ParsedEvent struct {
-	ID           any                  `bson:"_id"`
-	OpType       string               `bson:"operationType"`
-	Ns           *Namespace           `bson:"ns,omitempty"`
-	DocKey       DocKey               `bson:"documentKey,omitempty"`
-	FullDocument bson.Raw             `bson:"fullDocument,omitempty"`
-	ClusterTime  *primitive.Timestamp `bson:"clusterTime,omitEmpty"`
+	ID           any                            `bson:"_id"`
+	OpType       string                         `bson:"operationType"`
+	Ns           *Namespace                     `bson:"ns,omitempty"`
+	DocKey       DocKey                         `bson:"documentKey,omitempty"`
+	FullDocument bson.Raw                       `bson:"fullDocument,omitempty"`
+	FullDocLen   option.Option[types.ByteCount] `bson:"_fullDocLen"`
+	ClusterTime  *primitive.Timestamp           `bson:"clusterTime,omitEmpty"`
 }
 
 func (pe *ParsedEvent) String() string {
@@ -244,7 +246,9 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 		collNames[i] = srcCollName
 		docIDs[i] = changeEvent.DocKey.ID
 
-		if changeEvent.FullDocument == nil {
+		if changeEvent.FullDocLen.OrZero() > 0 {
+			dataSizes[i] = int(changeEvent.FullDocLen.OrZero())
+		} else if changeEvent.FullDocument == nil {
 			// This happens for deletes and for some updates.
 			// The document is probably, but not necessarily, deleted.
 			dataSizes[i] = fauxDocSizeForDeleteEvents
@@ -316,7 +320,7 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 		}
 	}
 
-	return append(
+	pipeline = append(
 		pipeline,
 		bson.D{
 			{"$unset", []string{
@@ -324,6 +328,30 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 			}},
 		},
 	)
+
+	if csr.hasBsonSize() {
+		pipeline = append(
+			pipeline,
+			bson.D{
+				{"$addFields", bson.D{
+					{"_fullDocLen", bson.D{{"$bsonSize", "$fullDocument"}}},
+					{"fullDocument", "$$REMOVE"},
+				}},
+			},
+		)
+	}
+
+	return pipeline
+}
+
+func (csr *ChangeStreamReader) hasBsonSize() bool {
+	major := csr.clusterInfo.VersionArray[0]
+
+	if major == 4 {
+		return csr.clusterInfo.VersionArray[1] >= 4
+	}
+
+	return major > 4
 }
 
 // This function reads a single `getMore` response into a slice.
@@ -345,6 +373,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	latestEvent := option.None[ParsedEvent]()
 
+	var batchTotalBytes int
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
 		gotEvent := cs.TryNext(ctx)
 
@@ -364,6 +393,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			changeEvents = make([]ParsedEvent, batchSize)
 		}
 
+		batchTotalBytes += len(cs.Current)
+
 		if err := cs.Decode(&changeEvents[eventsRead]); err != nil {
 			return errors.Wrapf(err, "failed to decode change event to %T", changeEvents[eventsRead])
 		}
@@ -373,7 +404,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			Stringer("changeStream", csr).
 			Any("event", changeEvents[eventsRead]).
 			Int("eventsPreviouslyReadInBatch", eventsRead).
-			Int("batchSize", len(changeEvents)).
+			Int("batchEvents", len(changeEvents)).
+			Int("batchBytes", batchTotalBytes).
 			Msg("Received a change event.")
 
 		opType := changeEvents[eventsRead].OpType
