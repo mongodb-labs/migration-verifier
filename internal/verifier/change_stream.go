@@ -266,7 +266,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 	latestTimestampTime := time.Unix(int64(latestTimestamp.T), 0)
 	lag := time.Unix(int64(batch.clusterTime.T), 0).Sub(latestTimestampTime)
 
-	verifier.logger.Debug().
+	verifier.logger.Trace().
 		Str("origin", string(eventOrigin)).
 		Int("count", len(docIDs)).
 		Any("latestTimestamp", latestTimestamp).

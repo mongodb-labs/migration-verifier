@@ -173,7 +173,7 @@ func (verifier *Verifier) insertRecheckDocs(
 		)
 	}
 
-	verifier.logger.Debug().
+	verifier.logger.Trace().
 		Int("generation", generation).
 		Int("count", len(documentIDs)).
 		Msg("Persisted rechecks.")
