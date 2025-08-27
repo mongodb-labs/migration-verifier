@@ -457,7 +457,7 @@ func (verifier *Verifier) getGenerationWhileLocked() (int, bool) {
 
 func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A) bson.A {
 	if len(verifier.globalFilter) == 0 {
-		verifier.logger.Debug().Msg("No filter to append; globalFilter is nil")
+		verifier.logger.Trace().Msg("No filter to append; globalFilter is nil")
 		return predicates
 	}
 	verifier.logger.Debug().Str("filter", fmt.Sprintf("%v", verifier.globalFilter)).Msg("Appending filter to find query")

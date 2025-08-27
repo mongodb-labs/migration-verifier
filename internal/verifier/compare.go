@@ -656,20 +656,20 @@ func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collectio
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
 	if !task.IsRecheck() {
+		if verifier.logger.Trace().Enabled() {
+			evt := verifier.logger.Trace().
+				Any("task", task.PrimaryKey)
 
-		evt := verifier.logger.Debug().
-			Any("task", task.PrimaryKey)
+			cmdStr, err := bson.MarshalExtJSON(cmd, true, false)
+			if err != nil {
+				cmdStr = fmt.Appendf(nil, "%s", cmd)
+			}
 
-		extJSON, err := bson.MarshalExtJSON(cmd, true, false)
-		if err != nil {
-			evt = evt.Str("cmd", fmt.Sprintf("%s", cmd))
-		} else {
-			evt = evt.RawJSON("cmd", extJSON)
+			evt.
+				Str("cmd", string(cmdStr)).
+				Str("options", fmt.Sprintf("%v", *runCommandOptions)).
+				Msg("getDocuments command.")
 		}
-
-		evt.
-			Str("options", fmt.Sprintf("%v", *runCommandOptions)).
-			Msg("getDocuments command.")
 	}
 
 	return collection.Database().RunCommandCursor(ctx, cmd, runCommandOptions)
