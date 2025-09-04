@@ -6,7 +6,7 @@ _If verifying a migration done via [mongosync](https://www.mongodb.com/docs/clus
 # Obtaining
 To fetch the latest release:
 ```
-curl -L https://raw.githubusercontent.com/mongodb-labs/migration-verifier/refs/heads/main/download_latest.sh | sh
+curl -sSL https://raw.githubusercontent.com/mongodb-labs/migration-verifier/refs/heads/main/download_latest.sh | sh
 ```
 … or, if you prefer to build locally, just do:
 ```
