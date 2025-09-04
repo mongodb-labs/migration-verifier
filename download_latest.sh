@@ -40,4 +40,4 @@ wget -O "$filename" "$DOWNLOAD_URL"
 
 chmod +x "$filename"
 
-echo "Migration Verifier $VERSION is now saved as $filename."
+echo "✅ Migration Verifier $VERSION is now saved as $filename."
