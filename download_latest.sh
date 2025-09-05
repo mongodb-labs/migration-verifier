@@ -36,7 +36,7 @@ fi
 
 echo "Downloading $DOWNLOAD_URL …"
 
-curl -L "$DOWNLOAD_URL" > "$filename"
+curl -sSL "$DOWNLOAD_URL" > "$filename"
 
 chmod +x "$filename"
 
