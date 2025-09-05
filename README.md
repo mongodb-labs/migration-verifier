@@ -3,9 +3,12 @@
 _If verifying a migration done via [mongosync](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/), please check if it is possible to use the 
 [embedded verifier](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/reference/verification/embedded/#std-label-c2c-embedded-verifier) as that is the preferred approach for verification._
 
-# To build
-
-
+# Obtaining
+To fetch the latest release:
+```
+curl -sSL https://raw.githubusercontent.com/mongodb-labs/migration-verifier/refs/heads/main/download_latest.sh | sh
+```
+… or, if you prefer to build locally, just do:
 ```
 ./build.sh
 ```
