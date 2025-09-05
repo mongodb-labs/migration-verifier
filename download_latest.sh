@@ -6,7 +6,7 @@ filename=migration_verifier
 
 RELEASE_URL="https://api.github.com/repos/mongodb-labs/migration-verifier/releases/latest"
 
-OS=$(uname -o | tr '[:upper:]' '[:lower:]')
+OS=$(uname -o | tr '[:upper:]' '[:lower:]' | sed 's|gnu/||')
 ARCH=$(uname -m)
 if [ "$ARCH" = "aarch64" ]; then
     ARCH=arm64
@@ -14,7 +14,7 @@ fi
 
 echo "Looks like you’re running $OS on $ARCH."
 
-MANIFEST=$(wget -qO- "$RELEASE_URL")
+MANIFEST=$(curl -sSL "$RELEASE_URL")
 
 VERSION=$(printf "%s" "$MANIFEST" | jq -r .name)
 
@@ -36,7 +36,7 @@ fi
 
 echo "Downloading $DOWNLOAD_URL …"
 
-wget -O "$filename" "$DOWNLOAD_URL"
+curl -L "$DOWNLOAD_URL" > "$filename"
 
 chmod +x "$filename"
 
