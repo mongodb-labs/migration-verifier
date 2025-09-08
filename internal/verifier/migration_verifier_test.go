@@ -2206,26 +2206,23 @@ func (suite *IntegrationTestSuite) awaitEnqueueOfRechecks(verifier *Verifier, mi
 	var lastNonzeroRechecksCount int
 
 	suite.Eventually(func() bool {
-		cursor, err := verifier.getRecheckQueueCollection(verifier.generation).
-			Find(suite.Context(), bson.D{})
-		var rechecks []bson.D
+		rechecksCount, err := verifier.localDB.CountRechecks(verifier.generation)
 		suite.Require().NoError(err)
-		suite.Require().NoError(cursor.All(suite.Context(), &rechecks))
 
-		if len(rechecks) >= minDocs {
+		if rechecksCount >= minDocs {
 			return true
 		}
 
-		if len(rechecks) > 0 {
+		if rechecksCount > 0 {
 			// Note any progress toward our minimum rechecks count.
-			if lastNonzeroRechecksCount != len(rechecks) {
+			if lastNonzeroRechecksCount != rechecksCount {
 				suite.T().Logf(
 					"%d recheck(s) are enqueued, but we want %d.",
-					len(rechecks),
+					rechecksCount,
 					minDocs,
 				)
 
-				lastNonzeroRechecksCount = len(rechecks)
+				lastNonzeroRechecksCount = rechecksCount
 			}
 
 			return false

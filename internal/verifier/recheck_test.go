@@ -8,6 +8,8 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/localdb"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -29,19 +31,17 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 		"insert failed-comparison recheck",
 	)
 
-	recheckDocs := suite.fetchRecheckDocs(ctx, verifier)
+	rechecks := suite.fetchRecheckDocs(ctx, verifier)
 
 	suite.Assert().Equal(
-		[]RecheckDoc{
+		[]localdb.Recheck{
 			{
-				PrimaryKey: RecheckPrimaryKey{
-					SrcDatabaseName:   "the",
-					SrcCollectionName: "namespace",
-					DocumentID:        "theDocID",
-				},
+				DB:    "the",
+				Coll:  "namespace",
+				DocID: mbson.MustConvertToRawValue("theDocID"),
 			},
 		},
-		recheckDocs,
+		rechecks,
 		"recheck queue after insertion of failed-comparison",
 	)
 
@@ -67,37 +67,36 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 	)
 	suite.Require().NoError(err)
 
-	recheckDocs = suite.fetchRecheckDocs(ctx, verifier)
+	rechecks = suite.fetchRecheckDocs(ctx, verifier)
 	suite.Assert().Equal(
-		[]RecheckDoc{
+		[]localdb.Recheck{
 			{
-				PrimaryKey: RecheckPrimaryKey{
-					SrcDatabaseName:   "the",
-					SrcCollectionName: "namespace",
-					DocumentID:        "theDocID",
-				},
+				DB:    "the",
+				Coll:  "namespace",
+				DocID: mbson.MustConvertToRawValue("theDocID"),
 			},
 		},
-		recheckDocs,
+		rechecks,
 		"recheck queue after insertion of change event",
 	)
 }
 
-func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifier *Verifier) []RecheckDoc {
-	metaColl := verifier.getRecheckQueueCollection(verifier.generation)
+func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifier *Verifier) []localdb.Recheck {
+	reader := verifier.localDB.GetRecheckReader(ctx, verifier.generation)
 
-	cursor, err := metaColl.Find(
-		ctx,
-		bson.D{},
-		options.Find().SetProjection(bson.D{{"dataSize", 0}}),
-	)
-	suite.Require().NoError(err, "find recheck docs")
+	var rechecks []localdb.Recheck
 
-	var results []RecheckDoc
-	err = cursor.All(ctx, &results)
-	suite.Require().NoError(err, "read recheck docs cursor")
+	for result := range reader {
+		recheck, err := result.Get()
+		suite.Require().NoError(err, "should fetch recheck")
 
-	return results
+		// We can’t very easily test this.
+		recheck.Size = 0
+
+		rechecks = append(rechecks, recheck)
+	}
+
+	return rechecks
 }
 
 func (suite *IntegrationTestSuite) TestRecheckResumability() {
@@ -169,7 +168,7 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 		verificationStatus, err := verifier.GetVerificationStatus(ctx)
 		suite.Require().NoError(err)
 
-		recheckDocs := suite.fetchVerifierRechecks(ctx, verifier)
+		recheckDocs := suite.fetchRecheckDocs(ctx, verifier)
 
 		if verificationStatus.FailedTasks != 0 && len(recheckDocs) == 2 {
 			break
@@ -199,7 +198,7 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 		"restarted verifier should immediately see mismatches",
 	)
 
-	recheckDocs := suite.fetchVerifierRechecks(ctx, verifier2)
+	recheckDocs := suite.fetchRecheckDocs(ctx, verifier2)
 	suite.Require().Len(recheckDocs, 2, "expect # of rechecks: %+v", recheckDocs)
 }
 
@@ -278,17 +277,15 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
-	d1 := RecheckDoc{
-		PrimaryKey: RecheckPrimaryKey{
-			SrcDatabaseName:   "testDB",
-			SrcCollectionName: "testColl",
-			DocumentID:        id1,
-		},
+	d1 := localdb.Recheck{
+		DB:    "testDB",
+		Coll:  "testColl",
+		DocID: mbson.MustConvertToRawValue(id1),
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = id2
+	d2.DocID = mbson.MustConvertToRawValue(id2)
 	d3 := d1
-	d3.PrimaryKey.DocumentID = id3
+	d3.DocID = mbson.MustConvertToRawValue(id3)
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
@@ -337,17 +334,16 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	dataSizes := []int{400 * 1024, 700 * 1024, 1024}
 	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
-	d1 := RecheckDoc{
-		PrimaryKey: RecheckPrimaryKey{
-			SrcDatabaseName:   "testDB",
-			SrcCollectionName: "testColl",
-			DocumentID:        id1,
-		},
+	d1 := localdb.Recheck{
+		DB:    "testDB",
+		Coll:  "testColl",
+		DocID: mbson.MustConvertToRawValue(id1),
 	}
+
 	d2 := d1
-	d2.PrimaryKey.DocumentID = id2
+	d2.DocID = mbson.MustConvertToRawValue(id2)
 	d3 := d1
-	d3.PrimaryKey.DocumentID = id3
+	d3.DocID = mbson.MustConvertToRawValue(id3)
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
@@ -446,15 +442,13 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
-	d1 := RecheckDoc{
-		PrimaryKey: RecheckPrimaryKey{
-			SrcDatabaseName:   "testDB",
-			SrcCollectionName: "testColl",
-			DocumentID:        id1,
-		},
+	d1 := localdb.Recheck{
+		DB:    "testDB",
+		Coll:  "testColl",
+		DocID: mbson.MustConvertToRawValue(id1),
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = id2
+	d2.DocID = mbson.MustConvertToRawValue(id2)
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.Assert().ElementsMatch([]any{d1, d2}, results)

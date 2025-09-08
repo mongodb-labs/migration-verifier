@@ -11,6 +11,8 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/localdb"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/pkg/errors"
@@ -277,7 +279,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 	verifier2 := suite.BuildVerifier()
 
 	suite.Require().Empty(
-		suite.fetchVerifierRechecks(ctx, verifier2),
+		suite.fetchRecheckDocs(ctx, verifier2),
 		"no rechecks should be enqueued before starting change stream",
 	)
 
@@ -292,12 +294,12 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 		"verifier2's change stream should be no later than this new session",
 	)
 
-	recheckDocs := []bson.M{}
+	var recheckDocs []localdb.Recheck
 
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			recheckDocs = suite.fetchVerifierRechecks(ctx, verifier2)
+			recheckDocs = suite.fetchRecheckDocs(ctx, verifier2)
 
 			return len(recheckDocs) > 0
 		},
@@ -307,13 +309,21 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 	)
 
 	suite.Assert().Equal(
-		bson.M{
-			"db":    suite.DBNameForTest(),
-			"coll":  "testColl",
-			"docID": "heyhey",
-		},
-		recheckDocs[0]["_id"],
-		"recheck doc should have expected ID",
+		suite.DBNameForTest(),
+		recheckDocs[0].DB,
+		"recheck DB should be as expected",
+	)
+
+	suite.Assert().Equal(
+		"testColl",
+		recheckDocs[0].Coll,
+		"recheck coll should be as expected",
+	)
+
+	suite.Assert().Equal(
+		mbson.MustConvertToRawValue("heyhey"),
+		recheckDocs[0].DocID,
+		"recheck doc ID should be as expected",
 	)
 }
 
@@ -328,20 +338,6 @@ func (suite *IntegrationTestSuite) getClusterTime(ctx context.Context, client *m
 	suite.Require().NoError(err, "should fetch cluster time")
 
 	return newTime
-}
-
-func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, verifier *Verifier) []bson.M {
-	recheckDocs := []bson.M{}
-
-	recheckColl := verifier.getRecheckQueueCollection(verifier.generation)
-	cursor, err := recheckColl.Find(ctx, bson.D{})
-
-	if !errors.Is(err, mongo.ErrNoDocuments) {
-		suite.Require().NoError(err)
-		suite.Require().NoError(cursor.All(ctx, &recheckDocs))
-	}
-
-	return recheckDocs
 }
 
 func (suite *IntegrationTestSuite) TestChangeStreamDDLError() {
@@ -554,12 +550,13 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 	_, err = coll2.InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 
-	var rechecks []bson.M
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			rechecks = suite.fetchVerifierRechecks(ctx, verifier)
-			return len(rechecks) == 3
+			count, err := verifier.localDB.CountRechecks(verifier.generation)
+			suite.Require().NoError(err)
+
+			return count == 3
 		},
 		time.Minute,
 		500*time.Millisecond,
@@ -891,18 +888,12 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	_, err = coll2.InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 
-	var rechecks []RecheckDoc
+	var rechecks []localdb.Recheck
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			recheckColl := verifier.getRecheckQueueCollection(verifier.generation)
-			cursor, err := recheckColl.Find(ctx, bson.D{})
-			if errors.Is(err, mongo.ErrNoDocuments) {
-				return false
-			}
+			rechecks := suite.fetchRecheckDocs(ctx, verifier)
 
-			suite.Require().NoError(err)
-			suite.Require().NoError(cursor.All(ctx, &rechecks))
 			return len(rechecks) == 3
 		},
 		time.Minute,
@@ -912,14 +903,14 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 
 	coll1RecheckCount, coll2RecheckCount := 0, 0
 	for _, recheck := range rechecks {
-		suite.Require().Equal(srcDBName, recheck.PrimaryKey.SrcDatabaseName)
-		switch recheck.PrimaryKey.SrcCollectionName {
+		suite.Require().Equal(srcDBName, recheck.DB)
+		switch recheck.Coll {
 		case "srcColl1":
 			coll1RecheckCount++
 		case "srcColl2":
 			coll2RecheckCount++
 		default:
-			suite.T().Fatalf("unknown collection name: %v", recheck.PrimaryKey.SrcCollectionName)
+			suite.T().Fatalf("unknown collection name: %v", recheck.Coll)
 		}
 	}
 	suite.Require().Equal(2, coll1RecheckCount)

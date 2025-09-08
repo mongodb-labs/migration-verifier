@@ -11,35 +11,11 @@ import (
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
 const (
 	recheckQueueCollectionNameBase = "recheckQueue"
 )
-
-// RecheckPrimaryKey stores the implicit type of recheck to perform
-// Currently, we only handle document mismatches/change stream updates,
-// so SrcDatabaseName, SrcCollectionName, and DocumentID must always be specified.
-//
-// NB: Order is important here so that, within a given generation,
-// sorting by _id will guarantee that all rechecks for a given
-// namespace appear consecutively.
-type RecheckPrimaryKey struct {
-	SrcDatabaseName   string `bson:"db"`
-	SrcCollectionName string `bson:"coll"`
-	DocumentID        any    `bson:"docID"`
-}
-
-// RecheckDoc stores the necessary information to know which documents must be rechecked.
-type RecheckDoc struct {
-	PrimaryKey RecheckPrimaryKey `bson:"_id"`
-
-	// NB: Because we don’t update the recheck queue’s documents, this field
-	// and any others that may be added will remain unchanged even if a recheck
-	// is enqueued multiple times for the same document in the same generation.
-	DataSize int `bson:"dataSize"`
-}
 
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
@@ -385,9 +361,4 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	}
 
 	return err
-}
-
-func (v *Verifier) getRecheckQueueCollection(generation int) *mongo.Collection {
-	return v.verificationDatabase().
-		Collection(fmt.Sprintf("%s_gen%d", recheckQueueCollectionNameBase, generation))
 }
