@@ -620,7 +620,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 			// Create a task for the next generation to recheck the
 			// mismatched & missing docs.
-			err := verifier.InsertFailedCompareRecheckDocs(ctx, task.QueryFilter.Namespace, idsToRecheck, dataSizes)
+			err := verifier.InsertFailedCompareRecheckDocs(task.QueryFilter.Namespace, idsToRecheck, dataSizes)
 			if err != nil {
 				return errors.Wrapf(
 					err,

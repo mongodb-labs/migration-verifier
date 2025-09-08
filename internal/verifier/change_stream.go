@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/keystring"
-	"github.com/10gen/migration-verifier/internal/localdb"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/localdb"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -821,32 +821,36 @@ func (csr *ChangeStreamReader) resumeTokenDocID() string {
 func (csr *ChangeStreamReader) persistChangeStreamResumeToken(ctx context.Context, cs *mongo.ChangeStream) error {
 	token := cs.ResumeToken()
 
-	coll := csr.getChangeStreamMetadataCollection()
-	_, err := coll.ReplaceOne(
-		ctx,
-		bson.D{{"_id", csr.resumeTokenDocID()}},
-		token,
-		options.Replace().SetUpsert(true),
-	)
+	var err error
 
-	if err == nil {
-		ts, err := extractTimestampFromResumeToken(token)
-
-		logEvent := csr.logger.Debug()
-
-		if err == nil {
-			logEvent = addTimestampToLogEvent(ts, logEvent)
-		} else {
-			csr.logger.Warn().Err(err).
-				Msg("failed to extract resume token timestamp")
-		}
-
-		logEvent.Msgf("Persisted %s's resume token.", csr)
-
-		return nil
+	switch csr.readerType {
+	case src:
+		err = csr.localDB.SetSrcChangeStreamResumeToken(token)
+	case dst:
+		err = csr.localDB.SetDstChangeStreamResumeToken(token)
+	default:
+		panic("unknown readerType: " + csr.readerType)
 	}
 
-	return errors.Wrapf(err, "failed to persist change stream resume token (%v)", token)
+	if err != nil {
+		return errors.Wrapf(err, "failed to persist change stream resume token (%v)", token)
+	}
+
+	ts, err := extractTimestampFromResumeToken(token)
+
+	logEvent := csr.logger.Debug().
+		Stringer("changeStream", csr)
+
+	if err == nil {
+		logEvent = addTimestampToLogEvent(ts, logEvent)
+	} else {
+		csr.logger.Warn().Err(err).
+			Msg("Failed to extract resume token’s timestamp.")
+	}
+
+	logEvent.Msg("Persisted resume token.")
+
+	return nil
 }
 
 func extractTimestampFromResumeToken(resumeToken bson.Raw) (primitive.Timestamp, error) {
