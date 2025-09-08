@@ -318,7 +318,7 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 		pipeline,
 		bson.D{
 			{"$addFields", bson.D{
-				{"_docID", bson.D{{"_id", "$documentKey._id"}}},
+				{"_docID", "$documentKey._id"},
 
 				{"updateDescription", "$$REMOVE"},
 				{"wallTime", "$$REMOVE"},

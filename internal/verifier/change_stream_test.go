@@ -312,7 +312,8 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 			"docID": "heyhey",
 		},
 		recheckDocs[0]["_id"],
-		"recheck doc should have expected ID",
+		"recheck doc (%v) should have expected ID",
+		recheckDocs[0],
 	)
 }
 
