@@ -22,7 +22,6 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 
 	suite.Require().NoError(
 		verifier.InsertFailedCompareRecheckDocs(
-			ctx,
 			"the.namespace",
 			[]any{"theDocID"},
 			[]int{1234},
@@ -489,5 +488,5 @@ func insertRecheckDocs(
 		collNames[i] = collName
 	}
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes)
+	return verifier.insertRecheckDocs(dbNames, collNames, documentIDs, dataSizes)
 }

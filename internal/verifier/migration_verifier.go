@@ -20,6 +20,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
+	"github.com/10gen/migration-verifier/internal/verifier/localdb"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/dustin/go-humanize"
@@ -75,6 +76,8 @@ const (
 
 	DefaultRecheckMaxSizeMB = 8
 	MaxRecheckMaxSizeMB     = 12
+
+	DefaultLocalDBPath = "verifier.db"
 )
 
 type whichCluster string
@@ -152,6 +155,8 @@ type Verifier struct {
 	workerTracker *WorkerTracker
 
 	verificationStatusCheckInterval time.Duration
+
+	localDB *localdb.LocalDB
 }
 
 var _ MigrationVerifierAPI = &Verifier{}
@@ -172,13 +177,18 @@ type VerifierSettings struct {
 }
 
 // NewVerifier creates a new Verifier
-func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
+func NewVerifier(settings VerifierSettings, logPath, dbPath string) *Verifier {
 	readConcern := settings.ReadConcernSetting
 	if readConcern == "" {
 		readConcern = ReadConcernMajority
 	}
 
 	logger, logWriter := getLoggerAndWriter(logPath)
+
+	ldb, err := localdb.New(logger, dbPath)
+	if err != nil {
+		panic(fmt.Sprintf("failed to open local DB %#q: %v", dbPath, err))
+	}
 
 	return &Verifier{
 		logger: logger,
@@ -202,6 +212,8 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 
 		verificationStatusCheckInterval: 15 * time.Second,
 		nsMap:                           NewNSMap(),
+
+		localDB: ldb,
 	}
 }
 

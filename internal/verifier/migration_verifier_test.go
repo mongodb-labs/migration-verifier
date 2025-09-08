@@ -835,11 +835,11 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
-	err := verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []any{42}, []int{100})
+	err := verifier.InsertFailedCompareRecheckDocs("foo.bar", []any{42}, []int{100})
 	suite.Require().NoError(err)
-	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []any{43, 44}, []int{100, 100})
+	err = verifier.InsertFailedCompareRecheckDocs("foo.bar", []any{43, 44}, []int{100, 100})
 	suite.Require().NoError(err)
-	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar2", []any{42}, []int{100})
+	err = verifier.InsertFailedCompareRecheckDocs("foo.bar2", []any{42}, []int{100})
 	suite.Require().NoError(err)
 	event := ParsedEvent{
 		DocKey: DocKey{ID: int32(55)},
@@ -905,7 +905,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 
 func TestVerifierCompareDocs(t *testing.T) {
 	id := rand.Intn(1000)
-	verifier := NewVerifier(VerifierSettings{}, "stderr")
+	verifier := NewVerifier(VerifierSettings{}, "stderr", testLocalDBFile)
 	verifier.SetDocCompareMethod(DocCompareIgnoreOrder)
 
 	type compareTest struct {

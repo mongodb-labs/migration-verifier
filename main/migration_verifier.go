@@ -28,7 +28,8 @@ const (
 	generationPauseDelay  = "generationPauseDelay"
 	workerSleepDelay      = "workerSleepDelay"
 	serverPort            = "serverPort"
-	logPath               = "logPath"
+	logDir                = "logPath"
+	dbFileArg             = "dbFile"
 	srcNamespace          = "srcNamespace"
 	dstNamespace          = "dstNamespace"
 	metaDBName            = "metaDBName"
@@ -84,9 +85,14 @@ func main() {
 			Usage: "`port` for the control web server",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  logPath,
+			Name:  logDir,
 			Value: "stdout",
-			Usage: "logging file `path`",
+			Usage: "directory where to store logs (or `stdout` or `stderr`)",
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  dbFileArg,
+			Value: verifier.DefaultLocalDBPath,
+			Usage: "path to verifier’s local metadata DB",
 		}),
 		altsrc.NewIntFlag(cli.IntFlag{
 			Name:  numWorkers,
@@ -223,9 +229,10 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		verifierSettings.ReadConcernSetting = verifier.ReadConcernIgnore
 	}
 
-	logPath := cCtx.String(logPath)
+	logDir := cCtx.String(logDir)
+	dbFile := cCtx.String(dbFileArg)
 
-	v := verifier.NewVerifier(verifierSettings, logPath)
+	v := verifier.NewVerifier(verifierSettings, logDir, dbFile)
 
 	v.GetLogger().Info().
 		Str("revision", Revision).

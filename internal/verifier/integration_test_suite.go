@@ -21,7 +21,8 @@ import (
 )
 
 const (
-	metaDBName = "VERIFIER_TEST_META"
+	metaDBName      = "VERIFIER_TEST_META"
+	testLocalDBFile = "test-" + DefaultLocalDBPath
 )
 
 type IntegrationTestSuite struct {
@@ -159,7 +160,9 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	qfilter := QueryFilter{Namespace: "keyhole.dealers"}
 	task := VerificationTask{QueryFilter: qfilter}
 
-	verifier := NewVerifier(VerifierSettings{}, "stderr")
+	suite.Require().NoError(os.RemoveAll(testLocalDBFile))
+
+	verifier := NewVerifier(VerifierSettings{}, "stderr", testLocalDBFile)
 	//verifier.SetStartClean(true)
 	verifier.SetNumWorkers(3)
 	verifier.SetGenerationPauseDelay(0)
