@@ -121,6 +121,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		handlerError:         util.NewEventual[error](),
 		doneChan:             make(chan struct{}),
 		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
+		localDB:              verifier.localDB,
 	}
 	verifier.dstChangeStreamReader = &ChangeStreamReader{
 		readerType:           dst,
@@ -137,6 +138,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		doneChan:             make(chan struct{}),
 		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
 		onDDLEvent:           onDDLEventAllow,
+		localDB:              verifier.localDB,
 	}
 }
 

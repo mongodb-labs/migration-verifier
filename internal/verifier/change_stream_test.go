@@ -553,10 +553,9 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			count, err := verifier.localDB.CountRechecks(verifier.generation)
-			suite.Require().NoError(err)
+			rechecks := suite.fetchRecheckDocs(ctx, verifier)
 
-			return count == 3
+			return len(rechecks) == 3
 		},
 		time.Minute,
 		500*time.Millisecond,

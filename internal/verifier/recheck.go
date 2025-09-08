@@ -13,10 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-const (
-	recheckQueueCollectionNameBase = "recheckQueue"
-)
-
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	namespace string,
@@ -42,22 +38,6 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		documentIDs,
 		dataSizes,
 	)
-}
-
-// This will split the given slice into *roughly* the given number of chunks.
-// It may end up being more or fewer, but it should be pretty close.
-func splitToChunks[T any, Slice ~[]T](elements Slice, numChunks int) []Slice {
-	if numChunks < 1 {
-		panic(fmt.Sprintf("numChunks (%v) should be >=1", numChunks))
-	}
-
-	elsPerChunk := len(elements) / numChunks
-
-	if elsPerChunk == 0 {
-		elsPerChunk = 1
-	}
-
-	return lo.Chunk(elements, elsPerChunk)
 }
 
 func (verifier *Verifier) insertRecheckDocs(
@@ -216,17 +196,7 @@ func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
 func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) error {
 	prevGeneration := verifier.getPreviousGenerationWhileLocked()
 
-	verifier.logger.Debug().
-		Int("priorGeneration", prevGeneration).
-		Msgf("Counting prior generation’s enqueued rechecks.")
-
-	/*
-		recheckColl := verifier.getRecheckQueueCollection(prevGeneration)
-
-		rechecksCount, err := recheckColl.CountDocuments(ctx, bson.D{})
-
-	*/
-	rechecksCount, err := verifier.localDB.CountRechecks(prevGeneration)
+	rechecksCount, err := verifier.localDB.GetRechecksCount(prevGeneration)
 	if err != nil {
 		return errors.Wrapf(err,
 			"counting generation %d’s rechecks",
