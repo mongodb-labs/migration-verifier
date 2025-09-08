@@ -277,28 +277,28 @@ func (ldb *LocalDB) InsertRechecks(
 							namespace,
 						)
 					}
-
-					metaBucketName := getRecheckMetaBucketForGeneration(generation)
-					metaBucket, err := getBucket(tx, metaBucketName)
-					if err != nil {
-						return errors.Wrapf(err, "getting bucket %#q", metaBucketName)
-					}
-
-					var curCount uint64
-					countBytes := metaBucket.Get([]byte(countKey))
-					if countBytes != nil {
-						curCount, err = parseUint(countBytes)
-						if err != nil {
-							return errors.Wrapf(err, "parsing rechecks count %v", countBytes)
-						}
-					}
-
-					countBytes = formatUint(1 + curCount)
-					err = metaBucket.Put([]byte(countKey), countBytes)
-					if err != nil {
-						return errors.Wrapf(err, "persisting rechecks count %v", countBytes)
-					}
 				}
+			}
+
+			metaBucketName := getRecheckMetaBucketForGeneration(generation)
+			metaBucket, err := getBucket(tx, metaBucketName)
+			if err != nil {
+				return errors.Wrapf(err, "getting bucket %#q", metaBucketName)
+			}
+
+			var curCount uint64
+			countBytes := metaBucket.Get([]byte(countKey))
+			if countBytes != nil {
+				curCount, err = parseUint(countBytes)
+				if err != nil {
+					return errors.Wrapf(err, "parsing rechecks count %v", countBytes)
+				}
+			}
+
+			countBytes = formatUint(uint64(len(dataSizes)) + curCount)
+			err = metaBucket.Put([]byte(countKey), countBytes)
+			if err != nil {
+				return errors.Wrapf(err, "persisting rechecks count %v", countBytes)
 			}
 
 			return nil

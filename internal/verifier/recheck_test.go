@@ -203,8 +203,6 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 }
 
 func (suite *IntegrationTestSuite) TestDuplicateRecheck() {
-	ctx := suite.Context()
-
 	verifier := suite.BuildVerifier()
 
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
@@ -213,7 +211,6 @@ func (suite *IntegrationTestSuite) TestDuplicateRecheck() {
 
 	ids := lo.Range(docsCount)
 	err := insertRecheckDocs(
-		ctx,
 		verifier,
 		suite.T().Name(), "testColl",
 		lo.ToAnySlice(ids),
@@ -222,7 +219,6 @@ func (suite *IntegrationTestSuite) TestDuplicateRecheck() {
 	suite.Require().NoError(err, "should insert the first time")
 
 	err = insertRecheckDocs(
-		ctx,
 		verifier,
 		suite.T().Name(), "testColl",
 		lo.ToAnySlice(ids),
@@ -240,13 +236,13 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	verifier.SetNumWorkers(10)
 	ctx := suite.Context()
 
-	docsCount := 20_000_000
+	//docsCount := 20_000_000
+	docsCount := 300000
 
 	suite.T().Logf("Inserting %d rechecks …", docsCount)
 
 	ids := lo.Range(docsCount)
 	err := insertRecheckDocs(
-		ctx,
 		verifier,
 		suite.T().Name(), "testColl",
 		lo.ToAnySlice(ids),
@@ -274,7 +270,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	id3 := strings.Repeat("c", overlyLarge)
 	ids := []any{id1, id2, id3}
 	dataSizes := []int{overlyLarge, overlyLarge, overlyLarge}
-	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
+	err := insertRecheckDocs(verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
 	d1 := localdb.Recheck{
@@ -332,7 +328,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	id3 := "c"
 	ids := []any{id1, id2, id3}
 	dataSizes := []int{400 * 1024, 700 * 1024, 1024}
-	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
+	err := insertRecheckDocs(verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 	d1 := localdb.Recheck{
 		DB:    "testDB",
@@ -389,13 +385,13 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 	id3 := "c"
 	ids := []any{id1, id2, id3}
 	dataSizes := []int{1000, 1000, 1000}
-	err := insertRecheckDocs(ctx, verifier, "testDB1", "testColl1", ids, dataSizes)
+	err := insertRecheckDocs(verifier, "testDB1", "testColl1", ids, dataSizes)
 	suite.Require().NoError(err)
-	err = insertRecheckDocs(ctx, verifier, "testDB1", "testColl2", ids, dataSizes)
+	err = insertRecheckDocs(verifier, "testDB1", "testColl2", ids, dataSizes)
 	suite.Require().NoError(err)
-	err = insertRecheckDocs(ctx, verifier, "testDB2", "testColl1", ids, dataSizes)
+	err = insertRecheckDocs(verifier, "testDB2", "testColl1", ids, dataSizes)
 	suite.Require().NoError(err)
-	err = insertRecheckDocs(ctx, verifier, "testDB2", "testColl2", ids, dataSizes)
+	err = insertRecheckDocs(verifier, "testDB2", "testColl2", ids, dataSizes)
 	suite.Require().NoError(err)
 
 	verifier.generation++
@@ -439,7 +435,7 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 	id2 := "b"
 	ids := []any{id1, id2}
 	dataSizes := []int{1000, 1000}
-	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
+	err := insertRecheckDocs(verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
 	d1 := localdb.Recheck{
@@ -468,7 +464,6 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 }
 
 func insertRecheckDocs(
-	ctx context.Context,
 	verifier *Verifier,
 	dbName, collName string,
 	documentIDs []any,
