@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/keystring"
+	"github.com/10gen/migration-verifier/internal/localdb"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
@@ -61,9 +62,8 @@ type DocKey struct {
 }
 
 const (
-	minChangeStreamPersistInterval     = time.Second * 10
-	maxChangeStreamAwaitTime           = time.Second
-	metadataChangeStreamCollectionName = "changeStream"
+	minChangeStreamPersistInterval = time.Second * 10
+	maxChangeStreamAwaitTime       = time.Second
 )
 
 type UnknownEventError struct {
@@ -86,7 +86,7 @@ type ChangeStreamReader struct {
 	logger              *logger.Logger
 	namespaces          []string
 
-	metaDB        *mongo.Database
+	metaDBName    string
 	watcherClient *mongo.Client
 	clusterInfo   util.ClusterInfo
 
@@ -102,6 +102,8 @@ type ChangeStreamReader struct {
 	lag *msync.TypedAtomic[option.Option[time.Duration]]
 
 	onDDLEvent ddlEventHandling
+
+	localDB *localdb.LocalDB
 }
 
 func (verifier *Verifier) initializeChangeStreamReaders() {
@@ -109,7 +111,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		readerType:           src,
 		logger:               verifier.logger,
 		namespaces:           verifier.srcNamespaces,
-		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
+		metaDBName:           verifier.metaDBName,
 		watcherClient:        verifier.srcClient,
 		clusterInfo:          *verifier.srcClusterInfo,
 		changeStreamRunning:  false,
@@ -124,7 +126,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		readerType:           dst,
 		logger:               verifier.logger,
 		namespaces:           verifier.dstNamespaces,
-		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
+		metaDBName:           verifier.metaDBName,
 		watcherClient:        verifier.dstClient,
 		clusterInfo:          *verifier.dstClusterInfo,
 		changeStreamRunning:  false,
@@ -278,7 +280,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 		Stringer("lag", lag).
 		Msg("Persisting rechecks for change events.")
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes)
+	return verifier.insertRecheckDocs(dbNames, collNames, docIDs, dataSizes)
 }
 
 // GetChangeStreamFilter returns an aggregation pipeline that filters
@@ -300,7 +302,7 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 				"ns.db",
 				append(
 					slices.Clone(MongosyncMetaDBPrefixes),
-					csr.metaDB.Name(),
+					csr.metaDBName,
 				),
 			)}},
 		}
@@ -790,23 +792,15 @@ func addTimestampToLogEvent(ts primitive.Timestamp, event *zerolog.Event) *zerol
 		Time("time", time.Unix(int64(ts.T), int64(0)))
 }
 
-func (csr *ChangeStreamReader) getChangeStreamMetadataCollection() *mongo.Collection {
-	return csr.metaDB.Collection(metadataChangeStreamCollectionName)
-}
-
 func (csr *ChangeStreamReader) loadChangeStreamResumeToken(ctx context.Context) (bson.Raw, error) {
-	coll := csr.getChangeStreamMetadataCollection()
-
-	token, err := coll.FindOne(
-		ctx,
-		bson.D{{"_id", csr.resumeTokenDocID()}},
-	).Raw()
-
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
+	switch csr.readerType {
+	case src:
+		return csr.localDB.GetSrcChangeStreamResumeToken()
+	case dst:
+		return csr.localDB.GetDstChangeStreamResumeToken()
+	default:
+		panic("unknown readerType: " + csr.readerType)
 	}
-
-	return token, err
 }
 
 func (csr *ChangeStreamReader) String() string {

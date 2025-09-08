@@ -6,14 +6,12 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
-	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
@@ -45,8 +43,10 @@ type RecheckDoc struct {
 
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
-	ctx context.Context,
-	namespace string, documentIDs []any, dataSizes []int) error {
+	namespace string,
+	documentIDs []any,
+	dataSizes []int,
+) error {
 	dbName, collName := SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
@@ -61,7 +61,6 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		Msg("Persisting rechecks for mismatched or missing documents.")
 
 	return verifier.insertRecheckDocs(
-		ctx,
 		dbNames,
 		collNames,
 		documentIDs,
@@ -86,7 +85,6 @@ func splitToChunks[T any, Slice ~[]T](elements Slice, numChunks int) []Slice {
 }
 
 func (verifier *Verifier) insertRecheckDocs(
-	ctx context.Context,
 	dbNames []string,
 	collNames []string,
 	documentIDs []any,
@@ -97,77 +95,96 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	generation, _ := verifier.getGenerationWhileLocked()
 
-	docIDIndexes := lo.Range(len(documentIDs))
-	indexesPerThread := splitToChunks(docIDIndexes, verifier.numWorkers)
+	err := verifier.localDB.InsertRechecks(
+		generation,
+		dbNames,
+		collNames,
+		documentIDs,
+		dataSizes,
+	)
 
-	eg, groupCtx := contextplus.ErrGroup(ctx)
-
-	genCollection := verifier.getRecheckQueueCollection(generation)
-
-	for _, curThreadIndexes := range indexesPerThread {
-		eg.Go(func() error {
-			models := make([]mongo.WriteModel, len(curThreadIndexes))
-			for m, i := range curThreadIndexes {
-				recheckDoc := RecheckDoc{
-					PrimaryKey: RecheckPrimaryKey{
-						SrcDatabaseName:   dbNames[i],
-						SrcCollectionName: collNames[i],
-						DocumentID:        documentIDs[i],
-					},
-					DataSize: dataSizes[i],
-				}
-
-				models[m] = mongo.NewInsertOneModel().
-					SetDocument(recheckDoc)
-			}
-
-			retryer := retry.New()
-			err := retryer.WithCallback(
-				func(retryCtx context.Context, _ *retry.FuncInfo) error {
-					_, err := genCollection.BulkWrite(
-						retryCtx,
-						models,
-						options.BulkWrite().SetOrdered(false),
-					)
-
-					// We expect duplicate-key errors from the above because:
-					//
-					// a) The same document can change multiple times per generation.
-					// b) The source’s changes also happen on the destination, and both
-					//    change streams populate this recheck queue.
-					//
-					// Because of that, we ignore duplicate-key errors. We do *not*, though,
-					// ignore other errors that may accompany duplicate-key errors in the
-					// same server response.
-					//
-					// This does mean that the persisted DataSize _does not change_ after
-					// a document is first inserted. That should matter little, though,
-					// the persisted document size is just an optimization for parallelizing,
-					// and document sizes probably remain stable(-ish) across updates.
-					err = util.TolerateSimpleDuplicateKeyInBulk(
-						verifier.logger,
-						len(models),
-						err,
-					)
-
-					return err
-				},
-				"persisting %d recheck(s)",
-				len(models),
-			).Run(groupCtx, verifier.logger)
-
-			return errors.Wrapf(err, "failed to persist %d recheck(s) for generation %d", len(models), generation)
-		})
-	}
-
-	if err := eg.Wait(); err != nil {
+	if err != nil {
 		return errors.Wrapf(
 			err,
-			"failed to persist %d recheck(s) for generation %d",
+			"persisting %d recheck(s) for generation %d",
 			len(documentIDs),
 			generation,
 		)
 	}
+
+	/*
+		docIDIndexes := lo.Range(len(documentIDs))
+		indexesPerThread := splitToChunks(docIDIndexes, verifier.numWorkers)
+
+		eg, groupCtx := contextplus.ErrGroup(ctx)
+
+		genCollection := verifier.getRecheckQueueCollection(generation)
+
+		for _, curThreadIndexes := range indexesPerThread {
+			eg.Go(func() error {
+				models := make([]mongo.WriteModel, len(curThreadIndexes))
+				for m, i := range curThreadIndexes {
+					recheckDoc := RecheckDoc{
+						PrimaryKey: RecheckPrimaryKey{
+							SrcDatabaseName:   dbNames[i],
+							SrcCollectionName: collNames[i],
+							DocumentID:        documentIDs[i],
+						},
+						DataSize: dataSizes[i],
+					}
+
+					models[m] = mongo.NewInsertOneModel().
+						SetDocument(recheckDoc)
+				}
+
+				retryer := retry.New()
+				err := retryer.WithCallback(
+					func(retryCtx context.Context, _ *retry.FuncInfo) error {
+						_, err := genCollection.BulkWrite(
+							retryCtx,
+							models,
+							options.BulkWrite().SetOrdered(false),
+						)
+
+						// We expect duplicate-key errors from the above because:
+						//
+						// a) The same document can change multiple times per generation.
+						// b) The source’s changes also happen on the destination, and both
+						//    change streams populate this recheck queue.
+						//
+						// Because of that, we ignore duplicate-key errors. We do *not*, though,
+						// ignore other errors that may accompany duplicate-key errors in the
+						// same server response.
+						//
+						// This does mean that the persisted DataSize _does not change_ after
+						// a document is first inserted. That should matter little, though,
+						// the persisted document size is just an optimization for parallelizing,
+						// and document sizes probably remain stable(-ish) across updates.
+						err = util.TolerateSimpleDuplicateKeyInBulk(
+							verifier.logger,
+							len(models),
+							err,
+						)
+
+						return err
+					},
+					"persisting %d recheck(s)",
+					len(models),
+				).Run(groupCtx, verifier.logger)
+
+				return errors.Wrapf(err, "failed to persist %d recheck(s) for generation %d", len(models), generation)
+			})
+		}
+
+		if err := eg.Wait(); err != nil {
+			return errors.Wrapf(
+				err,
+				"failed to persist %d recheck(s) for generation %d",
+				len(documentIDs),
+				generation,
+			)
+		}
+	*/
 
 	verifier.logger.Debug().
 		Int("generation", generation).
@@ -188,15 +205,19 @@ func (verifier *Verifier) DropOldRecheckQueueWhileLocked(ctx context.Context) er
 		Int("previousGeneration", prevGeneration).
 		Msg("Deleting previous generation's enqueued rechecks.")
 
-	genCollection := verifier.getRecheckQueueCollection(prevGeneration)
+	/*
+		genCollection := verifier.getRecheckQueueCollection(prevGeneration)
 
-	return retry.New().WithCallback(
-		func(ctx context.Context, i *retry.FuncInfo) error {
-			return genCollection.Drop(ctx)
-		},
-		"deleting generation %d's enqueued rechecks",
-		prevGeneration,
-	).Run(ctx, verifier.logger)
+		return retry.New().WithCallback(
+			func(ctx context.Context, i *retry.FuncInfo) error {
+				return genCollection.Drop(ctx)
+			},
+			"deleting generation %d's enqueued rechecks",
+			prevGeneration,
+		).Run(ctx, verifier.logger)
+	*/
+
+	return verifier.localDB.ClearAllRechecksForGeneration(prevGeneration)
 }
 
 func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
@@ -223,12 +244,16 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		Int("priorGeneration", prevGeneration).
 		Msgf("Counting prior generation’s enqueued rechecks.")
 
-	recheckColl := verifier.getRecheckQueueCollection(prevGeneration)
+	/*
+		recheckColl := verifier.getRecheckQueueCollection(prevGeneration)
 
-	rechecksCount, err := recheckColl.CountDocuments(ctx, bson.D{})
+		rechecksCount, err := recheckColl.CountDocuments(ctx, bson.D{})
+
+	*/
+	rechecksCount, err := verifier.localDB.CountRechecks(prevGeneration)
 	if err != nil {
 		return errors.Wrapf(err,
-			"failed to count generation %d’s rechecks",
+			"counting generation %d’s rechecks",
 			prevGeneration,
 		)
 	}
@@ -247,7 +272,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	//    this to prevent one thread from doing all of the rechecks.
 
 	var prevDBName, prevCollName string
-	var idAccum []any
+	var idAccum []bson.RawValue
 	var idsSizer util.BSONArraySizer
 	var totalDocs types.DocumentCount
 	var dataSizeAccum, totalRecheckData int64
@@ -257,18 +282,20 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		verifier.numWorkers,
 	)
 
-	// The sort here is important because the recheck _id is an embedded
-	// document that includes the namespace. Thus, all rechecks for a given
-	// namespace will be consecutive in this query’s result.
-	cursor, err := recheckColl.Find(
-		ctx,
-		bson.D{},
-		options.Find().SetSort(bson.D{{"_id", 1}}),
-	)
-	if err != nil {
-		return err
-	}
-	defer cursor.Close(ctx)
+	/*
+		// The sort here is important because the recheck _id is an embedded
+		// document that includes the namespace. Thus, all rechecks for a given
+		// namespace will be consecutive in this query’s result.
+		cursor, err := recheckColl.Find(
+			ctx,
+			bson.D{},
+			options.Find().SetSort(bson.D{{"_id", 1}}),
+		)
+		if err != nil {
+			return err
+		}
+		defer cursor.Close(ctx)
+	*/
 
 	persistBufferedRechecks := func() error {
 		if len(idAccum) == 0 {
@@ -279,7 +306,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 
 		task, err := verifier.InsertDocumentRecheckTask(
 			ctx,
-			idAccum,
+			lo.ToAnySlice(idAccum),
 			types.ByteCount(dataSizeAccum),
 			namespace,
 		)
@@ -302,18 +329,17 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		return nil
 	}
 
+	recheckCtx, recheckCancel := contextplus.WithCancelCause(ctx)
+	recheckReader := verifier.localDB.GetRecheckReader(recheckCtx, prevGeneration)
+	defer recheckCancel(fmt.Errorf("finished recheck"))
+
 	// We group these here using a sort rather than using aggregate because aggregate is
 	// subject to a 16MB limit on group size.
-	for cursor.Next(ctx) {
-		var doc RecheckDoc
-		err = cursor.Decode(&doc)
-		if err != nil {
-			return err
-		}
+	for recheckResult := range recheckReader {
+		recheck, err := recheckResult.Get()
 
-		idRaw, err := cursor.Current.LookupErr("_id", "docID")
 		if err != nil {
-			return errors.Wrapf(err, "failed to find docID in enqueued recheck %v", cursor.Current)
+			return errors.Wrap(err, "reading rechecks from local DB")
 		}
 
 		// We persist rechecks if any of these happen:
@@ -322,8 +348,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		// - the buffered document IDs’ size exceeds the per-task maximum
 		// - the buffered documents exceed the partition size
 		//
-		if doc.PrimaryKey.SrcDatabaseName != prevDBName ||
-			doc.PrimaryKey.SrcCollectionName != prevCollName ||
+		if recheck.DB != prevDBName ||
+			recheck.Coll != prevCollName ||
 			len(idAccum) > maxDocsPerTask ||
 			types.ByteCount(idsSizer.Len()) >= verifier.recheckMaxSizeInBytes ||
 			dataSizeAccum >= verifier.partitionSizeInBytes {
@@ -333,24 +359,19 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 				return err
 			}
 
-			prevDBName = doc.PrimaryKey.SrcDatabaseName
-			prevCollName = doc.PrimaryKey.SrcCollectionName
+			prevDBName = recheck.DB
+			prevCollName = recheck.Coll
 			idsSizer = util.BSONArraySizer{}
 			dataSizeAccum = 0
 			idAccum = idAccum[:0]
 		}
 
-		idsSizer.Add(idRaw)
-		dataSizeAccum += int64(doc.DataSize)
-		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
+		idsSizer.Add(recheck.DocID)
+		dataSizeAccum += int64(recheck.Size)
+		idAccum = append(idAccum, recheck.DocID)
 
-		totalRecheckData += int64(doc.DataSize)
+		totalRecheckData += int64(recheck.Size)
 		totalDocs++
-	}
-
-	err = cursor.Err()
-	if err != nil {
-		return err
 	}
 
 	err = persistBufferedRechecks()
