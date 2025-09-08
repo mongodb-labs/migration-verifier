@@ -577,9 +577,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
-				DocKey: DocKey{
-					ID: "heyhey",
-				},
+				DocID:  "heyhey",
 				ClusterTime: &primitive.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
@@ -598,9 +596,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 				},
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
-				DocKey: DocKey{
-					ID: "hoohoo",
-				},
+				DocID:  "hoohoo",
 				ClusterTime: &primitive.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
@@ -842,7 +838,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar2", []any{42}, []int{100})
 	suite.Require().NoError(err)
 	event := ParsedEvent{
-		DocKey: DocKey{ID: int32(55)},
+		DocID:  int32(55),
 		OpType: "delete",
 		Ns: &Namespace{
 			DB:   "foo",
