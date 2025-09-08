@@ -620,8 +620,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 ) (*mongo.ChangeStream, mongo.Session, primitive.Timestamp, error) {
 	pipeline := csr.GetChangeStreamFilter()
 	opts := options.ChangeStream().
-		SetMaxAwaitTime(maxChangeStreamAwaitTime).
-		SetFullDocument(options.UpdateLookup)
+		SetMaxAwaitTime(maxChangeStreamAwaitTime)
 
 	if csr.clusterInfo.VersionArray[0] >= 6 {
 		opts = opts.SetCustomPipeline(bson.M{"showExpandedEvents": true})
