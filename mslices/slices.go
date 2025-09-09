@@ -43,3 +43,30 @@ func Compact[T any, S ~[]T](slc S) S {
 func isZero[T any](val T) bool {
 	return reflect.ValueOf(&val).Elem().IsZero()
 }
+
+func Reorder[T any](data []T, order []int) {
+	visited := make([]bool, len(order))
+
+	for i := range len(order) {
+		if visited[i] || order[i] == i {
+			continue
+		}
+
+		current := i
+		temp := data[i]
+
+		for {
+			next := order[current]
+			if visited[next] {
+				break
+			}
+
+			data[current] = data[next]
+			visited[current] = true
+			current = next
+		}
+
+		data[current] = temp
+		visited[current] = true
+	}
+}

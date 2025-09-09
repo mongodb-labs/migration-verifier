@@ -3,11 +3,14 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
@@ -53,31 +56,59 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	dbNameChunks := lo.Chunk(dbNames, 10_000)
 
-	var i int
+	wg := sync.WaitGroup{}
+	errs := make([]error, len(dbNameChunks))
 
-	for _, dbNamesChunk := range dbNameChunks {
+	for i, dbNamesChunk := range dbNameChunks {
 		chunkLen := len(dbNamesChunk)
 		collNamesChunk := collNames[i : i+chunkLen]
 		docIDsChunk := documentIDs[i : i+chunkLen]
 		dataSizesChunk := dataSizes[i : i+chunkLen]
 
-		err := verifier.localDB.InsertRechecks(
-			generation,
-			dbNamesChunk,
-			collNamesChunk,
-			docIDsChunk,
-			dataSizesChunk,
-		)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 
-		if err != nil {
-			return errors.Wrapf(
-				err,
-				"persisting %d recheck(s) of %d for generation %d",
-				chunkLen,
-				len(documentIDs),
-				generation,
-			)
-		}
+			for {
+				err := verifier.localDB.InsertRechecks(
+					generation,
+					dbNamesChunk,
+					collNamesChunk,
+					docIDsChunk,
+					dataSizesChunk,
+				)
+
+				if errors.Is(err, badger.ErrConflict) {
+					continue
+				}
+
+				errs[i] = errors.Wrapf(
+					err,
+					"persisting %d recheck(s) of %d for generation %d",
+					chunkLen,
+					len(documentIDs),
+					generation,
+				)
+
+				break
+			}
+
+		}()
+	}
+
+	wg.Wait()
+
+	realErrs := lo.Compact(errs)
+
+	if len(realErrs) > 0 {
+		return errors.Wrapf(
+			fmt.Errorf(
+				strings.TrimSpace(strings.Repeat("%w ", len(realErrs))),
+				lo.ToAnySlice(realErrs)...,
+			),
+			"batch-inserting %d rechecks",
+			len(dbNames),
+		)
 	}
 
 	verifier.logger.Debug().

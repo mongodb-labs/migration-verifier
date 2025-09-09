@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"time"
@@ -11,12 +12,14 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/localdb"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
+	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -282,7 +285,34 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 		Stringer("lag", lag).
 		Msg("Persisting rechecks for change events.")
 
+	preSortRechecks(dbNames, collNames, docIDs, dataSizes)
+
 	return verifier.insertRecheckDocs(dbNames, collNames, docIDs, dataSizes)
+}
+
+func preSortRechecks(
+	dbNames, collNames []string,
+	docIDs []any,
+	dataSizes []int,
+) {
+	indices := lo.Range(len(dbNames))
+
+	slices.SortFunc(
+		indices,
+		func(indexA, indexB int) int {
+			ret := cmp.Compare(dbNames[indexA], dbNames[indexB])
+			if ret == 0 {
+				ret = cmp.Compare(collNames[indexA], collNames[indexB])
+			}
+
+			return ret
+		},
+	)
+
+	mslices.Reorder(dbNames, indices)
+	mslices.Reorder(collNames, indices)
+	mslices.Reorder(docIDs, indices)
+	mslices.Reorder(dataSizes, indices)
 }
 
 // GetChangeStreamFilter returns an aggregation pipeline that filters

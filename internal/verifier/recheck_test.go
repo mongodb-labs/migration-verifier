@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/localdb"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
@@ -248,7 +250,8 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 		lo.ToAnySlice(ids),
 		lo.RepeatBy(docsCount, func(_ int) int { return 16 }),
 	)
-	suite.Require().NoError(err)
+	fmt.Printf("------- err: [%v]\n\n", err)
+	suite.Require().NoError(err, "rechecks must be inserted")
 
 	verifier.mux.Lock()
 	defer verifier.mux.Unlock()
@@ -477,5 +480,9 @@ func insertRecheckDocs(
 		collNames[i] = collName
 	}
 
-	return verifier.insertRecheckDocs(dbNames, collNames, documentIDs, dataSizes)
+	return errors.Wrapf(
+		verifier.insertRecheckDocs(dbNames, collNames, documentIDs, dataSizes),
+		"test inserting %d rechecks",
+		len(documentIDs),
+	)
 }
