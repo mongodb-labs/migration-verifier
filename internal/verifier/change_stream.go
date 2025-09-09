@@ -283,6 +283,9 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 	return verifier.insertRecheckDocs(dbNames, collNames, docIDs, dataSizes)
 }
 
+// This function sorts the recheck arrays by DB then collection.
+// This should minimize friction when multiple threads compete for
+// writes.
 func preSortRechecks(
 	dbNames, collNames []string,
 	docIDs []any,
