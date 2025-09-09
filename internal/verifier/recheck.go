@@ -3,8 +3,6 @@ package verifier
 import (
 	"context"
 	"fmt"
-	"strings"
-	"sync"
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
@@ -54,20 +52,17 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	generation, _ := verifier.getGenerationWhileLocked()
 
-	dbNameChunks := lo.Chunk(dbNames, 10_000)
+	chunkSize := 2 << 12
 
-	wg := sync.WaitGroup{}
-	errs := make([]error, len(dbNameChunks))
+chunkSizeLoop:
+	for {
+		dbNameChunks := lo.Chunk(dbNames, chunkSize)
 
-	for i, dbNamesChunk := range dbNameChunks {
-		chunkLen := len(dbNamesChunk)
-		collNamesChunk := collNames[i : i+chunkLen]
-		docIDsChunk := documentIDs[i : i+chunkLen]
-		dataSizesChunk := dataSizes[i : i+chunkLen]
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		for i, dbNamesChunk := range dbNameChunks {
+			chunkLen := len(dbNamesChunk)
+			collNamesChunk := collNames[i : i+chunkLen]
+			docIDsChunk := documentIDs[i : i+chunkLen]
+			dataSizesChunk := dataSizes[i : i+chunkLen]
 
 			for {
 				err := verifier.localDB.InsertRechecks(
@@ -78,37 +73,46 @@ func (verifier *Verifier) insertRecheckDocs(
 					dataSizesChunk,
 				)
 
+				if err == nil {
+					break
+				}
+
 				if errors.Is(err, badger.ErrConflict) {
 					continue
 				}
 
-				errs[i] = errors.Wrapf(
+				if errors.Is(err, badger.ErrTxnTooBig) {
+					nextChunkSize := chunkSize >> 1
+
+					if nextChunkSize == 0 {
+						err = errors.Wrapf(
+							err,
+							"cannot reduce chunk size (%d) further; badger DB bug??",
+							chunkSize,
+						)
+					} else {
+						verifier.logger.Debug().
+							Int("failedChunkSize", chunkSize).
+							Int("nextChunkSize", nextChunkSize).
+							Msg("Local DB transaction is too big. Retrying with smaller chunks.")
+
+						chunkSize = nextChunkSize
+
+						continue chunkSizeLoop
+					}
+				}
+
+				return errors.Wrapf(
 					err,
 					"persisting %d recheck(s) of %d for generation %d",
 					chunkLen,
 					len(documentIDs),
 					generation,
 				)
-
-				break
 			}
+		}
 
-		}()
-	}
-
-	wg.Wait()
-
-	realErrs := lo.Compact(errs)
-
-	if len(realErrs) > 0 {
-		return errors.Wrapf(
-			fmt.Errorf(
-				strings.TrimSpace(strings.Repeat("%w ", len(realErrs))),
-				lo.ToAnySlice(realErrs)...,
-			),
-			"batch-inserting %d rechecks",
-			len(dbNames),
-		)
+		break
 	}
 
 	verifier.logger.Debug().
