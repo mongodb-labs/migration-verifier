@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"math"
+	"os"
 
 	"github.com/10gen/migration-verifier/internal/comparehashed"
 	"github.com/10gen/migration-verifier/internal/logger"
@@ -81,6 +82,11 @@ func (suite *IntegrationTestSuite) TestCompare_Hashed() {
 				suite.Require().NoError(err, "should create dest docs")
 
 				verifier := suite.BuildVerifier()
+				defer func() {
+					suite.Assert().NoError(verifier.localDB.Close())
+					suite.Assert().NoError(os.RemoveAll(testLocalDBFile))
+				}()
+
 				suite.Require().NoError(
 					verifier.verificationDatabase().Drop(ctx),
 					"should drop verification metadata database",

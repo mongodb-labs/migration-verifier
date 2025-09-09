@@ -256,14 +256,14 @@ func (ldb *LocalDB) InsertRechecks(
 			var addedRechecks uint64
 
 			for i, dbName := range dbNames {
-				bsonType, bsonIDVal, err := bson.MarshalValue(documentIDs[i])
-				if err != nil {
-					return errors.Wrapf(err, "marshaling document ID (%v)", documentIDs[i])
-				}
-
 				collName := collNames[i]
 
 				namespace := dbName + "." + collName
+
+				bsonType, bsonIDVal, err := bson.MarshalValue(documentIDs[i])
+				if err != nil {
+					return errors.Wrapf(err, "marshaling %#q document ID (%v)", namespace, documentIDs[i])
+				}
 
 				docIDRaw := bson.RawValue{
 					Type:  bsonType,

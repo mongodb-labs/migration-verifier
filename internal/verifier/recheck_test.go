@@ -118,6 +118,8 @@ func (suite *IntegrationTestSuite) TestRecheckResumability() {
 
 	suite.Require().EqualValues(2, verifier.generation)
 
+	suite.Require().NoError(verifier.localDB.Close())
+
 	verifier2 := suite.BuildVerifier()
 	verifier2.SetVerifyAll(true)
 
@@ -179,6 +181,8 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 		suite.Require().NoError(runner.StartNextGeneration())
 		suite.Require().NoError(runner.AwaitGenerationEnd())
 	}
+
+	suite.Require().NoError(verifier.localDB.Close())
 
 	suite.T().Logf("Starting a 2nd verifier and confirming that it sees the mismatches.")
 
@@ -296,8 +300,8 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
 	suite.Require().NoError(err)
-	var actualTasks []VerificationTask
-	err = cursor.All(ctx, &actualTasks)
+	var foundTasks []VerificationTask
+	err = cursor.All(ctx, &foundTasks)
 	suite.Require().NoError(err)
 
 	t1 := VerificationTask{
@@ -318,7 +322,13 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	t2.SourceDocumentCount = 1
 	t2.SourceByteCount = types.ByteCount(overlyLarge)
 
-	suite.ElementsMatch([]VerificationTask{t1, t2}, actualTasks)
+	suite.Assert().ElementsMatch(
+		[]VerificationTask{t1, t2},
+		foundTasks,
+		"found tasks: %+v",
+		foundTasks,
+	)
+
 }
 
 func (suite *IntegrationTestSuite) TestLargeDataInsertions() {

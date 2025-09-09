@@ -235,7 +235,9 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 	)
 }
 
-func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx context.Context, verifier *Verifier) {
+func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx context.Context, verifier *Verifier) <-chan struct{} {
+	doneChan := make(chan struct{})
+
 	err := verifier.srcChangeStreamReader.StartChangeStream(ctx)
 	suite.Require().NoError(err)
 	go func() {
@@ -244,7 +246,10 @@ func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx cont
 			return
 		}
 		suite.Require().NoError(err)
+		close(doneChan)
 	}()
+
+	return doneChan
 }
 
 // TestChangeStreamResumability creates a verifier, starts its change stream,
@@ -444,7 +449,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 		insertTs, err := util.GetClusterTimeFromSession(sess)
 		suite.Require().NoError(err, "should get cluster time")
 
-		suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
+		handlerDoneChan := suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
 		startAtTs := verifier.srcChangeStreamReader.startAtTs
 		suite.Require().NotNil(startAtTs, "startAtTs should be set")
@@ -459,6 +464,10 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 			verifier.srcChangeStreamReader.startAtTs,
 			*startAtTs,
 		)
+
+		<-handlerDoneChan
+
+		suite.Require().NoError(verifier.localDB.Close())
 	}
 }
 
@@ -894,7 +903,7 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			rechecks := suite.fetchRecheckDocs(ctx, verifier)
+			rechecks = suite.fetchRecheckDocs(ctx, verifier)
 
 			return len(rechecks) == 3
 		},

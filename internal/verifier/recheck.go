@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
+	"golang.org/x/exp/slices"
 )
 
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
@@ -47,6 +48,17 @@ func (verifier *Verifier) insertRecheckDocs(
 	documentIDs []any,
 	dataSizes []int,
 ) error {
+
+	if len(dbNames) != len(collNames) || len(collNames) != len(documentIDs) || len(documentIDs) != len(dataSizes) {
+		panic(fmt.Sprintf(
+			"Mismatched recheck slices!! dbNames=%d collNames=%d docIDs=%d sizes=%d",
+			len(dbNames),
+			len(collNames),
+			len(documentIDs),
+			len(dataSizes),
+		))
+	}
+
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
 
@@ -56,9 +68,11 @@ func (verifier *Verifier) insertRecheckDocs(
 
 chunkSizeLoop:
 	for {
-		dbNameChunks := lo.Chunk(dbNames, chunkSize)
+		dbNameChunks := lo.Chunk(slices.Clone(dbNames), chunkSize)
 
-		for i, dbNamesChunk := range dbNameChunks {
+		i := 0
+
+		for _, dbNamesChunk := range dbNameChunks {
 			chunkLen := len(dbNamesChunk)
 			collNamesChunk := collNames[i : i+chunkLen]
 			docIDsChunk := documentIDs[i : i+chunkLen]
@@ -110,6 +124,8 @@ chunkSizeLoop:
 					generation,
 				)
 			}
+
+			i += chunkLen
 		}
 
 		break
