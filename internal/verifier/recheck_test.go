@@ -253,7 +253,6 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 		lo.ToAnySlice(ids),
 		lo.RepeatBy(docsCount, func(_ int) int { return 16 }),
 	)
-	fmt.Printf("------- err: [%v]\n\n", err)
 	suite.Require().NoError(err, "rechecks must be inserted")
 
 	verifier.mux.Lock()

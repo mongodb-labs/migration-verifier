@@ -258,8 +258,6 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	for recheckResult := range recheckReader {
 		recheck, err := recheckResult.Get()
 
-		fmt.Printf("----- recheck from localDB: %+v\n", recheck)
-
 		if err != nil {
 			return errors.Wrap(err, "reading rechecks from local DB")
 		}
