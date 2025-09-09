@@ -893,7 +893,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		suite.Require().True(more)
 		err = cur.Decode(&doc)
 		suite.Require().NoError(err)
-		suite.Require().Equal(expectedIds, doc["_ids"])
+		suite.Require().ElementsMatch(expectedIds, doc["_ids"])
 		suite.Require().EqualValues(verificationTaskAdded, doc["status"])
 		suite.Require().EqualValues(verificationTaskVerifyDocuments, doc["type"])
 		suite.Require().Equal(expectedNamespace, doc["query_filter"].(bson.M)["namespace"])

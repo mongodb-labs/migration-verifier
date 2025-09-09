@@ -51,8 +51,21 @@ func (ldb *LocalDB) ClearAllRechecksForGeneration(generation int) error {
 
 		for iter.Rewind(); iter.Valid(); iter.Next() {
 			if err := tx.Delete(iter.Item().Key()); err != nil {
-				return err
+				return errors.Wrapf(
+					err,
+					"deleting key %#q",
+					string(iter.Item().Key()),
+				)
 			}
+		}
+
+		err := tx.Delete([]byte(getRecheckCountKeyForGeneration(generation)))
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"deleting generation %d’s recheck count",
+				generation,
+			)
 		}
 
 		return nil
