@@ -41,23 +41,16 @@ var supportedEventOpTypes = mapset.NewSet(
 
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
 type ParsedEvent struct {
-	ID           any                            `bson:"_id"`
 	OpType       string                         `bson:"operationType"`
 	Ns           *Namespace                     `bson:"ns,omitempty"`
-	DocKey       DocKey                         `bson:"documentKey,omitempty"`
+	DocID        any                            `bson:"_docID,omitempty"`
 	FullDocument bson.Raw                       `bson:"fullDocument,omitempty"`
 	FullDocLen   option.Option[types.ByteCount] `bson:"_fullDocLen"`
 	ClusterTime  *primitive.Timestamp           `bson:"clusterTime,omitEmpty"`
 }
 
 func (pe *ParsedEvent) String() string {
-	return fmt.Sprintf("{OpType: %s, namespace: %s, docID: %v, clusterTime: %v}", pe.OpType, pe.Ns, pe.DocKey.ID, pe.ClusterTime)
-}
-
-// DocKey is a deserialized form for the ChangeEvent documentKey field. We currently only care about
-// the _id.
-type DocKey struct {
-	ID any `bson:"_id"`
+	return fmt.Sprintf("{OpType: %s, namespace: %s, docID: %v, clusterTime: %v}", pe.OpType, pe.Ns, pe.DocID, pe.ClusterTime)
 }
 
 const (
@@ -244,7 +237,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 
 		dbNames[i] = srcDBName
 		collNames[i] = srcCollName
-		docIDs[i] = changeEvent.DocKey.ID
+		docIDs[i] = changeEvent.DocID
 
 		if changeEvent.FullDocLen.OrZero() > 0 {
 			dataSizes[i] = int(changeEvent.FullDocLen.OrZero())
@@ -323,8 +316,12 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 	pipeline = append(
 		pipeline,
 		bson.D{
-			{"$unset", []string{
-				"updateDescription",
+			{"$addFields", bson.D{
+				{"_docID", "$documentKey._id"},
+
+				{"updateDescription", "$$REMOVE"},
+				{"wallTime", "$$REMOVE"},
+				{"documentKey", "$$REMOVE"},
 			}},
 		},
 	)
@@ -622,8 +619,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 ) (*mongo.ChangeStream, mongo.Session, primitive.Timestamp, error) {
 	pipeline := csr.GetChangeStreamFilter()
 	opts := options.ChangeStream().
-		SetMaxAwaitTime(maxChangeStreamAwaitTime).
-		SetFullDocument(options.UpdateLookup)
+		SetMaxAwaitTime(maxChangeStreamAwaitTime)
 
 	if csr.clusterInfo.VersionArray[0] >= 6 {
 		opts = opts.SetCustomPipeline(bson.M{"showExpandedEvents": true})

@@ -108,7 +108,6 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 	cs, err := suite.srcMongoClient.Watch(
 		ctx,
 		filter,
-		options.ChangeStream().SetFullDocument("updateLookup"),
 	)
 	suite.Require().NoError(err)
 	defer cs.Close(ctx)
@@ -125,16 +124,17 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 
 	suite.Require().True(cs.Next(ctx), "should get event")
 
-	suite.Require().Equal(
-		"abc",
-		cs.Current.Lookup("documentKey", "_id").StringValue(),
-		"event should reference expected document",
-	)
 	suite.Assert().Less(len(cs.Current), 10_000, "event should not be large")
 
 	parsed := ParsedEvent{}
 	suite.Require().NoError(cs.Decode(&parsed))
 	suite.Require().Equal("insert", parsed.OpType)
+
+	suite.Require().Equal(
+		"abc",
+		parsed.DocID,
+		"event should reference expected document",
+	)
 
 	suite.Require().True(parsed.FullDocLen.IsSome(), "full doc len should be in event")
 	suite.Assert().Greater(parsed.FullDocLen.MustGet(), types.ByteCount(10_000))
@@ -313,7 +313,8 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 			"docID": "heyhey",
 		},
 		recheckDocs[0]["_id"],
-		"recheck doc should have expected ID",
+		"recheck doc (%v) should have expected ID",
+		recheckDocs[0],
 	)
 }
 

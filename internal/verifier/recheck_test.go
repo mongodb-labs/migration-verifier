@@ -48,9 +48,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 
 	event := ParsedEvent{
 		OpType: "insert",
-		DocKey: DocKey{
-			ID: "theDocID",
-		},
+		DocID:  "theDocID",
 		Ns: &Namespace{
 			DB:   "the",
 			Coll: "namespace",
