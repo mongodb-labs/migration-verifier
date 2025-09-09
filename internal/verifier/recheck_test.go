@@ -237,7 +237,7 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	ctx := suite.Context()
 
 	//docsCount := 20_000_000
-	docsCount := 300000
+	docsCount := 20_000_000
 
 	suite.T().Logf("Inserting %d rechecks …", docsCount)
 

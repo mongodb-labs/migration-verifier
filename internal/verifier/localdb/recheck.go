@@ -10,9 +10,9 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/pkg/errors"
 	"github.com/samber/mo"
-	"go.etcd.io/bbolt"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -31,9 +31,8 @@ import (
 // ----------------------------------------------------------------------------
 
 const (
-	recheckBucketPrefix     = "recheck-"
-	recheckMetaBucketPrefix = "recheck-meta-"
-	countKey                = "count"
+	recheckBucketPrefix   = "recheck-"
+	recheckCountKeyPrefix = "recheckcount-"
 )
 
 type recheckInternal struct {
@@ -44,15 +43,19 @@ type recheckInternal struct {
 func (ldb *LocalDB) ClearAllRechecksForGeneration(generation int) error {
 	bucketPrefix := getRecheckBucketPrefixForGeneration(generation)
 
-	return ldb.db.Update(func(tx *bbolt.Tx) error {
-		return tx.ForEach(func(name []byte, _ *bbolt.Bucket) error {
-			if bytes.HasPrefix(name, []byte(bucketPrefix)) {
-				if err := tx.DeleteBucket(name); err != nil {
-					return err
-				}
-			}
-			return nil
+	return ldb.db.Update(func(tx *badger.Txn) error {
+		iter := tx.NewIterator(badger.IteratorOptions{
+			Prefix: []byte(bucketPrefix),
 		})
+		defer iter.Close()
+
+		for iter.Rewind(); iter.Valid(); iter.Next() {
+			if err := tx.Delete(iter.Item().Key()); err != nil {
+				return err
+			}
+		}
+
+		return nil
 	})
 }
 
@@ -60,8 +63,8 @@ func getRecheckBucketPrefixForGeneration(generation int) string {
 	return recheckBucketPrefix + strconv.Itoa(generation) + "-"
 }
 
-func getRecheckMetaBucketForGeneration(generation int) string {
-	return recheckMetaBucketPrefix + strconv.Itoa(generation)
+func getRecheckCountKeyForGeneration(generation int) string {
+	return recheckCountKeyPrefix + strconv.Itoa(generation)
 }
 
 type Recheck struct {
@@ -73,7 +76,7 @@ type Recheck struct {
 func (ldb *LocalDB) GetRechecksCount(generation int) (uint64, error) {
 	var count uint64
 
-	err := ldb.db.View(func(tx *bbolt.Tx) error {
+	err := ldb.db.View(func(tx *badger.Txn) error {
 		var err error
 		count, err = getRechecksCountInTxn(tx, generation)
 		return err
@@ -82,20 +85,23 @@ func (ldb *LocalDB) GetRechecksCount(generation int) (uint64, error) {
 	return count, err
 }
 
-func getRechecksCountInTxn(tx *bbolt.Tx, generation int) (uint64, error) {
+func getRechecksCountInTxn(tx *badger.Txn, generation int) (uint64, error) {
 	var count uint64
 
-	bucket := getRecheckMetaBucketForGeneration(generation)
+	key := getRecheckCountKeyForGeneration(generation)
 
-	metaBucket := tx.Bucket([]byte(bucket))
-	if metaBucket == nil {
-		return 0, nil
+	item, err := tx.Get([]byte(key))
+	if err != nil {
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return 0, nil
+		}
+
+		return 0, errors.Wrapf(err, "getting gen %d recheck count", generation)
 	}
 
-	var err error
-	countBytes := metaBucket.Get([]byte(countKey))
-	if countBytes == nil {
-		return 0, nil
+	countBytes, err := item.ValueCopy(nil)
+	if err != nil {
+		return 0, errors.Wrap(err, "copying value")
 	}
 
 	count, err = parseUint(countBytes)
@@ -116,25 +122,31 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 	go func() {
 		defer close(retChan)
 
-		err := ldb.db.View(func(tx *bbolt.Tx) error {
-			expectedRechecks, err := getRechecksCountInTxn(tx, generation)
+		err := ldb.db.View(func(txn *badger.Txn) error {
+			expectedRechecks, err := getRechecksCountInTxn(txn, generation)
 			if err != nil {
 				return errors.Wrapf(err, "reading count of generation %d’s rechecks", generation)
 			}
 
-			err = tx.ForEach(func(name []byte, bucket *bbolt.Bucket) error {
-				if !bytes.HasPrefix(name, []byte(bucketPrefix)) {
-					return nil
+			iter := txn.NewIterator(badger.IteratorOptions{
+				Prefix: []byte(bucketPrefix),
+			})
+			defer iter.Close()
+
+			for iter.Rewind(); iter.Valid(); iter.Next() {
+				afterPrefix := strings.TrimPrefix(string(iter.Item().KeyCopy(nil)), bucketPrefix)
+				ns, _, err := parseKeyMinusPrefix(afterPrefix)
+				if err != nil {
+					return errors.Wrapf(err, "parsing key after prefix %#q", afterPrefix)
 				}
 
-				ns := string(bytes.TrimPrefix(name, []byte(bucketPrefix)))
 				db, coll, foundDot := strings.Cut(ns, ".")
 				if !foundDot {
-					return fmt.Errorf("found invalid recheck bucket %#q (no dot)", string(name))
+					return fmt.Errorf("recheck namespace %#q lacks dot", string(ns))
 				}
 
-				return bucket.ForEach(func(_, docs []byte) error {
-					iterator := mbson.NewIterator(bytes.NewReader(docs))
+				err = iter.Item().Value(func(val []byte) error {
+					iterator := mbson.NewIterator(bytes.NewReader(val))
 
 					for {
 						docOpt, err := iterator.Next()
@@ -170,9 +182,10 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 
 					return nil
 				})
-			})
-			if err != nil {
-				return err
+
+				if err != nil {
+					return err
+				}
 			}
 
 			if foundRechecks != expectedRechecks {
@@ -202,6 +215,20 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 	return retChan
 }
 
+func parseKeyMinusPrefix(in string) (string, []byte, error) {
+	beforeDash, afterDash, found := strings.Cut(in, "-")
+	if !found {
+		return "", nil, fmt.Errorf("invalid recheck key part: %#q", in)
+	}
+
+	nsLen, err := strconv.Atoi(beforeDash)
+	if err != nil {
+		return "", nil, errors.Wrapf(err, "parsing ns len %#q", nsLen)
+	}
+
+	return afterDash[:nsLen], []byte(afterDash[nsLen:]), nil
+}
+
 func (ldb *LocalDB) InsertRechecks(
 	generation int,
 	dbNames []string,
@@ -212,8 +239,8 @@ func (ldb *LocalDB) InsertRechecks(
 	bucketPrefix := getRecheckBucketPrefixForGeneration(generation)
 
 	return errors.Wrapf(
-		ldb.db.Update(func(tx *bbolt.Tx) error {
-			bucketCache := map[string]*bbolt.Bucket{}
+		ldb.db.Update(func(tx *badger.Txn) error {
+			var addedRechecks uint64
 
 			for i, dbName := range dbNames {
 				bsonType, bsonIDVal, err := bson.MarshalValue(documentIDs[i])
@@ -225,26 +252,37 @@ func (ldb *LocalDB) InsertRechecks(
 
 				namespace := dbName + "." + collName
 
-				bucket, ok := bucketCache[namespace]
-				if !ok {
-					bucketName := bucketPrefix + namespace
-
-					var err error
-					bucket, err = getBucket(tx, bucketName)
-					if err != nil {
-						return errors.Wrapf(err, "getting bucket %#q", namespace)
-					}
-
-					bucketCache[namespace] = bucket
-				}
-
 				docIDRaw := bson.RawValue{
 					Type:  bsonType,
 					Value: bsonIDVal,
 				}
+
 				sum := hashRawValue(docIDRaw)
 
-				existingRechecks := bucket.Get(sum)
+				newKey := strings.Join(
+					[]string{
+						bucketPrefix,
+						strconv.Itoa(len(namespace)),
+						"-",
+						namespace,
+						string(sum),
+					},
+					"",
+				)
+
+				var existingRechecks []byte
+				oldRechecksItem, err := tx.Get([]byte(newKey))
+				if err != nil {
+					if !errors.Is(err, badger.ErrKeyNotFound) {
+						return errors.Wrapf(err, "fetching item %#q", newKey)
+					}
+				} else {
+					existingRechecks, err = oldRechecksItem.ValueCopy(nil)
+					if err != nil {
+						return errors.Wrapf(err, "copying value %#q", newKey)
+					}
+				}
+
 				docExists, err := internalRechecksHaveDocID(existingRechecks, docIDRaw)
 				if err != nil {
 					return errors.Wrapf(
@@ -269,7 +307,7 @@ func (ldb *LocalDB) InsertRechecks(
 
 					buf := append(existingRechecks, newRecheckRaw...)
 
-					err = bucket.Put(sum, buf)
+					err = tx.Set([]byte(newKey), buf)
 					if err != nil {
 						return errors.Wrapf(
 							err,
@@ -277,26 +315,21 @@ func (ldb *LocalDB) InsertRechecks(
 							namespace,
 						)
 					}
-				}
-			}
 
-			metaBucketName := getRecheckMetaBucketForGeneration(generation)
-			metaBucket, err := getBucket(tx, metaBucketName)
-			if err != nil {
-				return errors.Wrapf(err, "getting bucket %#q", metaBucketName)
+					addedRechecks++
+				}
 			}
 
 			var curCount uint64
-			countBytes := metaBucket.Get([]byte(countKey))
-			if countBytes != nil {
-				curCount, err = parseUint(countBytes)
-				if err != nil {
-					return errors.Wrapf(err, "parsing rechecks count %v", countBytes)
-				}
+			curCount, err := getRechecksCountInTxn(tx, generation)
+			if err != nil {
+				return errors.Wrapf(err, "reading gen %d’s rechecks count", generation)
 			}
+			countBytes := formatUint(addedRechecks + curCount)
 
-			countBytes = formatUint(uint64(len(dataSizes)) + curCount)
-			err = metaBucket.Put([]byte(countKey), countBytes)
+			metaBucketName := getRecheckCountKeyForGeneration(generation)
+
+			err = tx.Set([]byte(metaBucketName), countBytes)
 			if err != nil {
 				return errors.Wrapf(err, "persisting rechecks count %v", countBytes)
 			}

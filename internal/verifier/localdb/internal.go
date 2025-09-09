@@ -2,11 +2,11 @@ package localdb
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strconv"
 
-	"github.com/pkg/errors"
-	"go.etcd.io/bbolt"
+	"github.com/dgraph-io/badger/v4"
 	"golang.org/x/exp/constraints"
 )
 
@@ -17,18 +17,22 @@ const (
 	metadataBucketName = "metadata"
 )
 
-func verifySchemaVersion(db *bbolt.DB) error {
+func verifySchemaVersion(db *badger.DB) error {
 	metadataVersionBytes := formatUint(schemaVersion)
 
-	return db.Update(func(tx *bbolt.Tx) error {
-		bucket, err := getMetadataBucket(tx)
+	return db.Update(func(tx *badger.Txn) error {
+		item, err := tx.Get([]byte(metadataBucketName + "." + schemaVersionKey))
+
 		if err != nil {
-			return err
-		}
+			if !errors.Is(err, badger.ErrKeyNotFound) {
+				return err
+			}
+		} else {
+			versionBytes, err := item.ValueCopy(nil)
+			if err != nil {
+				// TODO
+			}
 
-		versionBytes := bucket.Get([]byte(schemaVersionKey))
-
-		if versionBytes != nil {
 			if bytes.Equal(versionBytes, metadataVersionBytes) {
 				return nil
 			}
@@ -40,42 +44,27 @@ func verifySchemaVersion(db *bbolt.DB) error {
 			return fmt.Errorf("parsing persisted metadata version (%v): %w", versionBytes, err)
 		}
 
-		return bucket.Put([]byte(schemaVersionKey), metadataVersionBytes)
+		return tx.Set([]byte(metadataBucketName+"."+schemaVersionKey), metadataVersionBytes)
 	})
 }
 
-func getMetadataBucket(tx *bbolt.Tx) (*bbolt.Bucket, error) {
-	bucket, err := getBucket(tx, metadataBucketName)
-	if err != nil {
-		return nil, errors.Wrapf(err, "getting bucket %#q", metadataBucketName)
-	}
-
-	return bucket, nil
-}
-
 func (ldb *LocalDB) setMetadataValue(name string, value []byte) error {
-	return ldb.db.Update(func(tx *bbolt.Tx) error {
-		bucket, err := getMetadataBucket(tx)
-		if err != nil {
-			return err
-		}
-
-		return bucket.Put([]byte(name), value)
+	return ldb.db.Update(func(tx *badger.Txn) error {
+		return tx.Set([]byte(metadataBucketName+"."+name), value)
 	})
 }
 
 func (ldb *LocalDB) getMetadataValue(name string) ([]byte, error) {
 	var value []byte
 
-	err := ldb.db.View(func(tx *bbolt.Tx) error {
-		bucket, err := getMetadataBucket(tx)
-		if err != nil {
-			return err
+	err := ldb.db.View(func(tx *badger.Txn) error {
+		item, err := tx.Get([]byte(metadataBucketName + "." + name))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil
 		}
 
-		value = bucket.Get([]byte(name))
-
-		return nil
+		value, err = item.ValueCopy(value)
+		return err
 	})
 
 	if err != nil {
@@ -83,20 +72,6 @@ func (ldb *LocalDB) getMetadataValue(name string) ([]byte, error) {
 	}
 
 	return value, nil
-}
-
-func getBucket(tx *bbolt.Tx, name string) (*bbolt.Bucket, error) {
-	bucket := tx.Bucket([]byte(name))
-	if bucket == nil {
-		var err error
-		bucket, err = tx.CreateBucket([]byte(name))
-
-		if err != nil {
-			return nil, errors.Wrapf(err, "creating bucket %#q", name)
-		}
-	}
-
-	return bucket, nil
 }
 
 func parseUint(buf []byte) (uint64, error) {

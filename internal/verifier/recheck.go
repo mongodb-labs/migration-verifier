@@ -51,21 +51,33 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	generation, _ := verifier.getGenerationWhileLocked()
 
-	err := verifier.localDB.InsertRechecks(
-		generation,
-		dbNames,
-		collNames,
-		documentIDs,
-		dataSizes,
-	)
+	dbNameChunks := lo.Chunk(dbNames, 10_000)
 
-	if err != nil {
-		return errors.Wrapf(
-			err,
-			"persisting %d recheck(s) for generation %d",
-			len(documentIDs),
+	var i int
+
+	for _, dbNamesChunk := range dbNameChunks {
+		chunkLen := len(dbNamesChunk)
+		collNamesChunk := collNames[i : i+chunkLen]
+		docIDsChunk := documentIDs[i : i+chunkLen]
+		dataSizesChunk := dataSizes[i : i+chunkLen]
+
+		err := verifier.localDB.InsertRechecks(
 			generation,
+			dbNamesChunk,
+			collNamesChunk,
+			docIDsChunk,
+			dataSizesChunk,
 		)
+
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"persisting %d recheck(s) of %d for generation %d",
+				chunkLen,
+				len(documentIDs),
+				generation,
+			)
+		}
 	}
 
 	verifier.logger.Debug().

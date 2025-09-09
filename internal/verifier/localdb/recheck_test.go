@@ -17,12 +17,12 @@ import (
 func TestRecheck(t *testing.T) {
 	ctx := t.Context()
 
-	file, err := os.CreateTemp("", "")
-	defer os.Remove(file.Name())
+	dir, err := os.MkdirTemp("", "")
+	defer os.RemoveAll(dir)
 
 	require.NoError(t, err)
 
-	ldb, err := New(logger.NewDefaultLogger(), file.Name())
+	ldb, err := New(logger.NewDefaultLogger(), dir)
 	require.NoError(t, err)
 
 	count, err := ldb.GetRechecksCount(0)
