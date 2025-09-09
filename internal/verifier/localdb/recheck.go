@@ -44,9 +44,11 @@ func (ldb *LocalDB) ClearAllRechecksForGeneration(generation int) error {
 	bucketPrefix := getRecheckBucketPrefixForGeneration(generation)
 
 	return ldb.db.Update(func(tx *badger.Txn) error {
-		iter := tx.NewIterator(badger.IteratorOptions{
-			Prefix: []byte(bucketPrefix),
-		})
+		iteratorOpts := badger.DefaultIteratorOptions
+		iteratorOpts.Prefix = []byte(bucketPrefix)
+		iteratorOpts.PrefetchValues = false
+
+		iter := tx.NewIterator(iteratorOpts)
 		defer iter.Close()
 
 		for iter.Rewind(); iter.Valid(); iter.Next() {
@@ -141,9 +143,9 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 				return errors.Wrapf(err, "reading count of generation %d’s rechecks", generation)
 			}
 
-			iter := txn.NewIterator(badger.IteratorOptions{
-				Prefix: []byte(bucketPrefix),
-			})
+			iteratorOpts := badger.DefaultIteratorOptions
+			iteratorOpts.Prefix = []byte(bucketPrefix)
+			iter := txn.NewIterator(iteratorOpts)
 			defer iter.Close()
 
 			for iter.Rewind(); iter.Valid(); iter.Next() {
