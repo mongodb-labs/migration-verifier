@@ -1,6 +1,7 @@
 package mslices
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 )
@@ -44,7 +45,16 @@ func isZero[T any](val T) bool {
 	return reflect.ValueOf(&val).Elem().IsZero()
 }
 
+// Reorder accepts a slice and a slice of indices.
 func Reorder[T any](data []T, order []int) {
+	if len(order) != len(data) {
+		panic(fmt.Sprintf(
+			"cannot reorder: slice len=%d; indices len=%d",
+			len(data),
+			len(order),
+		))
+	}
+
 	visited := make([]bool, len(order))
 
 	for i := range len(order) {
