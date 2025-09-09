@@ -7,11 +7,15 @@ import (
 	"github.com/pkg/errors"
 )
 
+// LocalDB provides local storage for performance-sensitive parts of
+// the verifier’s internal state.
 type LocalDB struct {
 	log *logger.Logger
 	db  *badger.DB
 }
 
+// New returns a new LocalDB instance. If the datastore already exists it
+// will verify that the schema version matches.
 func New(l *logger.Logger, path string) (*LocalDB, error) {
 	db, err := badger.Open(
 		badger.DefaultOptions(path).

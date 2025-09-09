@@ -16,20 +16,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// ----------------------------------------------------------------------------
-// Rechecks are stored like this:
-//
-// recheck-0-dbName.collName: {
-//   $docIdHash: bson(recheckInternal), bson(recheckInternal), ...
-// }
-// recheck-meta-0: {
-//   count: 123,
-// }
-//
-// Ideally we could let the keys of `recheck-0-dbName.collName` be the
-// document ID, but bbolt limits bucket keys to 32 KiB.
-// ----------------------------------------------------------------------------
-
 const (
 	recheckBucketPrefix   = "recheck-"
 	recheckCountKeyPrefix = "recheckcount-"
@@ -40,6 +26,7 @@ type recheckInternal struct {
 	DocSize int
 }
 
+// ClearAllRechecksForGeneration removes all rechecks for the given generation.
 func (ldb *LocalDB) ClearAllRechecksForGeneration(generation int) error {
 	bucketPrefix := getRecheckBucketPrefixForGeneration(generation)
 
@@ -82,12 +69,17 @@ func getRecheckCountKeyForGeneration(generation int) string {
 	return recheckCountKeyPrefix + strconv.Itoa(generation)
 }
 
+// Recheck represents a single enqueued recheck. Note that, because this
+// only stores a document ID rather than a document key, it could actually
+// refer to multiple documents (i.e., duplicated _id across shards).
 type Recheck struct {
 	DB, Coll string
 	DocID    bson.RawValue
 	Size     types.ByteCount
 }
 
+// GetRechecksCount returns the number of enqueued rechecks for the given
+// generation.
 func (ldb *LocalDB) GetRechecksCount(generation int) (uint64, error) {
 	var count uint64
 
@@ -127,6 +119,13 @@ func getRechecksCountInTxn(tx *badger.Txn, generation int) (uint64, error) {
 	return count, err
 }
 
+// GetRecheckReader returns a channel from which the caller can read
+// Rechecks. If the context is canceled, the channel will be closed. If any
+// other error condition appears while reading the rechecks, that error will
+// go into the channel, and the channel will be closed.
+//
+// The rechecks will be returned sorted by namespace; within a namespace,
+// however, no sort order is defined.
 func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan mo.Result[Recheck] {
 	retChan := make(chan mo.Result[Recheck])
 
@@ -230,21 +229,7 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 	return retChan
 }
 
-// returns ns and doc ID hash
-func parseKeyMinusPrefix(in string) (string, []byte, error) {
-	beforeDash, afterDash, found := strings.Cut(in, "-")
-	if !found {
-		return "", nil, fmt.Errorf("invalid recheck key part: %#q", in)
-	}
-
-	nsLen, err := strconv.Atoi(beforeDash)
-	if err != nil {
-		return "", nil, errors.Wrapf(err, "parsing ns len %#q", nsLen)
-	}
-
-	return afterDash[:nsLen], []byte(afterDash[nsLen:]), nil
-}
-
+// InsertRechecks enqueues rechecks. The given slices must be of the same length.
 func (ldb *LocalDB) InsertRechecks(
 	generation int,
 	dbNames []string,
@@ -355,6 +340,21 @@ func (ldb *LocalDB) InsertRechecks(
 		"persisting %d recheck(s)",
 		len(documentIDs),
 	)
+}
+
+// returns ns and doc ID hash
+func parseKeyMinusPrefix(in string) (string, []byte, error) {
+	beforeDash, afterDash, found := strings.Cut(in, "-")
+	if !found {
+		return "", nil, fmt.Errorf("invalid recheck key part: %#q", in)
+	}
+
+	nsLen, err := strconv.Atoi(beforeDash)
+	if err != nil {
+		return "", nil, errors.Wrapf(err, "parsing ns len %#q", nsLen)
+	}
+
+	return afterDash[:nsLen], []byte(afterDash[nsLen:]), nil
 }
 
 func hashRawValue(rv bson.RawValue) []byte {
