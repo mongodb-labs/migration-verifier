@@ -217,21 +217,6 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		verifier.numWorkers,
 	)
 
-	/*
-		// The sort here is important because the recheck _id is an embedded
-		// document that includes the namespace. Thus, all rechecks for a given
-		// namespace will be consecutive in this query’s result.
-		cursor, err := recheckColl.Find(
-			ctx,
-			bson.D{},
-			options.Find().SetSort(bson.D{{"_id", 1}}),
-		)
-		if err != nil {
-			return err
-		}
-		defer cursor.Close(ctx)
-	*/
-
 	persistBufferedRechecks := func() error {
 		if len(idAccum) == 0 {
 			return nil
@@ -272,6 +257,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	// subject to a 16MB limit on group size.
 	for recheckResult := range recheckReader {
 		recheck, err := recheckResult.Get()
+
+		fmt.Printf("----- recheck from localDB: %+v\n", recheck)
 
 		if err != nil {
 			return errors.Wrap(err, "reading rechecks from local DB")
