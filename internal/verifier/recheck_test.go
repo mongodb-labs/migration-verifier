@@ -414,13 +414,26 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
 	suite.Require().NoError(err)
-	var actualTasks []VerificationTask
-	err = cursor.All(ctx, &actualTasks)
+	var foundTasks []VerificationTask
+	err = cursor.All(ctx, &foundTasks)
 	suite.Require().NoError(err)
+
+	expectIds := []any{id1, id2, id3}
+
+	for i, task := range foundTasks {
+		suite.Assert().ElementsMatch(
+			expectIds,
+			task.Ids,
+			"found-task %d should have expected doc IDs",
+			i,
+		)
+
+		// So we can deeply compare the tasks:
+		foundTasks[i].Ids = nil
+	}
 
 	t1 := VerificationTask{
 		Generation: 1,
-		Ids:        []any{id1, id2, id3},
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerifyDocuments,
 		QueryFilter: QueryFilter{
@@ -437,7 +450,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 	t2.QueryFilter.To = "testDB2.testColl1"
 	t3.QueryFilter.Namespace = "testDB1.testColl2"
 	t4.QueryFilter.To = "testDB2.testColl2"
-	suite.ElementsMatch([]VerificationTask{t1, t2, t3, t4}, actualTasks)
+	suite.ElementsMatch([]VerificationTask{t1, t2, t3, t4}, foundTasks)
 }
 
 func (suite *IntegrationTestSuite) TestGenerationalClear() {

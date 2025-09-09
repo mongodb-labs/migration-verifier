@@ -32,16 +32,16 @@ func TestRecheck(t *testing.T) {
 
 	err = ldb.InsertRechecks(
 		0,
-		[]string{"db1", "db1"},
-		[]string{"coll1", "coll2"},
-		[]any{"id1", "id2"},
-		[]int{123, 234},
+		[]string{"db1", "db1", "db2"},
+		[]string{"coll1", "coll2", "coll3"},
+		[]any{"id1", "id2", "id2"},
+		[]int{123, 234, 345},
 	)
 	require.NoError(t, err)
 
 	count, err = ldb.GetRechecksCount(0)
 	require.NoError(t, err)
-	assert.EqualValues(t, 2, count, "rechecks count")
+	assert.EqualValues(t, 3, count, "rechecks count")
 
 	t.Run(
 		"cancellation of recheck reader",
@@ -50,9 +50,14 @@ func TestRecheck(t *testing.T) {
 			cause := fmt.Errorf("just cuz")
 			cancel(cause)
 			reader := ldb.GetRecheckReader(readCtx, 0)
-			got := <-reader
-			recheck, err := got.Get()
-			assert.ErrorIs(t, err, cause, "(got recheck: %v)", recheck)
+
+			gotRechecks := 0
+			for recheck := range reader {
+				assert.NoError(t, recheck.Error(), "context cancellation should not cause error")
+				gotRechecks++
+			}
+
+			assert.Less(t, gotRechecks, 3, "should not read all rechecks")
 		},
 	)
 
@@ -68,6 +73,12 @@ func TestRecheck(t *testing.T) {
 			Coll:  "coll2",
 			DocID: mbson.MustConvertToRawValue("id2"),
 			Size:  234,
+		},
+		{
+			DB:    "db2",
+			Coll:  "coll3",
+			DocID: mbson.MustConvertToRawValue("id2"),
+			Size:  345,
 		},
 	}
 

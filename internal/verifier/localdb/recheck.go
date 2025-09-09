@@ -215,9 +215,9 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 		if err != nil {
 			select {
 			case <-ctx.Done():
-				ldb.log.Warn().
+				ldb.log.Debug().
 					Err(err).
-					Msg("Failed to read rechecks.")
+					Msg("Reading of rechecks was canceled.")
 
 				return
 			case retChan <- mo.Err[Recheck](err):
@@ -228,6 +228,7 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 	return retChan
 }
 
+// returns ns and doc ID hash
 func parseKeyMinusPrefix(in string) (string, []byte, error) {
 	beforeDash, afterDash, found := strings.Cut(in, "-")
 	if !found {
@@ -355,7 +356,7 @@ func (ldb *LocalDB) InsertRechecks(
 }
 
 func hashRawValue(rv bson.RawValue) []byte {
-	idHash := fnv.New128a()
+	idHash := fnv.New64a()
 	_, _ = idHash.Write([]byte{byte(rv.Type)})
 	_, _ = idHash.Write(rv.Value)
 	return idHash.Sum(nil)
