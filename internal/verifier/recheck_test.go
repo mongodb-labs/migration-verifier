@@ -364,13 +364,26 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
 	suite.Require().NoError(err)
-	var actualTasks []VerificationTask
-	err = cursor.All(ctx, &actualTasks)
+	var foundTasks []VerificationTask
+	err = cursor.All(ctx, &foundTasks)
 	suite.Require().NoError(err)
+
+	suite.Require().Len(foundTasks, 2, "should find expected # of tasks")
+
+	suite.ElementsMatch(
+		[]any{id1, id2},
+		foundTasks[0].Ids,
+	)
+	foundTasks[0].Ids = nil
+
+	suite.ElementsMatch(
+		[]any{id3},
+		foundTasks[1].Ids,
+	)
+	foundTasks[1].Ids = nil
 
 	t1 := VerificationTask{
 		Generation: 1,
-		Ids:        []any{id1, id2},
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerifyDocuments,
 		QueryFilter: QueryFilter{
@@ -382,11 +395,11 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	}
 
 	t2 := t1
-	t2.Ids = []any{id3}
 	t2.SourceDocumentCount = 1
 	t2.SourceByteCount = 1024
 
-	suite.ElementsMatch([]VerificationTask{t1, t2}, actualTasks)
+	suite.ElementsMatch([]VerificationTask{t1, t2}, foundTasks)
+
 }
 
 func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
