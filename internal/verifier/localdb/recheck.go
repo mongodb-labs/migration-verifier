@@ -136,6 +136,8 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 	go func() {
 		defer close(retChan)
 
+		var canceled bool
+
 		err := ldb.db.View(func(txn *badger.Txn) error {
 			expectedRechecks, err := getRechecksCountInTxn(txn, generation)
 			if err != nil {
@@ -188,6 +190,12 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 
 						select {
 						case <-ctx.Done():
+							canceled = true
+
+							ldb.log.Debug().
+								Err(err).
+								Msg("Reading of rechecks was canceled.")
+
 							return ctx.Err()
 						case retChan <- mo.Ok(recheck):
 							foundRechecks++
@@ -213,14 +221,9 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 			return nil
 		})
 
-		if err != nil {
+		if err != nil && !canceled {
 			select {
 			case <-ctx.Done():
-				ldb.log.Debug().
-					Err(err).
-					Msg("Reading of rechecks was canceled.")
-
-				return
 			case retChan <- mo.Err[Recheck](err):
 			}
 		}
