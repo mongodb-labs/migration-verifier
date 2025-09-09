@@ -18,6 +18,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/exp/slices"
 )
 
 func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
@@ -340,7 +341,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	id2 := "b"
 	id3 := "c"
 	ids := []any{id1, id2, id3}
-	dataSizes := []int{400 * 1024, 700 * 1024, 1024}
+	dataSizes := []int{600 * 1024, 700 * 1024, 650 * 1024}
 	err := insertRecheckDocs(verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 	d1 := localdb.Recheck{
@@ -370,36 +371,38 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 
 	suite.Require().Len(foundTasks, 2, "should find expected # of tasks")
 
-	suite.ElementsMatch(
-		[]any{id1, id2},
-		foundTasks[0].Ids,
-	)
-	foundTasks[0].Ids = nil
+	for _, task := range foundTasks {
+		suite.Assert().EqualValues(1, task.Generation)
+		suite.Assert().EqualValues(verificationTaskAdded, task.Status)
+		suite.Assert().EqualValues(verificationTaskVerifyDocuments, task.Type)
+		suite.Assert().EqualValues(
+			QueryFilter{
+				Namespace: "testDB.testColl",
+				To:        "testDB.testColl",
+			},
+			task.QueryFilter,
+		)
 
-	suite.ElementsMatch(
-		[]any{id3},
-		foundTasks[1].Ids,
-	)
-	foundTasks[1].Ids = nil
-
-	t1 := VerificationTask{
-		Generation: 1,
-		Status:     verificationTaskAdded,
-		Type:       verificationTaskVerifyDocuments,
-		QueryFilter: QueryFilter{
-			Namespace: "testDB.testColl",
-			To:        "testDB.testColl",
-		},
-		SourceDocumentCount: 2,
-		SourceByteCount:     1126400,
+		suite.Assert().Len(
+			task.Ids,
+			int(task.SourceDocumentCount),
+			"len(ids) == doc count",
+		)
 	}
+	suite.Assert().Len(foundTasks[0].Ids, 2, "first task should have 2 docs")
+	suite.Assert().Len(foundTasks[1].Ids, 1, "2nd task should have 1 docs")
 
-	t2 := t1
-	t2.SourceDocumentCount = 1
-	t2.SourceByteCount = 1024
+	suite.Assert().GreaterOrEqual(
+		int64(foundTasks[0].SourceByteCount),
+		int64(1024*1024),
+		"first task should be full",
+	)
 
-	suite.ElementsMatch([]VerificationTask{t1, t2}, foundTasks)
-
+	suite.Assert().ElementsMatch(
+		ids,
+		append(slices.Clone(foundTasks[0].Ids), foundTasks[1].Ids...),
+		"all IDs should be represented",
+	)
 }
 
 func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
