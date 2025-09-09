@@ -45,7 +45,10 @@ func isZero[T any](val T) bool {
 	return reflect.ValueOf(&val).Elem().IsZero()
 }
 
-// Reorder accepts a slice and a slice of indices.
+// Reorder accepts a slice and a slice of indices then
+// reorders the slice in-place. For example, given a
+// []string{"a", "b", "c"} and []int{1, 2, 0}, the slice
+// will become {"b", "c", "a"}.
 func Reorder[T any](data []T, order []int) {
 	if len(order) != len(data) {
 		panic(fmt.Sprintf(
