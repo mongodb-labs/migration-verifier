@@ -898,7 +898,8 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 
 func TestVerifierCompareDocs(t *testing.T) {
 	id := rand.Intn(1000)
-	verifier := NewVerifier(VerifierSettings{}, "stderr", testLocalDBFile)
+	verifier, err := NewVerifier(VerifierSettings{}, "stderr", testLocalDBFile)
+	require.NoError(t, err)
 	verifier.SetDocCompareMethod(DocCompareIgnoreOrder)
 
 	type compareTest struct {

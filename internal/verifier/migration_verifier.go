@@ -174,10 +174,11 @@ type VerificationStatus struct {
 // VerifierSettings is NewVerifier’s argument.
 type VerifierSettings struct {
 	ReadConcernSetting
+	StartClean bool
 }
 
 // NewVerifier creates a new Verifier
-func NewVerifier(settings VerifierSettings, logPath, dbPath string) *Verifier {
+func NewVerifier(settings VerifierSettings, logPath, dbPath string) (*Verifier, error) {
 	readConcern := settings.ReadConcernSetting
 	if readConcern == "" {
 		readConcern = ReadConcernMajority
@@ -185,9 +186,23 @@ func NewVerifier(settings VerifierSettings, logPath, dbPath string) *Verifier {
 
 	logger, logWriter := getLoggerAndWriter(logPath)
 
+	if settings.StartClean {
+		if err := os.RemoveAll(dbPath); err != nil {
+			return nil, errors.Wrapf(
+				err,
+				"clearing local DB path %#q",
+				dbPath,
+			)
+		}
+	}
+
 	ldb, err := localdb.New(logger, dbPath)
 	if err != nil {
-		panic(fmt.Sprintf("failed to open local DB %#q: %v", dbPath, err))
+		return nil, errors.Wrapf(
+			err,
+			"opening local DB path %#q",
+			dbPath,
+		)
 	}
 
 	return &Verifier{
@@ -213,8 +228,9 @@ func NewVerifier(settings VerifierSettings, logPath, dbPath string) *Verifier {
 		verificationStatusCheckInterval: 15 * time.Second,
 		nsMap:                           NewNSMap(),
 
-		localDB: ldb,
-	}
+		startClean: settings.StartClean,
+		localDB:    ldb,
+	}, nil
 }
 
 // ConfigureReadConcern
@@ -395,10 +411,6 @@ func (verifier *Verifier) SetDocCompareMethod(method DocCompareMethod) {
 
 func (verifier *Verifier) SetVerifyAll(arg bool) {
 	verifier.verifyAll = arg
-}
-
-func (verifier *Verifier) SetStartClean(arg bool) {
-	verifier.startClean = arg
 }
 
 func (verifier *Verifier) SetReadPreference(arg string) error {

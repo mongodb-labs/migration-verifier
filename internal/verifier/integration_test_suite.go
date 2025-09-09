@@ -162,8 +162,9 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	qfilter := QueryFilter{Namespace: "keyhole.dealers"}
 	task := VerificationTask{QueryFilter: qfilter}
 
-	verifier := NewVerifier(VerifierSettings{}, "stderr", testLocalDBFile)
-	//verifier.SetStartClean(true)
+	verifier, err := NewVerifier(VerifierSettings{}, "stderr", testLocalDBFile)
+	suite.Require().NoError(err)
+
 	verifier.SetNumWorkers(3)
 	verifier.SetGenerationPauseDelay(0)
 	verifier.SetWorkerSleepDelay(0)

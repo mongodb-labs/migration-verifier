@@ -65,19 +65,18 @@ func main() {
 			Usage: "path to an optional YAML config file",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  srcURI,
-			Value: "mongodb://localhost:27017",
-			Usage: "source Host `URI` for migration verification",
+			Name:     srcURI,
+			Usage:    "source Host `URI` for migration verification",
+			Required: true,
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  dstURI,
-			Value: "mongodb://localhost:27018",
-			Usage: "destination Host `URI` for migration verification",
+			Name:     dstURI,
+			Usage:    "destination Host `URI` for migration verification",
+			Required: true,
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  metaURI,
-			Value: "mongodb://localhost:27019",
-			Usage: "host `URI` for storing migration verification metadata",
+			Usage: "host `URI` for storing migration verification metadata; default=dstURI",
 		}),
 		altsrc.NewIntFlag(cli.IntFlag{
 			Name:  serverPort,
@@ -224,7 +223,9 @@ func main() {
 }
 
 func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, error) {
-	verifierSettings := verifier.VerifierSettings{}
+	verifierSettings := verifier.VerifierSettings{
+		StartClean: cCtx.Bool(startClean),
+	}
 	if cCtx.Bool(ignoreReadConcernFlag) {
 		verifierSettings.ReadConcernSetting = verifier.ReadConcernIgnore
 	}
@@ -232,7 +233,10 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	logDir := cCtx.String(logDir)
 	dbFile := cCtx.String(dbFileArg)
 
-	v := verifier.NewVerifier(verifierSettings, logDir, dbFile)
+	v, err := verifier.NewVerifier(verifierSettings, logDir, dbFile)
+	if err != nil {
+		return nil, err
+	}
 
 	v.GetLogger().Info().
 		Str("revision", Revision).
@@ -240,7 +244,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		Int("processID", os.Getpid()).
 		Msg("migration-verifier started.")
 
-	err := v.SetSrcURI(ctx, cCtx.String(srcURI))
+	err = v.SetSrcURI(ctx, cCtx.String(srcURI))
 	if err != nil {
 		return nil, err
 	}
@@ -252,14 +256,13 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 
 	metaConnStr := cCtx.String(metaURI)
+	if metaConnStr == "" {
+		metaConnStr = dstConnStr
+	}
+
 	err = v.SetMetaURI(ctx, metaConnStr)
 	if err != nil {
 		return nil, err
-	}
-
-	if dstConnStr == metaConnStr {
-		v.GetLogger().Warn().
-			Msg("Storing migration-verifier’s metadata on the destination can significantly impede performance. Use a dedicated cluster for the metadata if you can.")
 	}
 
 	v.SetServerPort(cCtx.Int(serverPort))
@@ -289,8 +292,6 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 
 		v.SetRecheckMaxSizeMB(recheckMaxSizeMBVal)
 	}
-
-	v.SetStartClean(cCtx.Bool(startClean))
 
 	if cCtx.Bool(verifyAll) {
 		if len(cCtx.StringSlice(srcNamespace)) > 0 || len(cCtx.StringSlice(dstNamespace)) > 0 {

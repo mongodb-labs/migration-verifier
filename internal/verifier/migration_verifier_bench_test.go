@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func BenchmarkGeneric(t *testing.B) {
@@ -54,12 +56,13 @@ func BenchmarkGeneric(t *testing.B) {
 	fmt.Printf("Running with %s as the meta db name. Specify META_DB_NAME= to change\n", metaDBName)
 	// fmt.Printf("Running with %s as the namespace. Specify META_DB_NAME= to change\n", metaDBName)
 
-	verifier := NewVerifier(VerifierSettings{}, "stderr", testLocalDBFile)
+	verifier, err := NewVerifier(VerifierSettings{}, "stderr", testLocalDBFile)
+	require.NoError(t, err)
 	verifier.SetNumWorkers(numWorkers)
 	verifier.SetGenerationPauseDelay(0)
 	verifier.SetWorkerSleepDelay(0)
 	fmt.Printf("meta uri %s\n", metaUri)
-	err := verifier.SetMetaURI(context.Background(), metaUri)
+	err = verifier.SetMetaURI(context.Background(), metaUri)
 	if err != nil {
 		t.Fatal(err)
 	}
