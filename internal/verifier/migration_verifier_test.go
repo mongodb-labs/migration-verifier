@@ -591,9 +591,6 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 		ctx,
 		changeEventBatch{
 			events: []ParsedEvent{{
-				ID: bson.M{
-					"docID": "ID/docID",
-				},
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
 				DocID:  "hoohoo",
