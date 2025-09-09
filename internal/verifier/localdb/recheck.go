@@ -120,9 +120,9 @@ func getRechecksCountInTxn(tx *badger.Txn, generation int) (uint64, error) {
 }
 
 // GetRecheckReader returns a channel from which the caller can read
-// Rechecks. If the context is canceled, the channel will be closed. If any
-// other error condition appears while reading the rechecks, that error will
-// go into the channel, and the channel will be closed.
+// Rechecks. If the context is canceled, the channel will be closed without an
+// error. If any other error condition appears while reading the rechecks,
+// that error will go into the channel, and the channel will be closed.
 //
 // The rechecks will be returned sorted by namespace; within a namespace,
 // however, no sort order is defined.
