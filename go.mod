@@ -18,7 +18,6 @@ require (
 	github.com/samber/mo v1.13.0
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli v1.22.9
-	go.etcd.io/bbolt v1.4.3
 	go.mongodb.org/mongo-driver v1.17.1
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
 	golang.org/x/sync v0.15.0
