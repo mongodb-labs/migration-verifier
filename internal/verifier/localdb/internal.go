@@ -30,7 +30,7 @@ func verifySchemaVersion(db *badger.DB) error {
 		} else {
 			versionBytes, err := item.ValueCopy(nil)
 			if err != nil {
-				// TODO
+				return err
 			}
 
 			if bytes.Equal(versionBytes, metadataVersionBytes) {

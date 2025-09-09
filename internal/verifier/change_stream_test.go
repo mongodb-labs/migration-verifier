@@ -259,6 +259,8 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	func() {
 		verifier1 := suite.BuildVerifier()
+		defer verifier1.localDB.Close()
+
 		ctx, cancel := contextplus.WithCancelCause(suite.Context())
 		defer cancel(errors.New("finished change stream handling"))
 		suite.startSrcChangeStreamReaderAndHandler(ctx, verifier1)

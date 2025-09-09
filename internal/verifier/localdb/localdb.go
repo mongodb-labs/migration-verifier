@@ -25,3 +25,7 @@ func New(l *logger.Logger, path string) (*LocalDB, error) {
 
 	return &LocalDB{l, db}, nil
 }
+
+func (ldb *LocalDB) Close() error {
+	return ldb.db.Close()
+}

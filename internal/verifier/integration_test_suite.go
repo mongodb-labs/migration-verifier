@@ -118,6 +118,8 @@ func (suite *IntegrationTestSuite) SetupTest() {
 			suite.initialDbNames.Add(dbName)
 		}
 	}
+
+	suite.Require().NoError(os.RemoveAll(testLocalDBFile))
 }
 
 func (suite *IntegrationTestSuite) TearDownTest() {
@@ -159,8 +161,6 @@ func (suite *IntegrationTestSuite) GetTopology(client *mongo.Client) util.Cluste
 func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	qfilter := QueryFilter{Namespace: "keyhole.dealers"}
 	task := VerificationTask{QueryFilter: qfilter}
-
-	suite.Require().NoError(os.RemoveAll(testLocalDBFile))
 
 	verifier := NewVerifier(VerifierSettings{}, "stderr", testLocalDBFile)
 	//verifier.SetStartClean(true)
