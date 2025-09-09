@@ -13,7 +13,10 @@ type LocalDB struct {
 }
 
 func New(l *logger.Logger, path string) (*LocalDB, error) {
-	db, err := badger.Open(badger.DefaultOptions(path))
+	db, err := badger.Open(
+		badger.DefaultOptions(path).
+			WithLogger(&badgerLogger{l}),
+	)
 	if err != nil {
 		return nil, errors.Wrapf(err, "opening %#q", path)
 	}

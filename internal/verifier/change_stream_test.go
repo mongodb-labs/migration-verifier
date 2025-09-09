@@ -608,6 +608,7 @@ func (suite *IntegrationTestSuite) TestWritesOffCursorKilledResilience() {
 				clientAppName,
 			),
 		)
+		suite.Require().NoError(verifier.localDB.Close())
 	}
 }
 
