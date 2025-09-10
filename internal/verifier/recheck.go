@@ -64,7 +64,9 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	generation, _ := verifier.getGenerationWhileLocked()
 
-	chunkSize := 2 << 12
+	// This was determined via testing to be a reasonable
+	// initial batch size.
+	chunkSize := 1 << 13
 
 chunkSizeLoop:
 	for {
@@ -91,6 +93,8 @@ chunkSizeLoop:
 					break
 				}
 
+				// ErrConflict means we conflicted with another write,
+				// so we need to retry.
 				if errors.Is(err, badger.ErrConflict) {
 					continue
 				}
@@ -149,18 +153,6 @@ func (verifier *Verifier) DropOldRecheckQueueWhileLocked(ctx context.Context) er
 	verifier.logger.Debug().
 		Int("previousGeneration", prevGeneration).
 		Msg("Deleting previous generation's enqueued rechecks.")
-
-	/*
-		genCollection := verifier.getRecheckQueueCollection(prevGeneration)
-
-		return retry.New().WithCallback(
-			func(ctx context.Context, i *retry.FuncInfo) error {
-				return genCollection.Drop(ctx)
-			},
-			"deleting generation %d's enqueued rechecks",
-			prevGeneration,
-		).Run(ctx, verifier.logger)
-	*/
 
 	return verifier.localDB.ClearAllRechecksForGeneration(prevGeneration)
 }

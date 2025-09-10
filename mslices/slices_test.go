@@ -1,8 +1,10 @@
 package mslices
 
 import (
+	"slices"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -47,4 +49,34 @@ func (s *mySuite) Test_ToMap() {
 		},
 		myMap,
 	)
+}
+
+func (s *mySuite) Test_Reorder_Static() {
+	values := Of("a", "b", "c")
+	indices := Of(1, 2, 0)
+
+	Reorder(values, indices)
+
+	s.Assert().Equal(
+		Of("b", "c", "a"),
+		values,
+		"values should be reordered as we expect",
+	)
+}
+
+func (s *mySuite) Test_Reorder_Random() {
+	values := lo.Range(10_000)
+
+	indices := lo.Shuffle(slices.Clone(values))
+
+	// This would be a much simpler implementation of Reorder, but it
+	// copies the array, which is unideal.
+	expect := make([]int, len(values))
+	for i, o := range indices {
+		expect[i] = values[o]
+	}
+
+	Reorder(values, indices)
+
+	s.Assert().Equal(expect, values)
 }

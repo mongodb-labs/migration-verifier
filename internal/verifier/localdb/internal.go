@@ -11,8 +11,12 @@ import (
 )
 
 const (
+	// If we ever change how the data is stored in this DB,
+	// bump this version to invalidate any verifications using
+	// the prior schema.
+	schemaVersion = uint16(1)
+
 	schemaVersionKey = "formatVersion"
-	schemaVersion    = uint16(3)
 
 	metadataBucketName = "metadata"
 )
