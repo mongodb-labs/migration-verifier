@@ -31,35 +31,7 @@ type recheckInternal struct {
 func (ldb *LocalDB) ClearAllRechecksForGeneration(generation int) error {
 	bucketPrefix := getRecheckBucketPrefixForGeneration(generation)
 
-	return ldb.db.Update(func(tx *badger.Txn) error {
-		iteratorOpts := badger.DefaultIteratorOptions
-		iteratorOpts.Prefix = []byte(bucketPrefix)
-		iteratorOpts.PrefetchValues = false
-
-		iter := tx.NewIterator(iteratorOpts)
-		defer iter.Close()
-
-		for iter.Rewind(); iter.Valid(); iter.Next() {
-			if err := tx.Delete(iter.Item().Key()); err != nil {
-				return errors.Wrapf(
-					err,
-					"deleting key %#q",
-					string(iter.Item().Key()),
-				)
-			}
-		}
-
-		err := tx.Delete([]byte(getRecheckCountKeyForGeneration(generation)))
-		if err != nil {
-			return errors.Wrapf(
-				err,
-				"deleting generation %d’s recheck count",
-				generation,
-			)
-		}
-
-		return nil
-	})
+	return ldb.db.DropPrefix([]byte(bucketPrefix))
 }
 
 func getRecheckBucketPrefixForGeneration(generation int) string {
@@ -222,6 +194,10 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 
 			return nil
 		})
+
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			err = nil
+		}
 
 		if err != nil && !canceled {
 			select {
