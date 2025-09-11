@@ -220,11 +220,13 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	verifier.mux.Unlock()
 
 	err = retry.New().WithCallback(
-		func(ctx context.Context, _ *retry.FuncInfo) error {
+		func(ctx context.Context, ri *retry.FuncInfo) error {
 			err = verifier.AddMetaIndexes(ctx)
 			if err != nil {
 				return err
 			}
+
+			ri.NoteSuccess("added meta indexes")
 
 			err = verifier.doInMetaTransaction(
 				ctx,

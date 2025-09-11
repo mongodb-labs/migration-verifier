@@ -3,16 +3,18 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/dgraph-io/badger/v4"
+	"github.com/10gen/migration-verifier/internal/verifier/localdb"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
-	"golang.org/x/exp/slices"
+	"go.mongodb.org/mongo-driver/bson/bsontype"
 )
 
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
@@ -45,102 +47,135 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 func (verifier *Verifier) insertRecheckDocs(
 	dbNames []string,
 	collNames []string,
-	documentIDs []any,
+	documentIDsAny []any,
 	dataSizes []int,
 ) error {
 
-	if len(dbNames) != len(collNames) || len(collNames) != len(documentIDs) || len(documentIDs) != len(dataSizes) {
+	if len(dbNames) != len(collNames) || len(collNames) != len(documentIDsAny) || len(documentIDsAny) != len(dataSizes) {
 		panic(fmt.Sprintf(
 			"Mismatched recheck slices!! dbNames=%d collNames=%d docIDs=%d sizes=%d",
 			len(dbNames),
 			len(collNames),
-			len(documentIDs),
+			len(documentIDsAny),
 			len(dataSizes),
 		))
 	}
+
+	var rawDocIDs []bson.RawValue
+	dbNames, collNames, rawDocIDs, dataSizes = deduplicateRechecks(dbNames, collNames, documentIDsAny, dataSizes)
 
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
 
 	generation, _ := verifier.getGenerationWhileLocked()
 
-	// This was determined via testing to be a reasonable
-	// initial batch size.
-	chunkSize := 1 << 13
+	rechecks := make([]localdb.Recheck, 0, len(dbNames))
 
-chunkSizeLoop:
-	for {
-		dbNameChunks := lo.Chunk(slices.Clone(dbNames), chunkSize)
+	for i, dbName := range dbNames {
+		rechecks = append(
+			rechecks,
+			localdb.Recheck{
+				DB:    dbName,
+				Coll:  collNames[i],
+				DocID: rawDocIDs[i],
+				Size:  types.ByteCount(dataSizes[i]),
+			},
+		)
+	}
 
-		i := 0
+	start := time.Now()
+	err := verifier.localDB.InsertRechecks(generation, rechecks)
 
-		for _, dbNamesChunk := range dbNameChunks {
-			chunkLen := len(dbNamesChunk)
-			collNamesChunk := collNames[i : i+chunkLen]
-			docIDsChunk := documentIDs[i : i+chunkLen]
-			dataSizesChunk := dataSizes[i : i+chunkLen]
-
-			for {
-				err := verifier.localDB.InsertRechecks(
-					generation,
-					dbNamesChunk,
-					collNamesChunk,
-					docIDsChunk,
-					dataSizesChunk,
-				)
-
-				if err == nil {
-					break
-				}
-
-				// ErrConflict means we conflicted with another write,
-				// so we need to retry.
-				if errors.Is(err, badger.ErrConflict) {
-					continue
-				}
-
-				if errors.Is(err, badger.ErrTxnTooBig) {
-					nextChunkSize := chunkSize >> 1
-
-					if nextChunkSize == 0 {
-						err = errors.Wrapf(
-							err,
-							"cannot reduce chunk size (%d) further; badger DB bug??",
-							chunkSize,
-						)
-					} else {
-						verifier.logger.Debug().
-							Int("failedChunkSize", chunkSize).
-							Int("nextChunkSize", nextChunkSize).
-							Msg("Local DB transaction is too big. Retrying with smaller chunks.")
-
-						chunkSize = nextChunkSize
-
-						continue chunkSizeLoop
-					}
-				}
-
-				return errors.Wrapf(
-					err,
-					"persisting %d recheck(s) of %d for generation %d",
-					chunkLen,
-					len(documentIDs),
-					generation,
-				)
-			}
-
-			i += chunkLen
-		}
-
-		break
+	if err != nil {
+		return errors.Wrapf(
+			err,
+			"persisting %d recheck(s) for generation %d",
+			len(dbNames),
+			generation,
+		)
 	}
 
 	verifier.logger.Debug().
 		Int("generation", generation).
-		Int("count", len(documentIDs)).
+		Int("count", len(rawDocIDs)).
+		Stringer("timeElapsed", time.Since(start)).
 		Msg("Persisted rechecks.")
 
 	return nil
+}
+
+func deduplicateRechecks(
+	dbNames, collNames []string,
+	documentIDs []any,
+	dataSizes []int,
+) ([]string, []string, []bson.RawValue, []int) {
+	dedupeMap := map[string]map[string]map[string]int{}
+
+	uniqueElems := 0
+
+	for i, dbName := range dbNames {
+		collName := collNames[i]
+		docID := documentIDs[i]
+		dataSize := dataSizes[i]
+
+		docIDRaw := mbson.MustConvertToRawValue(docID)
+
+		docIDStr := string(append(
+			[]byte{byte(docIDRaw.Type)},
+			docIDRaw.Value...,
+		))
+
+		if _, ok := dedupeMap[dbName]; !ok {
+			dedupeMap[dbName] = map[string]map[string]int{
+				collName: {
+					docIDStr: dataSize,
+				},
+			}
+
+			uniqueElems++
+
+			continue
+		}
+
+		if _, ok := dedupeMap[dbName][collName]; !ok {
+			dedupeMap[dbName][collName] = map[string]int{
+				docIDStr: dataSize,
+			}
+
+			uniqueElems++
+
+			continue
+		}
+
+		if _, ok := dedupeMap[dbName][collName][docIDStr]; !ok {
+			dedupeMap[dbName][collName][docIDStr] = dataSize
+			uniqueElems++
+		}
+	}
+
+	dbNames = make([]string, 0, uniqueElems)
+	collNames = make([]string, 0, uniqueElems)
+	rawDocIDs := make([]bson.RawValue, 0, uniqueElems)
+	dataSizes = make([]int, 0, uniqueElems)
+
+	for dbName, collMap := range dedupeMap {
+		for collName, docMap := range collMap {
+			for docIDStr, dataSize := range docMap {
+				dbNames = append(dbNames, dbName)
+				collNames = append(collNames, collName)
+				rawDocIDs = append(
+					rawDocIDs,
+					bson.RawValue{
+						Type:  []bsontype.Type(docIDStr)[0],
+						Value: []byte(docIDStr)[1:],
+					},
+				)
+				dataSizes = append(dataSizes, dataSize)
+			}
+		}
+	}
+
+	return dbNames, collNames, rawDocIDs, dataSizes
 }
 
 // DropOldRecheckQueueWhileLocked deletes the previous generation’s recheck

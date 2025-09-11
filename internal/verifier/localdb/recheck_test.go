@@ -8,10 +8,12 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 func TestRecheck(t *testing.T) {
@@ -32,10 +34,19 @@ func TestRecheck(t *testing.T) {
 
 	err = ldb.InsertRechecks(
 		0,
-		[]string{"db1", "db1", "db2"},
-		[]string{"coll1", "coll2", "coll3"},
-		[]any{"id1", "id2", "id2"},
-		[]int{123, 234, 345},
+		mslices.Of("db1", "db1", "db2"),
+		mslices.Of("coll1", "coll2", "coll3"),
+		lo.Map(
+			mslices.Of("id1", "id2", "id2"),
+			func(str string, _ int) bson.RawValue {
+				bType, bVal := lo.Must2(bson.MarshalValue(str))
+				return bson.RawValue{
+					Type:  bType,
+					Value: bVal,
+				}
+			},
+		),
+		mslices.Of(123, 234, 345),
 	)
 	require.NoError(t, err)
 
@@ -98,10 +109,13 @@ func TestRecheck(t *testing.T) {
 		func(t *testing.T) {
 			err := ldb.InsertRechecks(
 				0,
-				[]string{"db1", "db1"},
-				[]string{"coll1", "coll2"},
-				[]any{"id1", "id2"},
-				[]int{123, 234},
+				mslices.Of("db1", "db1"),
+				mslices.Of("coll1", "coll2"),
+				mslices.Of(
+					expectedRechecks[0].DocID,
+					expectedRechecks[1].DocID,
+				),
+				mslices.Of(123, 234),
 			)
 			require.NoError(t, err)
 

@@ -236,6 +236,8 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 		suite.T().Skip("Skipping this test in CI. (It causes GitHub Action to self-terminate.)")
 	}
 
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
 	verifier := suite.BuildVerifier()
 	verifier.SetNumWorkers(10)
 	ctx := suite.Context()

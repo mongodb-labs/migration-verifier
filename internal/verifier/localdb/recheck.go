@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -234,116 +235,169 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 }
 
 // InsertRechecks enqueues rechecks. The given slices must be of the same length.
-func (ldb *LocalDB) InsertRechecks(
-	generation int,
-	dbNames []string,
-	collNames []string,
-	documentIDs []any,
-	dataSizes []int,
-) error {
+func (ldb *LocalDB) InsertRechecks(generation int, rechecks []Recheck) error {
+
+	for _, chunk := range lo.Chunk(rechecks, 16384) {
+		if err := ldb.persistRechecksChunk(generation, chunk); err != nil {
+			return errors.Wrapf(
+				err,
+				"persisting chunk of %d out of %d rechecks",
+				len(chunk),
+				len(rechecks),
+			)
+		}
+	}
+
+	return nil
+}
+
+func (ldb *LocalDB) persistRechecksChunk(generation int, rechecks []Recheck) error {
 	bucketPrefix := getRecheckBucketPrefixForGeneration(generation)
 
-	return errors.Wrapf(
-		ldb.db.Update(func(tx *badger.Txn) error {
-			var addedRechecks uint64
+	attempts := 0
+	for {
+		err := errors.Wrapf(
+			ldb.db.Update(func(tx *badger.Txn) error {
+				var addedRechecks uint64
 
-			for i, dbName := range dbNames {
-				collName := collNames[i]
+				for _, recheck := range rechecks {
+					namespace := recheck.DB + "." + recheck.Coll
 
-				namespace := dbName + "." + collName
+					sum := hashRawValue(recheck.DocID)
 
-				bsonType, bsonIDVal, err := bson.MarshalValue(documentIDs[i])
-				if err != nil {
-					return errors.Wrapf(err, "marshaling %#q document ID (%v)", namespace, documentIDs[i])
-				}
-
-				docIDRaw := bson.RawValue{
-					Type:  bsonType,
-					Value: bsonIDVal,
-				}
-
-				sum := hashRawValue(docIDRaw)
-
-				newKey := strings.Join(
-					[]string{
-						bucketPrefix,
-						strconv.Itoa(len(namespace)),
-						"-",
-						namespace,
-						string(sum),
-					},
-					"",
-				)
-
-				var existingRechecks []byte
-				oldRechecksItem, err := tx.Get([]byte(newKey))
-				if err != nil {
-					if !errors.Is(err, badger.ErrKeyNotFound) {
-						return errors.Wrapf(err, "fetching item %#q", newKey)
-					}
-				} else {
-					existingRechecks, err = oldRechecksItem.ValueCopy(nil)
-					if err != nil {
-						return errors.Wrapf(err, "copying value %#q", newKey)
-					}
-				}
-
-				docExists, err := internalRechecksHaveDocID(existingRechecks, docIDRaw)
-				if err != nil {
-					return errors.Wrapf(
-						err,
-						"checking if doc already enqueued for recheck",
-					)
-				}
-
-				if !docExists {
-					newRecheck := recheckInternal{
-						DocID:   docIDRaw,
-						DocSize: dataSizes[i],
-					}
-
-					newRecheckRaw, err := bson.Marshal(newRecheck)
-					if err != nil {
-						return errors.Wrapf(
-							err,
-							"marshaling internal recheck",
-						)
-					}
-
-					buf := append(existingRechecks, newRecheckRaw...)
-
-					err = tx.Set([]byte(newKey), buf)
-					if err != nil {
-						return errors.Wrapf(
-							err,
-							"persisting recheck for %#q",
+					newKey := strings.Join(
+						[]string{
+							bucketPrefix,
+							strconv.Itoa(len(namespace)),
+							"-",
 							namespace,
+							string(sum),
+						},
+						"",
+					)
+
+					var existingRechecks []byte
+					oldRechecksItem, err := tx.Get([]byte(newKey))
+					if err != nil {
+						if !errors.Is(err, badger.ErrKeyNotFound) {
+							return errors.Wrapf(err, "fetching item %#q", newKey)
+						}
+					} else {
+						existingRechecks, err = oldRechecksItem.ValueCopy(nil)
+						if err != nil {
+							return errors.Wrapf(err, "fetching value %#q", newKey)
+						}
+					}
+
+					docExists, err := internalRechecksHaveDocID(existingRechecks, recheck.DocID)
+					if err != nil {
+						return errors.Wrapf(
+							err,
+							"checking if doc already enqueued for recheck",
 						)
 					}
 
-					addedRechecks++
+					if !docExists {
+						if len(existingRechecks) > 0 {
+							ldb.log.Trace().
+								Str("DB", recheck.DB).
+								Str("Collection", recheck.Coll).
+								Bytes("DocIDHash", sum).
+								Msg("Document ID hash collision")
+						}
+
+						newRecheck := recheckInternal{
+							DocID:   recheck.DocID,
+							DocSize: int(recheck.Size),
+						}
+
+						newRecheckRaw, err := bson.Marshal(newRecheck)
+						if err != nil {
+							return errors.Wrapf(
+								err,
+								"marshaling internal recheck",
+							)
+						}
+
+						buf := append(existingRechecks, newRecheckRaw...)
+
+						err = tx.Set([]byte(newKey), buf)
+						if err != nil {
+							return errors.Wrapf(
+								err,
+								"persisting recheck for %#q",
+								namespace,
+							)
+						}
+
+						addedRechecks++
+					}
 				}
+
+				var curCount uint64
+				curCount, err := getRechecksCountInTxn(tx, generation)
+				if err != nil {
+					return errors.Wrapf(err, "reading gen %d’s rechecks count", generation)
+				}
+				countBytes := formatUint(addedRechecks + curCount)
+
+				metaBucketName := getRecheckCountKeyForGeneration(generation)
+
+				err = tx.Set([]byte(metaBucketName), countBytes)
+				if err != nil {
+					return errors.Wrapf(err, "persisting rechecks count %v", countBytes)
+				}
+
+				return nil
+			}),
+			"persisting %d recheck(s)",
+			len(rechecks),
+		)
+
+		// ErrConflict means we conflicted with another write,
+		// so we need to retry.
+		if errors.Is(err, badger.ErrConflict) {
+			attempts++
+
+			ldb.log.Trace().
+				Int("attemptsSoFar", attempts).
+				Msg("Transaction conflicted. Retrying.")
+
+			continue
+		}
+
+		if errors.Is(err, badger.ErrTxnTooBig) {
+			nextChunkSize := len(rechecks) >> 1
+
+			if nextChunkSize == 0 {
+				err = errors.Wrapf(
+					err,
+					"cannot reduce chunk size (%d) further; badger DB bug??",
+					len(rechecks),
+				)
+			} else {
+				ldb.log.Trace().
+					Int("failedChunkSize", len(rechecks)).
+					Int("nextChunkSize", nextChunkSize).
+					Msg("Local DB transaction is too big. Retrying with smaller chunks.")
+
+				for _, subChunk := range lo.Chunk(rechecks, nextChunkSize) {
+					if err := ldb.persistRechecksChunk(generation, subChunk); err != nil {
+						return errors.Wrapf(
+							err,
+							"persisting sub-chunk of %d out of %d rechecks",
+							len(subChunk),
+							len(rechecks),
+						)
+					}
+				}
+
+				return nil
 			}
+		}
 
-			var curCount uint64
-			curCount, err := getRechecksCountInTxn(tx, generation)
-			if err != nil {
-				return errors.Wrapf(err, "reading gen %d’s rechecks count", generation)
-			}
-			countBytes := formatUint(addedRechecks + curCount)
-
-			metaBucketName := getRecheckCountKeyForGeneration(generation)
-
-			err = tx.Set([]byte(metaBucketName), countBytes)
-			if err != nil {
-				return errors.Wrapf(err, "persisting rechecks count %v", countBytes)
-			}
-
-			return nil
-		}),
-		"persisting %d recheck(s)",
-		len(documentIDs),
-	)
+		return errors.Wrapf(err, "saving %d rechecks", len(rechecks))
+	}
 }
 
 // returns ns and doc ID hash
