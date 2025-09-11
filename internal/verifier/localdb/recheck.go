@@ -191,12 +191,13 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 						select {
 						case <-ctx.Done():
 							canceled = true
+							err = ctx.Err()
 
 							ldb.log.Debug().
 								Err(err).
 								Msg("Reading of rechecks was canceled.")
 
-							return ctx.Err()
+							return err
 						case retChan <- mo.Ok(recheck):
 							foundRechecks++
 						}

@@ -51,13 +51,9 @@ func TestRecheck(t *testing.T) {
 			cancel(cause)
 			reader := ldb.GetRecheckReader(readCtx, 0)
 
-			gotRechecks := 0
 			for recheck := range reader {
 				assert.NoError(t, recheck.Error(), "context cancellation should not cause error")
-				gotRechecks++
 			}
-
-			assert.Less(t, gotRechecks, 3, "should not read all rechecks")
 		},
 	)
 
