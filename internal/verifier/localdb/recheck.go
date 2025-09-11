@@ -237,7 +237,7 @@ func (ldb *LocalDB) GetRecheckReader(ctx context.Context, generation int) <-chan
 // InsertRechecks enqueues rechecks. The given slices must be of the same length.
 func (ldb *LocalDB) InsertRechecks(generation int, rechecks []Recheck) error {
 
-	for _, chunk := range lo.Chunk(rechecks, 16384) {
+	for _, chunk := range lo.Chunk(rechecks, 8192) {
 		if err := ldb.persistRechecksChunk(generation, chunk); err != nil {
 			return errors.Wrapf(
 				err,
