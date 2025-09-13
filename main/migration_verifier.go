@@ -38,7 +38,6 @@ const (
 	startClean            = "clean"
 	readPreference        = "readPreference"
 	partitionSizeMB       = "partitionSizeMB"
-	recheckMaxSizeMB      = "recheckMaxSizeMB"
 	checkOnly             = "checkOnly"
 	logLevelFlag          = "logLevel"
 	failureDisplaySize    = "failureDisplaySize"
@@ -104,11 +103,6 @@ func main() {
 			Name:  numWorkers,
 			Value: 10,
 			Usage: "`number` of worker threads to use for verification",
-		}),
-		altsrc.NewUintFlag(cli.UintFlag{
-			Name:  recheckMaxSizeMB,
-			Value: verifier.DefaultRecheckMaxSizeMB,
-			Usage: "Maximum size of a recheck query. Reduce this to limit server memory usage after generation 0.",
 		}),
 		altsrc.NewInt64Flag(cli.Int64Flag{
 			Name:  generationPauseDelay,
@@ -302,15 +296,6 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		}
 
 		v.SetPartitionSizeMB(uint32(partitionSizeMB))
-	}
-
-	recheckMaxSizeMBVal := cCtx.Uint(recheckMaxSizeMB)
-	if recheckMaxSizeMBVal != 0 {
-		if recheckMaxSizeMBVal > verifier.MaxRecheckMaxSizeMB {
-			return nil, fmt.Errorf("%#q may not exceed %d", recheckMaxSizeMB, verifier.MaxRecheckMaxSizeMB)
-		}
-
-		v.SetRecheckMaxSizeMB(recheckMaxSizeMBVal)
 	}
 
 	v.SetStartClean(cCtx.Bool(startClean))

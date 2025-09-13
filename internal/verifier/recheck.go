@@ -257,6 +257,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		verifier.numWorkers,
 	)
 
+	maxDocsPerTask = min(maxDocsPerTask, maxRecheckIDs)
+
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
 	// namespace will be consecutive in this query’s result.
@@ -325,7 +327,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		if doc.PrimaryKey.SrcDatabaseName != prevDBName ||
 			doc.PrimaryKey.SrcCollectionName != prevCollName ||
 			len(idAccum) > maxDocsPerTask ||
-			types.ByteCount(idsSizer.Len()) >= verifier.recheckMaxSizeInBytes ||
+			types.ByteCount(idsSizer.Len()) >= maxRecheckIDsBytes ||
 			dataSizeAccum >= verifier.partitionSizeInBytes {
 
 			err := persistBufferedRechecks()
