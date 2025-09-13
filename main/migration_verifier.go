@@ -44,6 +44,7 @@ const (
 	ignoreReadConcernFlag = "ignoreReadConcern"
 	configFileFlag        = "configFile"
 	pprofInterval         = "pprofInterval"
+	startFlag             = "start"
 
 	buildVarDefaultStr = "Unknown; build with build.sh."
 )
@@ -148,6 +149,10 @@ func main() {
 			Name:  startClean,
 			Usage: "If set, drop all previous verification metadata before starting",
 		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
+			Name:  startFlag,
+			Usage: "Start checking documents immediately",
+		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  readPreference,
 			Value: "primary",
@@ -216,6 +221,10 @@ func main() {
 
 				return verifier.CheckDriver(ctx, nil)
 			} else {
+				if cCtx.Bool(startFlag) {
+					verifier.Check(ctx, nil)
+				}
+
 				return verifier.StartServer()
 			}
 		},
