@@ -195,7 +195,7 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 
 		workerTracker: NewWorkerTracker(NumWorkers),
 
-		verificationStatusCheckInterval: 15 * time.Second,
+		verificationStatusCheckInterval: 2 * time.Second,
 		nsMap:                           NewNSMap(),
 	}
 }
