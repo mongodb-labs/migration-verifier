@@ -1285,9 +1285,12 @@ func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*Verificat
 	verificationStatus := VerificationStatus{}
 
 	for _, result := range results {
-		status := result.Lookup("_id").String()
-		// Status is returned with quotes around it so remove those
-		status = status[1 : len(status)-1]
+		idRaw := result.Lookup("_id")
+		status, isString := idRaw.StringValueOK()
+		if !isString {
+			panic(fmt.Sprintf("status (BSON %s: %v) should be BSON string", idRaw.Type, idRaw))
+		}
+
 		count := int(result.Lookup("count").Int32())
 		verificationStatus.TotalTasks += int(count)
 		switch verificationTaskStatus(status) {
