@@ -76,24 +76,24 @@ func main() {
 			Usage: "path to an optional YAML config file",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  srcURI,
-			Value: "mongodb://localhost:27017",
-			Usage: "source Host `URI` for migration verification",
+			Name:     srcURI,
+			Usage:    "source connection string",
+			Required: true,
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  dstURI,
-			Value: "mongodb://localhost:27018",
-			Usage: "destination Host `URI` for migration verification",
+			Name:     dstURI,
+			Usage:    "destination connection string",
+			Required: true,
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  metaURI,
-			Value: "mongodb://localhost:27019",
-			Usage: "host `URI` for storing migration verification metadata",
+			Value: "mongodb://localhost",
+			Usage: "connection string to replset that stores verifier metadata",
 		}),
 		altsrc.NewIntFlag(cli.IntFlag{
 			Name:  serverPort,
 			Value: 27020,
-			Usage: "`port` for the control web server",
+			Usage: "`port` for the control web server (0 assigns a random port)",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  logPath,
@@ -103,7 +103,7 @@ func main() {
 		altsrc.NewIntFlag(cli.IntFlag{
 			Name:  numWorkers,
 			Value: 10,
-			Usage: "`number` of worker threads to use for verification",
+			Usage: "number of worker threads to use for verification",
 		}),
 		altsrc.NewInt64Flag(cli.Int64Flag{
 			Name:  generationPauseDelay,
@@ -114,6 +114,10 @@ func main() {
 			Name:  workerSleepDelay,
 			Value: 1_000,
 			Usage: "`milliseconds` workers sleep while waiting for work",
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
+			Name:  verifyAll,
+			Usage: "Verify all user namespaces",
 		}),
 		altsrc.NewStringSliceFlag(cli.StringSliceFlag{
 			Name:  srcNamespace,
@@ -140,10 +144,6 @@ func main() {
 				", ",
 			),
 			Value: string(verifier.DocCompareDefault),
-		}),
-		altsrc.NewBoolFlag(cli.BoolFlag{
-			Name:  verifyAll,
-			Usage: "If set, verify all user namespaces",
 		}),
 		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  startClean,
