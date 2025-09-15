@@ -9,9 +9,11 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -95,9 +97,16 @@ func (verifier *Verifier) insertRecheckDocs(
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
 
+	dbNames, collNames, rawDocIDs, dataSizes := deduplicateRechecks(
+		dbNames,
+		collNames,
+		documentIDs,
+		dataSizes,
+	)
+
 	generation, _ := verifier.getGenerationWhileLocked()
 
-	docIDIndexes := lo.Range(len(documentIDs))
+	docIDIndexes := lo.Range(len(dbNames))
 	indexesPerThread := splitToChunks(docIDIndexes, verifier.numWorkers)
 
 	eg, groupCtx := contextplus.ErrGroup(ctx)
@@ -112,7 +121,7 @@ func (verifier *Verifier) insertRecheckDocs(
 					PrimaryKey: RecheckPrimaryKey{
 						SrcDatabaseName:   dbNames[i],
 						SrcCollectionName: collNames[i],
-						DocumentID:        documentIDs[i],
+						DocumentID:        rawDocIDs[i],
 					},
 					DataSize: dataSizes[i],
 				}
@@ -164,17 +173,91 @@ func (verifier *Verifier) insertRecheckDocs(
 		return errors.Wrapf(
 			err,
 			"failed to persist %d recheck(s) for generation %d",
-			len(documentIDs),
+			len(dbNames),
 			generation,
 		)
 	}
 
 	verifier.logger.Trace().
 		Int("generation", generation).
-		Int("count", len(documentIDs)).
+		Int("count", len(dbNames)).
 		Msg("Persisted rechecks.")
 
 	return nil
+}
+
+func deduplicateRechecks(
+	dbNames, collNames []string,
+	documentIDs []any,
+	dataSizes []int,
+) ([]string, []string, []bson.RawValue, []int) {
+	dedupeMap := map[string]map[string]map[string]int{}
+
+	uniqueElems := 0
+
+	for i, dbName := range dbNames {
+		collName := collNames[i]
+		docID := documentIDs[i]
+		dataSize := dataSizes[i]
+
+		docIDRaw := mbson.MustConvertToRawValue(docID)
+
+		docIDStr := string(append(
+			[]byte{byte(docIDRaw.Type)},
+			docIDRaw.Value...,
+		))
+
+		if _, ok := dedupeMap[dbName]; !ok {
+			dedupeMap[dbName] = map[string]map[string]int{
+				collName: {
+					docIDStr: dataSize,
+				},
+			}
+
+			uniqueElems++
+
+			continue
+		}
+
+		if _, ok := dedupeMap[dbName][collName]; !ok {
+			dedupeMap[dbName][collName] = map[string]int{
+				docIDStr: dataSize,
+			}
+
+			uniqueElems++
+
+			continue
+		}
+
+		if _, ok := dedupeMap[dbName][collName][docIDStr]; !ok {
+			dedupeMap[dbName][collName][docIDStr] = dataSize
+			uniqueElems++
+		}
+	}
+
+	dbNames = make([]string, 0, uniqueElems)
+	collNames = make([]string, 0, uniqueElems)
+	rawDocIDs := make([]bson.RawValue, 0, uniqueElems)
+	dataSizes = make([]int, 0, uniqueElems)
+
+	for dbName, collMap := range dedupeMap {
+		for collName, docMap := range collMap {
+			for docIDStr, dataSize := range docMap {
+				dbNames = append(dbNames, dbName)
+				collNames = append(collNames, collName)
+				rawDocIDs = append(
+					rawDocIDs,
+					bson.RawValue{
+						Type:  []bsontype.Type(docIDStr)[0],
+						Value: []byte(docIDStr)[1:],
+					},
+				)
+				dataSizes = append(dataSizes, dataSize)
+			}
+		}
+	}
+
+	return dbNames, collNames, rawDocIDs, dataSizes
 }
 
 // DropOldRecheckQueueWhileLocked deletes the previous generation’s recheck
