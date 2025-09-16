@@ -9,14 +9,18 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
+	recheckBatchByteLimit  = 1024 * 1024
+	recheckBatchCountLimit = 1000
+
 	recheckQueueCollectionNameBase = "recheckQueue"
 )
 
@@ -69,22 +73,6 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	)
 }
 
-// This will split the given slice into *roughly* the given number of chunks.
-// It may end up being more or fewer, but it should be pretty close.
-func splitToChunks[T any, Slice ~[]T](elements Slice, numChunks int) []Slice {
-	if numChunks < 1 {
-		panic(fmt.Sprintf("numChunks (%v) should be >=1", numChunks))
-	}
-
-	elsPerChunk := len(elements) / numChunks
-
-	if elsPerChunk == 0 {
-		elsPerChunk = 1
-	}
-
-	return lo.Chunk(elements, elsPerChunk)
-}
-
 func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
 	dbNames []string,
@@ -95,31 +83,55 @@ func (verifier *Verifier) insertRecheckDocs(
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
 
-	generation, _ := verifier.getGenerationWhileLocked()
+	dbNames, collNames, rawDocIDs, dataSizes := deduplicateRechecks(
+		dbNames,
+		collNames,
+		documentIDs,
+		dataSizes,
+	)
 
-	docIDIndexes := lo.Range(len(documentIDs))
-	indexesPerThread := splitToChunks(docIDIndexes, verifier.numWorkers)
+	generation, _ := verifier.getGenerationWhileLocked()
 
 	eg, groupCtx := contextplus.ErrGroup(ctx)
 
 	genCollection := verifier.getRecheckQueueCollection(generation)
 
-	for _, curThreadIndexes := range indexesPerThread {
-		eg.Go(func() error {
-			models := make([]mongo.WriteModel, len(curThreadIndexes))
-			for m, i := range curThreadIndexes {
-				recheckDoc := RecheckDoc{
-					PrimaryKey: RecheckPrimaryKey{
-						SrcDatabaseName:   dbNames[i],
-						SrcCollectionName: collNames[i],
-						DocumentID:        documentIDs[i],
-					},
-					DataSize: dataSizes[i],
-				}
+	var recheckBatches [][]mongo.WriteModel
+	var curRechecks []mongo.WriteModel
+	curBatchSize := 0
+	for i, dbName := range dbNames {
+		recheckDoc := RecheckDoc{
+			PrimaryKey: RecheckPrimaryKey{
+				SrcDatabaseName:   dbName,
+				SrcCollectionName: collNames[i],
+				DocumentID:        rawDocIDs[i],
+			},
+			DataSize: dataSizes[i],
+		}
 
-				models[m] = mongo.NewInsertOneModel().
-					SetDocument(recheckDoc)
-			}
+		recheckRaw, err := bson.Marshal(recheckDoc)
+		if err != nil {
+			return errors.Wrapf(err, "marshaling recheck for %#q", dbName+"."+collNames[i])
+		}
+
+		curRechecks = append(
+			curRechecks,
+			mongo.NewInsertOneModel().SetDocument(recheckDoc),
+		)
+		curBatchSize += len(recheckRaw)
+		if curBatchSize > recheckBatchByteLimit || len(recheckRaw) >= recheckBatchCountLimit {
+			recheckBatches = append(recheckBatches, curRechecks)
+			curRechecks = nil
+			curBatchSize = 0
+		}
+	}
+
+	if len(curRechecks) > 0 {
+		recheckBatches = append(recheckBatches, curRechecks)
+	}
+
+	for _, models := range recheckBatches {
+		eg.Go(func() error {
 
 			retryer := retry.New()
 			err := retryer.WithCallback(
@@ -156,14 +168,14 @@ func (verifier *Verifier) insertRecheckDocs(
 				len(models),
 			).Run(groupCtx, verifier.logger)
 
-			return errors.Wrapf(err, "failed to persist %d recheck(s) for generation %d", len(models), generation)
+			return errors.Wrapf(err, "batch of %d rechecks", len(models))
 		})
 	}
 
 	if err := eg.Wait(); err != nil {
 		return errors.Wrapf(
 			err,
-			"failed to persist %d recheck(s) for generation %d",
+			"persisting %d recheck(s) for generation %d",
 			len(documentIDs),
 			generation,
 		)
@@ -175,6 +187,80 @@ func (verifier *Verifier) insertRecheckDocs(
 		Msg("Persisted rechecks.")
 
 	return nil
+}
+
+func deduplicateRechecks(
+	dbNames, collNames []string,
+	documentIDs []any,
+	dataSizes []int,
+) ([]string, []string, []bson.RawValue, []int) {
+	dedupeMap := map[string]map[string]map[string]int{}
+
+	uniqueElems := 0
+
+	for i, dbName := range dbNames {
+		collName := collNames[i]
+		docID := documentIDs[i]
+		dataSize := dataSizes[i]
+
+		docIDRaw := mbson.MustConvertToRawValue(docID)
+
+		docIDStr := string(append(
+			[]byte{byte(docIDRaw.Type)},
+			docIDRaw.Value...,
+		))
+
+		if _, ok := dedupeMap[dbName]; !ok {
+			dedupeMap[dbName] = map[string]map[string]int{
+				collName: {
+					docIDStr: dataSize,
+				},
+			}
+
+			uniqueElems++
+
+			continue
+		}
+
+		if _, ok := dedupeMap[dbName][collName]; !ok {
+			dedupeMap[dbName][collName] = map[string]int{
+				docIDStr: dataSize,
+			}
+
+			uniqueElems++
+
+			continue
+		}
+
+		if _, ok := dedupeMap[dbName][collName][docIDStr]; !ok {
+			dedupeMap[dbName][collName][docIDStr] = dataSize
+			uniqueElems++
+		}
+	}
+
+	dbNames = make([]string, 0, uniqueElems)
+	collNames = make([]string, 0, uniqueElems)
+	rawDocIDs := make([]bson.RawValue, 0, uniqueElems)
+	dataSizes = make([]int, 0, uniqueElems)
+
+	for dbName, collMap := range dedupeMap {
+		for collName, docMap := range collMap {
+			for docIDStr, dataSize := range docMap {
+				dbNames = append(dbNames, dbName)
+				collNames = append(collNames, collName)
+				rawDocIDs = append(
+					rawDocIDs,
+					bson.RawValue{
+						Type:  []bsontype.Type(docIDStr)[0],
+						Value: []byte(docIDStr)[1:],
+					},
+				)
+				dataSizes = append(dataSizes, dataSize)
+			}
+		}
+	}
+
+	return dbNames, collNames, rawDocIDs, dataSizes
 }
 
 // DropOldRecheckQueueWhileLocked deletes the previous generation’s recheck
@@ -252,11 +338,6 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	var totalDocs types.DocumentCount
 	var dataSizeAccum, totalRecheckData int64
 
-	maxDocsPerTask := max(
-		int(rechecksCount)/verifier.numWorkers,
-		verifier.numWorkers,
-	)
-
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
 	// namespace will be consecutive in this query’s result.
@@ -324,8 +405,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		//
 		if doc.PrimaryKey.SrcDatabaseName != prevDBName ||
 			doc.PrimaryKey.SrcCollectionName != prevCollName ||
-			len(idAccum) > maxDocsPerTask ||
-			types.ByteCount(idsSizer.Len()) >= verifier.recheckMaxSizeInBytes ||
+			len(idAccum) > maxRecheckIDs ||
+			types.ByteCount(idsSizer.Len()) >= maxRecheckIDsBytes ||
 			dataSizeAccum >= verifier.partitionSizeInBytes {
 
 			err := persistBufferedRechecks()

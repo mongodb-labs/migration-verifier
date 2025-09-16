@@ -299,29 +299,30 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
 	suite.Require().NoError(err)
-	var actualTasks []VerificationTask
-	err = cursor.All(ctx, &actualTasks)
+	var foundTasks []VerificationTask
+	err = cursor.All(ctx, &foundTasks)
 	suite.Require().NoError(err)
 
 	t1 := VerificationTask{
 		Generation: 1,
-		Ids:        []any{id1, id2},
+		Ids:        []any{id1},
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerifyDocuments,
 		QueryFilter: QueryFilter{
 			Namespace: "testDB.testColl",
 			To:        "testDB.testColl",
 		},
-		SourceDocumentCount: 2,
-		SourceByteCount:     types.ByteCount(2 * overlyLarge),
+		SourceDocumentCount: 1,
+		SourceByteCount:     types.ByteCount(overlyLarge),
 	}
 
 	t2 := t1
-	t2.Ids = []any{id3}
-	t2.SourceDocumentCount = 1
-	t2.SourceByteCount = types.ByteCount(overlyLarge)
+	t2.Ids = []any{id2}
 
-	suite.ElementsMatch([]VerificationTask{t1, t2}, actualTasks)
+	t3 := t1
+	t3.Ids = []any{id3}
+
+	suite.ElementsMatch([]VerificationTask{t1, t2, t3}, foundTasks)
 }
 
 func (suite *IntegrationTestSuite) TestLargeDataInsertions() {

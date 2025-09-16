@@ -38,13 +38,13 @@ const (
 	startClean            = "clean"
 	readPreference        = "readPreference"
 	partitionSizeMB       = "partitionSizeMB"
-	recheckMaxSizeMB      = "recheckMaxSizeMB"
 	checkOnly             = "checkOnly"
 	logLevelFlag          = "logLevel"
 	failureDisplaySize    = "failureDisplaySize"
 	ignoreReadConcernFlag = "ignoreReadConcern"
 	configFileFlag        = "configFile"
 	pprofInterval         = "pprofInterval"
+	startFlag             = "start"
 
 	buildVarDefaultStr = "Unknown; build with build.sh."
 )
@@ -76,24 +76,24 @@ func main() {
 			Usage: "path to an optional YAML config file",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  srcURI,
-			Value: "mongodb://localhost:27017",
-			Usage: "source Host `URI` for migration verification",
+			Name:     srcURI,
+			Usage:    "source connection string",
+			Required: true,
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  dstURI,
-			Value: "mongodb://localhost:27018",
-			Usage: "destination Host `URI` for migration verification",
+			Name:     dstURI,
+			Usage:    "destination connection string",
+			Required: true,
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  metaURI,
-			Value: "mongodb://localhost:27019",
-			Usage: "host `URI` for storing migration verification metadata",
+			Value: "mongodb://localhost",
+			Usage: "connection string to replset that stores verifier metadata",
 		}),
 		altsrc.NewIntFlag(cli.IntFlag{
 			Name:  serverPort,
 			Value: 27020,
-			Usage: "`port` for the control web server",
+			Usage: "`port` for the control web server (0 assigns a random port)",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  logPath,
@@ -103,12 +103,7 @@ func main() {
 		altsrc.NewIntFlag(cli.IntFlag{
 			Name:  numWorkers,
 			Value: 10,
-			Usage: "`number` of worker threads to use for verification",
-		}),
-		altsrc.NewUintFlag(cli.UintFlag{
-			Name:  recheckMaxSizeMB,
-			Value: verifier.DefaultRecheckMaxSizeMB,
-			Usage: "Maximum size of a recheck query. Reduce this to limit server memory usage after generation 0.",
+			Usage: "number of worker threads to use for verification",
 		}),
 		altsrc.NewInt64Flag(cli.Int64Flag{
 			Name:  generationPauseDelay,
@@ -119,6 +114,10 @@ func main() {
 			Name:  workerSleepDelay,
 			Value: 1_000,
 			Usage: "`milliseconds` workers sleep while waiting for work",
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
+			Name:  verifyAll,
+			Usage: "Verify all user namespaces",
 		}),
 		altsrc.NewStringSliceFlag(cli.StringSliceFlag{
 			Name:  srcNamespace,
@@ -147,12 +146,12 @@ func main() {
 			Value: string(verifier.DocCompareDefault),
 		}),
 		altsrc.NewBoolFlag(cli.BoolFlag{
-			Name:  verifyAll,
-			Usage: "If set, verify all user namespaces",
-		}),
-		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  startClean,
 			Usage: "If set, drop all previous verification metadata before starting",
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
+			Name:  startFlag,
+			Usage: "Start checking documents immediately",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  readPreference,
@@ -222,6 +221,10 @@ func main() {
 
 				return verifier.CheckDriver(ctx, nil)
 			} else {
+				if cCtx.Bool(startFlag) {
+					verifier.Check(ctx, nil)
+				}
+
 				return verifier.StartServer()
 			}
 		},
@@ -302,15 +305,6 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		}
 
 		v.SetPartitionSizeMB(uint32(partitionSizeMB))
-	}
-
-	recheckMaxSizeMBVal := cCtx.Uint(recheckMaxSizeMB)
-	if recheckMaxSizeMBVal != 0 {
-		if recheckMaxSizeMBVal > verifier.MaxRecheckMaxSizeMB {
-			return nil, fmt.Errorf("%#q may not exceed %d", recheckMaxSizeMB, verifier.MaxRecheckMaxSizeMB)
-		}
-
-		v.SetRecheckMaxSizeMB(recheckMaxSizeMBVal)
 	}
 
 	v.SetStartClean(cCtx.Bool(startClean))

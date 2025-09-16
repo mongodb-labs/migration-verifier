@@ -1,32 +1,44 @@
 # Verify Migrations!
 
-_If verifying a migration done via [mongosync](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/), please check if it is possible to use the 
+_If verifying a migration done via [mongosync](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/), please check if it is possible to use the
 [embedded verifier](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/reference/verification/embedded/#std-label-c2c-embedded-verifier) as that is the preferred approach for verification._
 
-# Obtaining
-To fetch the latest release:
+# Quick Start
+
+Download the verifier’s latest release:
 ```
 curl -sSL https://raw.githubusercontent.com/mongodb-labs/migration-verifier/refs/heads/main/download_latest.sh | sh
 ```
-… or, if you prefer to build locally, just do:
+(Alternatively, you can check out this repository then `./build.sh` to build from source.)
+
+Then start a local replica set to store verification metadata:
 ```
-./build.sh
+docker run -it -p27017:27017 -v ./verifier_db:/data/db --entrypoint bash mongodb/mongodb-community-server -c 'mongod --bind_ip_all --replSet rs & mpid=$! && until mongosh --eval "rs.initiate()"; do sleep 1; done && wait $mpid'
 ```
+(This will create a local `verifier_db` directory so that you can resume verification if needed.)
 
-# Operational UX Once Running 
-
-_Assumes no port set, default port for operation webserver is 27020_
-
-# Recommendations
+Finally, run verification:
+```
+./migration_verifier \
+    --srcURI mongodb://your.source.cluster \
+    --dstURI mongodb://your.destination.cluster \
+    --serverPort 0 \
+    --verifyAll \
+    --start
+```
+The above will stream verification logs to standard output. Once writes stop,
+watch for change stream lag to hit 0. The log will report either the found
+mismatches or a confirmation of exact match between the clusters.
 
 # Verifier Metadata Considerations
 
-migration-verifier needs a database to store its state. This database SHOULD be on its own cluster.
+migration-verifier needs a MongoDB cluster to store its state. This cluster *must* support transactions (i.e., either a replica set or sharded cluster, NOT a standalone instance). By default, this is assumed to run on localhost:27017.
 
-The verifier _can_ instead store its metadata on the destination cluster. This can severely degrade performance, though. 
-It also requires either disabling mongosync’s destination write blocking or giving the `bypassWriteBlockingMode` to the verifier’s `--metaURI` user.
+See [above](#Quick-Start) for a one-line command to start up a local, single-node replica set that you can use for this purpose.
 
-## Launch the Verifier Binary
+The verifier can alternatively store its metadata on the destination cluster. This can severely degrade performance, though. Also, if you’re using mongosync, it requires either disabling mongosync’s destination write blocking or giving the `bypassWriteBlockingMode` to the verifier’s `--metaURI` user.
+
+# More Details
 
 To see all options: 
 
@@ -36,19 +48,19 @@ To see all options:
 ```
 
 
-To check all namespaces: 
+To check all namespaces:
 
 
 ```
-./migration_verifier --srcURI mongodb://127.0.0.1:27002 --dstURI mongodb://127.0.0.1:27003 --metaURI mongodb://127.0.0.1:27001 --metaDBName verify_meta --verifyAll  
+./migration_verifier --srcURI mongodb://127.0.0.1:27002 --dstURI mongodb://127.0.0.1:27003 --metaURI mongodb://127.0.0.1:27001 --verifyAll
 ```
 
 
-To filter namespaces (allow list): 
+To check only specific namespaces:
 
 
 ```
-./migration_verifier --srcURI mongodb://127.0.0.1:27002 --dstURI mongodb://127.0.0.1:27003 --metaURI mongodb://127.0.0.1:27001 --metaDBName verify_meta --srcNamespace foo.bar --dstNamespace foo.bar --srcNamespace foo.yar --dstNamespace foo.yar --srcNamespace mixed.namespaces --dstNamespace can.work
+./migration_verifier --srcURI mongodb://127.0.0.1:27002 --dstURI mongodb://127.0.0.1:27003 --srcNamespace foo.bar --dstNamespace foo.bar --srcNamespace foo.yar --dstNamespace foo.yar --srcNamespace mixed.namespaces --dstNamespace can.work
 ```
 
 
@@ -70,7 +82,7 @@ To set a port, use `--serverPort <port number>`. The default is 27020. Note that
 
 If you give 0 as the port, a random ephemeral port will be chosen. The log will show the chosen port, and you may also query the OS to learn it (e.g., `lsof -a -iTCP -sTCP:LISTEN -p <pid>`).
 
-### Using a configuration file
+## Using a configuration file
 
 To load configuration options from a YAML configuration file, use the `--configFile` parameter.
 
@@ -83,19 +95,17 @@ metaURI: mongodb://localhost:28012
 ```
 
 
-## Send the Verifier Process Commands: 
+## Send the Verifier Process Commands:
 
-
-
-1. After launching the verifier (see above), you can send it requests to get it to start verifying. The verification process is started by using the `check`command. An [optional `filter` parameter](#document-filtering) can be passed within the `check` request body to only check documents within that filter. The verification process will keep running until you tell the verifier to stop. It will keep track of the inconsistencies it has found and will keep checking those inconsistencies hoping that eventually they will resolve.
+1. After launching the verifier (see above), you can send it requests to get it to start verifying. If you don’t pass the `--start` parameter, verification is started by using the `check` command. An [optional `filter` parameter](#document-filtering) can be passed within the `check` request body to only check documents within that filter. The verification process will keep running until you tell the verifier to stop. It will keep track of the inconsistencies it has found and will keep checking those inconsistencies hoping that eventually they will resolve.
 
     ```
     curl -H "Content-Type: application/json" -d '{}' http://127.0.0.1:27020/api/v1/check
     ```
 
 
-2. Once mongosync has committed the replication, you can tell the verifier that writes have stopped. You can see the state of mongosync’s replication by hitting mongosync’s `progress` endpoint and checking that the state is `COMMITTED`. See the documentation [here](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/reference/api/progress/#response). \
-The verifier will now check to completion to make sure that there are no inconsistencies. The command you need to send the verifier to tell it that the replication is committed is `writesOff`. The command doesn’t block. This means that you will have to poll the verifier to see the status of the verification (see `progress`).
+2. Once writes on the source cluster have stopped, you can tell the verifier that writes have stopped. (You can see the state of mongosync’s replication by hitting mongosync’s `progress` endpoint and checking that the state is `COMMITTED`. See the documentation [here](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/reference/api/progress/#response)). \
+The verifier will now check to completion to make sure that there are no inconsistencies. The command you need to send the verifier here is `writesOff`. The command doesn’t block. This means that you will have to poll the verifier, or watch its logs, to see the status of the verification (see `progress`).
 
     ```
     curl -H "Content-Type: application/json" -X POST -d '{}' http://127.0.0.1:27020/api/v1/writesOff
@@ -135,6 +145,7 @@ The verifier will now check to completion to make sure that there are no inconsi
 | `--dstNamespace <namespaces>`           | destination namespaces to check                                                                                                                                                             |
 | `--metaDBName <name>`                   | name of the database in which to store verification metadata (default: "migration_verification_metadata")                                                                                   |
 | `--docCompareMethod`                    | How to compare documents. See below for details.                                                                                                                                        |
+| `--start`                               | Start checking documents right away rather than waiting for a `/check` API request. |
 | `--verifyAll`                           | If set, verify all user namespaces                                                                                                                                                          |
 | `--clean`                               | If set, drop all previous verification metadata before starting                                                                                                                             |
 | `--readPreference <value>`              | Read preference for reading data from clusters. May be 'primary', 'secondary', 'primaryPreferred', 'secondaryPreferred', or 'nearest' (default: "primary")                                  |
@@ -170,19 +181,6 @@ generation’s mismatches, aggregate like this on the metadata cluster:
 
 Note that each mismatch includes timestamps. You can cross-reference
 these with the clusters’ oplogs to diagnose problems.
-
-# Benchmarking Results
-
-Ran on m6id.metal + M40 with 3 replica sets
-
-Command run python3 ./test/benchmark.py --way=recheck remote
-
-When running with 1TB of random data on 3 collections
-
-**In recheck and normal mode it runs at 1.5-2.5gbps per replica** and is **disk bound on each node** (meaning there are not of easy optimizations to make this faster) \
-On default settings it used about **200GB of RAM on m6id.metal machine when using all the cores**
-
-**This means it does about 1TB/20min but it is HIGHLY dependent on the source and dest machines**
 
 # Tests
 
@@ -311,9 +309,11 @@ The migration-verifier periodically persists its change stream’s resume token 
 
 # Performance
 
-The migration-verifier optimizes for the case where a migration’s initial sync is completed **and** change events are relatively infrequent. If you start verification before initial sync finishes, or if the source cluster is too busy, the verification may freeze.
+The verifier has been observed handling test source write loads of 15,000 writes per second. Real-world performance will vary according to several factors, including network latency, cluster resources, and the verifier node’s resources.
 
-The migration-verifier is also rather resource-hungry. To mitigate this, try limiting its number of workers (i.e., `--numWorkers`), its partition size (`--partitionSizeMB`), and/or its process group’s resource limits (see the `ulimit` command in POSIX OSes).
+## Per-shard verification
+
+If migrating shard-to-shard, you can also verify shard-to-shard to scale verification horizontally. Run 1 verifier per source shard. You can colocate all verifiers’ metadata on the same metadata cluster, but each verifier must use its own database (e.g., `verify90`, `verify1`, …). If that metadata cluster buckles under the load, consider splitting verification across multiple hosts.
 
 # Document comparison methods
 
@@ -323,11 +323,11 @@ The default. This establishes full binary equivalence, including field order and
 
 ## `ignoreFieldOrder`
 
-Like `binary` but ignores the ordering of fields. Incurs extra overhead on this host.
+Like `binary` but ignores the ordering of fields. Incurs extra overhead on the verifier host.
 
 ## `toHashedIndexKey`
 
-Compares document hashes (and lengths) rather than full documents. This minimizes the data sent to migration-verifier, which can dramatically shorten verification time.
+Compares document hashes (and lengths) rather than full documents. This minimizes the data sent to migration-verifier, which can dramatically increase performance.
 
 It carries a few downsides, though:
 
@@ -339,7 +339,7 @@ The discrepancy _will_, though, usually be seen if the BSON types are of differe
 
 If, however, _multiple_ numeric type changes happen, then `toHashedIndexKey` will only notice the discrepancy if the total document length changes. For example, if an Int changes to a Long, but elsewhere a Long changes to an Int, that will evade notice.
 
-The above are all, of course, **highly** unlikely in real-world migrations.
+The above are all **highly** unlikely in real-world migrations.
 
 ### Lost reporting
 
@@ -359,6 +359,6 @@ Additionally, because the amount of data sent to migration-verifier doesn’t ac
 
 # Limitations
 
-- The verifier’s iterative process can handle data changes while it is running, until you hit the writesOff endpoint.  However, it cannot handle DDL commands.  If the verifier receives a DDL change stream event (drop, dropDatabase, rename), the verification will fail.  If an untracked DDL event (create, createIndexes, dropIndexes, modify) occurs, the verifier may miss the change.
+- The verifier’s iterative process can handle data changes while it is running, until you hit the writesOff endpoint.  However, it cannot handle DDL commands.  If the verifier receives a DDL change stream event, the verification will fail.
 
 - The verifier crashes if it tries to compare time-series collections. The error will include a phrase like “Collection has nil UUID (most probably is a view)” and also mention “timeseries”.

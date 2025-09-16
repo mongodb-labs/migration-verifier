@@ -117,7 +117,19 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	waitForTaskCreation := 0
 
-	finishedAllTasks := false
+	var finishedAllTasks bool
+
+	go func() {
+		delay := 30 * time.Second
+
+		time.Sleep(delay)
+
+		for cancelableCtx.Err() == nil {
+			verifier.PrintVerificationSummary(cancelableCtx, GenerationInProgress)
+
+			time.Sleep(delay)
+		}
+	}()
 
 	eg.Go(func() error {
 		for {
@@ -134,12 +146,6 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 				Any("taskCountsByStatus", verificationStatus).
 				Send()
 
-			if waitForTaskCreation%2 == 0 {
-				if generation > 0 || verifier.gen0PendingCollectionTasks.Load() == 0 {
-					verifier.PrintVerificationSummary(ctx, GenerationInProgress)
-				}
-			}
-
 			// The generation continues as long as >=1 task for this generation is
 			// “added” or “pending”.
 			if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 {
@@ -147,8 +153,9 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 				time.Sleep(verifier.verificationStatusCheckInterval)
 			} else {
-				verifier.PrintVerificationSummary(ctx, GenerationComplete)
 				finishedAllTasks = true
+				verifier.PrintVerificationSummary(ctx, GenerationComplete)
+
 				canceler(errors.Errorf("generation %d finished", generation))
 				return nil
 			}

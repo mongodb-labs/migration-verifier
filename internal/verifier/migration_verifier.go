@@ -23,7 +23,6 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/dustin/go-humanize"
-	clone "github.com/huandu/go-clone/generic"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -74,7 +73,6 @@ const (
 	progressReportTimeWarnThreshold = 10 * time.Second
 
 	DefaultRecheckMaxSizeMB = 8
-	MaxRecheckMaxSizeMB     = 12
 )
 
 type whichCluster string
@@ -122,8 +120,6 @@ type Verifier struct {
 	// trigger several other similar type changes, and that’s not really
 	// worthwhile for now.
 	partitionSizeInBytes int64
-
-	recheckMaxSizeInBytes types.ByteCount
 
 	readPreference *readpref.ReadPref
 
@@ -184,12 +180,11 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		logger: logger,
 		writer: logWriter,
 
-		phase:                 Idle,
-		numWorkers:            NumWorkers,
-		readPreference:        readpref.Primary(),
-		partitionSizeInBytes:  400 * 1024 * 1024,
-		recheckMaxSizeInBytes: DefaultRecheckMaxSizeMB * 1024 * 1024,
-		failureDisplaySize:    DefaultFailureDisplaySize,
+		phase:                Idle,
+		numWorkers:           NumWorkers,
+		readPreference:       readpref.Primary(),
+		partitionSizeInBytes: 400 * 1024 * 1024,
+		failureDisplaySize:   DefaultFailureDisplaySize,
 
 		readConcernSetting: readConcern,
 
@@ -200,7 +195,7 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 
 		workerTracker: NewWorkerTracker(NumWorkers),
 
-		verificationStatusCheckInterval: 15 * time.Second,
+		verificationStatusCheckInterval: 2 * time.Second,
 		nsMap:                           NewNSMap(),
 	}
 }
@@ -357,10 +352,6 @@ func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
 	verifier.partitionSizeInBytes = int64(partitionSizeMB) * 1024 * 1024
 }
 
-func (verifier *Verifier) SetRecheckMaxSizeMB(size uint) {
-	verifier.recheckMaxSizeInBytes = types.ByteCount(size) * 1024 * 1024
-}
-
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {
 	verifier.srcNamespaces = arg
 }
@@ -495,7 +486,18 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 	for _, field := range mismatch.fieldContentsDiffer {
 		srcClientValue := srcClientDoc.Lookup(field)
 		dstClientValue := dstClientDoc.Lookup(field)
-		details := Mismatch + fmt.Sprintf(" : Document %s failed comparison on field %#q between srcClient (Type: %s) and dstClient (Type: %s)", id, fieldPrefix+field, srcClientValue.Type, dstClientValue.Type)
+
+		details := Mismatch
+
+		if srcClientValue.Type != dstClientValue.Type {
+			details = fmt.Sprintf(
+				"%s : type mismatch: src=%s, dst=%s",
+				details,
+				srcClientValue.Type,
+				dstClientValue.Type,
+			)
+		}
+
 		result := VerificationResult{
 			Field:     fieldPrefix + field,
 			Details:   details,
@@ -523,56 +525,11 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 	debugLog.Msg("Processing document comparison task.")
 
-	var problems []VerificationResult
-	var docsCount types.DocumentCount
-	var bytesCount types.ByteCount
-	var err error
-
-	if task.IsRecheck() {
-		var idGroups [][]any
-		idGroups, err = util.SplitArrayByBSONMaxSize(task.Ids, int(verifier.recheckMaxSizeInBytes))
-		if err != nil {
-			return errors.Wrapf(err, "failed to split recheck task %v document IDs", task.PrimaryKey)
-		}
-
-		for _, ids := range idGroups {
-			if len(idGroups) != 1 {
-				verifier.logger.Info().
-					Int("workerNum", workerNum).
-					Any("task", task.PrimaryKey).
-					Str("namespace", task.QueryFilter.Namespace).
-					Int("subsetDocs", len(ids)).
-					Int("totalTaskDocs", len(task.Ids)).
-					Msg("Comparing subset of recheck task’s documents.")
-			}
-
-			miniTask := clone.Clone(*task)
-			miniTask.Ids = ids
-
-			var curProblems []VerificationResult
-			var curDocsCount types.DocumentCount
-			var curBytesCount types.ByteCount
-			curProblems, curDocsCount, curBytesCount, err = verifier.FetchAndCompareDocuments(
-				ctx,
-				workerNum,
-				&miniTask,
-			)
-
-			if err != nil {
-				break
-			}
-
-			problems = append(problems, curProblems...)
-			docsCount += curDocsCount
-			bytesCount += curBytesCount
-		}
-	} else {
-		problems, docsCount, bytesCount, err = verifier.FetchAndCompareDocuments(
-			ctx,
-			workerNum,
-			task,
-		)
-	}
+	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(
+		ctx,
+		workerNum,
+		task,
+	)
 
 	if err != nil {
 		return errors.Wrapf(
@@ -668,6 +625,11 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 	return nil
 }
+
+const (
+	maxRecheckIDsBytes = 1024 * 1024 // 1 MiB
+	maxRecheckIDs      = 10_000
+)
 
 func (verifier *Verifier) logChunkInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) {
 	// Only log full chunk info in debug mode
@@ -1323,9 +1285,12 @@ func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*Verificat
 	verificationStatus := VerificationStatus{}
 
 	for _, result := range results {
-		status := result.Lookup("_id").String()
-		// Status is returned with quotes around it so remove those
-		status = status[1 : len(status)-1]
+		idRaw := result.Lookup("_id")
+		status, isString := idRaw.StringValueOK()
+		if !isString {
+			panic(fmt.Sprintf("status (BSON %s: %v) should be BSON string", idRaw.Type, idRaw))
+		}
+
 		count := int(result.Lookup("count").Int32())
 		verificationStatus.TotalTasks += int(count)
 		switch verificationTaskStatus(status) {
