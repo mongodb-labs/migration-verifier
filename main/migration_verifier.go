@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/verifier"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -39,7 +40,7 @@ const (
 	partitionSizeMB       = "partitionSizeMB"
 	recheckMaxSizeMB      = "recheckMaxSizeMB"
 	checkOnly             = "checkOnly"
-	debugFlag             = "debug"
+	logLevelFlag          = "logLevel"
 	failureDisplaySize    = "failureDisplaySize"
 	ignoreReadConcernFlag = "ignoreReadConcern"
 	configFileFlag        = "configFile"
@@ -51,6 +52,17 @@ const (
 // These get set at build time, assuming use of build.sh.
 var Revision = buildVarDefaultStr
 var BuildTime = buildVarDefaultStr
+
+var logLevelStrs = lo.Map(
+	mslices.Of(
+		zerolog.InfoLevel,
+		zerolog.DebugLevel,
+		zerolog.TraceLevel,
+	),
+	func(lv zerolog.Level, _ int) string {
+		return lv.String()
+	},
+)
 
 func main() {
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
@@ -153,9 +165,10 @@ func main() {
 			Value: 0,
 			Usage: "`Megabytes` to use for a partition.  Change only for debugging. 0 means use partitioner default.",
 		}),
-		altsrc.NewBoolFlag(cli.BoolFlag{
-			Name:  debugFlag,
-			Usage: "Turn on debug logging",
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  logLevelFlag,
+			Value: zerolog.InfoLevel.String(),
+			Usage: "Level of detail to include in logs. One of: " + strings.Join(logLevelStrs, ", "),
 		}),
 		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  checkOnly,
@@ -196,9 +209,11 @@ func main() {
 			if err != nil {
 				return err
 			}
-			if cCtx.Bool(debugFlag) {
-				zerolog.SetGlobalLevel(zerolog.DebugLevel)
+
+			if err := handleLogLevelArg(cCtx); err != nil {
+				return err
 			}
+
 			if cCtx.Bool(checkOnly) {
 				err := verifier.WritesOff(ctx)
 				if err != nil {
@@ -215,6 +230,21 @@ func main() {
 	if err := app.Run(os.Args); err != nil {
 		log.Fatal().Err(err).Stack().Msg("Fatal Error")
 	}
+}
+
+func handleLogLevelArg(cCtx *cli.Context) error {
+	logLevelStr := cCtx.String(logLevelFlag)
+	if !slices.Contains(logLevelStrs, logLevelStr) {
+		return errors.Errorf("invalid %#q", logLevelFlag)
+	}
+	logLevel, err := zerolog.ParseLevel(logLevelStr)
+	if err != nil {
+		return errors.Wrapf(err, "parsing %#q", logLevelFlag)
+	}
+
+	zerolog.SetGlobalLevel(logLevel)
+
+	return nil
 }
 
 func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, error) {
