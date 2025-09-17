@@ -202,13 +202,13 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		err = verifier.verificationDatabase().Drop(ctx)
 		if err != nil {
 			verifier.mux.Unlock()
-			return err
+			return errors.Wrap(err, "dropping metadata")
 		}
 	} else {
 		genOpt, err := verifier.readGeneration(ctx)
 		if err != nil {
 			verifier.mux.Unlock()
-			return err
+			return errors.Wrap(err, "reading generation from metadata")
 		}
 
 		if gen, has := genOpt.Get(); has {
@@ -221,6 +221,8 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		}
 	}
 
+	verifier.logger.Info().Msg("Starting change streams.")
+
 	// Now that we’ve initialized verifier.generation we can
 	// start the change stream readers.
 	verifier.initializeChangeStreamReaders()
@@ -230,7 +232,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			err = verifier.AddMetaIndexes(ctx)
 			if err != nil {
-				return err
+				return errors.Wrap(err, "adding metadata indexes")
 			}
 
 			err = verifier.doInMetaTransaction(
