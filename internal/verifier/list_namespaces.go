@@ -5,6 +5,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -62,10 +63,15 @@ func ListAllUserNamespaces(
 	for _, dbName := range dbNames {
 		db := client.Database(dbName)
 
-		filter := util.ExcludePrefixesQuery(
-			"name",
-			mslices.Of(ExcludedSystemCollPrefix),
-		)
+		filter := bson.D{
+			{"$or", []bson.D{
+				util.ExcludePrefixesQuery(
+					"name",
+					mslices.Of(ExcludedSystemCollPrefix),
+				),
+				mmongo.StartsWithAgg("$name", "system.buckets."),
+			}},
+		}
 
 		specifications, err := db.ListCollectionSpecifications(ctx, filter, options.ListCollections().SetNameOnly(true))
 		if err != nil {
