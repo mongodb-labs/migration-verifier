@@ -19,6 +19,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 	}
 
 	dbName := suite.DBNameForTest()
+	collName := "weather"
 	now := time.Now()
 
 	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
@@ -36,7 +37,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 	}
 
 	srcDB := suite.srcMongoClient.Database(dbName)
-	_, err := srcDB.Collection("weather").InsertOne(ctx, bson.D{
+	_, err := srcDB.Collection(collName).InsertOne(ctx, bson.D{
 		{"time", now},
 		{"metadata", 234.0},
 	})
@@ -44,8 +45,8 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 
 	copyDocs(
 		suite.T(),
-		srcDB.Collection("system.buckets.weather"),
-		suite.dstMongoClient.Database(dbName).Collection("system.buckets.weather"),
+		srcDB.Collection("system.buckets."+collName),
+		suite.dstMongoClient.Database(dbName).Collection("system.buckets."+collName),
 	)
 
 	verifier := suite.BuildVerifier()
