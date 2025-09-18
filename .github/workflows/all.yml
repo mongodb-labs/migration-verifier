@@ -98,9 +98,11 @@ jobs:
       - name: Install m and mtools
         run: |-
             {
-                echo npm install -g m
+                curl -fsSL https://raw.githubusercontent.com/aheckmann/m/master/bin/m > /usr/local/bin/m && chmod +x /usr/local/bin/m
                 echo pipx install 'mtools[all]'
             } | parallel
+
+      - run: export M_DEBUG=1
 
       - name: Install MongoDB ${{ matrix.mongodb_versions[0] }} (source)
         run: yes | m ${{ matrix.mongodb_versions[0] }} && dirname $(readlink $(which mongod)) > .srcpath
