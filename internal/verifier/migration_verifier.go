@@ -1124,6 +1124,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		}
 		task.Status = verificationTaskMetadataMismatch
 	}
+
 	if !verifyData {
 		// If the metadata mismatched and we're not checking the actual data, that's a complete failure.
 		if task.Status == verificationTaskMetadataMismatch {

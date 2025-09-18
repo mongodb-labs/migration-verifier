@@ -14,6 +14,7 @@ import (
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"golang.org/x/exp/slices"
 )
 
 type GenerationStatus string
@@ -459,7 +460,7 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 	}
 	isPrimary, err := verifier.CreatePrimaryTaskIfNeeded(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "creating primary task")
 	}
 	if !isPrimary {
 		verifier.logger.Info().Msg("Primary task already existed; skipping setup")
@@ -468,9 +469,15 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 	if verifier.verifyAll {
 		err := verifier.setupAllNamespaceList(ctx)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "creating namespace list")
 		}
 	}
+
+	err = verifier.addTimeseriesBucketsToNamespaces(ctx)
+	if err != nil {
+		return errors.Wrap(err, "adding timeseries buckets to namespaces")
+	}
+
 	for _, src := range verifier.srcNamespaces {
 		_, err := verifier.InsertCollectionVerificationTask(ctx, src)
 		if err != nil {
@@ -480,15 +487,88 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 				src,
 			)
 		}
-	}
 
-	verifier.gen0PendingCollectionTasks.Store(int32(len(verifier.srcNamespaces)))
+		verifier.gen0PendingCollectionTasks.Add(1)
+	}
 
 	err = verifier.UpdatePrimaryTaskComplete(ctx)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func (verifier *Verifier) addTimeseriesBucketsToNamespaces(ctx context.Context) error {
+	srcTimeseriesNamespaces, err := whichNamespacesAreTimeseries(
+		ctx,
+		verifier.srcClient,
+		mapset.NewSet(verifier.srcNamespaces...),
+	)
+	if err != nil {
+		return errors.Wrap(err, "fetching timeseries namespaces")
+	}
+
+	for _, srcNS := range slices.Clone(verifier.srcNamespaces) {
+		if !srcTimeseriesNamespaces.Contains(srcNS) {
+			continue
+		}
+
+		dstNS, ok := verifier.nsMap.GetDstNamespace(srcNS)
+		if !ok {
+			return fmt.Errorf("found no dst namespace for %#q", srcNS)
+		}
+
+		verifier.srcNamespaces = append(
+			verifier.srcNamespaces,
+			"system.buckets."+srcNS,
+		)
+
+		verifier.dstNamespaces = append(
+			verifier.dstNamespaces,
+			"system.buckets."+dstNS,
+		)
+	}
+
+	return nil
+}
+
+func whichNamespacesAreTimeseries(
+	ctx context.Context,
+	client *mongo.Client,
+	namespaces mapset.Set[string],
+) (mapset.Set[string], error) {
+	tsNamespaces := mapset.NewSet[string]()
+
+	dbNamespaces := map[string]mapset.Set[string]{}
+
+	for ns := range namespaces.Iter() {
+		db, coll := SplitNamespace(ns)
+		if set, exists := dbNamespaces[db]; exists {
+			set.Add(coll)
+		} else {
+			dbNamespaces[db] = mapset.NewSet(coll)
+		}
+	}
+
+	for db, colls := range dbNamespaces {
+		specs, err := client.Database(db).ListCollectionSpecifications(
+			ctx,
+			bson.D{
+				{"type", "timeseries"},
+				{"name", bson.D{{"$in", colls.ToSlice()}}},
+			},
+		)
+
+		if err != nil {
+			return nil, errors.Wrapf(err, "listing %#q’s timeseries namespaces", db)
+		}
+
+		for _, spec := range specs {
+			tsNamespaces.Add(db + "." + spec.Name)
+		}
+	}
+
+	return tsNamespaces, nil
 }
 
 func FetchFailedAndIncompleteTasks(
