@@ -1,7 +1,5 @@
 package verifier
 
-import "fmt"
-
 type NSMap struct {
 	srcDstNsMap map[string]string
 	dstSrcNsMap map[string]string
@@ -20,9 +18,15 @@ func (nsmap *NSMap) PopulateWithNamespaces(srcNamespaces []string, dstNamespaces
 	}
 
 	for i, srcNs := range srcNamespaces {
-		if err := nsmap.Augment(srcNs, dstNamespaces[i]); err != nil {
-			panic(err.Error())
+		dstNs := dstNamespaces[i]
+		if _, exist := nsmap.srcDstNsMap[srcNs]; exist {
+			panic("another mapping already exists for source namespace " + srcNs)
 		}
+		if _, exist := nsmap.dstSrcNsMap[dstNs]; exist {
+			panic("another mapping already exists for destination namespace " + dstNs)
+		}
+		nsmap.srcDstNsMap[srcNs] = dstNs
+		nsmap.dstSrcNsMap[dstNs] = srcNs
 	}
 }
 
@@ -32,20 +36,6 @@ func (nsmap *NSMap) Len() int {
 	}
 
 	return len(nsmap.srcDstNsMap)
-}
-
-func (nsmap *NSMap) Augment(srcNs, dstNs string) error {
-	if _, exist := nsmap.srcDstNsMap[srcNs]; exist {
-		return fmt.Errorf("another mapping already exists for source namespace %#q", srcNs)
-	}
-	if _, exist := nsmap.dstSrcNsMap[dstNs]; exist {
-		return fmt.Errorf("another mapping already exists for destination namespace %#q", dstNs)
-	}
-
-	nsmap.srcDstNsMap[srcNs] = dstNs
-	nsmap.dstSrcNsMap[dstNs] = srcNs
-
-	return nil
 }
 
 func (nsmap *NSMap) GetDstNamespace(srcNamespace string) (string, bool) {

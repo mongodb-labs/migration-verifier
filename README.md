@@ -366,3 +366,6 @@ NB: Given bucket documents’ size, hashed document comparison can be especially
 # Limitations
 
 - The verifier’s iterative process can handle data changes while it is running, until you hit the writesOff endpoint.  However, it cannot handle DDL commands.  If the verifier receives a DDL change stream event from the source, the verification will fail permanently.
+
+- The verifier cannot verify time-series collections under namespace
+  filtering.

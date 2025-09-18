@@ -459,7 +459,7 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 	}
 	isPrimary, err := verifier.CreatePrimaryTaskIfNeeded(ctx)
 	if err != nil {
-		return errors.Wrap(err, "creating primary task")
+		return return errors.Wrap(err, "creating primary task")
 	}
 	if !isPrimary {
 		verifier.logger.Info().Msg("Primary task already existed; skipping setup")
@@ -471,12 +471,6 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 			return errors.Wrap(err, "creating namespace list")
 		}
 	}
-
-	err = verifier.addTimeseriesBucketsToNamespaces(ctx)
-	if err != nil {
-		return errors.Wrap(err, "adding timeseries buckets to namespaces")
-	}
-
 	for _, src := range verifier.srcNamespaces {
 		_, err := verifier.InsertCollectionVerificationTask(ctx, src)
 		if err != nil {

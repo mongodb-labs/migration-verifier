@@ -5,6 +5,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -27,11 +28,12 @@ var (
 	ExcludedSystemCollPrefix = "system."
 )
 
-// ListAllUserNamespaces lists all the user collections on a cluster.
-// Unlike mongosync, we don't use the internal $listCatalog, since we need to
-// work on old versions without that command.
+// ListAllUserNamespaces lists all the user collections on a cluster,
+// in addition to time-series “system.buckets.*” collections.
 //
-// This means this does *NOT* run with read concern majority.
+// Unlike mongosync, we don't use the internal $listCatalog, since we need to
+// work on old versions without that command. Thus, this does *NOT* run with
+// majority read concern.
 func ListAllUserNamespaces(
 	ctx context.Context,
 	logger *logger.Logger,
@@ -65,10 +67,17 @@ func ListAllUserNamespaces(
 	for _, dbName := range dbNames {
 		db := client.Database(dbName)
 
-		filter := util.ExcludePrefixesQuery(
-			"name",
-			mslices.Of(ExcludedSystemCollPrefix),
-		)
+		filter := bson.D{
+			{"$or", []bson.D{
+				util.ExcludePrefixesQuery(
+					"name",
+					mslices.Of(ExcludedSystemCollPrefix),
+				),
+				{
+					{"$expr", mmongo.StartsWithAgg("$name", timeseriesBucketsPrefix)},
+				},
+			}},
+		}
 
 		specifications, err := db.ListCollectionSpecifications(ctx, filter, options.ListCollections().SetNameOnly(true))
 		if err != nil {
