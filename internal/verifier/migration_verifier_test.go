@@ -573,8 +573,11 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Metadata(
 	verifier.SetVerifyAll(true)
 
 	dbName := suite.DBNameForTest()
-	_, err := verifier.srcClient.Database(dbName).Collection("foo").
-		InsertOne(ctx, bson.D{{"_id", "foo"}})
+
+	err := verifier.srcClient.Database(dbName).CreateCollection(
+		ctx,
+		"foo",
+	)
 	suite.Require().NoError(err)
 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
@@ -600,6 +603,65 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Metadata(
 	suite.Assert().Equal(
 		mslices.Of(NamespaceStats{
 			Namespace: dbName + ".foo",
+		}),
+		stats,
+		"stats should be as expected",
+	)
+}
+
+func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_OneDoc() {
+	ctx := suite.Context()
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	bsonDoc := lo.Must(bson.Marshal(bson.D{{"_id", "foo"}}))
+
+	dbName := suite.DBNameForTest()
+	_, err := verifier.srcClient.Database(dbName).Collection("foo").
+		InsertOne(ctx, bsonDoc)
+	suite.Require().NoError(err)
+
+	err = verifier.dstClient.Database(dbName).CreateCollection(
+		ctx,
+		"foo",
+	)
+	suite.Require().NoError(err)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(
+		mslices.Of(NamespaceStats{
+			Namespace:      dbName + ".foo",
+			DocsCompared:   1,
+			TotalDocs:      1,
+			BytesCompared:  types.ByteCount(len(bsonDoc)),
+			TotalBytes:     types.ByteCount(len(bsonDoc)),
+			PartitionsDone: 1,
+		}),
+		stats,
+		"stats should be as expected",
+	)
+
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(
+		mslices.Of(NamespaceStats{
+			Namespace:      dbName + ".foo",
+			DocsCompared:   1,
+			TotalDocs:      1,
+			BytesCompared:  types.ByteCount(len(bsonDoc)),
+			PartitionsDone: 1,
+
+			// NB: TotalBytes is 0 because we can’t compute that from the
+			// change stream.
 		}),
 		stats,
 		"stats should be as expected",
