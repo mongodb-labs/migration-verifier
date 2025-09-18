@@ -122,20 +122,11 @@ const perNsStatsPipelineTemplate = `[
 			*/}}
 			"totalDocs": {
 				"$cond": {
-					"if": { "$or": [
-						{ "$eq": [ "$type", "{{.VerifyCollType}}" ] },
-						{ "$and": [
-							{ "$eq": [ "$type", "{{.VerifyDocsType}}" ] },
-							{ "$ne": [ "$generation", 0 ] }
-						] }
-					] },
+					"if": { "$eq": [ "$type", "{{.VerifyDocsType}}" ] },
 					"then": { "$cond": {
-						"if": { "$and": [
-							{ "$gt": [ "$generation", 0 ] },
-							{ "$eq": [ "array", { "$type": "$_ids" } ] }
-						] },
-						"then": { "$size": "$_ids" },
-						"else": "$source_documents_count"
+						"if": {"$eq": [ "$generation", 0 ]},
+						"then": "$source_documents_count",
+						"else": { "$size": "$_ids" }
 					} },
 					"else": 0
 				}

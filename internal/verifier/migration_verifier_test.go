@@ -567,6 +567,34 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	)
 }
 
+func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Metadata() {
+	ctx := suite.Context()
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	dbName := suite.DBNameForTest()
+	suite.Require().NoError(
+		verifier.srcClient.Database(dbName).CreateCollection(ctx, "foo"),
+	)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(
+		mslices.Of(NamespaceStats{
+			Namespace: dbName + ".foo",
+		}),
+		stats,
+		"stats should be as expected",
+	)
+}
+
 func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
