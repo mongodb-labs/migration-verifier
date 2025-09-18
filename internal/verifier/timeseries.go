@@ -28,9 +28,16 @@ func (verifier *Verifier) addTimeseriesBucketsToNamespaces(ctx context.Context) 
 			continue
 		}
 
-		dstNS, ok := verifier.nsMap.GetDstNamespace(srcNS)
-		if !ok {
-			return fmt.Errorf("found no dst namespace for %#q", srcNS)
+		var dstNS string
+
+		if verifier.nsMap.Len() == 0 {
+			dstNS = srcNS
+		} else {
+			var ok bool
+			dstNS, ok = verifier.nsMap.GetDstNamespace(srcNS)
+			if !ok {
+				return fmt.Errorf("found no dst namespace for %#q", srcNS)
+			}
 		}
 
 		srcBuckets := "system.buckets." + srcNS
@@ -46,13 +53,15 @@ func (verifier *Verifier) addTimeseriesBucketsToNamespaces(ctx context.Context) 
 			dstBuckets,
 		)
 
-		if err := verifier.nsMap.Augment(srcBuckets, dstBuckets); err != nil {
-			return errors.Wrapf(
-				err,
-				"adding %#q -> %#q to internal namespace map",
-				srcBuckets,
-				dstBuckets,
-			)
+		if verifier.nsMap.Len() > 0 {
+			if err := verifier.nsMap.Augment(srcBuckets, dstBuckets); err != nil {
+				return errors.Wrapf(
+					err,
+					"adding %#q -> %#q to internal namespace map",
+					srcBuckets,
+					dstBuckets,
+				)
+			}
 		}
 	}
 
