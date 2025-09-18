@@ -69,7 +69,7 @@ func ListAllUserNamespaces(
 					"name",
 					mslices.Of(ExcludedSystemCollPrefix),
 				),
-				bson.D{
+				{
 					{"$expr", mmongo.StartsWithAgg("$name", "system.buckets.")},
 				},
 			}},
