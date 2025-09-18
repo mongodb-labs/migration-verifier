@@ -573,17 +573,28 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Metadata(
 	verifier.SetVerifyAll(true)
 
 	dbName := suite.DBNameForTest()
-	suite.Require().NoError(
-		verifier.srcClient.Database(dbName).CreateCollection(ctx, "foo"),
-	)
+	_, err := verifier.srcClient.Database(dbName).Collection("foo").
+		InsertOne(ctx, bson.D{{"_id", "foo"}})
+	suite.Require().NoError(err)
 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(
+		mslices.Of(NamespaceStats{
+			Namespace: dbName + ".foo",
+		}),
+		stats,
+		"stats should be as expected",
+	)
+
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(

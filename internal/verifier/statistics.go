@@ -114,7 +114,7 @@ const perNsStatsPipelineTemplate = `[
 				In generation 0 we can get the total docs from the
 				verify-collection tasks.
 
-				In later generations we don’t have verify-collection tasks,
+				In later generations we may not have verify-collection tasks,
 				so we add up the individual recheck batch tasks. Note that,
 				in these tasks source_documents_count refers to the actual
 				number of docs found on the source, not all the documents
@@ -122,13 +122,17 @@ const perNsStatsPipelineTemplate = `[
 			*/}}
 			"totalDocs": {
 				"$cond": {
-					"if": { "$eq": [ "$type", "{{.VerifyDocsType}}" ] },
+					"if": {"$eq": [ "$generation", 0 ]},
 					"then": { "$cond": {
-						"if": {"$eq": [ "$generation", 0 ]},
+						"if": { "$eq": [ "$type", "{{.VerifyCollType}}" ] },
 						"then": "$source_documents_count",
-						"else": { "$size": "$_ids" }
+						"else": 0
 					} },
-					"else": 0
+					"else": { "$cond": {
+						"if": { "$eq": [ "$type", "{{.VerifyDocsType}}" ] },
+						"then": { "$size": "$_ids" },
+						"else": 0
+					} }
 				}
 			},
 
