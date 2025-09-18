@@ -40,8 +40,11 @@ func (verifier *Verifier) addTimeseriesBucketsToNamespaces(ctx context.Context) 
 			}
 		}
 
-		srcBuckets := "system.buckets." + srcNS
-		dstBuckets := "system.buckets." + dstNS
+		srcDB, srcColl := SplitNamespace(srcNS)
+		srcBuckets := srcDB + ".system.buckets." + srcColl
+
+		dstDB, dstColl := SplitNamespace(dstNS)
+		dstBuckets := dstDB + ".system.buckets." + dstColl
 
 		verifier.srcNamespaces = append(
 			verifier.srcNamespaces,
