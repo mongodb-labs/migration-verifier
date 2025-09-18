@@ -361,6 +361,8 @@ Additionally, because the amount of data sent to migration-verifier doesn’t ac
 
 Because the verifier compares documents by `_id`, it cannot compare logical time-series measurements (i.e., the data that users actually insert). Instead it compares the server’s internal time-series “buckets”. Unfortunately, this makes mismatch details essentially useless with time-series since they will be details about time-series buckets, which users generally don’t see.
 
+It also requires that migrations replicate the raw buckets rather than the logical measurements. This is because a logical migration would cause `_id` mismatches between source & destination buckets. A user application wouldn’t care (since it never sees the buckets’ `_id`s), but verification does.
+
 NB: Given bucket documents’ size, hashed document comparison can be especially useful with time-series.
 
 # Limitations
