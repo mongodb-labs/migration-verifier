@@ -459,7 +459,7 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 	}
 	isPrimary, err := verifier.CreatePrimaryTaskIfNeeded(ctx)
 	if err != nil {
-		return return errors.Wrap(err, "creating primary task")
+		return errors.Wrap(err, "creating primary task")
 	}
 	if !isPrimary {
 		verifier.logger.Info().Msg("Primary task already existed; skipping setup")
