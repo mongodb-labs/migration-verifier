@@ -827,11 +827,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 	switch srcSpec.Type {
 	case "collection":
 		canCompareData = true
-	case "view":
-	case "timeseries":
-		if !verifier.verifyAll {
-			return nil, false, fmt.Errorf("cannot verify time-series collection (%#q) under namespace filtering", srcNs)
-		}
+	case "view", "timeseries":
 	default:
 		return nil, false, fmt.Errorf("unrecognized collection type (spec: %+v)", srcSpec)
 	}
