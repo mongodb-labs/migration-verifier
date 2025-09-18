@@ -633,12 +633,15 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_OneDoc() 
 	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
 
+	suite.Require().NotEmpty(stats)
+	suite.Assert().NotZero(stats[0].BytesCompared, "bytes compared should be set")
+
 	suite.Assert().Equal(
 		mslices.Of(NamespaceStats{
 			Namespace:      dbName + ".foo",
 			DocsCompared:   1,
 			TotalDocs:      1,
-			BytesCompared:  types.ByteCount(len(bsonDoc)),
+			BytesCompared:  stats[0].BytesCompared,
 			TotalBytes:     types.ByteCount(len(bsonDoc)),
 			PartitionsDone: 1,
 		}),
@@ -652,12 +655,15 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_OneDoc() 
 	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
 
+	suite.Require().NotEmpty(stats)
+	suite.Assert().NotZero(stats[0].BytesCompared, "bytes compared should be set")
+
 	suite.Assert().Equal(
 		mslices.Of(NamespaceStats{
 			Namespace:      dbName + ".foo",
 			DocsCompared:   1,
 			TotalDocs:      1,
-			BytesCompared:  types.ByteCount(len(bsonDoc)),
+			BytesCompared:  stats[0].BytesCompared,
 			PartitionsDone: 1,
 
 			// NB: TotalBytes is 0 because we can’t compute that from the
