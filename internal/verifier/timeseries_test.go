@@ -34,6 +34,20 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 				),
 			),
 		)
+
+		// v7+ automatically create this:
+		_, err := client.Database(dbName).Collection("weather").Indexes().
+			CreateOne(
+				ctx,
+				mongo.IndexModel{
+					Keys: bson.D{
+						{"metadata", 1},
+						{"time", 1},
+					},
+				},
+			)
+		suite.Require().NoError(err, "should create index")
+
 	}
 
 	srcDB := suite.srcMongoClient.Database(dbName)
@@ -67,6 +81,8 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 		verificationStatus.CompletedTasks,
 		"should be completed: view meta, buckets meta, and buckets docs",
 	)
+
+	suite.T().Logf("verificationStatus")
 
 	_, err = srcDB.Collection("weather").InsertOne(ctx, bson.D{
 		{"time", now},
