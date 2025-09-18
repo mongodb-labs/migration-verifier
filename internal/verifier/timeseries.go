@@ -11,6 +11,8 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+// This method augments the verifier’s in-memory state to track the
+// `system.buckets.*` collection for each timeseries collection.
 func (verifier *Verifier) addTimeseriesBucketsToNamespaces(ctx context.Context) error {
 	srcTimeseriesNamespaces, err := whichNamespacesAreTimeseries(
 		ctx,
