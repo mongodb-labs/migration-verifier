@@ -8,11 +8,17 @@ RELEASE_URL="https://api.github.com/repos/mongodb-labs/migration-verifier/releas
 
 OS=$(uname -o | tr '[:upper:]' '[:lower:]' | sed 's|gnu/||')
 ARCH=$(uname -m)
-if [ "$ARCH" = "aarch64" ]; then
-    ARCH=arm64
-fi
 
 echo "Looks like you’re running $OS on $ARCH."
+
+case "$ARCH" in
+    x86_64)
+        ARCH=amd64
+        ;;
+    aarch64)
+        ARCH=arm64
+        ;;
+esac
 
 MANIFEST=$(curl -sSL "$RELEASE_URL")
 
