@@ -822,8 +822,20 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		}
 	}
 
-	// Don't compare view data; they have no data of their own.
-	canCompareData := srcSpec.Type != "view"
+	var canCompareData bool
+
+	switch srcSpec.Type {
+	case "collection":
+		canCompareData = true
+	case "view":
+	case "timeseries":
+		if !verifier.verifyAll {
+			return nil, false, fmt.Errorf("cannot verify time-series collection (%#q) under namespace filtering", srcNs)
+		}
+	default:
+		return nil, false, fmt.Errorf("unrecognized collection type (spec: %+v)", srcSpec)
+	}
+
 	// Do not compare data between capped and uncapped collections because the partitioning is different.
 	canCompareData = canCompareData && srcSpec.Options.Lookup("capped").Equal(dstSpec.Options.Lookup("capped"))
 
