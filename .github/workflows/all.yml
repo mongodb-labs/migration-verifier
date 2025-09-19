@@ -12,15 +12,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-#        include:
-#
-#          # Testing fallback when `hello` isn’t implemented
-#          # (but appendOplogNote is).
-#          - mongodb_versions: [ '4.2.5', '6.0' ]
-#            topology:
-#              name: replset
-#              srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
-#              dstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
+        include:
+
+          # Testing fallback when `hello` isn’t implemented
+          # (but appendOplogNote is).
+          - mongodb_versions: [ '4.2.5', '6.0' ]
+            topology:
+              name: replset
+              srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
+              dstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
 
         exclude:
           - mongodb_versions: [ '4.2', '4.2' ]
@@ -34,10 +34,10 @@ jobs:
 
         # versions are: source, destination
         mongodb_versions:
-#          - [ '4.2', '4.2' ]
-#          - [ '4.2', '4.4' ]
-#          - [ '4.2', '5.0' ]
-#          - [ '4.2', '6.0' ]
+          - [ '4.2', '4.2' ]
+          - [ '4.2', '4.4' ]
+          - [ '4.2', '5.0' ]
+          - [ '4.2', '6.0' ]
 
           - [ '4.4', '4.4' ]
           - [ '4.4', '5.0' ]
