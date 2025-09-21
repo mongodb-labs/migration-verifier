@@ -567,6 +567,113 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	)
 }
 
+func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Metadata() {
+	ctx := suite.Context()
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	dbName := suite.DBNameForTest()
+
+	err := verifier.srcClient.Database(dbName).CreateCollection(
+		ctx,
+		"foo",
+	)
+	suite.Require().NoError(err)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(
+		mslices.Of(NamespaceStats{
+			Namespace: dbName + ".foo",
+		}),
+		stats,
+		"stats should be as expected",
+	)
+
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(
+		mslices.Of(NamespaceStats{
+			Namespace: dbName + ".foo",
+		}),
+		stats,
+		"stats should be as expected",
+	)
+}
+
+func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_OneDoc() {
+	ctx := suite.Context()
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	bsonDoc := lo.Must(bson.Marshal(bson.D{{"_id", "foo"}}))
+
+	dbName := suite.DBNameForTest()
+	_, err := verifier.srcClient.Database(dbName).Collection("foo").
+		InsertOne(ctx, bsonDoc)
+	suite.Require().NoError(err)
+
+	err = verifier.dstClient.Database(dbName).CreateCollection(
+		ctx,
+		"foo",
+	)
+	suite.Require().NoError(err)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Require().NotEmpty(stats)
+	suite.Assert().NotZero(stats[0].BytesCompared, "bytes compared should be set")
+
+	suite.Assert().Equal(
+		mslices.Of(NamespaceStats{
+			Namespace:      dbName + ".foo",
+			DocsCompared:   1,
+			TotalDocs:      1,
+			BytesCompared:  stats[0].BytesCompared,
+			TotalBytes:     types.ByteCount(len(bsonDoc)),
+			PartitionsDone: 1,
+		}),
+		stats,
+		"stats should be as expected",
+	)
+
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	suite.Require().NoError(err)
+
+	suite.Require().NotEmpty(stats)
+	suite.Assert().NotZero(stats[0].BytesCompared, "bytes compared should be set")
+
+	suite.Assert().Equal(
+		mslices.Of(NamespaceStats{
+			Namespace:      dbName + ".foo",
+			DocsCompared:   1,
+			TotalDocs:      1,
+			BytesCompared:  stats[0].BytesCompared,
+			PartitionsDone: 1,
+
+			// NB: TotalBytes is 0 because we can’t compute that from the
+			// change stream.
+		}),
+		stats,
+		"stats should be as expected",
+	)
+}
+
 func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
