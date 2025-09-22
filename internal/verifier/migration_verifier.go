@@ -822,7 +822,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		}
 	}
 
-	var canCompareData bool
+	canCompareData := false
 
 	switch srcSpec.Type {
 	case "collection":
