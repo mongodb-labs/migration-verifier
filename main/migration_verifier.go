@@ -76,14 +76,12 @@ func main() {
 			Usage: "path to an optional YAML config file",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:     srcURI,
-			Usage:    "source connection string",
-			Required: true,
+			Name:  srcURI,
+			Usage: "source connection string",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:     dstURI,
-			Usage:    "destination connection string",
-			Required: true,
+			Name:  dstURI,
+			Usage: "destination connection string",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  metaURI,
@@ -254,6 +252,17 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	verifierSettings := verifier.VerifierSettings{}
 	if cCtx.Bool(ignoreReadConcernFlag) {
 		verifierSettings.ReadConcernSetting = verifier.ReadConcernIgnore
+	}
+
+	missingStringArgs := lo.Filter(
+		mslices.Of(srcURI, dstURI),
+		func(setting string, _ int) bool {
+			return cCtx.String(setting) == ""
+		},
+	)
+
+	if len(missingStringArgs) > 0 {
+		return nil, fmt.Errorf("missing required parameters: %#q", missingStringArgs)
 	}
 
 	logPath := cCtx.String(logPath)
