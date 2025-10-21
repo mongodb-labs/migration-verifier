@@ -13,7 +13,7 @@ curl -sSL https://raw.githubusercontent.com/mongodb-labs/migration-verifier/refs
 
 Then start a local replica set to store verification metadata:
 ```
-podman run -it -p27017:27017 -v ./verifier_db:/data/db --entrypoint bash docker.io/mongodb/mongodb-community-server -c 'mongod --bind_ip_all --replSet rs & mpid=$! && until mongosh --eval "rs.initiate()"; do sleep 1; done && wait $mpid'
+podman run -it --rm -p27017:27017 -v ./verifier_db:/data/db --entrypoint bash docker.io/mongodb/mongodb-community-server -c 'mongod --bind_ip_all --replSet rs & mpid=$! && until mongosh --eval "rs.initiate({_id: \"rs\", members: [{_id: 0, host: \"localhost:27017\"}]})"; do sleep 1; done && wait $mpid'
 ```
 (This will create a local `verifier_db` directory so that you can resume verification if needed. Omit `-v` with its argument to avoid that.)
 
