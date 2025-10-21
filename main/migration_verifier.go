@@ -281,7 +281,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	if err != nil {
 		return nil, errors.Wrap(err, "parsing source connection string")
 	}
-	err = v.SetSrcURI(ctx, srcURI)
+	err = v.SetSrcURI(ctx, srcConnStr)
 	if err != nil {
 		return nil, err
 	}
