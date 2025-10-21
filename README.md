@@ -13,9 +13,9 @@ curl -sSL https://raw.githubusercontent.com/mongodb-labs/migration-verifier/refs
 
 Then start a local replica set to store verification metadata:
 ```
-docker run -it -p27017:27017 -v ./verifier_db:/data/db --entrypoint bash mongodb/mongodb-community-server -c 'mongod --bind_ip_all --replSet rs & mpid=$! && until mongosh --eval "rs.initiate()"; do sleep 1; done && wait $mpid'
+podman run -it --rm -p27017:27017 -v ./verifier_db:/data/db --entrypoint bash docker.io/mongodb/mongodb-community-server -c 'mongod --bind_ip_all --replSet rs & mpid=$! && until mongosh --eval "rs.initiate({_id: \"rs\", members: [{_id: 0, host: \"localhost:27017\"}]})"; do sleep 1; done && wait $mpid'
 ```
-(This will create a local `verifier_db` directory so that you can resume verification if needed.)
+(This will create a local `verifier_db` directory so that you can resume verification if needed. Omit `-v` with its argument to avoid that.)
 
 Finally, run verification:
 ```
@@ -40,7 +40,7 @@ The verifier can alternatively store its metadata on the destination cluster. Th
 
 # More Details
 
-To see all options: 
+To see all options:
 
 
 ```
@@ -52,7 +52,7 @@ To check all namespaces:
 
 
 ```
-./migration_verifier --srcURI mongodb://127.0.0.1:27002 --dstURI mongodb://127.0.0.1:27003 --metaURI mongodb://127.0.0.1:27001 --verifyAll
+./migration_verifier --srcURI mongodb://127.0.0.1:27002 --dstURI mongodb://127.0.0.1:27003 --verifyAll
 ```
 
 
@@ -133,9 +133,9 @@ The verifier will now check to completion to make sure that there are no inconsi
 | Flag                                    | Description                                                                                                                                                                                 |
 |-----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--configFile <value>`                  | path to an optional YAML config file                                                                                                                                                        |
-| `--srcURI <URI>`                        | source Host URI for migration verification (default: "mongodb://localhost:27017")                                                                                                           |
-| `--dstURI <URI>`                        | destination Host URI for migration verification (default: "mongodb://localhost:27018")                                                                                                      |
-| `--metaURI <URI>`                       | host URI for storing migration verification metadata (default: "mongodb://localhost:27019")                                                                                                 |
+| `--srcURI <URI>`                        | source Host URI for migration verification (required)                                                                                                           |
+| `--dstURI <URI>`                        | destination Host URI for migration verification (required)                                                                                                      |
+| `--metaURI <URI>`                       | host URI for storing migration verification metadata (default: "mongodb://localhost")                                                                                                 |
 | `--serverPort <port>`                   | port for the control web server (default: 27020)                                                                                                                                            |
 | `--logPath <path>`                      | logging file path (default: "stdout")                                                                                                                                                       |
 | `--numWorkers <number>`                 | number of worker threads to use for verification (default: 10)                                                                                                                              |

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/verifier"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -275,18 +276,31 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		Int("processID", os.Getpid()).
 		Msg("migration-verifier started.")
 
-	err := v.SetSrcURI(ctx, cCtx.String(srcURI))
+	srcConnStr := cCtx.String(srcURI)
+	_, srcConnStr, err := mmongo.MaybeAddDirectConnection(srcConnStr)
+	if err != nil {
+		return nil, errors.Wrap(err, "parsing source connection string")
+	}
+	err = v.SetSrcURI(ctx, srcConnStr)
 	if err != nil {
 		return nil, err
 	}
 
 	dstConnStr := cCtx.String(dstURI)
+	_, dstConnStr, err = mmongo.MaybeAddDirectConnection(dstConnStr)
+	if err != nil {
+		return nil, errors.Wrap(err, "parsing destination connection string")
+	}
 	err = v.SetDstURI(ctx, dstConnStr)
 	if err != nil {
 		return nil, err
 	}
 
 	metaConnStr := cCtx.String(metaURI)
+	_, metaConnStr, err = mmongo.MaybeAddDirectConnection(metaConnStr)
+	if err != nil {
+		return nil, errors.Wrap(err, "parsing metadata connection string")
+	}
 	err = v.SetMetaURI(ctx, metaConnStr)
 	if err != nil {
 		return nil, err
