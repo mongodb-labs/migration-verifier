@@ -283,12 +283,10 @@ func deduplicateRechecks(
 	return dbNames, collNames, rawDocIDs, dataSizes
 }
 
-// DropOldRecheckQueueWhileLocked deletes the previous generation’s recheck
+// DropOldRecheckQueue deletes the previous generation’s recheck
 // documents from the verifier’s metadata.
-//
-// The verifier **MUST** be locked when this function is called (or panic).
-func (verifier *Verifier) DropOldRecheckQueueWhileLocked(ctx context.Context) error {
-	prevGeneration := verifier.getPreviousGenerationWhileLocked()
+func (verifier *Verifier) DropOldRecheckQueue(ctx context.Context) error {
+	prevGeneration := verifier.generation - 1
 
 	verifier.logger.Debug().
 		Int("previousGeneration", prevGeneration).
@@ -305,16 +303,7 @@ func (verifier *Verifier) DropOldRecheckQueueWhileLocked(ctx context.Context) er
 	).Run(ctx, verifier.logger)
 }
 
-func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
-	generation, _ := verifier.getGenerationWhileLocked()
-	if generation < 1 {
-		panic("This function is forbidden before generation 1!")
-	}
-
-	return generation - 1
-}
-
-// GenerateRecheckTasksWhileLocked fetches the previous generation’s recheck
+// GenerateRecheckTasks fetches the previous generation’s recheck
 // documents from the verifier’s metadata and creates current-generation
 // document-verification tasks from them.
 //
@@ -322,8 +311,8 @@ func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
 // calls to this function in a retryer.
 //
 // The verifier **MUST** be locked when this function is called (or panic).
-func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) error {
-	prevGeneration := verifier.getPreviousGenerationWhileLocked()
+func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
+	prevGeneration := verifier.generation - 1
 
 	verifier.logger.Debug().
 		Int("priorGeneration", prevGeneration).

@@ -718,7 +718,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 	func() {
 		verifier.mux.Lock()
 		defer func() { verifier.mux.Unlock() }()
-		suite.Require().NoError(verifier.GenerateRecheckTasksWhileLocked(ctx))
+		suite.Require().NoError(verifier.GenerateRecheckTasks(ctx))
 	}()
 
 	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
@@ -1000,7 +1000,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		verifier.mux.Lock()
 		defer verifier.mux.Unlock()
 
-		err = verifier.GenerateRecheckTasksWhileLocked(ctx)
+		err = verifier.GenerateRecheckTasks(ctx)
 		suite.Require().NoError(err)
 	}()
 

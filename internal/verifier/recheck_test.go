@@ -260,7 +260,7 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	verifier.generation++
 
 	suite.T().Logf("Generating recheck tasks …")
-	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
+	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 }
 
@@ -294,7 +294,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 
 	verifier.generation++
 	verifier.mux.Lock()
-	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
+	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -354,7 +354,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 
 	verifier.generation++
 	verifier.mux.Lock()
-	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
+	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -404,7 +404,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 
 	verifier.generation++
 	verifier.mux.Lock()
-	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
+	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -463,7 +463,7 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 
 	verifier.generation++
 
-	err = verifier.DropOldRecheckQueueWhileLocked(ctx)
+	err = verifier.DropOldRecheckQueue(ctx)
 	suite.Require().NoError(err)
 
 	// This never happens in real life but is needed for this test.
