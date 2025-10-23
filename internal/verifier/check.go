@@ -405,7 +405,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				Err(err).
 				Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
 		}
-		verifier.mux.Unlock()
 	}
 }
 
