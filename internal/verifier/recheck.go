@@ -118,7 +118,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			mongo.NewInsertOneModel().SetDocument(recheckDoc),
 		)
 		curBatchSize += len(recheckRaw)
-		if curBatchSize > recheckBatchByteLimit || len(recheckRaw) >= recheckBatchCountLimit {
+		if curBatchSize > recheckBatchByteLimit || len(curRechecks) >= recheckBatchCountLimit {
 			recheckBatches = append(recheckBatches, curRechecks)
 			curRechecks = nil
 			curBatchSize = 0
