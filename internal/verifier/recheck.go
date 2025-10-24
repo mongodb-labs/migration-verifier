@@ -9,7 +9,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/bsontype"
@@ -50,7 +49,7 @@ type RecheckDoc struct {
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	ctx context.Context,
-	namespace string, documentIDs []any, dataSizes []int) error {
+	namespace string, documentIDs []bson.RawValue, dataSizes []int) error {
 	dbName, collName := SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
@@ -77,7 +76,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
 	dbNames []string,
 	collNames []string,
-	documentIDs []any,
+	documentIDs []bson.RawValue,
 	dataSizes []int,
 ) error {
 	verifier.mux.RLock()
@@ -191,7 +190,7 @@ func (verifier *Verifier) insertRecheckDocs(
 
 func deduplicateRechecks(
 	dbNames, collNames []string,
-	documentIDs []any,
+	documentIDs []bson.RawValue,
 	dataSizes []int,
 ) ([]string, []string, []bson.RawValue, []int) {
 	dedupeMap := map[string]map[string]map[string]int{}
@@ -200,15 +199,13 @@ func deduplicateRechecks(
 
 	for i, dbName := range dbNames {
 		collName := collNames[i]
-		docID := documentIDs[i]
+		docIDRaw := documentIDs[i]
 		dataSize := dataSizes[i]
 
-		docIDRaw := mbson.MustConvertToRawValue(docID)
-
-		docIDStr := string(append(
-			[]byte{byte(docIDRaw.Type)},
-			docIDRaw.Value...,
-		))
+		docIDBuf := make([]byte, 1+len(docIDRaw.Value))
+		docIDBuf[0] = byte(docIDRaw.Type)
+		copy(docIDBuf[1:], docIDRaw.Value)
+		docIDStr := string(docIDBuf)
 
 		if _, ok := dedupeMap[dbName]; !ok {
 			dedupeMap[dbName] = map[string]map[string]int{
@@ -251,8 +248,8 @@ func deduplicateRechecks(
 				rawDocIDs = append(
 					rawDocIDs,
 					bson.RawValue{
-						Type:  []bsontype.Type(docIDStr)[0],
-						Value: []byte(docIDStr)[1:],
+						Type:  bsontype.Type(docIDStr[0]),
+						Value: []byte(docIDStr[1:]),
 					},
 				)
 				dataSizes = append(dataSizes, dataSize)

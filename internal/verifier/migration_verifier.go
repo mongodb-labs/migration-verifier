@@ -455,16 +455,20 @@ func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A)
 	return append(predicates, verifier.globalFilter)
 }
 
-func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, id any, fieldPrefix string) (results []VerificationResult) {
+func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, id bson.RawValue, fieldPrefix string) (results []VerificationResult) {
+	results = make(
+		[]VerificationResult,
+		0,
+		len(mismatch.missingFieldOnSrc)+len(mismatch.missingFieldOnDst)+len(mismatch.fieldContentsDiffer),
+	)
 
 	for _, field := range mismatch.missingFieldOnSrc {
 		result := VerificationResult{
 			Field:     fieldPrefix + field,
 			Details:   Missing,
 			Cluster:   ClusterSource,
-			NameSpace: namespace}
-		if id != nil {
-			result.ID = id
+			NameSpace: namespace,
+			ID:        id,
 		}
 
 		results = append(results, result)
@@ -475,9 +479,8 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 			Field:     fieldPrefix + field,
 			Details:   Missing,
 			Cluster:   ClusterTarget,
-			NameSpace: namespace}
-		if id != nil {
-			result.ID = id
+			NameSpace: namespace,
+			ID:        id,
 		}
 
 		results = append(results, result)
@@ -502,9 +505,8 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 			Field:     fieldPrefix + field,
 			Details:   details,
 			Cluster:   ClusterTarget,
-			NameSpace: namespace}
-		if id != nil {
-			result.ID = id
+			NameSpace: namespace,
+			ID:        id,
 		}
 
 		results = append(results, result)
@@ -564,11 +566,11 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 				Int("mismatchesCount", len(problems)).
 				Msg("Discrepancies found. Will recheck in the next generation.")
 
-			var dataSizes []int
+			dataSizes := make([]int, 0, len(problems))
 
 			// This stores all IDs for the next generation to check.
 			// Its length should equal len(mismatches) + len(missingIds).
-			var idsToRecheck []any
+			idsToRecheck := make([]bson.RawValue, 0, len(problems))
 
 			for _, mismatch := range problems {
 				idsToRecheck = append(idsToRecheck, mismatch.ID)
@@ -818,7 +820,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 				Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Options, dstSpec.Options),
 			})
 		} else {
-			results = append(results, mismatchResultsToVerificationResults(mismatchDetails, srcSpec.Options, dstSpec.Options, srcNs, "spec", "Options.")...)
+			results = append(results, mismatchResultsToVerificationResults(mismatchDetails, srcSpec.Options, dstSpec.Options, srcNs, mbson.ToRawValue("spec"), "Options.")...)
 		}
 	}
 
@@ -1005,7 +1007,7 @@ func (verifier *Verifier) verifyIndexes(
 
 			if !theyMatch {
 				results = append(results, VerificationResult{
-					ID:        indexName,
+					ID:        mbson.ToRawValue(indexName),
 					Field:     "index",
 					NameSpace: FullName(dstColl),
 					Cluster:   ClusterTarget,
@@ -1014,7 +1016,7 @@ func (verifier *Verifier) verifyIndexes(
 			}
 		} else {
 			results = append(results, VerificationResult{
-				ID:        indexName,
+				ID:        mbson.ToRawValue(indexName),
 				Field:     "index",
 				Details:   Missing,
 				Cluster:   ClusterSource,
@@ -1027,7 +1029,7 @@ func (verifier *Verifier) verifyIndexes(
 	for indexName := range srcMap {
 		if !srcMapUsed[indexName] {
 			results = append(results, VerificationResult{
-				ID:        indexName,
+				ID:        mbson.ToRawValue(indexName),
 				Field:     "index",
 				Details:   Missing,
 				Cluster:   ClusterTarget,
