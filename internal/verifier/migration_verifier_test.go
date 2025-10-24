@@ -25,6 +25,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
@@ -543,7 +544,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	suite.Assert().Regexp(regexp.MustCompile("^"+Mismatch), results[0].Details, "mismatch expected")
 	suite.Assert().EqualValues(
 		any(id),
-		results[0].ID.(bson.RawValue).AsInt64(),
+		results[0].ID.AsInt64(),
 		"mismatch recorded as expeceted",
 	)
 
@@ -562,7 +563,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	suite.Assert().Regexp(regexp.MustCompile("^"+Mismatch), results[0].Details, "mismatch expeceted")
 	suite.Assert().EqualValues(
 		any(id),
-		results[0].ID.(bson.RawValue).AsInt64(),
+		results[0].ID.AsInt64(),
 		"mismatch recorded as expeceted",
 	)
 }
@@ -684,7 +685,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
-				DocID:  "heyhey",
+				DocID:  mbson.ToRawValue("heyhey"),
 				ClusterTime: &primitive.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
@@ -700,7 +701,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
-				DocID:  "hoohoo",
+				DocID:  mbson.ToRawValue("hoohoo"),
 				ClusterTime: &primitive.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
@@ -935,14 +936,29 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
-	err := verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []any{42}, []int{100})
+	err := verifier.InsertFailedCompareRecheckDocs(
+		ctx,
+		"foo.bar",
+		mslices.Of(mbson.ToRawValue(42)),
+		[]int{100},
+	)
 	suite.Require().NoError(err)
-	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar", []any{43, 44}, []int{100, 100})
+	err = verifier.InsertFailedCompareRecheckDocs(
+		ctx,
+		"foo.bar",
+		mslices.Of(mbson.ToRawValue(43), mbson.ToRawValue(44)),
+		[]int{100, 100},
+	)
 	suite.Require().NoError(err)
-	err = verifier.InsertFailedCompareRecheckDocs(ctx, "foo.bar2", []any{42}, []int{100})
+	err = verifier.InsertFailedCompareRecheckDocs(
+		ctx,
+		"foo.bar2",
+		mslices.Of(mbson.ToRawValue(42)),
+		[]int{100},
+	)
 	suite.Require().NoError(err)
 	event := ParsedEvent{
-		DocID:  int32(55),
+		DocID:  mbson.ToRawValue(int32(55)),
 		OpType: "delete",
 		Ns: &Namespace{
 			DB:   "foo",
@@ -1056,7 +1072,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 			compareFn: func(t *testing.T, mismatchResults []VerificationResult) {
 				if assert.Equal(t, 1, len(mismatchResults)) {
 					var res int
-					require.Nil(t, mismatchResults[0].ID.(bson.RawValue).Unmarshal(&res))
+					require.Nil(t, mismatchResults[0].ID.Unmarshal(&res))
 					assert.Equal(t, id, res)
 					assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchResults[0].Details)
 				}
@@ -1074,7 +1090,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 			compareFn: func(t *testing.T, mismatchResults []VerificationResult) {
 				if assert.Equal(t, 1, len(mismatchResults)) {
 					var res int
-					require.Nil(t, mismatchResults[0].ID.(bson.RawValue).Unmarshal(&res))
+					require.Nil(t, mismatchResults[0].ID.Unmarshal(&res))
 					assert.Equal(t, id, res)
 					assert.Regexp(t, regexp.MustCompile("^"+Mismatch), mismatchResults[0].Details)
 				}
@@ -1555,7 +1571,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 
 	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
-		suite.Equal(srcIndexNames[1], failures[0].ID)
+		suite.Equal(mbson.ToRawValue(srcIndexNames[1]), failures[0].ID)
 		suite.Equal(Missing, failures[0].Details)
 		suite.Equal(ClusterTarget, failures[0].Cluster)
 		suite.Equal("testDb.testColl1", failures[0].NameSpace)
@@ -1588,7 +1604,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.T().Logf("failures: %+v", failures)
 
 	if suite.Equal(1, len(failures)) {
-		suite.Equal(dstIndexNames[1], failures[0].ID)
+		suite.Equal(mbson.ToRawValue(dstIndexNames[1]), failures[0].ID)
 		suite.Equal(Missing, failures[0].Details)
 		suite.Equal(ClusterSource, failures[0].Cluster)
 		suite.Equal("testDb.testColl2", failures[0].NameSpace)
@@ -1620,13 +1636,13 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(2, len(failures)) {
 		sort.Slice(failures, func(i, j int) bool {
-			return failures[i].ID.(string) < failures[j].ID.(string)
+			return failures[i].ID.StringValue() < failures[j].ID.StringValue()
 		})
-		suite.Equal(dstIndexNames[1], failures[0].ID)
+		suite.Equal(mbson.ToRawValue(dstIndexNames[1]), failures[0].ID)
 		suite.Equal(Missing, failures[0].Details)
 		suite.Equal(ClusterSource, failures[0].Cluster)
 		suite.Equal("testDb.testColl3", failures[0].NameSpace)
-		suite.Equal(srcIndexNames[0], failures[1].ID)
+		suite.Equal(mbson.ToRawValue(srcIndexNames[0]), failures[1].ID)
 		suite.Equal(Missing, failures[1].Details)
 		suite.Equal(ClusterTarget, failures[1].Cluster)
 		suite.Equal("testDb.testColl3", failures[1].NameSpace)
@@ -1658,7 +1674,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Equal(verificationTaskMetadataMismatch, task.Status)
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
-		suite.Equal("wrong", failures[0].ID)
+		suite.Equal(mbson.ToRawValue("wrong"), failures[0].ID)
 		suite.Regexp(regexp.MustCompile("^"+Mismatch), failures[0].Details)
 		suite.Equal(ClusterTarget, failures[0].Cluster)
 		suite.Equal("testDb.testColl4", failures[0].NameSpace)

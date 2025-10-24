@@ -8,6 +8,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -24,7 +25,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 		verifier.InsertFailedCompareRecheckDocs(
 			ctx,
 			"the.namespace",
-			[]any{"theDocID"},
+			[]bson.RawValue{mbson.ToRawValue("theDocID")},
 			[]int{1234},
 		),
 		"insert failed-comparison recheck",
@@ -38,7 +39,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 				PrimaryKey: RecheckPrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
-					DocumentID:        "theDocID",
+					DocumentID:        mbson.ToRawValue("theDocID"),
 				},
 			},
 		},
@@ -48,7 +49,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 
 	event := ParsedEvent{
 		OpType: "insert",
-		DocID:  "theDocID",
+		DocID:  mbson.ToRawValue("theDocID"),
 		Ns: &Namespace{
 			DB:   "the",
 			Coll: "namespace",
@@ -73,7 +74,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 				PrimaryKey: RecheckPrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
-					DocumentID:        "theDocID",
+					DocumentID:        mbson.ToRawValue("theDocID"),
 				},
 			},
 		},
@@ -281,13 +282,13 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 		PrimaryKey: RecheckPrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        id1,
+			DocumentID:        mbson.ToRawValue(id1),
 		},
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = id2
+	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
 	d3 := d1
-	d3.PrimaryKey.DocumentID = id3
+	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
@@ -341,13 +342,13 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 		PrimaryKey: RecheckPrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        id1,
+			DocumentID:        mbson.ToRawValue(id1),
 		},
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = id2
+	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
 	d3 := d1
-	d3.PrimaryKey.DocumentID = id3
+	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
@@ -450,11 +451,11 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 		PrimaryKey: RecheckPrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        id1,
+			DocumentID:        mbson.ToRawValue(id1),
 		},
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = id2
+	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.Assert().ElementsMatch([]any{d1, d2}, results)
@@ -488,5 +489,16 @@ func insertRecheckDocs(
 		collNames[i] = collName
 	}
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes)
+	rawIDs := lo.Map(
+		documentIDs,
+		func(idAny any, _ int) bson.RawValue {
+			btype, buf := lo.Must2(bson.MarshalValue(idAny))
+			return bson.RawValue{
+				Type:  btype,
+				Value: buf,
+			}
+		},
+	)
+
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, rawIDs, dataSizes)
 }

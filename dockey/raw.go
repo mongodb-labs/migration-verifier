@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
 )
 
-// This extracts the document key from a document gets its field names.
+// ExtractTrueDocKeyFromDoc extracts the document key from a document
+// given its field names.
 //
 // NB: This avoids the problem documented in SERVER-109340; as a result,
 // the returned key may not always match the change stream’s `documentKey`
@@ -21,7 +22,8 @@ func ExtractTrueDocKeyFromDoc(
 ) (bson.Raw, error) {
 	assertFieldNameUniqueness(fieldNames)
 
-	var dk bson.D
+	docBuilder := bsoncore.NewDocumentBuilder()
+
 	for _, field := range fieldNames {
 		var val bson.RawValue
 
@@ -38,19 +40,20 @@ func ExtractTrueDocKeyFromDoc(
 			return nil, errors.Wrapf(err, "extracting doc key field %#q from doc %+v", field, doc)
 		}
 
-		dk = append(dk, bson.E{field, val})
+		docBuilder.AppendValue(
+			field,
+			bsoncore.Value{
+				Type: val.Type,
+				Data: val.Value,
+			},
+		)
 	}
 
-	docKey, err := bson.Marshal(dk)
-	if err != nil {
-		return nil, errors.Wrapf(err, "marshaling doc key %v from doc %v", dk, docKey)
-	}
-
-	return docKey, nil
+	return bson.Raw(docBuilder.Build()), nil
 }
 
 func assertFieldNameUniqueness(fieldNames []string) {
-	if len(lo.Uniq(fieldNames)) != len(fieldNames) {
+	if mslices.FindFirstDupe(fieldNames).IsSome() {
 		panic(fmt.Sprintf("Duplicate field names: %v", fieldNames))
 	}
 }

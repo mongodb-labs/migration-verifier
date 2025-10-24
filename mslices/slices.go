@@ -3,6 +3,8 @@ package mslices
 import (
 	"reflect"
 	"slices"
+
+	"github.com/10gen/migration-verifier/option"
 )
 
 // This package complements the Go standard library’s package of the
@@ -42,4 +44,24 @@ func Compact[T any, S ~[]T](slc S) S {
 
 func isZero[T any](val T) bool {
 	return reflect.ValueOf(&val).Elem().IsZero()
+}
+
+// FindFirstDupe returns the first item in the slice that has at
+// least 1 duplicate, or none if all slice members are unique.
+func FindFirstDupe[T comparable](items []T) option.Option[T] {
+	for i := range items {
+		j := 1 + i
+
+		if j == len(items) {
+			break
+		}
+
+		for ; j < len(items); j++ {
+			if items[i] == items[j] {
+				return option.Some(items[i])
+			}
+		}
+	}
+
+	return option.None[T]()
 }
