@@ -39,7 +39,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 				PrimaryKey: RecheckPrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
-					DocumentID:        "theDocID",
+					DocumentID:        mbson.ToRawValue("theDocID"),
 				},
 			},
 		},
@@ -74,7 +74,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 				PrimaryKey: RecheckPrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
-					DocumentID:        "theDocID",
+					DocumentID:        mbson.ToRawValue("theDocID"),
 				},
 			},
 		},
@@ -282,13 +282,13 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 		PrimaryKey: RecheckPrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        id1,
+			DocumentID:        mbson.ToRawValue(id1),
 		},
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = id2
+	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
 	d3 := d1
-	d3.PrimaryKey.DocumentID = id3
+	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
@@ -342,13 +342,13 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 		PrimaryKey: RecheckPrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        id1,
+			DocumentID:        mbson.ToRawValue(id1),
 		},
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = id2
+	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
 	d3 := d1
-	d3.PrimaryKey.DocumentID = id3
+	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
@@ -451,11 +451,11 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 		PrimaryKey: RecheckPrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        id1,
+			DocumentID:        mbson.ToRawValue(id1),
 		},
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = id2
+	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.Assert().ElementsMatch([]any{d1, d2}, results)
