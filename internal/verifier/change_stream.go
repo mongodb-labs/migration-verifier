@@ -44,7 +44,7 @@ var supportedEventOpTypes = mapset.NewSet(
 type ParsedEvent struct {
 	OpType       string                         `bson:"operationType"`
 	Ns           *Namespace                     `bson:"ns,omitempty"`
-	DocID        any                            `bson:"_docID,omitempty"`
+	DocID        bson.RawValue                  `bson:"_docID,omitempty"`
 	FullDocument bson.Raw                       `bson:"fullDocument,omitempty"`
 	FullDocLen   option.Option[types.ByteCount] `bson:"_fullDocLen"`
 	ClusterTime  *primitive.Timestamp           `bson:"clusterTime,omitEmpty"`
@@ -187,7 +187,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 
 	dbNames := make([]string, len(batch.events))
 	collNames := make([]string, len(batch.events))
-	docIDs := make([]any, len(batch.events))
+	docIDs := make([]bson.RawValue, len(batch.events))
 	dataSizes := make([]int, len(batch.events))
 
 	latestTimestamp := primitive.Timestamp{}

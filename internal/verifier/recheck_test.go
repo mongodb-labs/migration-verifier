@@ -8,6 +8,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -24,7 +25,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 		verifier.InsertFailedCompareRecheckDocs(
 			ctx,
 			"the.namespace",
-			[]any{"theDocID"},
+			[]bson.RawValue{mbson.ToRawValue("theDocID")},
 			[]int{1234},
 		),
 		"insert failed-comparison recheck",
@@ -48,7 +49,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 
 	event := ParsedEvent{
 		OpType: "insert",
-		DocID:  "theDocID",
+		DocID:  mbson.ToRawValue("theDocID"),
 		Ns: &Namespace{
 			DB:   "the",
 			Coll: "namespace",
@@ -488,5 +489,16 @@ func insertRecheckDocs(
 		collNames[i] = collName
 	}
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes)
+	rawIDs := lo.Map(
+		documentIDs,
+		func(idAny any, _ int) bson.RawValue {
+			btype, buf := lo.Must2(bson.MarshalValue(idAny))
+			return bson.RawValue{
+				Type:  btype,
+				Value: buf,
+			}
+		},
+	)
+
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, rawIDs, dataSizes)
 }
