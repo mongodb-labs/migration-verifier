@@ -311,6 +311,37 @@ The migration-verifier periodically persists its change stream’s resume token 
 
 The verifier has been observed handling test source write loads of 15,000 writes per second. Real-world performance will vary according to several factors, including network latency, cluster resources, and the verifier node’s resources.
 
+## Change stream lag
+
+Every time the verifier notices a change in a document, it schedules a recheck of that document. If the rate of change (i.e., the write load) outpaces the verifier’s recheck scheduling, change stream lag will grow. The verifier will start warning about this once the lag appears “unhealthy”.
+
+High change stream lag causes one of two outcomes:
+
+1. Once writes stop on the source (i.e., during the migration’s cutover), you’ll have to wait for a longer-than-ideal time for the verifier to recheck documents until its writes-off timestamp.
+
+2. Sufficiently high verifier lag can exceed the server’s oplog capacity. If this happens, verification will fail permanently, and you’ll have to restart it.
+
+### Mitigation
+
+The following may help if you see warnings about change stream lag:
+
+1. Scale up: Run the verifier on a more powerful host.
+
+2. Reduce load: Disable nonessential applications during verification until cutover.
+
+## Recheck generation size
+
+Even if the change stream keeps up with the write load, the verifier may still recheck
+the documents more slowly than writes happen on the source. If this happens, you’ll
+see recheck generations grow over time.
+
+Unlike change stream lag, this won’t actually endanger the verification. It will, though,
+extend downtime during cutover because the final recheck generation will take longer than
+it otherwise might.
+
+Mitigation for this scenario is the same as for change stream lag: scale up verification,
+or reduce load.
+
 ## Per-shard verification
 
 If migrating shard-to-shard, you can also verify shard-to-shard to scale verification horizontally. Run 1 verifier per source shard. You can colocate all verifiers’ metadata on the same metadata cluster, but each verifier must use its own database (e.g., `verify90`, `verify1`, …). If that metadata cluster buckles under the load, consider splitting verification across multiple hosts.

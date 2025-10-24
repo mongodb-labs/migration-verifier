@@ -7,13 +7,13 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -513,7 +513,7 @@ func (verifier *Verifier) printMismatchInvestigationNotes(strBuilder *strings.Bu
 	}
 }
 
-func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, now time.Time) {
+func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 	var eventsTable *tablewriter.Table
 
 	for _, cluster := range []struct {
@@ -535,23 +535,42 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, n
 			totalEvents += nsTotals[ns]
 		}
 
-		elapsed := now.Sub(verifier.generationStartTime)
-
 		eventsDescr := "none"
 		if totalEvents > 0 {
 			eventsDescr = fmt.Sprintf(
-				"%s total (%s/sec), across %s namespace(s)",
+				"%s total, across %s namespace(s)",
 				reportutils.FmtReal(totalEvents),
-				reportutils.FmtReal(util.DivideToF64(totalEvents, elapsed.Seconds())),
 				reportutils.FmtReal(activeNamespacesCount),
 			)
 		}
 
 		fmt.Fprintf(builder, "\n%s change events this generation: %s\n", cluster.title, eventsDescr)
 
-		lag, hasLag := cluster.csReader.GetLag().Get()
-		if hasLag {
-			fmt.Fprintf(builder, "%s change stream lag: %s\n", cluster.title, reportutils.DurationToHMS(lag))
+		if eventsPerSec, has := cluster.csReader.GetEventsPerSecond().Get(); has {
+			var lagNote string
+
+			lag, hasLag := cluster.csReader.GetLag().Get()
+
+			if hasLag {
+				lagNote = fmt.Sprintf(" (lag: %s)", reportutils.DurationToHMS(lag))
+			}
+
+			fmt.Fprintf(
+				builder,
+				"%s observed change rate: %s/sec%s",
+				cluster.title,
+				reportutils.FmtReal(eventsPerSec),
+				lagNote,
+			)
+
+			const lagWarnThreshold = 5 * time.Minute
+
+			if hasLag && lag > lagWarnThreshold {
+				fmt.Fprintf(
+					builder,
+					"⚠️ Lag is excessive. Verification may fail. See documentation.",
+				)
+			}
 		}
 
 		// We only print event breakdowns for the source because we assume that
@@ -591,7 +610,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder *strings.Builder, n
 	}
 
 	if eventsTable != nil {
-		builder.WriteString("\nSource’s most frequently-changing namespaces:\n")
+		fmt.Fprint(builder, "\nSource’s most frequently-changing namespaces:\n")
 
 		eventsTable.Render()
 	}
