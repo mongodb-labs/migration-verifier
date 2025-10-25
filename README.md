@@ -339,8 +339,13 @@ Unlike change stream lag, this won’t actually endanger the verification. It wi
 extend downtime during cutover because the final recheck generation will take longer than
 it otherwise might.
 
-Mitigation for this scenario is the same as for change stream lag: scale up verification,
-or reduce load.
+### Mitigation
+
+1. Scale up. (See above.)
+
+2. Reduce load. (ditto)
+
+3. Make the verifier compare document hashes rather than full documents. See below for details.
 
 ## Per-shard verification
 
