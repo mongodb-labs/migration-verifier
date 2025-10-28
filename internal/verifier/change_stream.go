@@ -792,17 +792,22 @@ func (csr *ChangeStreamReader) GetLag() option.Option[time.Duration] {
 
 func (csr *ChangeStreamReader) GetEventsPerSecond() option.Option[float64] {
 	logs := csr.batchSizeHistory.Get()
-	if len(logs) > 1 {
-		span := lo.Must(lo.Last(logs)).At.Sub(logs[0].At)
+	lastLog, hasLogs := lo.Last(logs)
 
-		if span > 0 {
-			totalEvents := 0
-			for _, log := range logs {
-				totalEvents += log.Datum
-			}
+	if hasLogs && lastLog.At != logs[0].At {
+		span := lastLog.At.Sub(logs[0].At)
 
-			return option.Some(util.DivideToF64(totalEvents, span.Seconds()))
+		// Each log contains a time and a # of events that happened since
+		// the prior log. Thus, each log’s Datum is a count of events that
+		// happened before the timestamp. Since we want the # of events that
+		// happened between the first & last times, we only want events *after*
+		// the first time. Thus, we skip the first log entry here.
+		totalEvents := 0
+		for _, log := range logs[1:] {
+			totalEvents += log.Datum
 		}
+
+		return option.Some(util.DivideToF64(totalEvents, span.Seconds()))
 	}
 
 	return option.None[float64]()
