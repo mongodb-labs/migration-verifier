@@ -277,7 +277,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 					return nil, 0, 0, errors.Wrapf(
 						err,
 						"reading batch of docs from source (task: %s)",
-						namespace,
 						task.PrimaryKey,
 					)
 				}
@@ -317,7 +316,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 					return nil, 0, 0, errors.Wrapf(
 						err,
 						"reading batch of docs from destination (task: %s)",
-						namespace,
 						task.PrimaryKey,
 					)
 				}
