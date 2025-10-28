@@ -200,7 +200,7 @@ func NewWithSession(
 ) (*Cursor, error) {
 	c, err := New(db, resp)
 
-	if err != nil {
+	if err == nil {
 		c.sess = sess
 	}
 
