@@ -313,13 +313,22 @@ The verifier has been observed handling test source write loads of 15,000 writes
 
 ## Change stream lag
 
-Every time the verifier notices a change in a document, it schedules a recheck of that document. If the rate of change (i.e., the write load) outpaces the verifier’s recheck scheduling, change stream lag will grow. The verifier will start warning about this once the lag appears “unhealthy”.
+Every time the verifier notices a change in a document, it schedules a recheck
+of that document. If the changes happen faster than the verifier can schedule
+rechecks, then the verifier “lags” the cluster. We measure that lag by
+comparing the server-reported cluster time with the time of the most
+recently-seen event.
 
-High change stream lag causes one of two outcomes:
+If the lag exceeds a certain “comfortable” threshold, the verifier will warn
+in the logs. High lag can cause either of these outcomes:
 
-1. Once writes stop on the source (i.e., during the migration’s cutover), you’ll have to wait for a longer-than-ideal time for the verifier to recheck documents until its writes-off timestamp.
+1. Once writes stop on the source (i.e., during the migration’s cutover),
+you’ll have to wait for a longer-than-ideal time for the verifier to recheck
+documents until its writes-off timestamp.
 
-2. Sufficiently high verifier lag can exceed the server’s oplog capacity. If this happens, verification will fail permanently, and you’ll have to restart it.
+2. Sufficiently high verifier lag can exceed the server’s oplog capacity. If
+this happens, verification will fail permanently, and you’ll have to restart
+verification from the beginning.
 
 ### Mitigation
 
