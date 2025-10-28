@@ -117,7 +117,7 @@ func (c *Cursor) GetNext(ctx context.Context, extraPieces ...bson.E) error {
 	}
 
 	if awaitTime, has := c.maxAwaitTime.Get(); has {
-		cmd = append(cmd, bson.E{"maxAwaitTimeMS", awaitTime.Milliseconds()})
+		cmd = append(cmd, bson.E{"maxTimeMS", awaitTime.Milliseconds()})
 	}
 
 	cmd = append(cmd, extraPieces...)
