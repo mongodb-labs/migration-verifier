@@ -9,9 +9,11 @@ import (
 	"io"
 	"iter"
 	"strings"
+	"time"
 
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
@@ -28,12 +30,13 @@ var (
 // a per-document reader. It also exposes cursor metadata, which facilitates
 // things like resumable $natural scans.
 type Cursor struct {
-	sess     mongo.Session
-	id       int64
-	ns       string
-	db       *mongo.Database
-	rawResp  bson.Raw
-	curBatch bson.Raw // an undecoded array
+	sess         mongo.Session
+	maxAwaitTime option.Option[time.Duration]
+	id           int64
+	ns           string
+	db           *mongo.Database
+	rawResp      bson.Raw
+	curBatch     bson.Raw // an undecoded array
 	//cursorExtra ExtraMap
 }
 
@@ -113,6 +116,10 @@ func (c *Cursor) GetNext(ctx context.Context, extraPieces ...bson.E) error {
 		{"collection", nsColl},
 	}
 
+	if awaitTime, has := c.maxAwaitTime.Get(); has {
+		cmd = append(cmd, bson.E{"maxAwaitTimeMS", awaitTime.Milliseconds()})
+	}
+
 	cmd = append(cmd, extraPieces...)
 
 	if c.sess != nil {
@@ -124,15 +131,6 @@ func (c *Cursor) GetNext(ctx context.Context, extraPieces ...bson.E) error {
 	if err != nil {
 		return fmt.Errorf("iterating %#q’s cursor: %w", c.ns, err)
 	}
-
-	/*
-		baseResp := baseResponse{}
-
-		err = bson.Unmarshal(raw, &baseResp)
-		if err != nil {
-			return fmt.Errorf("decoding %#q’s iterated cursor to %T: %w", c.ns, baseResp, err)
-		}
-	*/
 
 	//c.curBatch = extractBatch(raw, "nextBatch") baseResp.Cursor.NextBatch
 	c.curBatch = lo.Must(raw.LookupErr("cursor", "nextBatch")).Array()
@@ -191,20 +189,12 @@ func New(
 	}, nil
 }
 
-// NewWithSession is like New but, for convenience, stores a session.
-// This relieves you of having to pass the session around with your cursor.
-func NewWithSession(
-	db *mongo.Database,
-	resp *mongo.SingleResult,
-	sess mongo.Session,
-) (*Cursor, error) {
-	c, err := New(db, resp)
+func (c *Cursor) SetSession(sess mongo.Session) {
+	c.sess = sess
+}
 
-	if err == nil {
-		c.sess = sess
-	}
-
-	return c, err
+func (c *Cursor) SetMaxAwaitTime(d time.Duration) {
+	c.maxAwaitTime = option.Some(d)
 }
 
 // GetResumeToken is a convenience function that extracts the

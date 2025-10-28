@@ -724,11 +724,16 @@ func (verifier *Verifier) getDocumentsCursor(
 		}
 	}
 
-	return cursor.NewWithSession(
+	c, err := cursor.New(
 		collection.Database(),
 		collection.Database().RunCommand(ctx, cmd, runCommandOptions),
-		mongo.SessionFromContext(ctx),
 	)
+
+	if err == nil {
+		c.SetSession(mongo.SessionFromContext(ctx))
+	}
+
+	return c, err
 }
 
 func transformPipelineForToHashedIndexKey(

@@ -614,7 +614,6 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 	changeStreamStage := bson.D{
 		{"allChangesForCluster", true},
-		{"maxAwaitTimeMS", maxChangeStreamAwaitTime.Milliseconds()},
 	}
 
 	if csr.clusterInfo.VersionArray[0] >= 6 {
@@ -678,13 +677,16 @@ func (csr *ChangeStreamReader) createChangeStream(
 	sctx := mongo.NewSessionContext(ctx, sess)
 	adminDB := sess.Client().Database("admin")
 	result := adminDB.RunCommand(sctx, aggregateCmd)
-	myCursor, err := cursor.NewWithSession(adminDB, result, sess)
+	myCursor, err := cursor.New(adminDB, result)
 
 	if err != nil {
 		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
 
-	var startTs primitive.Timestamp
+	myCursor.SetSession(sess)
+	myCursor.SetMaxAwaitTime(maxChangeStreamAwaitTime)
+
+	var startTS primitive.Timestamp
 	for firstEvent, err := range myCursor.GetCurrentBatch() {
 		if err != nil {
 			return nil, primitive.Timestamp{}, errors.Wrap(err, "reading first event")
@@ -695,14 +697,14 @@ func (csr *ChangeStreamReader) createChangeStream(
 			return nil, primitive.Timestamp{}, errors.Wrap(err, "extracting first event’s cluster time")
 		}
 
-		if err := mbson.UnmarshalRawValue(ct, &startTs); err != nil {
+		if err := mbson.UnmarshalRawValue(ct, &startTS); err != nil {
 			return nil, primitive.Timestamp{}, errors.Wrap(err, "parsing first event’s cluster time")
 		}
 
 		break
 	}
 
-	if startTs.IsZero() {
+	if startTS.IsZero() {
 		resumeToken, err := cursor.GetResumeToken(myCursor)
 		if err != nil {
 			return nil, primitive.Timestamp{}, errors.Wrap(
@@ -711,7 +713,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 			)
 		}
 
-		startTs, err = extractTimestampFromResumeToken(resumeToken)
+		startTS, err = extractTimestampFromResumeToken(resumeToken)
 		if err != nil {
 			return nil, primitive.Timestamp{}, errors.Wrap(
 				err,
@@ -720,7 +722,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 		}
 	}
 
-	return myCursor, startTs, nil
+	return myCursor, startTS, nil
 }
 
 // StartChangeStream starts the change stream.
