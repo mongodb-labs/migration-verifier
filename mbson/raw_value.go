@@ -53,6 +53,13 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 	return *new(T), cannotCastErr{in.Type, any(in)}
 }
 
+func UnmarshalRawValue[T bsonCastRecipient](in bson.RawValue, recipient *T) error {
+	var err error
+	*recipient, err = CastRawValue[T](in)
+
+	return err
+}
+
 // ToRawValue is a bit like bson.MarshalValue, but:
 // - It’s faster since it avoids reflection.
 // - It always succeeds since it only accepts certain known types.
