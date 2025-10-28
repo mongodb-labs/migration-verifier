@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/pkg/errors"
@@ -131,7 +132,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 	suite.Require().Equal("insert", parsed.OpType)
 
 	suite.Require().Equal(
-		"abc",
+		mbson.ToRawValue("abc"),
 		parsed.DocID,
 		"event should reference expected document",
 	)

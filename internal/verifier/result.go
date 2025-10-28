@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"github.com/10gen/migration-verifier/option"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -21,7 +22,7 @@ type VerificationResult struct {
 	// VerificationResult instances might share the same ID. That’s OK,
 	// though; it’ll just make the recheck include all docs with that ID,
 	// regardless of which ones actually need the recheck.
-	ID any
+	ID bson.RawValue `bson:",omitempty"`
 
 	Field     string
 	Details   string
