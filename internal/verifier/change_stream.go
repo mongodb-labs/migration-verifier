@@ -855,7 +855,7 @@ func (csr *ChangeStreamReader) persistChangeStreamResumeToken(ctx context.Contex
 	}
 
 	coll := csr.getChangeStreamMetadataCollection()
-	_, err := coll.ReplaceOne(
+	_, err = coll.ReplaceOne(
 		ctx,
 		bson.D{{"_id", csr.resumeTokenDocID()}},
 		token,
