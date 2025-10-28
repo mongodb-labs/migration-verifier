@@ -9,12 +9,13 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
 )
 
 const (
@@ -32,9 +33,22 @@ const (
 // sorting by _id will guarantee that all rechecks for a given
 // namespace appear consecutively.
 type RecheckPrimaryKey struct {
-	SrcDatabaseName   string `bson:"db"`
-	SrcCollectionName string `bson:"coll"`
-	DocumentID        any    `bson:"docID"`
+	SrcDatabaseName   string        `bson:"db"`
+	SrcCollectionName string        `bson:"coll"`
+	DocumentID        bson.RawValue `bson:"docID"`
+}
+
+var _ bson.Marshaler = &RecheckPrimaryKey{}
+
+func (rk *RecheckPrimaryKey) MarshalBSON() ([]byte, error) {
+	return bsoncore.NewDocumentBuilder().
+		AppendString("db", rk.SrcDatabaseName).
+		AppendString("coll", rk.SrcCollectionName).
+		AppendValue("docID", bsoncore.Value{
+			Type: rk.DocumentID.Type,
+			Data: rk.DocumentID.Value,
+		}).
+		Build(), nil
 }
 
 // RecheckDoc stores the necessary information to know which documents must be rechecked.
@@ -47,10 +61,19 @@ type RecheckDoc struct {
 	DataSize int `bson:"dataSize"`
 }
 
+var _ bson.Marshaler = &RecheckDoc{}
+
+func (rd *RecheckDoc) MarshalBSON() ([]byte, error) {
+	return bsoncore.NewDocumentBuilder().
+		AppendDocument("_id", lo.Must(bson.Marshal(rd.PrimaryKey))).
+		AppendInt64("dataSize", int64(rd.DataSize)).
+		Build(), nil
+}
+
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	ctx context.Context,
-	namespace string, documentIDs []any, dataSizes []int) error {
+	namespace string, documentIDs []bson.RawValue, dataSizes []int) error {
 	dbName, collName := SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
@@ -77,7 +100,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
 	dbNames []string,
 	collNames []string,
-	documentIDs []any,
+	documentIDs []bson.RawValue,
 	dataSizes []int,
 ) error {
 	verifier.mux.RLock()
@@ -96,50 +119,16 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	genCollection := verifier.getRecheckQueueCollection(generation)
 
-	var recheckBatches [][]mongo.WriteModel
-	var curRechecks []mongo.WriteModel
-	curBatchSize := 0
-	for i, dbName := range dbNames {
-		recheckDoc := RecheckDoc{
-			PrimaryKey: RecheckPrimaryKey{
-				SrcDatabaseName:   dbName,
-				SrcCollectionName: collNames[i],
-				DocumentID:        rawDocIDs[i],
-			},
-			DataSize: dataSizes[i],
-		}
-
-		recheckRaw, err := bson.Marshal(recheckDoc)
-		if err != nil {
-			return errors.Wrapf(err, "marshaling recheck for %#q", dbName+"."+collNames[i])
-		}
-
-		curRechecks = append(
-			curRechecks,
-			mongo.NewInsertOneModel().SetDocument(recheckDoc),
-		)
-		curBatchSize += len(recheckRaw)
-		if curBatchSize > recheckBatchByteLimit || len(recheckRaw) >= recheckBatchCountLimit {
-			recheckBatches = append(recheckBatches, curRechecks)
-			curRechecks = nil
-			curBatchSize = 0
-		}
-	}
-
-	if len(curRechecks) > 0 {
-		recheckBatches = append(recheckBatches, curRechecks)
-	}
-
-	for _, models := range recheckBatches {
+	sendRechecks := func(rechecks []bson.Raw) {
 		eg.Go(func() error {
 
 			retryer := retry.New()
 			err := retryer.WithCallback(
 				func(retryCtx context.Context, _ *retry.FuncInfo) error {
-					_, err := genCollection.BulkWrite(
+					_, err := genCollection.InsertMany(
 						retryCtx,
-						models,
-						options.BulkWrite().SetOrdered(false),
+						lo.ToAnySlice(rechecks),
+						options.InsertMany().SetOrdered(false),
 					)
 
 					// We expect duplicate-key errors from the above because:
@@ -158,18 +147,52 @@ func (verifier *Verifier) insertRecheckDocs(
 					// and document sizes probably remain stable(-ish) across updates.
 					err = util.TolerateSimpleDuplicateKeyInBulk(
 						verifier.logger,
-						len(models),
+						len(rechecks),
 						err,
 					)
 
 					return err
 				},
 				"persisting %d recheck(s)",
-				len(models),
+				len(rechecks),
 			).Run(groupCtx, verifier.logger)
 
-			return errors.Wrapf(err, "batch of %d rechecks", len(models))
+			return errors.Wrapf(err, "batch of %d rechecks", len(rechecks))
 		})
+	}
+
+	curRechecks := make([]bson.Raw, 0, recheckBatchCountLimit)
+	curBatchBytes := 0
+	for i, dbName := range dbNames {
+		recheckDoc := RecheckDoc{
+			PrimaryKey: RecheckPrimaryKey{
+				SrcDatabaseName:   dbName,
+				SrcCollectionName: collNames[i],
+				DocumentID:        rawDocIDs[i],
+			},
+			DataSize: dataSizes[i],
+		}
+
+		recheckRaw, err := bson.Marshal(recheckDoc)
+		if err != nil {
+			return errors.Wrapf(err, "marshaling recheck for %#q", dbName+"."+collNames[i])
+		}
+
+		curRechecks = append(
+			curRechecks,
+			bson.Raw(recheckRaw),
+		)
+
+		curBatchBytes += len(recheckRaw)
+		if curBatchBytes > recheckBatchByteLimit || len(curRechecks) >= recheckBatchCountLimit {
+			sendRechecks(curRechecks)
+			curRechecks = make([]bson.Raw, 0, recheckBatchCountLimit)
+			curBatchBytes = 0
+		}
+	}
+
+	if len(curRechecks) > 0 {
+		sendRechecks(curRechecks)
 	}
 
 	if err := eg.Wait(); err != nil {
@@ -191,7 +214,7 @@ func (verifier *Verifier) insertRecheckDocs(
 
 func deduplicateRechecks(
 	dbNames, collNames []string,
-	documentIDs []any,
+	documentIDs []bson.RawValue,
 	dataSizes []int,
 ) ([]string, []string, []bson.RawValue, []int) {
 	dedupeMap := map[string]map[string]map[string]int{}
@@ -200,15 +223,13 @@ func deduplicateRechecks(
 
 	for i, dbName := range dbNames {
 		collName := collNames[i]
-		docID := documentIDs[i]
+		docIDRaw := documentIDs[i]
 		dataSize := dataSizes[i]
 
-		docIDRaw := mbson.MustConvertToRawValue(docID)
-
-		docIDStr := string(append(
-			[]byte{byte(docIDRaw.Type)},
-			docIDRaw.Value...,
-		))
+		docIDBuf := make([]byte, 1+len(docIDRaw.Value))
+		docIDBuf[0] = byte(docIDRaw.Type)
+		copy(docIDBuf[1:], docIDRaw.Value)
+		docIDStr := string(docIDBuf)
 
 		if _, ok := dedupeMap[dbName]; !ok {
 			dedupeMap[dbName] = map[string]map[string]int{
@@ -251,8 +272,8 @@ func deduplicateRechecks(
 				rawDocIDs = append(
 					rawDocIDs,
 					bson.RawValue{
-						Type:  []bsontype.Type(docIDStr)[0],
-						Value: []byte(docIDStr)[1:],
+						Type:  bsontype.Type(docIDStr[0]),
+						Value: []byte(docIDStr[1:]),
 					},
 				)
 				dataSizes = append(dataSizes, dataSize)

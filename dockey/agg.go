@@ -16,8 +16,6 @@ import (
 // the returned key may not always match the change stream’s `documentKey`
 // (because the server misreports its own sharding logic).
 func ExtractTrueDocKeyAgg(fieldNames []string, docExpr string) bson.D {
-	assertFieldNameUniqueness(fieldNames)
-
 	return bson.D{
 		{"$arrayToObject", mslices.Of(lo.Map(
 			fieldNames,
