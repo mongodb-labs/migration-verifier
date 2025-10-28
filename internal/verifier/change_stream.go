@@ -355,6 +355,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	var latestEvent option.Option[ParsedEvent]
 
 	for rawEvent, err := range csCursor.GetCurrentBatch() {
+		fmt.Printf("------- got event: %v\n", rawEvent)
+
 		if err != nil {
 			return errors.Wrapf(err, "reading batch of events")
 		}
@@ -405,19 +407,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		}
 	}
 
-	/*
-		var tokenTs primitive.Timestamp
-		tokenTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
-		if err == nil {
-			lagSecs := int64(sess.OperationTime().T) - int64(tokenTs.T)
-			csr.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
-		} else {
-			csr.logger.Warn().
-				Err(err).
-				Msgf("Failed to extract timestamp from %s's resume token to compute change stream lag.", csr)
-		}
-	*/
-
 	clusterTS, err := csCursor.GetClusterTime()
 	if err != nil {
 		return errors.Wrapf(err, "extracting cluster time from server response")
@@ -428,9 +417,9 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		return errors.Wrapf(err, "extracting resume token")
 	}
 
-	tokenTs, err := extractTimestampFromResumeToken(resumeToken)
+	tokenTS, err := extractTimestampFromResumeToken(resumeToken)
 	if err == nil {
-		lagSecs := int64(clusterTS.T) - int64(tokenTs.T)
+		lagSecs := int64(clusterTS.T) - int64(tokenTS.T)
 		csr.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
 	} else {
 		csr.logger.Warn().
@@ -570,7 +559,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			err = csr.readAndHandleOneChangeEventBatch(ctx, ri, csCursor)
 
 			if err := csCursor.GetNext(ctx); err != nil {
-				return errors.Wrap(err, "reading change stream")
+				return errors.Wrapf(err, "reading %s", csr)
 			}
 
 			if err == nil {

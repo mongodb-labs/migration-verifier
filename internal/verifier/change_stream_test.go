@@ -290,7 +290,9 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	suite.Assert().False(
 		verifier2.srcChangeStreamReader.startAtTs.After(newTime),
-		"verifier2's change stream should be no later than this new session",
+		"verifier2’s change stream (%v) should be no later than this new session (%v)",
+		verifier2.srcChangeStreamReader.startAtTs,
+		newTime,
 	)
 
 	recheckDocs := []bson.M{}
