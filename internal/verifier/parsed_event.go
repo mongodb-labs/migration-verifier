@@ -102,10 +102,6 @@ func (pe *ParsedEvent) UnmarshalBSON(in []byte) error {
 
 			pe.ClusterTime = &ct
 		}
-
-		if err != nil {
-			return errors.Wrapf(err, "parsing %#q", key)
-		}
 	}
 
 	return nil
