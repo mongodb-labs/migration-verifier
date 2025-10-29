@@ -355,8 +355,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	var latestEvent option.Option[ParsedEvent]
 
 	for rawEvent, err := range csCursor.GetCurrentBatch() {
-		fmt.Printf("------- got event: %v\n", rawEvent)
-
 		if err != nil {
 			return errors.Wrapf(err, "reading batch of events")
 		}
@@ -672,6 +670,13 @@ func (csr *ChangeStreamReader) createChangeStream(
 		return nil, primitive.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
 
+	if savedResumeToken == nil {
+		err = csr.persistChangeStreamResumeToken(ctx, myCursor)
+		if err != nil {
+			return nil, primitive.Timestamp{}, errors.Wrap(err, "persisting initial resume token")
+		}
+	}
+
 	myCursor.SetSession(sess)
 	myCursor.SetMaxAwaitTime(maxChangeStreamAwaitTime)
 
@@ -679,6 +684,14 @@ func (csr *ChangeStreamReader) createChangeStream(
 	for firstEvent, err := range myCursor.GetCurrentBatch() {
 		if err != nil {
 			return nil, primitive.Timestamp{}, errors.Wrap(err, "reading first event")
+		}
+
+		// If there is no `startAfter`, then the change stream’s first response
+		// should have no events. If that invariant breaks then we will have
+		// just persisted a resume token that exceeds events we have yet to
+		// process.
+		if savedResumeToken == nil {
+			panic(fmt.Sprintf("plain change stream first response should be empty; instead got: %v", firstEvent))
 		}
 
 		ct, err := firstEvent.LookupErr("clusterTime")
@@ -693,7 +706,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 		break
 	}
 
-	if startTS.IsZero() {
+	if savedResumeToken == nil {
 		resumeToken, err := cursor.GetResumeToken(myCursor)
 		if err != nil {
 			return nil, primitive.Timestamp{}, errors.Wrap(
@@ -783,12 +796,12 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 
 	result := <-initialCreateResultChan
 
-	startTs, err := result.Get()
+	startTS, err := result.Get()
 	if err != nil {
 		return err
 	}
 
-	csr.startAtTs = &startTs
+	csr.startAtTs = &startTS
 
 	csr.changeStreamRunning = true
 
