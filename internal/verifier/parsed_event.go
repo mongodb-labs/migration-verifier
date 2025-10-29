@@ -7,7 +7,6 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -52,33 +51,50 @@ func (pe *ParsedEvent) UnmarshalBSON(in []byte) error {
 			rv, err = el.ValueErr()
 			if err == nil {
 				var rvDoc bson.Raw
-				rvDoc, err = mbson.CastRawValue[bson.Raw](rv)
+				err = mbson.UnmarshalRawValue(rv, &rvDoc)
+
 				if err == nil {
-					pe.Ns = &Namespace{
-						DB:   rvDoc.Lookup("db").StringValue(),   // TODO
-						Coll: rvDoc.Lookup("coll").StringValue(), // TODO
+					ns := Namespace{}
+					err = ns.UnmarshalBSON(rvDoc)
+
+					if err == nil {
+						pe.Ns = &ns
 					}
 				}
 			}
 		case "_docID":
 			rv, err = el.ValueErr()
+
 			if err == nil {
 				pe.DocID = rv
 			}
 		case "fullDocument":
 			rv, err = el.ValueErr()
+
 			if err == nil {
-				pe.FullDocument = rv.Document() // TODO
+				err = mbson.UnmarshalRawValue(rv, &pe.FullDocument)
 			}
 		case "_fullDocLen":
 			rv, err = el.ValueErr()
+
 			if err == nil && rv.Type != bson.TypeNull {
-				pe.FullDocLen = option.Some(types.ByteCount(rv.AsInt64()))
+				docLen, ok := rv.AsInt64OK()
+
+				if !ok {
+					err = fmt.Errorf("BSON type %s (value: %v) cannot be int64", rv.Type, rv)
+				} else {
+					pe.FullDocLen = option.Some(types.ByteCount(docLen))
+				}
 			}
 		case "clusterTime":
 			rv, err = el.ValueErr()
 			if err == nil {
-				pe.ClusterTime = lo.ToPtr(lo.Must(mbson.CastRawValue[primitive.Timestamp](rv)))
+				var ct primitive.Timestamp
+				err = mbson.UnmarshalRawValue(rv, &ct)
+
+				if err == nil {
+					pe.ClusterTime = &ct
+				}
 			}
 		}
 

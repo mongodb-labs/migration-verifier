@@ -53,6 +53,27 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 	return *new(T), cannotCastErr{in.Type, any(in)}
 }
 
+// Lookup fetches a value from a BSON document, casts it to the appropriate
+// type, then returns the result.
+func Lookup[T bsonCastRecipient](doc bson.Raw, pointer ...string) (T, error) {
+	rv, err := doc.LookupErr(pointer...)
+
+	if err != nil {
+		return *new(T), fmt.Errorf("extracting %#q: %w", pointer, err)
+	}
+
+	return CastRawValue[T](rv)
+}
+
+// LookupTo is like Lookup but assigns to a referent value rather than
+// returning a new one.
+func LookupTo[T bsonCastRecipient](doc bson.Raw, recipient *T, pointer ...string) error {
+	var err error
+	*recipient, err = Lookup[T](doc, pointer...)
+
+	return err
+}
+
 // UnmarshalRawValue implements bson.Unmarshal’s semantics but with additional
 // type constraints that avoid reflection.
 func UnmarshalRawValue[T bsonCastRecipient](in bson.RawValue, recipient *T) error {
