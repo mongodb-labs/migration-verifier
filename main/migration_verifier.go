@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +46,7 @@ const (
 	failureDisplaySize    = "failureDisplaySize"
 	ignoreReadConcernFlag = "ignoreReadConcern"
 	configFileFlag        = "configFile"
+	pprofPort             = "pprofPort"
 	pprofInterval         = "pprofInterval"
 	startFlag             = "start"
 
@@ -182,6 +185,10 @@ func main() {
 			Usage: "Use connection-default read concerns rather than setting majority read concern. This option may degrade consistency, so only enable it if majority read concern (the default) doesn’t work.",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  pprofPort,
+			Usage: "Local TCP port on which pprof server should listen",
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  pprofInterval,
 			Usage: "Interval to periodically collect pprof profiles (e.g. --pprofInterval=\"5m\")",
 		}),
@@ -315,6 +322,18 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	v.SetNumWorkers(cCtx.Int(numWorkers))
 	v.SetGenerationPauseDelay(time.Duration(cCtx.Int64(generationPauseDelay)) * time.Millisecond)
 	v.SetWorkerSleepDelay(time.Duration(cCtx.Int64(workerSleepDelay)) * time.Millisecond)
+
+	if pprofPort := cCtx.String(pprofPort); pprofPort != "" {
+		port, err := strconv.ParseUint(pprofPort, 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pprof port (%#q): %w", pprofPort, err)
+		}
+
+		go func() {
+			err := http.ListenAndServe(fmt.Sprintf("localhost:%d", port), nil)
+			v.GetLogger().Info().AnErr("pprofError", err).Send()
+		}()
+	}
 
 	err = v.SetPprofInterval(cCtx.String(pprofInterval))
 	if err != nil {
