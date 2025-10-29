@@ -46,62 +46,61 @@ func (pe *ParsedEvent) UnmarshalBSON(in []byte) error {
 
 		switch key {
 		case "operationType":
-			rv, err = el.ValueErr()
-			if err == nil {
-				err = mbson.UnmarshalRawValue(rv, &pe.OpType)
+			err := mbson.UnmarshalElementValue(el, &pe.OpType)
+			if err != nil {
+				return err
 			}
+
 		case "ns":
-			rv, err = el.ValueErr()
-			if err == nil {
-				var rvDoc bson.Raw
-				err = mbson.UnmarshalRawValue(rv, &rvDoc)
-
-				if err == nil {
-					ns := Namespace{}
-
-					// Here we might as well call UnmarshalBSON directly
-					// rather than calling bson.Unmarshal.
-					err = ns.UnmarshalBSON(rvDoc)
-
-					if err == nil {
-						pe.Ns = &ns
-					}
-				}
+			var rvDoc bson.Raw
+			err := mbson.UnmarshalElementValue(el, &rvDoc)
+			if err != nil {
+				return err
 			}
+
+			ns := Namespace{}
+
+			err = bson.Unmarshal(rvDoc, &ns)
+			if err != nil {
+				return errors.Wrapf(err, "unmarshaling %#q value", key)
+			}
+
+			pe.Ns = &ns
 		case "_docID":
 			rv, err = el.ValueErr()
-
-			if err == nil {
-				pe.DocID = rv
+			if err != nil {
+				return errors.Wrapf(err, "parsing %#q field", key)
 			}
-		case "fullDocument":
-			rv, err = el.ValueErr()
 
-			if err == nil {
-				err = mbson.UnmarshalRawValue(rv, &pe.FullDocument)
+			pe.DocID = rv
+		case "fullDocument":
+			err := mbson.UnmarshalElementValue(el, &pe.FullDocument)
+			if err != nil {
+				return err
 			}
 		case "_fullDocLen":
 			rv, err = el.ValueErr()
+			if err != nil {
+				return errors.Wrapf(err, "parsing %#q field", key)
+			}
 
-			if err == nil && rv.Type != bson.TypeNull {
+			if rv.Type != bson.TypeNull {
 				docLen, ok := rv.AsInt64OK()
 
 				if !ok {
-					err = fmt.Errorf("BSON type %s (value: %v) cannot be int64", rv.Type, rv)
+					return fmt.Errorf("%#q BSON type %s (value: %v) cannot be %T", key, rv.Type, rv, docLen)
 				} else {
 					pe.FullDocLen = option.Some(types.ByteCount(docLen))
 				}
 			}
 		case "clusterTime":
-			rv, err = el.ValueErr()
-			if err == nil {
-				var ct primitive.Timestamp
-				err = mbson.UnmarshalRawValue(rv, &ct)
-
-				if err == nil {
-					pe.ClusterTime = &ct
-				}
+			var ct primitive.Timestamp
+			err := mbson.UnmarshalElementValue(el, &ct)
+			if err != nil {
+				return err
 			}
+
+			pe.ClusterTime = &ct
 		}
 
 		if err != nil {

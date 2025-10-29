@@ -74,6 +74,23 @@ func LookupTo[T bsonCastRecipient](doc bson.Raw, recipient *T, pointer ...string
 	return err
 }
 
+// UnmarshalElementValue is like UnmarshalRawValue but takes a RawElement.
+// Any returned error will include the field name (if it parses validly).
+func UnmarshalElementValue[T bsonCastRecipient](in bson.RawElement, recipient *T) error {
+	rv, err := in.ValueErr()
+
+	if err != nil {
+		key, keyErr := in.KeyErr()
+		if keyErr != nil {
+			return fmt.Errorf("parsing element value (invalid key: %w): %w", keyErr, err)
+		}
+
+		return fmt.Errorf("parsing %#q element: %w", key, err)
+	}
+
+	return UnmarshalRawValue(rv, recipient)
+}
+
 // UnmarshalRawValue implements bson.Unmarshal’s semantics but with additional
 // type constraints that avoid reflection.
 func UnmarshalRawValue[T bsonCastRecipient](in bson.RawValue, recipient *T) error {
