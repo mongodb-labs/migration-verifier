@@ -31,7 +31,7 @@ func (ce cannotCastErr) Error() string {
 // casting interfaces. Unlike those functions, though, this returns an error
 // if the target type doesn’t match the value.
 //
-// Augment bsonType if you find a type here that’s missing.
+// Augment bsonCastRecipient if you find a type here that’s missing.
 func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 	switch any(*new(T)).(type) {
 	case bson.Raw:
@@ -51,6 +51,15 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 	}
 
 	return *new(T), cannotCastErr{in.Type, any(in)}
+}
+
+// UnmarshalRawValue implements bson.Unmarshal’s semantics but with additional
+// type constraints that avoid reflection.
+func UnmarshalRawValue[T bsonCastRecipient](in bson.RawValue, recipient *T) error {
+	var err error
+	*recipient, err = CastRawValue[T](in)
+
+	return err
 }
 
 // ToRawValue is a bit like bson.MarshalValue, but:
