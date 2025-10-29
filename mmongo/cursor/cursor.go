@@ -45,10 +45,14 @@ type ExtraMap = map[string]bson.RawValue
 
 // GetCurrentBatch returns an iterator over the Cursor’s current batch.
 func (c *Cursor) GetCurrentBatch() iter.Seq2[bson.Raw, error] {
+	batch := c.curBatch
+
+	// NB: This MUST NOT close around c (the receiver), or else there can be
+	// a race condition between this callback and GetNext().
 	return func(yield func(bson.Raw, error) bool) {
 		iterator := &bsoncore.DocumentSequence{
 			Style: bsoncore.ArrayStyle,
-			Data:  c.curBatch,
+			Data:  batch,
 		}
 
 		for {
