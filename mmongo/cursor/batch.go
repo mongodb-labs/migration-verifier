@@ -40,7 +40,7 @@ type BatchCursor struct {
 	//cursorExtra ExtraMap
 }
 
-// GetCurrentBatchIterator returns an iterator over the Cursor’s current batch.
+// GetCurrentBatchIterator returns an iterator over the BatchCursor’s current batch.
 func (c *BatchCursor) GetCurrentBatchIterator() iter.Seq2[bson.Raw, error] {
 	// NB: Use of iter.Seq2 to return an error is a bit controversial.
 	// The pattern is used here in order to minimize the odds that a caller
