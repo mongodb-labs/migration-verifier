@@ -71,11 +71,11 @@ func (ns *Namespace) UnmarshalBSON(in []byte) error {
 
 	err := mbson.LookupTo(rawDoc, &ns.DB, "db")
 
-	if err == nil {
-		err = mbson.LookupTo(rawDoc, &ns.Coll, "coll")
+	if err != nil {
+		return err
 	}
 
-	return err
+	return mbson.LookupTo(rawDoc, &ns.Coll, "coll")
 }
 
 // NewNamespace returns a new Namespace struct with the given parameters.
