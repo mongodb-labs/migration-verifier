@@ -552,13 +552,13 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 func iterateCursorToChannel(
 	ctx context.Context,
 	state *retry.FuncInfo,
-	myCursor *cursor.Cursor,
+	myCursor *cursor.BatchCursor,
 	writer chan<- seqWithTs,
 ) error {
 	defer close(writer)
 
 	for {
-		seq := myCursor.GetCurrentBatch()
+		seq := myCursor.GetCurrentBatchIterator()
 
 		state.NoteSuccess("received a document")
 
@@ -607,7 +607,7 @@ func (verifier *Verifier) getDocumentsCursor(
 	clusterInfo *util.ClusterInfo,
 	startAtTs *primitive.Timestamp,
 	task *VerificationTask,
-) (*cursor.Cursor, error) {
+) (*cursor.BatchCursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
 	var andPredicates bson.A

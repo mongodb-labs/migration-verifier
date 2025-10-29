@@ -26,10 +26,10 @@ var (
 	clusterTimePath = mslices.Of("$clusterTime", "clusterTime")
 )
 
-// Cursor is like mongo.Cursor, but it exposes documents per batch rather than
+// BatchCursor is like mongo.Cursor, but it exposes documents per batch rather than
 // a per-document reader. It also exposes cursor metadata, which facilitates
 // things like resumable $natural scans.
-type Cursor struct {
+type BatchCursor struct {
 	sess         mongo.Session
 	maxAwaitTime option.Option[time.Duration]
 	id           int64
@@ -40,11 +40,15 @@ type Cursor struct {
 	//cursorExtra ExtraMap
 }
 
-// ExtraMap represents “extra” data points in cursor metadata.
-type ExtraMap = map[string]bson.RawValue
+// GetCurrentBatchIterator returns an iterator over the Cursor’s current batch.
+func (c *BatchCursor) GetCurrentBatchIterator() iter.Seq2[bson.Raw, error] {
+	// NB: Use of iter.Seq2 to return an error is a bit controversial.
+	// The pattern is used here in order to minimize the odds that a caller
+	// would overlook the need to check the error, which seems more probable
+	// with various other patterns.
+	//
+	// See “https://sinclairtarget.com/blog/2025/07/error-handling-with-iterators-in-go/”.
 
-// GetCurrentBatch returns an iterator over the Cursor’s current batch.
-func (c *Cursor) GetCurrentBatch() iter.Seq2[bson.Raw, error] {
 	batch := c.curBatch
 
 	// NB: This MUST NOT close around c (the receiver), or else there can be
@@ -64,12 +68,16 @@ func (c *Cursor) GetCurrentBatch() iter.Seq2[bson.Raw, error] {
 			if !yield(bson.Raw(doc), err) {
 				return
 			}
+
+			if err != nil {
+				panic(fmt.Sprintf("Iteration must stop after error (%v)", err))
+			}
 		}
 	}
 }
 
 // GetClusterTime returns the server response’s cluster time.
-func (c *Cursor) GetClusterTime() (primitive.Timestamp, error) {
+func (c *BatchCursor) GetClusterTime() (primitive.Timestamp, error) {
 	ctRV, err := c.rawResp.LookupErr(clusterTimePath...)
 
 	if err != nil {
@@ -93,7 +101,7 @@ func (c *Cursor) GetClusterTime() (primitive.Timestamp, error) {
 }
 
 // IsFinished indicates whether the present batch is the final one.
-func (c *Cursor) IsFinished() bool {
+func (c *BatchCursor) IsFinished() bool {
 	return c.id == 0
 }
 
@@ -102,7 +110,7 @@ func (c *Cursor) IsFinished() bool {
 //
 // extraPieces are things you want to add to the underlying `getMore`
 // server call, such as `batchSize`.
-func (c *Cursor) GetNext(ctx context.Context, extraPieces ...bson.E) error {
+func (c *BatchCursor) GetNext(ctx context.Context, extraPieces ...bson.E) error {
 	if c.IsFinished() {
 		panic("internal error: cursor already finished!")
 	}
@@ -171,7 +179,7 @@ type baseResponse struct {
 func New(
 	db *mongo.Database,
 	resp *mongo.SingleResult,
-) (*Cursor, error) {
+) (*BatchCursor, error) {
 	raw, err := resp.Raw()
 	if err != nil {
 		return nil, errors.Wrapf(err, "cursor open failed")
@@ -184,7 +192,7 @@ func New(
 		return nil, errors.Wrapf(err, "failed to decode cursor-open response to %T", baseResp)
 	}
 
-	return &Cursor{
+	return &BatchCursor{
 		db:       db,
 		id:       baseResp.Cursor.ID,
 		ns:       baseResp.Cursor.Ns,
@@ -193,17 +201,17 @@ func New(
 	}, nil
 }
 
-func (c *Cursor) SetSession(sess mongo.Session) {
+func (c *BatchCursor) SetSession(sess mongo.Session) {
 	c.sess = sess
 }
 
-func (c *Cursor) SetMaxAwaitTime(d time.Duration) {
+func (c *BatchCursor) SetMaxAwaitTime(d time.Duration) {
 	c.maxAwaitTime = option.Some(d)
 }
 
 // GetResumeToken is a convenience function that extracts the
 // post-batch resume token from the cursor.
-func GetResumeToken(c *Cursor) (bson.Raw, error) {
+func GetResumeToken(c *BatchCursor) (bson.Raw, error) {
 	var resumeToken bson.Raw
 
 	tokenRV, err := c.rawResp.LookupErr("cursor", "postBatchResumeToken")
