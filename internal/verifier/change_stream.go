@@ -526,30 +526,30 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 					return err
 				}
 
-				if err := csCursor.GetNext(ctx); err != nil {
-					return errors.Wrap(err, "reading change stream")
-				}
-
 				rt, err := cursor.GetResumeToken(csCursor)
 				if err != nil {
 					return errors.Wrap(err, "extracting resume token")
 				}
 
-				var curTs primitive.Timestamp
-				curTs, err = extractTimestampFromResumeToken(rt)
+				var curTS primitive.Timestamp
+				curTS, err = extractTimestampFromResumeToken(rt)
 				if err != nil {
 					return errors.Wrap(err, "extracting timestamp from change stream's resume token")
 				}
 
 				// writesOffTs never refers to a real event,
 				// so we can stop once curTs >= writesOffTs.
-				if !curTs.Before(writesOffTs) {
+				if !curTS.Before(writesOffTs) {
 					csr.logger.Debug().
-						Any("currentTimestamp", curTs).
+						Any("resumeTokenTimestamp", curTS).
 						Any("writesOffTimestamp", writesOffTs).
 						Msgf("%s has reached the writesOff timestamp. Shutting down.", csr)
 
 					break
+				}
+
+				if err := csCursor.GetNext(ctx); err != nil {
+					return errors.Wrap(err, "reading change stream")
 				}
 			}
 
