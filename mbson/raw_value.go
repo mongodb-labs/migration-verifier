@@ -31,7 +31,7 @@ func (ce cannotCastErr) Error() string {
 // casting interfaces. Unlike those functions, though, this returns an error
 // if the target type doesn’t match the value.
 //
-// Augment bsonType if you find a type here that’s missing.
+// Augment bsonCastRecipient if you find a type here that’s missing.
 func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 	switch any(*new(T)).(type) {
 	case bson.Raw:
@@ -51,6 +51,53 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 	}
 
 	return *new(T), cannotCastErr{in.Type, any(in)}
+}
+
+// Lookup fetches a value from a BSON document, casts it to the appropriate
+// type, then returns the result.
+func Lookup[T bsonCastRecipient](doc bson.Raw, pointer ...string) (T, error) {
+	rv, err := doc.LookupErr(pointer...)
+
+	if err != nil {
+		return *new(T), fmt.Errorf("extracting %#q: %w", pointer, err)
+	}
+
+	return CastRawValue[T](rv)
+}
+
+// LookupTo is like Lookup but assigns to a referent value rather than
+// returning a new one.
+func LookupTo[T bsonCastRecipient](doc bson.Raw, recipient *T, pointer ...string) error {
+	var err error
+	*recipient, err = Lookup[T](doc, pointer...)
+
+	return err
+}
+
+// UnmarshalElementValue is like UnmarshalRawValue but takes a RawElement.
+// Any returned error will include the field name (if it parses validly).
+func UnmarshalElementValue[T bsonCastRecipient](in bson.RawElement, recipient *T) error {
+	rv, err := in.ValueErr()
+
+	if err != nil {
+		key, keyErr := in.KeyErr()
+		if keyErr != nil {
+			return fmt.Errorf("parsing element value (invalid key: %w): %w", keyErr, err)
+		}
+
+		return fmt.Errorf("parsing %#q element: %w", key, err)
+	}
+
+	return UnmarshalRawValue(rv, recipient)
+}
+
+// UnmarshalRawValue implements bson.Unmarshal’s semantics but with additional
+// type constraints that avoid reflection.
+func UnmarshalRawValue[T bsonCastRecipient](in bson.RawValue, recipient *T) error {
+	var err error
+	*recipient, err = CastRawValue[T](in)
+
+	return err
 }
 
 // ToRawValue is a bit like bson.MarshalValue, but:

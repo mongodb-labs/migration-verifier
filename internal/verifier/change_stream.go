@@ -8,7 +8,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
-	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/msync"
@@ -39,20 +38,6 @@ var supportedEventOpTypes = mapset.NewSet(
 	"replace",
 	"delete",
 )
-
-// ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
-type ParsedEvent struct {
-	OpType       string                         `bson:"operationType"`
-	Ns           *Namespace                     `bson:"ns,omitempty"`
-	DocID        bson.RawValue                  `bson:"_docID,omitempty"`
-	FullDocument bson.Raw                       `bson:"fullDocument,omitempty"`
-	FullDocLen   option.Option[types.ByteCount] `bson:"_fullDocLen"`
-	ClusterTime  *primitive.Timestamp           `bson:"clusterTime,omitEmpty"`
-}
-
-func (pe *ParsedEvent) String() string {
-	return fmt.Sprintf("{OpType: %s, namespace: %s, docID: %v, clusterTime: %v}", pe.OpType, pe.Ns, pe.DocID, pe.ClusterTime)
-}
 
 const (
 	minChangeStreamPersistInterval     = time.Second * 10

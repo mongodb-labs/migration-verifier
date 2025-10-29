@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -51,12 +53,29 @@ type Namespace struct {
 	Coll string `bson:"coll"`
 }
 
+var _ bson.Unmarshaler = &Namespace{}
+
 func (ns *Namespace) String() string {
 	return fmt.Sprintf("{ db: %s, coll: %s }", ns.DB, ns.Coll)
 }
 
 func (ns *Namespace) FullName() string {
 	return ns.DB + "." + ns.Coll
+}
+
+// UnmarshalBSON implements bson.Unmarshaler. We define this manually to
+// avoid reflection, which can substantially impede performance in “hot”
+// code paths like this.
+func (ns *Namespace) UnmarshalBSON(in []byte) error {
+	rawDoc := bson.Raw(in)
+
+	err := mbson.LookupTo(rawDoc, &ns.DB, "db")
+
+	if err != nil {
+		return err
+	}
+
+	return mbson.LookupTo(rawDoc, &ns.Coll, "coll")
 }
 
 // NewNamespace returns a new Namespace struct with the given parameters.
