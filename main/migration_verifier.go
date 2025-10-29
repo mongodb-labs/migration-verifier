@@ -329,6 +329,10 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 			return nil, fmt.Errorf("invalid pprof port (%#q): %w", pprofPort, err)
 		}
 
+		v.GetLogger().Info().
+			Uint64("port", port).
+			Msg("Starting pprof server.")
+
 		go func() {
 			err := http.ListenAndServe(fmt.Sprintf("localhost:%d", port), nil)
 			v.GetLogger().Info().AnErr("pprofError", err).Send()
