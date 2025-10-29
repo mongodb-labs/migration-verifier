@@ -41,6 +41,8 @@ type BatchCursor struct {
 }
 
 // GetCurrentBatchIterator returns an iterator over the BatchCursor’s current batch.
+// Note that the iteratees are NOT copied; the expectation is that each batch
+// will be iterated exactly once. (Nothing *requires* that, of course.)
 func (c *BatchCursor) GetCurrentBatchIterator() iter.Seq2[bson.Raw, error] {
 	// NB: Use of iter.Seq2 to return an error is a bit controversial.
 	// The pattern is used here in order to minimize the odds that a caller
