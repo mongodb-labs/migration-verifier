@@ -63,6 +63,9 @@ func (ns *Namespace) FullName() string {
 	return ns.DB + "." + ns.Coll
 }
 
+// UnmarshalBSON implements bson.Unmarshaler. We define this manually to
+// avoid reflection, which can substantially impede performance in “hot”
+// code paths like this.
 func (ns *Namespace) UnmarshalBSON(in []byte) error {
 	rawDoc := bson.Raw(in)
 
