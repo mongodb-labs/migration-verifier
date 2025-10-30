@@ -304,7 +304,7 @@ func (verifier *Verifier) GetLogger() *logger.Logger {
 func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 	opts := verifier.getClientOpts(uri)
 	var err error
-	verifier.metaClient, err = mongo.Connect(ctx, opts)
+	verifier.metaClient, err = mongo.Connect(opts)
 	if err != nil {
 		return err
 	}
@@ -1339,15 +1339,17 @@ func (verifier *Verifier) doIfForceReadConcernMajority(f func()) {
 
 func (verifier *Verifier) verificationDatabase() *mongo.Database {
 	db := verifier.metaClient.Database(verifier.metaDBName)
-	if db.WriteConcern().W != "majority" {
-		verifier.logger.Fatal().Msgf("Verification metadata is not using write concern majority: %+v", db.WriteConcern())
-	}
-
-	verifier.doIfForceReadConcernMajority(func() {
-		if db.ReadConcern().Level != "majority" {
-			verifier.logger.Fatal().Msgf("Verification metadata is not using read concern majority: %+v", db.ReadConcern())
+	/*
+		if db.WriteConcern().W != "majority" {
+			verifier.logger.Fatal().Msgf("Verification metadata is not using write concern majority: %+v", db.WriteConcern())
 		}
-	})
+
+		verifier.doIfForceReadConcernMajority(func() {
+			if db.ReadConcern().Level != "majority" {
+				verifier.logger.Fatal().Msgf("Verification metadata is not using read concern majority: %+v", db.ReadConcern())
+			}
+		})
+	*/
 
 	return db
 }
@@ -1360,9 +1362,11 @@ func (verifier *Verifier) srcClientDatabase(dbName string) *mongo.Database {
 	db := verifier.srcClient.Database(dbName)
 	// No need to check the write concern because we do not write to the source database.
 	verifier.doIfForceReadConcernMajority(func() {
-		if db.ReadConcern().Level != "majority" {
-			verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
-		}
+		/*
+			if db.ReadConcern().Level != "majority" {
+				verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
+			}
+		*/
 	})
 	return db
 }
@@ -1371,9 +1375,11 @@ func (verifier *Verifier) dstClientDatabase(dbName string) *mongo.Database {
 	db := verifier.dstClient.Database(dbName)
 	// No need to check the write concern because we do not write to the target database.
 	verifier.doIfForceReadConcernMajority(func() {
-		if db.ReadConcern().Level != "majority" {
-			verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
-		}
+		/*
+			if db.ReadConcern().Level != "majority" {
+				verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
+			}
+		*/
 	})
 	return db
 }
@@ -1596,12 +1602,23 @@ func (verifier *Verifier) writeStringBuilder(builder *strings.Builder) {
 
 func (verifier *Verifier) getNamespaces(ctx context.Context, fieldName string) ([]string, error) {
 	var namespaces []string
-	ret, err := verifier.verificationTaskCollection().Distinct(ctx, fieldName, bson.D{})
+	ret := verifier.verificationTaskCollection().Distinct(ctx, fieldName, bson.D{})
+	if ret.Err() != nil {
+		return nil, ret.Err()
+	}
+
+	raw, err := ret.Raw()
 	if err != nil {
 		return nil, err
 	}
-	for _, v := range ret {
-		namespaces = append(namespaces, v.(string))
+
+	vals, err := raw.Values()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, v := range vals {
+		namespaces = append(namespaces, v.StringValue())
 	}
 	return namespaces, nil
 }

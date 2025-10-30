@@ -13,7 +13,7 @@ import (
 func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 	opts := verifier.getClientOpts(uri)
 	var err error
-	verifier.srcClient, err = mongo.Connect(ctx, opts)
+	verifier.srcClient, err = mongo.Connect(opts)
 	if err != nil {
 		return errors.Wrapf(err, "failed to connect to source %#q", uri)
 	}
@@ -92,7 +92,7 @@ func isVersionSupported(version []int) bool {
 func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 	opts := verifier.getClientOpts(uri)
 	var err error
-	verifier.dstClient, err = mongo.Connect(ctx, opts)
+	verifier.dstClient, err = mongo.Connect(opts)
 	if err != nil {
 		return errors.Wrapf(err, "failed to connect to destination %#q", uri)
 	}

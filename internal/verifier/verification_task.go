@@ -342,7 +342,7 @@ func (verifier *Verifier) CreatePrimaryTaskIfNeeded(ctx context.Context) (bool, 
 						"status": verificationTaskAdded,
 					},
 				},
-				options.Update().SetUpsert(true),
+				options.UpdateOne().SetUpsert(true),
 			)
 			if err != nil {
 				return err

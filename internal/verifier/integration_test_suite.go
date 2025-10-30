@@ -55,19 +55,19 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 		SetReadConcern(readconcern.Majority())
 	var err error
 
-	suite.srcMongoClient, err = mongo.Connect(ctx, clientOpts)
+	suite.srcMongoClient, err = mongo.Connect(clientOpts)
 	suite.Require().NoError(err)
 
 	clientOpts = options.Client().ApplyURI(suite.dstConnStr).SetAppName("Verifier Test Suite").
 		SetWriteConcern(writeconcern.Majority()).
 		SetReadConcern(readconcern.Majority())
-	suite.dstMongoClient, err = mongo.Connect(ctx, clientOpts)
+	suite.dstMongoClient, err = mongo.Connect(clientOpts)
 	suite.Require().NoError(err)
 
 	clientOpts = options.Client().ApplyURI(suite.metaConnStr).SetAppName("Verifier Test Suite").
 		SetWriteConcern(writeconcern.Majority()).
 		SetReadConcern(readconcern.Majority())
-	suite.metaMongoClient, err = mongo.Connect(ctx, clientOpts)
+	suite.metaMongoClient, err = mongo.Connect(clientOpts)
 	suite.Require().NoError(err)
 
 	suite.initialDbNames = mapset.NewSet[string]()

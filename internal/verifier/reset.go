@@ -1,9 +1,10 @@
 package verifier
 
 import (
+	"context"
+
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 var defaultTaskUpdate = bson.M{
@@ -11,7 +12,7 @@ var defaultTaskUpdate = bson.M{
 	"$unset": bson.M{"begin_time": 1},
 }
 
-func (verifier *Verifier) ResetInProgressTasks(ctx mongo.SessionContext) error {
+func (verifier *Verifier) ResetInProgressTasks(ctx context.Context) error {
 	didReset, err := verifier.handleIncompletePrimary(ctx)
 
 	if err == nil {
@@ -29,7 +30,7 @@ func (verifier *Verifier) ResetInProgressTasks(ctx mongo.SessionContext) error {
 	return err
 }
 
-func (verifier *Verifier) handleIncompletePrimary(ctx mongo.SessionContext) (bool, error) {
+func (verifier *Verifier) handleIncompletePrimary(ctx context.Context) (bool, error) {
 	taskColl := verifier.verificationTaskCollection()
 
 	cursor, err := taskColl.Find(
@@ -89,7 +90,7 @@ func (verifier *Verifier) handleIncompletePrimary(ctx mongo.SessionContext) (boo
 	return false, nil
 }
 
-func (verifier *Verifier) resetCollectionTasksIfNeeded(ctx mongo.SessionContext) error {
+func (verifier *Verifier) resetCollectionTasksIfNeeded(ctx context.Context) error {
 	taskColl := verifier.verificationTaskCollection()
 
 	cursor, err := taskColl.Find(
@@ -142,7 +143,7 @@ func (verifier *Verifier) resetCollectionTasksIfNeeded(ctx mongo.SessionContext)
 	return nil
 }
 
-func (verifier *Verifier) resetPartitionTasksIfNeeded(ctx mongo.SessionContext) error {
+func (verifier *Verifier) resetPartitionTasksIfNeeded(ctx context.Context) error {
 	taskColl := verifier.verificationTaskCollection()
 
 	_, err := taskColl.UpdateMany(

@@ -25,7 +25,7 @@ func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
 
 	err = verifier.doInMetaTransaction(
 		ctx,
-		func(_ context.Context, ctx mongo.SessionContext) error {
+		func(_ context.Context, ctx context.Context) error {
 			return verifier.ResetInProgressTasks(ctx)
 		},
 	)
@@ -101,7 +101,7 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	// Reset tasks
 	err = verifier.doInMetaTransaction(
 		ctx,
-		func(_ context.Context, ctx mongo.SessionContext) error {
+		func(_ context.Context, ctx context.Context) error {
 			return verifier.ResetInProgressTasks(ctx)
 		},
 	)

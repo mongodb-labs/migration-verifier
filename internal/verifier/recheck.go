@@ -44,7 +44,7 @@ func (rk *RecheckPrimaryKey) MarshalBSON() ([]byte, error) {
 		AppendString("db", rk.SrcDatabaseName).
 		AppendString("coll", rk.SrcCollectionName).
 		AppendValue("docID", bsoncore.Value{
-			Type: rk.DocumentID.Type,
+			Type: bsoncore.Type(rk.DocumentID.Type),
 			Data: rk.DocumentID.Value,
 		}).
 		Build(), nil

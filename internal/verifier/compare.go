@@ -510,17 +510,19 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 }
 
 func iterateCursorToChannel(
-	sctx mongo.SessionContext,
+	sctx context.Context,
 	state *retry.FuncInfo,
 	cursor *mongo.Cursor,
 	writer chan<- docWithTs,
 ) error {
 	defer close(writer)
 
+	sess := mongo.SessionFromContext(sctx)
+
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
 
-		clusterTime, err := util.GetClusterTimeFromSession(sctx)
+		clusterTime, err := util.GetClusterTimeFromSession(sess)
 		if err != nil {
 			return errors.Wrap(err, "reading cluster time from session")
 		}
@@ -553,7 +555,7 @@ func getMapKey(docKeyValues []bson.RawValue) string {
 	return keyBuffer.String()
 }
 
-func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
+func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
 	startAtTs *bson.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()

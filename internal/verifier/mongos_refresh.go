@@ -67,7 +67,7 @@ func refreshMongoses(
 		// Only open 1 connection to each mongos to reduce the risk of overwhelming the source cluster.
 		singleHostClientOpts.SetMaxConnecting(1)
 
-		singleHostClient, err := mongo.Connect(ctx, &singleHostClientOpts)
+		singleHostClient, err := mongo.Connect(&singleHostClientOpts)
 		if err != nil {
 			return errors.Wrapf(err, "failed to connect to mongos host %#q", host)
 		}

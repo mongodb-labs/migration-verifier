@@ -348,7 +348,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	ctx context.Context,
 	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
-	sess mongo.Session,
+	sess *mongo.Session,
 ) error {
 	eventsRead := 0
 	var changeEvents []ParsedEvent
@@ -484,7 +484,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	ctx context.Context,
 	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
-	sess mongo.Session,
+	sess *mongo.Session,
 ) error {
 	var lastPersistedTime time.Time
 
@@ -601,7 +601,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 func (csr *ChangeStreamReader) createChangeStream(
 	ctx context.Context,
-) (*mongo.ChangeStream, mongo.Session, bson.Timestamp, error) {
+) (*mongo.ChangeStream, *mongo.Session, bson.Timestamp, error) {
 	pipeline := csr.GetChangeStreamFilter()
 	opts := options.ChangeStream().
 		SetMaxAwaitTime(maxChangeStreamAwaitTime)
