@@ -27,8 +27,9 @@ var (
 )
 
 // BatchCursor is like mongo.Cursor, but it exposes documents per batch rather than
-// a per-document reader. It also exposes cursor metadata, which facilitates
-// things like resumable $natural scans.
+// a per-document reader. This facilitates more efficient memory usage
+// because there is no need to clone each document individually, as
+// mongo.Cursor requires.
 type BatchCursor struct {
 	sess         mongo.Session
 	maxAwaitTime option.Option[time.Duration]
