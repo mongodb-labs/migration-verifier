@@ -39,7 +39,7 @@ func (u UUID) MarshalBSONValue() (byte, []byte, error) {
 // ValueUnmarshaler interface.
 func (u *UUID) UnmarshalBSONValue(bsonType byte, data []byte) error {
 	if bson.Type(bsonType) != bson.TypeBinary {
-		return fmt.Errorf("cannot decoded BSON value of type %s as a UUID", bsonType)
+		return fmt.Errorf("cannot decoded BSON value of type %s as a UUID", bson.Type(bsonType))
 	}
 
 	subtype, binData, rem, ok := bsoncore.ReadBinary(data)
