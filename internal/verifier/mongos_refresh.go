@@ -8,10 +8,10 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 )
 
 const UnauthorizedErrCode = 13
@@ -67,7 +67,7 @@ func refreshMongoses(
 		// Only open 1 connection to each mongos to reduce the risk of overwhelming the source cluster.
 		singleHostClientOpts.SetMaxConnecting(1)
 
-		singleHostClient, err := mongo.Connect(ctx, &singleHostClientOpts)
+		singleHostClient, err := mongo.Connect(&singleHostClientOpts)
 		if err != nil {
 			return errors.Wrapf(err, "failed to connect to mongos host %#q", host)
 		}

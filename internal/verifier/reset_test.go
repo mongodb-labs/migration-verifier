@@ -7,8 +7,8 @@ import (
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/mslices"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
@@ -25,7 +25,7 @@ func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
 
 	err = verifier.doInMetaTransaction(
 		ctx,
-		func(_ context.Context, ctx mongo.SessionContext) error {
+		func(_ context.Context, ctx context.Context) error {
 			return verifier.ResetInProgressTasks(ctx)
 		},
 	)
@@ -101,7 +101,7 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	// Reset tasks
 	err = verifier.doInMetaTransaction(
 		ctx,
-		func(_ context.Context, ctx mongo.SessionContext) error {
+		func(_ context.Context, ctx context.Context) error {
 			return verifier.ResetInProgressTasks(ctx)
 		},
 	)

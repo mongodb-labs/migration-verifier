@@ -7,8 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
@@ -18,7 +17,7 @@ type ParsedEvent struct {
 	DocID        bson.RawValue                  `bson:"_docID,omitempty"`
 	FullDocument bson.Raw                       `bson:"fullDocument,omitempty"`
 	FullDocLen   option.Option[types.ByteCount] `bson:"_fullDocLen"`
-	ClusterTime  *primitive.Timestamp           `bson:"clusterTime,omitEmpty"`
+	ClusterTime  *bson.Timestamp                `bson:"clusterTime,omitEmpty"`
 }
 
 func (pe *ParsedEvent) String() string {
@@ -94,7 +93,7 @@ func (pe *ParsedEvent) UnmarshalBSON(in []byte) error {
 				}
 			}
 		case "clusterTime":
-			var ct primitive.Timestamp
+			var ct bson.Timestamp
 			err := mbson.UnmarshalElementValue(el, &ct)
 			if err != nil {
 				return err

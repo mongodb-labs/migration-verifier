@@ -8,10 +8,9 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // NamespaceAndUUID represents a collection and database name and its corresponding UUID.  It is
@@ -39,11 +38,11 @@ func GetCollectionNamespaceAndUUID(ctx context.Context, logger *logger.Logger, d
 	}, nil
 }
 
-func GetCollectionUUID(ctx context.Context, logger *logger.Logger, db *mongo.Database, collName string) (*primitive.Binary, error) {
+func GetCollectionUUID(ctx context.Context, logger *logger.Logger, db *mongo.Database, collName string) (*bson.Binary, error) {
 	filter := bson.D{{"name", collName}}
 	opts := options.ListCollections().SetNameOnly(false)
 
-	var collSpecs []*mongo.CollectionSpecification
+	var collSpecs []mongo.CollectionSpecification
 	err := retry.New().WithCallback(
 		func(_ context.Context, ri *retry.FuncInfo) error {
 			ri.Log(logger.Logger, "ListCollectionSpecifications", db.Name(), collName, "Getting collection UUID.", "")

@@ -19,10 +19,9 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type verificationTaskType string
@@ -72,7 +71,7 @@ const (
 
 // VerificationTask stores source cluster info
 type VerificationTask struct {
-	PrimaryKey primitive.ObjectID     `bson:"_id"`
+	PrimaryKey bson.ObjectID          `bson:"_id"`
 	Type       verificationTaskType   `bson:"type"`
 	Status     verificationTaskStatus `bson:"status"`
 	Generation int                    `bson:"generation"`
@@ -128,7 +127,7 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 	verifier.logger.Debug().Msg(msg)
 
 	verificationTask := VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Generation: generation,
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerifyCollection,
@@ -173,7 +172,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 	srcNamespace := strings.Join([]string{partition.Ns.DB, partition.Ns.Coll}, ".")
 
 	task := VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Generation: verifier.generation,
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerifyDocuments,
@@ -216,7 +215,7 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 	}
 
 	task := VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Generation: verifier.generation,
 		Ids:        ids,
 		Status:     verificationTaskAdded,
@@ -327,7 +326,7 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *Veri
 }
 
 func (verifier *Verifier) CreatePrimaryTaskIfNeeded(ctx context.Context) (bool, error) {
-	ownerSetId := primitive.NewObjectID()
+	ownerSetId := bson.NewObjectID()
 
 	var created bool
 
@@ -343,7 +342,7 @@ func (verifier *Verifier) CreatePrimaryTaskIfNeeded(ctx context.Context) (bool, 
 						"status": verificationTaskAdded,
 					},
 				},
-				options.Update().SetUpsert(true),
+				options.UpdateOne().SetUpsert(true),
 			)
 			if err != nil {
 				return err

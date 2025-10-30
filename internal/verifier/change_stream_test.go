@@ -18,10 +18,9 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
@@ -308,10 +307,10 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 	)
 
 	suite.Assert().Equal(
-		bson.M{
-			"db":    suite.DBNameForTest(),
-			"coll":  "testColl",
-			"docID": "heyhey",
+		bson.D{
+			{"db", suite.DBNameForTest()},
+			{"coll", "testColl"},
+			{"docID", "heyhey"},
 		},
 		recheckDocs[0]["_id"],
 		"recheck doc (%v) should have expected ID",
@@ -319,7 +318,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 	)
 }
 
-func (suite *IntegrationTestSuite) getClusterTime(ctx context.Context, client *mongo.Client) primitive.Timestamp {
+func (suite *IntegrationTestSuite) getClusterTime(ctx context.Context, client *mongo.Client) bson.Timestamp {
 	sess, err := client.StartSession()
 	suite.Require().NoError(err, "should start session")
 

@@ -2,31 +2,31 @@ package option
 
 import (
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // MarshalBSONValue implements bson.ValueMarshaler.
-func (o Option[T]) MarshalBSONValue() (bsontype.Type, []byte, error) {
+func (o Option[T]) MarshalBSONValue() (byte, []byte, error) {
 	val, exists := o.Get()
 	if !exists {
-		return bson.MarshalValue(primitive.Null{})
+		btype, buf, err := bson.MarshalValue(bson.Null{})
+		return byte(btype), buf, err
 	}
 
-	return bson.MarshalValue(val)
+	btype, buf, err := bson.MarshalValue(val)
+	return byte(btype), buf, err
 }
 
 // UnmarshalBSONValue implements bson.ValueUnmarshaler.
-func (o *Option[T]) UnmarshalBSONValue(bType bsontype.Type, raw []byte) error {
-	switch bType {
+func (o *Option[T]) UnmarshalBSONValue(bType byte, raw []byte) error {
+	switch bson.Type(bType) {
 	case bson.TypeNull:
 		o.val = nil
 
 	default:
 		valPtr := new(T)
 
-		err := bson.UnmarshalValue(bType, raw, &valPtr)
+		err := bson.UnmarshalValue(bson.Type(bType), raw, &valPtr)
 		if err != nil {
 			return errors.Wrapf(err, "failed to unmarshal %T", *o)
 		}

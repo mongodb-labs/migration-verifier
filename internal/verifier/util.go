@@ -9,8 +9,8 @@ import (
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // Specify states
@@ -125,7 +125,7 @@ func (qf QueryFilter) GetDocKeyFields() []string {
 
 func (verifier *Verifier) doInMetaTransaction(
 	ctx context.Context,
-	todo func(context.Context, mongo.SessionContext) error,
+	todo func(context.Context, context.Context) error,
 ) error {
 	if mongo.SessionFromContext(ctx) != nil {
 		verifier.logger.Panic().
@@ -139,7 +139,7 @@ func (verifier *Verifier) doInMetaTransaction(
 
 	defer session.EndSession(ctx)
 
-	_, err = session.WithTransaction(ctx, func(sctx mongo.SessionContext) (any, error) {
+	_, err = session.WithTransaction(ctx, func(sctx context.Context) (any, error) {
 		return nil, todo(ctx, sctx)
 	})
 

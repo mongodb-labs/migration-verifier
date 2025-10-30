@@ -8,8 +8,7 @@ import (
 	"math"
 	"math/bits"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // This is a direct port of the Javascript keystring decoder from
@@ -205,13 +204,13 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any,
 	isNegative := false
 	switch ctype {
 	case kMinKey:
-		return primitive.MinKey{}, nil
+		return bson.MinKey{}, nil
 	case kMaxKey:
-		return primitive.MaxKey{}, nil
+		return bson.MaxKey{}, nil
 	case kNullish:
 		return nil, nil
 	case kUndefined:
-		return primitive.Undefined{}, nil
+		return bson.Undefined{}, nil
 	case kBoolTrue:
 		return true, nil
 	case kBoolFalse:
@@ -221,7 +220,7 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any,
 		if err != nil {
 			return nil, err
 		}
-		return primitive.DateTime(dateTimeAsInt ^ (uint64(1) << 63)), nil
+		return bson.DateTime(dateTimeAsInt ^ (uint64(1) << 63)), nil
 	case kTimestamp:
 		t, err := buf.readUint32BE()
 		if err != nil {
@@ -231,9 +230,9 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any,
 		if err != nil {
 			return nil, err
 		}
-		return primitive.Timestamp{T: t, I: i}, nil
+		return bson.Timestamp{T: t, I: i}, nil
 	case kOID:
-		var oid primitive.ObjectID
+		var oid bson.ObjectID
 		oidSlice, err := buf.readBytes(12)
 		if err != nil {
 			return nil, err
@@ -247,7 +246,7 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any,
 		if err != nil {
 			return nil, err
 		}
-		return primitive.JavaScript(str), nil
+		return bson.JavaScript(str), nil
 	case kCodeWithScope:
 		code, err := buf.readCStringWithNuls()
 		if err != nil {
@@ -257,7 +256,7 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any,
 		if err != nil {
 			return nil, err
 		}
-		return primitive.CodeWithScope{Code: primitive.JavaScript(code), Scope: scope}, nil
+		return bson.CodeWithScope{Code: bson.JavaScript(code), Scope: scope}, nil
 	case kBinData:
 		size8, err := buf.readUint8()
 		if err != nil {
@@ -279,7 +278,7 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any,
 		if err != nil {
 			return nil, err
 		}
-		return primitive.Binary{Data: data, Subtype: subtype}, nil
+		return bson.Binary{Data: data, Subtype: subtype}, nil
 	case kRegEx:
 		pattern, err := buf.readCString()
 		if err != nil {
@@ -289,7 +288,7 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any,
 		if err != nil {
 			return nil, err
 		}
-		return primitive.Regex{Pattern: pattern, Options: flags}, nil
+		return bson.Regex{Pattern: pattern, Options: flags}, nil
 	case kDBRef:
 		size, err := buf.readUint32BE()
 		if err != nil {
@@ -304,9 +303,9 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any,
 		if err != nil {
 			return nil, err
 		}
-		var oid primitive.ObjectID
+		var oid bson.ObjectID
 		copy(oid[:], oidBytes)
-		return primitive.DBPointer{DB: ns, Pointer: oid}, nil // TODO: What happens to non-OID DBRefs?
+		return bson.DBPointer{DB: ns, Pointer: oid}, nil // TODO: What happens to non-OID DBRefs?
 	case kObject:
 		return keystringToBsonPartial(version, buf, modeNamed)
 	case kArray:

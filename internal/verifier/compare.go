@@ -14,11 +14,10 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"golang.org/x/exp/slices"
 )
 
@@ -33,7 +32,7 @@ const (
 
 type docWithTs struct {
 	doc bson.Raw
-	ts  primitive.Timestamp
+	ts  bson.Timestamp
 }
 
 func (verifier *Verifier) FetchAndCompareDocuments(
@@ -511,17 +510,19 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 }
 
 func iterateCursorToChannel(
-	sctx mongo.SessionContext,
+	sctx context.Context,
 	state *retry.FuncInfo,
 	cursor *mongo.Cursor,
 	writer chan<- docWithTs,
 ) error {
 	defer close(writer)
 
+	sess := mongo.SessionFromContext(sctx)
+
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
 
-		clusterTime, err := util.GetClusterTimeFromSession(sctx)
+		clusterTime, err := util.GetClusterTimeFromSession(sess)
 		if err != nil {
 			return errors.Wrap(err, "reading cluster time from session")
 		}
@@ -554,8 +555,8 @@ func getMapKey(docKeyValues []bson.RawValue) string {
 	return keyBuffer.String()
 }
 
-func (verifier *Verifier) getDocumentsCursor(ctx mongo.SessionContext, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
-	startAtTs *primitive.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
+func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
+	startAtTs *bson.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
 	var andPredicates bson.A

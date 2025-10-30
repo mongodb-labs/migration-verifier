@@ -5,15 +5,14 @@ import (
 
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func (s *UnitTestSuite) TestSplitArrayByBSONMaxSize() {
 	oids := lo.RepeatBy(
 		1_000_000,
 		func(_ int) any {
-			return primitive.NewObjectID()
+			return bson.NewObjectID()
 		},
 	)
 
@@ -55,14 +54,14 @@ func (s *UnitTestSuite) TestBSONArraySizer() {
 		true,
 		123,
 		int64(123),
-		primitive.Null{},
-		primitive.NewObjectID(),
+		bson.Null{},
+		bson.NewObjectID(),
 		bson.M{},
 		[]any{},
-		primitive.Timestamp{},
-		primitive.MinKey{},
-		primitive.MaxKey{},
-		primitive.Binary{},
+		bson.Timestamp{},
+		bson.MinKey{},
+		bson.MaxKey{},
+		bson.Binary{},
 		float32(123),
 		float64(234),
 	}
