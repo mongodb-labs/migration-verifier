@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/verifier/webserver"
+	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -131,6 +132,7 @@ func (server *WebServer) setupRouter() *gin.Engine {
 	gin.EnableJsonDecoderUseNumber()
 
 	router := gin.New()
+	pprof.Register(router)
 	router.Use(server.RequestAndResponseLogger(), gin.Recovery())
 
 	api := router.Group("/api")
