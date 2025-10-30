@@ -24,13 +24,12 @@ import (
 	"fmt"
 	"reflect"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsoncodec"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 var _ bson.ValueMarshaler = &Option[int]{}
 var _ bson.ValueUnmarshaler = &Option[int]{}
-var _ bsoncodec.Zeroer = &Option[int]{}
+var _ bson.Zeroer = &Option[int]{}
 
 // Option represents a possibly-empty value.
 // Its zero value is the empty case.

@@ -6,9 +6,8 @@ import (
 	"github.com/10gen/migration-verifier/internal/comparehashed"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // TestCompare_Hashed ensures that $toHashedIndexKey-based
@@ -28,7 +27,7 @@ func (suite *IntegrationTestSuite) TestCompare_Hashed() {
 		suite.T().Skipf("source (%v) can’t do hashed comparison", buildInfo.VersionArray)
 	}
 
-	decimal128_42, err := primitive.ParseDecimal128("42")
+	decimal128_42, err := bson.ParseDecimal128("42")
 	suite.Require().NoError(err, "should parse `42` as decimal128")
 
 	cases := []struct {

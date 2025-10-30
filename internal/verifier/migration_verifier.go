@@ -26,13 +26,12 @@ import (
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readconcern"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
-	"go.mongodb.org/mongo-driver/mongo/writeconcern"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
+	"go.mongodb.org/mongo-driver/v2/mongo/writeconcern"
 )
 
 // ReadConcernSetting describes the verifier’s handling of read
@@ -228,7 +227,7 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	verifier.logger.Debug().
 		Msg("WritesOff called.")
 
-	var srcFinalTs, dstFinalTs primitive.Timestamp
+	var srcFinalTs, dstFinalTs bson.Timestamp
 	var err error
 
 	// The anonymous function here makes it easier to ensure
@@ -737,8 +736,8 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 				Coll: namespaceAndUUID.CollName}}}
 	}
 	// Use "open" partitions, otherwise out-of-range keys on the destination might be missed
-	partitionList[0].Key.Lower = primitive.MinKey{}
-	partitionList[len(partitionList)-1].Upper = primitive.MaxKey{}
+	partitionList[0].Key.Lower = bson.MinKey{}
+	partitionList[len(partitionList)-1].Upper = bson.MaxKey{}
 	debugLog := verifier.logger.Debug()
 	if debugLog.Enabled() {
 		debugLog.Msgf("Partitions (%d):", len(partitionList))

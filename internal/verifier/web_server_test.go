@@ -9,8 +9,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/stretchr/testify/suite"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // WebServerTestSuite uses a mock verifier to test webserver endpoints.
@@ -71,10 +70,10 @@ func (suite *WebServerTestSuite) TestCheckEndPoint() {
 			}},
 			{"$and", bson.A{
 				bson.D{
-					{"_id", bson.D{{"$gte", primitive.ObjectID{0x50, 0x7f, 0x1f, 0x77, 0xbc, 0xf8, 0x6c, 0xd7, 0x99, 0x43, 0x90, 0x00}}}},
+					{"_id", bson.D{{"$gte", bson.ObjectID{0x50, 0x7f, 0x1f, 0x77, 0xbc, 0xf8, 0x6c, 0xd7, 0x99, 0x43, 0x90, 0x00}}}},
 				},
 				bson.D{
-					{"_id", bson.D{{"$lte", primitive.ObjectID{0x50, 0x7f, 0x1f, 0x77, 0xbc, 0xf8, 0x6c, 0xd7, 0x99, 0x43, 0x90, 0xff}}}},
+					{"_id", bson.D{{"$lte", bson.ObjectID{0x50, 0x7f, 0x1f, 0x77, 0xbc, 0xf8, 0x6c, 0xd7, 0x99, 0x43, 0x90, 0xff}}}},
 				},
 			}},
 		},

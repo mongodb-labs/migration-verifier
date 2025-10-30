@@ -2,23 +2,21 @@ package option
 
 import (
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // MarshalBSONValue implements bson.ValueMarshaler.
-func (o Option[T]) MarshalBSONValue() (bsontype.Type, []byte, error) {
+func (o Option[T]) MarshalBSONValue() (bson.Type, []byte, error) {
 	val, exists := o.Get()
 	if !exists {
-		return bson.MarshalValue(primitive.Null{})
+		return bson.MarshalValue(bson.Null{})
 	}
 
 	return bson.MarshalValue(val)
 }
 
 // UnmarshalBSONValue implements bson.ValueUnmarshaler.
-func (o *Option[T]) UnmarshalBSONValue(bType bsontype.Type, raw []byte) error {
+func (o *Option[T]) UnmarshalBSONValue(bType bson.Type, raw []byte) error {
 	switch bType {
 	case bson.TypeNull:
 		o.val = nil

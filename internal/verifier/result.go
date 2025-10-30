@@ -2,8 +2,7 @@ package verifier
 
 import (
 	"github.com/10gen/migration-verifier/option"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 const (
@@ -33,8 +32,8 @@ type VerificationResult struct {
 	// don't get too large.
 	dataSize int
 
-	SrcTimestamp option.Option[primitive.Timestamp]
-	DstTimestamp option.Option[primitive.Timestamp]
+	SrcTimestamp option.Option[bson.Timestamp]
+	DstTimestamp option.Option[bson.Timestamp]
 }
 
 // DocumentIsMissing returns a boolean that indicates whether the

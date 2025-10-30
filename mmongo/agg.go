@@ -1,6 +1,6 @@
 package mmongo
 
-import "go.mongodb.org/mongo-driver/bson"
+import "go.mongodb.org/mongo-driver/v2/bson"
 
 // StartsWithAgg returns an aggregation expression that indicates whether
 // the referent field begins with the “besought” string.

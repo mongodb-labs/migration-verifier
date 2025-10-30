@@ -17,7 +17,7 @@ import (
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/exp/maps"
 )
 
@@ -54,7 +54,7 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 			verifier.verificationDatabase(),
 			lo.Map(
 				failedTasks,
-				func(ft VerificationTask, _ int) primitive.ObjectID {
+				func(ft VerificationTask, _ int) bson.ObjectID {
 					return ft.PrimaryKey
 				},
 			),
@@ -115,7 +115,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		verifier.verificationDatabase(),
 		lo.Map(
 			failedTasks,
-			func(ft VerificationTask, _ int) primitive.ObjectID {
+			func(ft VerificationTask, _ int) bson.ObjectID {
 				return ft.PrimaryKey
 			},
 		),
@@ -634,7 +634,7 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 		var taskIdStr string
 
 		switch id := wsmap[w].TaskID.(type) {
-		case primitive.ObjectID:
+		case bson.ObjectID:
 			theBytes, _ := id.MarshalText()
 
 			taskIdStr = string(theBytes)

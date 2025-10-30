@@ -10,7 +10,7 @@ import (
 	"text/template"
 
 	"github.com/10gen/migration-verifier/internal/types"
-	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // NamespaceStats represents progress statistics for a single namespace.

@@ -2,9 +2,8 @@ package mbson
 
 import (
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 // RawLookup combines bson.Raw’s LookupErr method with an additional
@@ -32,7 +31,7 @@ func RawContains(doc bson.Raw, keys ...string) (bool, error) {
 // ConvertToRawValue converts the specified argument to a bson.RawValue.
 func ConvertToRawValue(thing any) (bson.RawValue, error) {
 	if thing == nil {
-		thing = primitive.Null{}
+		thing = bson.Null{}
 	}
 
 	t, val, err := bson.MarshalValue(thing)

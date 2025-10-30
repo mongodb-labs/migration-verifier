@@ -5,9 +5,8 @@ import (
 
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // CollectionSpec is like mongo.CollectionSpecification except:
@@ -19,7 +18,7 @@ type CollectionSpec struct {
 	Options bson.Raw
 	Info    struct {
 		ReadOnly bool `bson:"readOnly"`
-		UUID     primitive.Binary
+		UUID     bson.Binary
 
 		Extra map[string]any
 	}

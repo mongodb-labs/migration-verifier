@@ -2,7 +2,7 @@ package mmongo
 
 import (
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // ErrorHasCode returns true if (and only if) this error is a

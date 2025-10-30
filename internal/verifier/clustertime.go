@@ -9,11 +9,10 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/writeconcern"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/writeconcern"
 )
 
 const opTimeKeyInServerResponse = "operationTime"
@@ -24,8 +23,8 @@ func GetNewClusterTime(
 	ctx context.Context,
 	logger *logger.Logger,
 	client *mongo.Client,
-) (primitive.Timestamp, error) {
-	var clusterTime primitive.Timestamp
+) (bson.Timestamp, error) {
+	var clusterTime bson.Timestamp
 
 	// First we just fetch the latest cluster time among all shards without
 	// updating any shards’ oplogs.
@@ -36,7 +35,7 @@ func GetNewClusterTime(
 				ctx,
 				client,
 				"new ts",
-				option.None[primitive.Timestamp](),
+				option.None[bson.Timestamp](),
 			)
 			return err
 		},
@@ -44,7 +43,7 @@ func GetNewClusterTime(
 	).Run(ctx, logger)
 
 	if err != nil {
-		return primitive.Timestamp{}, err
+		return bson.Timestamp{}, err
 	}
 
 	// fetchClusterTime() will have taught the mongos about the most current
@@ -76,8 +75,8 @@ func runAppendOplogNote(
 	ctx context.Context,
 	client *mongo.Client,
 	note string,
-	maxClusterTimeOpt option.Option[primitive.Timestamp],
-) (primitive.Timestamp, error) {
+	maxClusterTimeOpt option.Option[bson.Timestamp],
+) (bson.Timestamp, error) {
 	cmd := bson.D{
 		{"appendOplogNote", 1},
 		{"data", bson.D{
@@ -102,7 +101,7 @@ func runAppendOplogNote(
 	// StaleClusterTime error. This particular error doesn’t indicate a
 	// failure, so we ignore it.
 	if err != nil && !util.IsStaleClusterTimeError(err) {
-		return primitive.Timestamp{}, errors.Wrap(
+		return bson.Timestamp{}, errors.Wrap(
 			err,
 			"failed to append note to oplog",
 		)
@@ -111,16 +110,16 @@ func runAppendOplogNote(
 	return getOpTimeFromRawResponse(rawResponse)
 }
 
-func getOpTimeFromRawResponse(rawResponse bson.Raw) (primitive.Timestamp, error) {
+func getOpTimeFromRawResponse(rawResponse bson.Raw) (bson.Timestamp, error) {
 	// Get the `operationTime` from the response and return it.
-	var optime primitive.Timestamp
+	var optime bson.Timestamp
 
 	found, err := mbson.RawLookup(rawResponse, &optime, opTimeKeyInServerResponse)
 	if err != nil {
-		return primitive.Timestamp{}, errors.Errorf("failed to read server response (%s)", rawResponse)
+		return bson.Timestamp{}, errors.Errorf("failed to read server response (%s)", rawResponse)
 	}
 	if !found {
-		return primitive.Timestamp{}, errors.Errorf("server response (%s) lacks %#q", rawResponse, opTimeKeyInServerResponse)
+		return bson.Timestamp{}, errors.Errorf("server response (%s) lacks %#q", rawResponse, opTimeKeyInServerResponse)
 	}
 
 	return optime, nil

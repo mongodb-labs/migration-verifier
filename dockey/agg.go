@@ -6,7 +6,7 @@ package dockey
 import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // ExtractTrueDocKeyAgg returns an aggregation expression that extracts the

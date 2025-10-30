@@ -28,7 +28,7 @@ linters:
           failOn: all
     govet:
       disable:
-        # Unkeyed primitive.E and timestamp fields are used extensively in code taken from
+        # Unkeyed bson.E and timestamp fields are used extensively in code taken from
         # mongosync.
         - composites
   exclusions:

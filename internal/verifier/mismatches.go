@@ -6,10 +6,9 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const (
@@ -17,7 +16,7 @@ const (
 )
 
 type MismatchInfo struct {
-	Task   primitive.ObjectID
+	Task   bson.ObjectID
 	Detail VerificationResult
 }
 
@@ -43,8 +42,8 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 func getMismatchesForTasks(
 	ctx context.Context,
 	db *mongo.Database,
-	taskIDs []primitive.ObjectID,
-) (map[primitive.ObjectID][]VerificationResult, error) {
+	taskIDs []bson.ObjectID,
+) (map[bson.ObjectID][]VerificationResult, error) {
 	cursor, err := db.Collection(mismatchesCollectionName).Find(
 		ctx,
 		bson.D{
@@ -61,7 +60,7 @@ func getMismatchesForTasks(
 		return nil, errors.Wrapf(err, "fetching %d tasks' discrepancies", len(taskIDs))
 	}
 
-	result := map[primitive.ObjectID][]VerificationResult{}
+	result := map[bson.ObjectID][]VerificationResult{}
 
 	for cursor.Next(ctx) {
 		if cursor.Err() != nil {
@@ -95,7 +94,7 @@ func getMismatchesForTasks(
 func recordMismatches(
 	ctx context.Context,
 	db *mongo.Database,
-	taskID primitive.ObjectID,
+	taskID bson.ObjectID,
 	problems []VerificationResult,
 ) error {
 	if option.IfNotZero(taskID).IsNone() {

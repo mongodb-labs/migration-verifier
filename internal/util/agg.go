@@ -3,7 +3,7 @@ package util
 import (
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // ExcludePrefixesQuery returns a document that represents a query

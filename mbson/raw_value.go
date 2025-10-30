@@ -4,14 +4,12 @@ import (
 	"fmt"
 	"math"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 type bsonCastRecipient interface {
-	bson.Raw | primitive.Timestamp | string
+	bson.Raw | bson.Timestamp | string
 }
 
 type bsonSourceTypes interface {
@@ -19,7 +17,7 @@ type bsonSourceTypes interface {
 }
 
 type cannotCastErr struct {
-	gotBSONType bsontype.Type
+	gotBSONType bson.Type
 	toGoType    any
 }
 
@@ -38,9 +36,9 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 		if doc, isDoc := in.DocumentOK(); isDoc {
 			return any(doc).(T), nil
 		}
-	case primitive.Timestamp:
+	case bson.Timestamp:
 		if t, i, ok := in.TimestampOK(); ok {
-			return any(primitive.Timestamp{t, i}).(T), nil
+			return any(bson.Timestamp{t, i}).(T), nil
 		}
 	case string:
 		if str, ok := in.StringValueOK(); ok {

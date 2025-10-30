@@ -11,11 +11,10 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 const (
@@ -272,7 +271,7 @@ func deduplicateRechecks(
 				rawDocIDs = append(
 					rawDocIDs,
 					bson.RawValue{
-						Type:  bsontype.Type(docIDStr[0]),
+						Type:  bson.Type(docIDStr[0]),
 						Value: []byte(docIDStr[1:]),
 					},
 				)
