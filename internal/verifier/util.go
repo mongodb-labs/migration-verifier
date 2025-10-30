@@ -11,6 +11,7 @@ import (
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
 )
 
 // Specify states
@@ -75,7 +76,12 @@ func (ns *Namespace) UnmarshalBSON(in []byte) error {
 		return err
 	}
 
-	return mbson.LookupTo(rawDoc, &ns.Coll, "coll")
+	err = mbson.LookupTo(rawDoc, &ns.Coll, "coll")
+	if errors.Is(err, bsoncore.ErrElementNotFound) {
+		err = nil
+	}
+
+	return err
 }
 
 // NewNamespace returns a new Namespace struct with the given parameters.
