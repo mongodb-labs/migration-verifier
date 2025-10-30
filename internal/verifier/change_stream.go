@@ -5,17 +5,20 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
+	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -78,42 +81,41 @@ type ChangeStreamReader struct {
 
 	startAtTs *primitive.Timestamp
 
-	lag *msync.TypedAtomic[option.Option[time.Duration]]
+	lag              *msync.TypedAtomic[option.Option[time.Duration]]
+	batchSizeHistory *history.History[int]
 
 	onDDLEvent ddlEventHandling
 }
 
 func (verifier *Verifier) initializeChangeStreamReaders() {
-	verifier.srcChangeStreamReader = &ChangeStreamReader{
-		readerType:           src,
-		logger:               verifier.logger,
-		namespaces:           verifier.srcNamespaces,
-		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
-		watcherClient:        verifier.srcClient,
-		clusterInfo:          *verifier.srcClusterInfo,
-		changeStreamRunning:  false,
-		changeEventBatchChan: make(chan changeEventBatch),
-		writesOffTs:          util.NewEventual[primitive.Timestamp](),
-		readerError:          util.NewEventual[error](),
-		handlerError:         util.NewEventual[error](),
-		doneChan:             make(chan struct{}),
-		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
+	srcReader := &ChangeStreamReader{
+		readerType:    src,
+		namespaces:    verifier.srcNamespaces,
+		watcherClient: verifier.srcClient,
+		clusterInfo:   *verifier.srcClusterInfo,
 	}
-	verifier.dstChangeStreamReader = &ChangeStreamReader{
-		readerType:           dst,
-		logger:               verifier.logger,
-		namespaces:           verifier.dstNamespaces,
-		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
-		watcherClient:        verifier.dstClient,
-		clusterInfo:          *verifier.dstClusterInfo,
-		changeStreamRunning:  false,
-		changeEventBatchChan: make(chan changeEventBatch),
-		writesOffTs:          util.NewEventual[primitive.Timestamp](),
-		readerError:          util.NewEventual[error](),
-		handlerError:         util.NewEventual[error](),
-		doneChan:             make(chan struct{}),
-		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
-		onDDLEvent:           onDDLEventAllow,
+	verifier.srcChangeStreamReader = srcReader
+
+	dstReader := &ChangeStreamReader{
+		readerType:    dst,
+		namespaces:    verifier.dstNamespaces,
+		watcherClient: verifier.dstClient,
+		clusterInfo:   *verifier.dstClusterInfo,
+		onDDLEvent:    onDDLEventAllow,
+	}
+	verifier.dstChangeStreamReader = dstReader
+
+	// Common elements in both readers:
+	for _, csr := range mslices.Of(srcReader, dstReader) {
+		csr.logger = verifier.logger
+		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
+		csr.changeEventBatchChan = make(chan changeEventBatch)
+		csr.writesOffTs = util.NewEventual[primitive.Timestamp]()
+		csr.readerError = util.NewEventual[error]()
+		csr.handlerError = util.NewEventual[error]()
+		csr.doneChan = make(chan struct{})
+		csr.lag = msync.NewTypedAtomic(option.None[time.Duration]())
+		csr.batchSizeHistory = history.New[int](time.Minute)
 	}
 }
 
@@ -447,6 +449,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		return nil
 	}
 
+	csr.batchSizeHistory.Add(eventsRead)
+
 	if event, has := latestEvent.Get(); has {
 		csr.logger.Trace().
 			Stringer("changeStreamReader", csr).
@@ -769,6 +773,29 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 
 func (csr *ChangeStreamReader) GetLag() option.Option[time.Duration] {
 	return csr.lag.Load()
+}
+
+func (csr *ChangeStreamReader) GetEventsPerSecond() option.Option[float64] {
+	logs := csr.batchSizeHistory.Get()
+	lastLog, hasLogs := lo.Last(logs)
+
+	if hasLogs && lastLog.At != logs[0].At {
+		span := lastLog.At.Sub(logs[0].At)
+
+		// Each log contains a time and a # of events that happened since
+		// the prior log. Thus, each log’s Datum is a count of events that
+		// happened before the timestamp. Since we want the # of events that
+		// happened between the first & last times, we only want events *after*
+		// the first time. Thus, we skip the first log entry here.
+		totalEvents := 0
+		for _, log := range logs[1:] {
+			totalEvents += log.Datum
+		}
+
+		return option.Some(util.DivideToF64(totalEvents, span.Seconds()))
+	}
+
+	return option.None[float64]()
 }
 
 func addTimestampToLogEvent(ts primitive.Timestamp, event *zerolog.Event) *zerolog.Event {
