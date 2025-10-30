@@ -1339,17 +1339,8 @@ func (verifier *Verifier) doIfForceReadConcernMajority(f func()) {
 
 func (verifier *Verifier) verificationDatabase() *mongo.Database {
 	db := verifier.metaClient.Database(verifier.metaDBName)
-	/*
-		if db.WriteConcern().W != "majority" {
-			verifier.logger.Fatal().Msgf("Verification metadata is not using write concern majority: %+v", db.WriteConcern())
-		}
 
-		verifier.doIfForceReadConcernMajority(func() {
-			if db.ReadConcern().Level != "majority" {
-				verifier.logger.Fatal().Msgf("Verification metadata is not using read concern majority: %+v", db.ReadConcern())
-			}
-		})
-	*/
+	// TODO REP-6772: Restore read & write concern guard rails.
 
 	return db
 }
@@ -1360,27 +1351,17 @@ func (verifier *Verifier) verificationTaskCollection() *mongo.Collection {
 
 func (verifier *Verifier) srcClientDatabase(dbName string) *mongo.Database {
 	db := verifier.srcClient.Database(dbName)
-	// No need to check the write concern because we do not write to the source database.
-	verifier.doIfForceReadConcernMajority(func() {
-		/*
-			if db.ReadConcern().Level != "majority" {
-				verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
-			}
-		*/
-	})
+
+	// TODO REP-6772: Restore read & write concern guard rails.
+
 	return db
 }
 
 func (verifier *Verifier) dstClientDatabase(dbName string) *mongo.Database {
 	db := verifier.dstClient.Database(dbName)
-	// No need to check the write concern because we do not write to the target database.
-	verifier.doIfForceReadConcernMajority(func() {
-		/*
-			if db.ReadConcern().Level != "majority" {
-				verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
-			}
-		*/
-	})
+
+	// TODO REP-6772: Restore read & write concern guard rails.
+
 	return db
 }
 
