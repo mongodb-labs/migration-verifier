@@ -1011,7 +1011,10 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		suite.Require().Equal(expectedIds, doc["_ids"])
 		suite.Require().EqualValues(verificationTaskAdded, doc["status"])
 		suite.Require().EqualValues(verificationTaskVerifyDocuments, doc["type"])
-		suite.Require().Equal(expectedNamespace, doc["query_filter"].(bson.M)["namespace"])
+		suite.Require().Equal(
+			expectedNamespace,
+			lo.Must(cur.Current.LookupErr("query_filter", "namespace")).StringValue(),
+		)
 	}
 	verifyTask(bson.A{int32(42), int32(43), int32(44)}, "foo.bar")
 	verifyTask(bson.A{int32(42), int32(55)}, "foo.bar2")
