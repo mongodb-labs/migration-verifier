@@ -21,6 +21,8 @@ type UUID uuid.UUID
 var (
 	_ bson.ValueMarshaler   = UUID{}
 	_ bson.ValueUnmarshaler = (*UUID)(nil)
+	_ bson.KeyMarshaler     = UUID{}
+	_ bson.KeyUnmarshaler   = (*UUID)(nil)
 )
 
 // NewUUID constructs a new, randomly-generated UUID.
@@ -50,6 +52,24 @@ func (u *UUID) UnmarshalBSONValue(bsonType byte, data []byte) error {
 		return fmt.Errorf("expected BSON value %v to have subtype %d, got %d", data, uuidBinarySubtype, subtype)
 	}
 	copy((*u)[:], binData)
+	return nil
+}
+
+// MarshalKey is used to marshal a map with UUID keys into BSON. This implements the
+// KeyMarshaler interface.
+func (u UUID) MarshalKey() (string, error) {
+	return u.String(), nil
+}
+
+// UnmarshalKey is used to unmarshal BSON into a map with UUID keys. This implements the
+// KeyUnmarshaler interface.
+func (u *UUID) UnmarshalKey(key string) error {
+	parsedUUID, err := uuid.Parse(key)
+	if err != nil {
+		return fmt.Errorf("error parsing string as UUID: %w", err)
+	}
+
+	*u = UUID(parsedUUID)
 	return nil
 }
 
