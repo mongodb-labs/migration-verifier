@@ -30,6 +30,7 @@ import (
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
+	"github.com/samber/lo/mutable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -273,7 +274,8 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 			"Should move upper chunk to the 2nd shard",
 		)
 
-		_, err := coll.InsertMany(ctx, lo.ToAnySlice(lo.Shuffle(docs)))
+		mutable.Shuffle(docs)
+		_, err := coll.InsertMany(ctx, lo.ToAnySlice(docs))
 		require.NoError(err, "should insert all docs")
 	}
 
