@@ -42,7 +42,7 @@ func GetCollectionUUID(ctx context.Context, logger *logger.Logger, db *mongo.Dat
 	filter := bson.D{{"name", collName}}
 	opts := options.ListCollections().SetNameOnly(false)
 
-	var collSpecs []*mongo.CollectionSpecification
+	var collSpecs []mongo.CollectionSpecification
 	err := retry.New().WithCallback(
 		func(_ context.Context, ri *retry.FuncInfo) error {
 			ri.Log(logger.Logger, "ListCollectionSpecifications", db.Name(), collName, "Getting collection UUID.", "")

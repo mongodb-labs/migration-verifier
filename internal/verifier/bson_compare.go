@@ -3,7 +3,7 @@ package verifier
 import (
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 type MismatchDetails struct {

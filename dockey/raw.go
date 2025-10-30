@@ -43,7 +43,7 @@ func ExtractTrueDocKeyFromDoc(
 		docBuilder.AppendValue(
 			field,
 			bsoncore.Value{
-				Type: val.Type,
+				Type: bsoncore.Type(val.Type),
 				Data: val.Value,
 			},
 		)

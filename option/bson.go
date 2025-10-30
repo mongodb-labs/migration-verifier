@@ -6,25 +6,27 @@ import (
 )
 
 // MarshalBSONValue implements bson.ValueMarshaler.
-func (o Option[T]) MarshalBSONValue() (bson.Type, []byte, error) {
+func (o Option[T]) MarshalBSONValue() (byte, []byte, error) {
 	val, exists := o.Get()
 	if !exists {
-		return bson.MarshalValue(bson.Null{})
+		btype, buf, err := bson.MarshalValue(bson.Null{})
+		return byte(btype), buf, err
 	}
 
-	return bson.MarshalValue(val)
+	btype, buf, err := bson.MarshalValue(val)
+	return byte(btype), buf, err
 }
 
 // UnmarshalBSONValue implements bson.ValueUnmarshaler.
-func (o *Option[T]) UnmarshalBSONValue(bType bson.Type, raw []byte) error {
-	switch bType {
+func (o *Option[T]) UnmarshalBSONValue(bType byte, raw []byte) error {
+	switch bson.Type(bType) {
 	case bson.TypeNull:
 		o.val = nil
 
 	default:
 		valPtr := new(T)
 
-		err := bson.UnmarshalValue(bType, raw, &valPtr)
+		err := bson.UnmarshalValue(bson.Type(bType), raw, &valPtr)
 		if err != nil {
 			return errors.Wrapf(err, "failed to unmarshal %T", *o)
 		}

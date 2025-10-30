@@ -30,15 +30,15 @@ func NewUUID() UUID {
 
 // MarshalBSONValue is used to marshal UUID objects into BSON. This implements the
 // ValueMarshaler interface.
-func (u UUID) MarshalBSONValue() (bson.Type, []byte, error) {
+func (u UUID) MarshalBSONValue() (byte, []byte, error) {
 	val := bsoncore.AppendBinary(nil, uuidBinarySubtype, u[:])
-	return bson.TypeBinary, val, nil
+	return byte(bson.TypeBinary), val, nil
 }
 
 // UnmarshalBSONValue is used to unmarshal BSON into UUID objects. This implements the
 // ValueUnmarshaler interface.
-func (u *UUID) UnmarshalBSONValue(bsonType bson.Type, data []byte) error {
-	if bsonType != bson.TypeBinary {
+func (u *UUID) UnmarshalBSONValue(bsonType byte, data []byte) error {
+	if bson.Type(bsonType) != bson.TypeBinary {
 		return fmt.Errorf("cannot decoded BSON value of type %s as a UUID", bsonType)
 	}
 
