@@ -31,6 +31,26 @@ func TestHistory(t *testing.T) {
 	assert.Equal(t, mslices.Of(234, 234, 345), data, "slice is copied")
 }
 
+func TestHistoryTTL(t *testing.T) {
+	h := New[int](time.Millisecond)
+
+	assert.Equal(t, 1, h.Add(234))
+	assert.Equal(t, 2, h.Add(234))
+	assert.Equal(t, 3, h.Add(345))
+
+	assert.Eventually(
+		t,
+		func() bool {
+			return len(h.Get()) == 0
+		},
+		time.Minute,
+		time.Millisecond,
+		"history should expire its entries",
+	)
+
+	assert.Equal(t, 1, h.Add(234), "new record should be the first")
+}
+
 func splitLogs[T any](in []Log[T]) ([]time.Time, []T) {
 	var times []time.Time
 	var data []T
