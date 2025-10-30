@@ -307,10 +307,10 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 	)
 
 	suite.Assert().Equal(
-		bson.M{
-			"db":    suite.DBNameForTest(),
-			"coll":  "testColl",
-			"docID": "heyhey",
+		bson.D{
+			{"db", suite.DBNameForTest()},
+			{"coll", "testColl"},
+			{"docID", "heyhey"},
 		},
 		recheckDocs[0]["_id"],
 		"recheck doc (%v) should have expected ID",
