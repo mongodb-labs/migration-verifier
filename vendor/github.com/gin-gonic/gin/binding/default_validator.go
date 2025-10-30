@@ -43,7 +43,7 @@ func (err SliceValidationError) Error() string {
 	}
 }
 
-var _ StructValidator = &defaultValidator{}
+var _ StructValidator = (*defaultValidator)(nil)
 
 // ValidateStruct receives any kind of type, but only performed struct or pointer to struct type.
 func (v *defaultValidator) ValidateStruct(obj any) error {
@@ -54,7 +54,10 @@ func (v *defaultValidator) ValidateStruct(obj any) error {
 	value := reflect.ValueOf(obj)
 	switch value.Kind() {
 	case reflect.Ptr:
-		return v.ValidateStruct(value.Elem().Interface())
+		if value.Elem().Kind() != reflect.Struct {
+			return v.ValidateStruct(value.Elem().Interface())
+		}
+		return v.validateStruct(obj)
 	case reflect.Struct:
 		return v.validateStruct(obj)
 	case reflect.Slice, reflect.Array:
