@@ -6,17 +6,20 @@ import (
 	"time"
 )
 
-// Log represents a single entry in a History.
-type Log[T any] struct {
-	At    time.Time
-	Datum T
-}
-
-// History represents a series of expiring log entries.
+// History stores an ordered list of entries, each with a TTL (time-to-live).
+// Once an entry expires, it goes away.
+//
+// This facilitates computation of data flow rates across batches.
 type History[T any] struct {
 	mu   sync.RWMutex
 	ttl  time.Duration
 	logs []Log[T]
+}
+
+// Log represents a single entry in a History.
+type Log[T any] struct {
+	At    time.Time
+	Datum T
 }
 
 // New creates & returns a new History.
@@ -26,8 +29,19 @@ func New[T any](ttl time.Duration) *History[T] {
 	}
 }
 
-// Add augments the History’s Log list.
-func (h *History[T]) Add(datum T) {
+// Get returns a copy of the History’s (non-expired) elements.
+func (h *History[T]) Get() []Log[T] {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	now := time.Now()
+
+	return slices.Clone(h.logs[h.getFirstValidIdxWhileLocked(now):])
+}
+
+// Add augments the History’s Log list. It returns the list’s count of
+// (non-expired) elements.
+func (h *History[T]) Add(datum T) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -36,27 +50,8 @@ func (h *History[T]) Add(datum T) {
 	h.reapWhileLocked(now)
 
 	h.logs = append(h.logs, Log[T]{now, datum})
-}
 
-func (h *History[T]) AddAndGet(datum T) []Log[T] {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	now := time.Now()
-
-	h.reapWhileLocked(now)
-
-	return slices.Clone(h.logs)
-}
-
-// Get returns a copy of the History’s Logs.
-func (h *History[T]) Get() []Log[T] {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	now := time.Now()
-
-	return slices.Clone(h.logs[h.getFirstValidIdxWhileLocked(now):])
+	return len(h.logs)
 }
 
 // NB: If all entries are invalid this returns len(logs).
