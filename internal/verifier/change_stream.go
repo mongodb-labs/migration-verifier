@@ -539,17 +539,17 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 					return errors.Wrap(err, "extracting resume token")
 				}
 
-				var curTS bson.Timestamp
-				curTS, err = extractTimestampFromResumeToken(rt)
+				var curTs bson.Timestamp
+				curTs, err = extractTimestampFromResumeToken(rt)
 				if err != nil {
 					return errors.Wrap(err, "extracting timestamp from change stream's resume token")
 				}
 
 				// writesOffTs never refers to a real event,
 				// so we can stop once curTs >= writesOffTs.
-				if !curTS.Before(writesOffTs) {
+				if !curTs.Before(writesOffTs) {
 					csr.logger.Debug().
-						Any("resumeTokenTimestamp", curTS).
+						Any("resumeTokenTimestamp", curTs).
 						Any("writesOffTimestamp", writesOffTs).
 						Msgf("%s has reached the writesOff timestamp. Shutting down.", csr)
 
