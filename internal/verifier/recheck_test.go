@@ -61,7 +61,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 
 	err := verifier.HandleChangeStreamEvents(
 		ctx,
-		changeEventBatch{events: mslices.Of(event)},
+		changeEventBatch{events: mslices.Of(&event)},
 		src,
 	)
 	suite.Require().NoError(err)
