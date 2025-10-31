@@ -44,4 +44,19 @@ func TestRawElements(t *testing.T) {
 	}
 
 	assert.Error(t, iterErr, "should fail somewhere in the iteration")
+
+	assert.Panics(
+		t,
+		func() {
+			var gotErr error
+			for _, err := range RawElements(mydoc) {
+				if err != nil {
+					gotErr = err
+				}
+			}
+
+			assert.Error(t, gotErr, "should get an error")
+		},
+		"should panic if we fail but didn’t stop iterating",
+	)
 }
