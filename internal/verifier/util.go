@@ -67,15 +67,29 @@ func (ns *Namespace) FullName() string {
 // avoid reflection, which can substantially impede performance in “hot”
 // code paths like this.
 func (ns *Namespace) UnmarshalBSON(in []byte) error {
-	rawDoc := bson.Raw(in)
+	for el, err := range mbson.RawElements(in) {
+		if err != nil {
+			return errors.Wrap(err, "iterating BSON fields")
+		}
 
-	err := mbson.LookupTo(rawDoc, &ns.DB, "db")
+		key, err := el.KeyErr()
+		if err != nil {
+			return errors.Wrap(err, "reading BSON field name")
+		}
 
-	if err != nil {
-		return err
+		switch key {
+		case "db":
+			if err := mbson.UnmarshalElementValue(el, &ns.DB); err != nil {
+				return err
+			}
+		case "coll":
+			if err := mbson.UnmarshalElementValue(el, &ns.Coll); err != nil {
+				return err
+			}
+		}
 	}
 
-	return mbson.LookupTo(rawDoc, &ns.Coll, "coll")
+	return nil
 }
 
 // NewNamespace returns a new Namespace struct with the given parameters.
