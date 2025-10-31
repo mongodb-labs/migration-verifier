@@ -5,23 +5,24 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
-	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
+	"github.com/samber/lo"
 	"github.com/samber/mo"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/exp/slices"
 )
 
@@ -40,20 +41,6 @@ var supportedEventOpTypes = mapset.NewSet(
 	"delete",
 )
 
-// ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
-type ParsedEvent struct {
-	OpType       string                         `bson:"operationType"`
-	Ns           *Namespace                     `bson:"ns,omitempty"`
-	DocID        bson.RawValue                  `bson:"_docID,omitempty"`
-	FullDocument bson.Raw                       `bson:"fullDocument,omitempty"`
-	FullDocLen   option.Option[types.ByteCount] `bson:"_fullDocLen"`
-	ClusterTime  *primitive.Timestamp           `bson:"clusterTime,omitEmpty"`
-}
-
-func (pe *ParsedEvent) String() string {
-	return fmt.Sprintf("{OpType: %s, namespace: %s, docID: %v, clusterTime: %v}", pe.OpType, pe.Ns, pe.DocID, pe.ClusterTime)
-}
-
 const (
 	minChangeStreamPersistInterval     = time.Second * 10
 	maxChangeStreamAwaitTime           = time.Second
@@ -70,13 +57,13 @@ func (uee UnknownEventError) Error() string {
 
 type changeEventBatch struct {
 	events      []ParsedEvent
-	clusterTime primitive.Timestamp
+	clusterTime bson.Timestamp
 }
 
 type ChangeStreamReader struct {
 	readerType whichCluster
 
-	lastChangeEventTime *primitive.Timestamp
+	lastChangeEventTime *bson.Timestamp
 	logger              *logger.Logger
 	namespaces          []string
 
@@ -86,49 +73,48 @@ type ChangeStreamReader struct {
 
 	changeStreamRunning  bool
 	changeEventBatchChan chan changeEventBatch
-	writesOffTs          *util.Eventual[primitive.Timestamp]
+	writesOffTs          *util.Eventual[bson.Timestamp]
 	readerError          *util.Eventual[error]
 	handlerError         *util.Eventual[error]
 	doneChan             chan struct{}
 
-	startAtTs *primitive.Timestamp
+	startAtTs *bson.Timestamp
 
-	lag *msync.TypedAtomic[option.Option[time.Duration]]
+	lag              *msync.TypedAtomic[option.Option[time.Duration]]
+	batchSizeHistory *history.History[int]
 
 	onDDLEvent ddlEventHandling
 }
 
 func (verifier *Verifier) initializeChangeStreamReaders() {
-	verifier.srcChangeStreamReader = &ChangeStreamReader{
-		readerType:           src,
-		logger:               verifier.logger,
-		namespaces:           verifier.srcNamespaces,
-		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
-		watcherClient:        verifier.srcClient,
-		clusterInfo:          *verifier.srcClusterInfo,
-		changeStreamRunning:  false,
-		changeEventBatchChan: make(chan changeEventBatch),
-		writesOffTs:          util.NewEventual[primitive.Timestamp](),
-		readerError:          util.NewEventual[error](),
-		handlerError:         util.NewEventual[error](),
-		doneChan:             make(chan struct{}),
-		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
+	srcReader := &ChangeStreamReader{
+		readerType:    src,
+		namespaces:    verifier.srcNamespaces,
+		watcherClient: verifier.srcClient,
+		clusterInfo:   *verifier.srcClusterInfo,
 	}
-	verifier.dstChangeStreamReader = &ChangeStreamReader{
-		readerType:           dst,
-		logger:               verifier.logger,
-		namespaces:           verifier.dstNamespaces,
-		metaDB:               verifier.metaClient.Database(verifier.metaDBName),
-		watcherClient:        verifier.dstClient,
-		clusterInfo:          *verifier.dstClusterInfo,
-		changeStreamRunning:  false,
-		changeEventBatchChan: make(chan changeEventBatch),
-		writesOffTs:          util.NewEventual[primitive.Timestamp](),
-		readerError:          util.NewEventual[error](),
-		handlerError:         util.NewEventual[error](),
-		doneChan:             make(chan struct{}),
-		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
-		onDDLEvent:           onDDLEventAllow,
+	verifier.srcChangeStreamReader = srcReader
+
+	dstReader := &ChangeStreamReader{
+		readerType:    dst,
+		namespaces:    verifier.dstNamespaces,
+		watcherClient: verifier.dstClient,
+		clusterInfo:   *verifier.dstClusterInfo,
+		onDDLEvent:    onDDLEventAllow,
+	}
+	verifier.dstChangeStreamReader = dstReader
+
+	// Common elements in both readers:
+	for _, csr := range mslices.Of(srcReader, dstReader) {
+		csr.logger = verifier.logger
+		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
+		csr.changeEventBatchChan = make(chan changeEventBatch)
+		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
+		csr.readerError = util.NewEventual[error]()
+		csr.handlerError = util.NewEventual[error]()
+		csr.doneChan = make(chan struct{})
+		csr.lag = msync.NewTypedAtomic(option.None[time.Duration]())
+		csr.batchSizeHistory = history.New[int](time.Minute)
 	}
 }
 
@@ -190,7 +176,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 	docIDs := make([]bson.RawValue, len(batch.events))
 	dataSizes := make([]int, len(batch.events))
 
-	latestTimestamp := primitive.Timestamp{}
+	latestTimestamp := bson.Timestamp{}
 
 	for i, changeEvent := range batch.events {
 		if !supportedEventOpTypes.Contains(changeEvent.OpType) {
@@ -364,7 +350,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	ctx context.Context,
 	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
-	sess mongo.Session,
+	sess *mongo.Session,
 ) error {
 	eventsRead := 0
 	var changeEvents []ParsedEvent
@@ -445,7 +431,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
-	var tokenTs primitive.Timestamp
+	var tokenTs bson.Timestamp
 	tokenTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
 	if err == nil {
 		lagSecs := int64(sess.OperationTime().T) - int64(tokenTs.T)
@@ -461,6 +447,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 		return nil
 	}
+
+	csr.batchSizeHistory.Add(eventsRead)
 
 	if event, has := latestEvent.Get(); has {
 		csr.logger.Trace().
@@ -500,7 +488,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	ctx context.Context,
 	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
-	sess mongo.Session,
+	sess *mongo.Session,
 ) error {
 	var lastPersistedTime time.Time
 
@@ -553,7 +541,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			// Read change events until the stream reaches the writesOffTs.
 			// (i.e., the `getMore` call returns empty)
 			for {
-				var curTs primitive.Timestamp
+				var curTs bson.Timestamp
 				curTs, err = extractTimestampFromResumeToken(cs.ResumeToken())
 				if err != nil {
 					return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
@@ -617,7 +605,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 func (csr *ChangeStreamReader) createChangeStream(
 	ctx context.Context,
-) (*mongo.ChangeStream, mongo.Session, primitive.Timestamp, error) {
+) (*mongo.ChangeStream, *mongo.Session, bson.Timestamp, error) {
 	pipeline := csr.GetChangeStreamFilter()
 	opts := options.ChangeStream().
 		SetMaxAwaitTime(maxChangeStreamAwaitTime)
@@ -633,7 +621,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 	savedResumeToken, err := csr.loadChangeStreamResumeToken(ctx)
 	if err != nil {
-		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
+		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
 	}
 
 	csStartLogEvent := csr.logger.Info()
@@ -660,22 +648,22 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 	sess, err := csr.watcherClient.StartSession()
 	if err != nil {
-		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to start session")
+		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to start session")
 	}
 	sctx := mongo.NewSessionContext(ctx, sess)
 	changeStream, err := csr.watcherClient.Watch(sctx, pipeline, opts)
 	if err != nil {
-		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to open change stream")
+		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
 
 	err = csr.persistChangeStreamResumeToken(ctx, changeStream)
 	if err != nil {
-		return nil, nil, primitive.Timestamp{}, err
+		return nil, nil, bson.Timestamp{}, err
 	}
 
 	startTs, err := extractTimestampFromResumeToken(changeStream.ResumeToken())
 	if err != nil {
-		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
+		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
 	}
 
 	// With sharded clusters the resume token might lead the cluster time
@@ -683,7 +671,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 	// otherwise we will get errors.
 	clusterTime, err := util.GetClusterTimeFromSession(sess)
 	if err != nil {
-		return nil, nil, primitive.Timestamp{}, errors.Wrap(err, "failed to read cluster time from session")
+		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to read cluster time from session")
 	}
 
 	csr.logger.Debug().
@@ -705,7 +693,7 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 	// success or failure. Rather than using a Result we could make separate
 	// Timestamp and error channels, but the single channel is cleaner since
 	// there's no chance of "nonsense" like both channels returning a payload.
-	initialCreateResultChan := make(chan mo.Result[primitive.Timestamp])
+	initialCreateResultChan := make(chan mo.Result[bson.Timestamp])
 
 	go func() {
 		// Closing changeEventBatchChan at the end of change stream goroutine
@@ -733,7 +721,7 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 					if parentThreadWaiting {
 						logEvent.Msg("First change stream open failed.")
 
-						initialCreateResultChan <- mo.Err[primitive.Timestamp](err)
+						initialCreateResultChan <- mo.Err[bson.Timestamp](err)
 						return nil
 					}
 
@@ -786,7 +774,30 @@ func (csr *ChangeStreamReader) GetLag() option.Option[time.Duration] {
 	return csr.lag.Load()
 }
 
-func addTimestampToLogEvent(ts primitive.Timestamp, event *zerolog.Event) *zerolog.Event {
+func (csr *ChangeStreamReader) GetEventsPerSecond() option.Option[float64] {
+	logs := csr.batchSizeHistory.Get()
+	lastLog, hasLogs := lo.Last(logs)
+
+	if hasLogs && lastLog.At != logs[0].At {
+		span := lastLog.At.Sub(logs[0].At)
+
+		// Each log contains a time and a # of events that happened since
+		// the prior log. Thus, each log’s Datum is a count of events that
+		// happened before the timestamp. Since we want the # of events that
+		// happened between the first & last times, we only want events *after*
+		// the first time. Thus, we skip the first log entry here.
+		totalEvents := 0
+		for _, log := range logs[1:] {
+			totalEvents += log.Datum
+		}
+
+		return option.Some(util.DivideToF64(totalEvents, span.Seconds()))
+	}
+
+	return option.None[float64]()
+}
+
+func addTimestampToLogEvent(ts bson.Timestamp, event *zerolog.Event) *zerolog.Event {
 	return event.
 		Any("timestamp", ts).
 		Time("time", time.Unix(int64(ts.T), int64(0)))
@@ -857,27 +868,27 @@ func (csr *ChangeStreamReader) persistChangeStreamResumeToken(ctx context.Contex
 	return errors.Wrapf(err, "failed to persist change stream resume token (%v)", token)
 }
 
-func extractTimestampFromResumeToken(resumeToken bson.Raw) (primitive.Timestamp, error) {
+func extractTimestampFromResumeToken(resumeToken bson.Raw) (bson.Timestamp, error) {
 	// Change stream token is always a V1 keystring in the _data field
 	tokenDataRV, err := resumeToken.LookupErr("_data")
 
 	if err != nil {
-		return primitive.Timestamp{}, errors.Wrapf(err, "extracting %#q from resume token (%v)", "_data", resumeToken)
+		return bson.Timestamp{}, errors.Wrapf(err, "extracting %#q from resume token (%v)", "_data", resumeToken)
 	}
 
 	tokenData, err := mbson.CastRawValue[string](tokenDataRV)
 	if err != nil {
-		return primitive.Timestamp{}, errors.Wrapf(err, "parsing resume token (%v)", resumeToken)
+		return bson.Timestamp{}, errors.Wrapf(err, "parsing resume token (%v)", resumeToken)
 	}
 
 	resumeTokenBson, err := keystring.KeystringToBson(keystring.V1, tokenData)
 	if err != nil {
-		return primitive.Timestamp{}, err
+		return bson.Timestamp{}, err
 	}
 	// First element is the cluster time we want
-	resumeTokenTime, ok := resumeTokenBson[0].Value.(primitive.Timestamp)
+	resumeTokenTime, ok := resumeTokenBson[0].Value.(bson.Timestamp)
 	if !ok {
-		return primitive.Timestamp{}, errors.Errorf("resume token data's (%+v) first element is of type %T, not a timestamp", resumeTokenBson, resumeTokenBson[0].Value)
+		return bson.Timestamp{}, errors.Errorf("resume token data's (%+v) first element is of type %T, not a timestamp", resumeTokenBson, resumeTokenBson[0].Value)
 	}
 
 	return resumeTokenTime, nil

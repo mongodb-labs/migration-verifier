@@ -16,11 +16,10 @@ import (
 	"github.com/10gen/migration-verifier/mmongo/cursor"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"golang.org/x/exp/slices"
 )
 
@@ -35,12 +34,12 @@ const (
 
 type seqWithTs struct {
 	seq iter.Seq2[bson.Raw, error]
-	ts  primitive.Timestamp
+	ts  bson.Timestamp
 }
 
 type docWithTs struct {
 	doc bson.Raw
-	ts  primitive.Timestamp
+	ts  bson.Timestamp
 }
 
 func (verifier *Verifier) FetchAndCompareDocuments(
@@ -602,10 +601,10 @@ func getMapKey(docKeyValues []bson.RawValue) string {
 }
 
 func (verifier *Verifier) getDocumentsCursor(
-	ctx mongo.SessionContext,
+	ctx context.Context,
 	collection *mongo.Collection,
 	clusterInfo *util.ClusterInfo,
-	startAtTs *primitive.Timestamp,
+	startAtTs *bson.Timestamp,
 	task *VerificationTask,
 ) (*cursor.BatchCursor, error) {
 	var findOptions bson.D

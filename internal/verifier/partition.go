@@ -11,10 +11,9 @@ import (
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func (verifier *Verifier) findLatestPartitionUpperBound(
@@ -114,7 +113,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		predicates, err := partitions.FilterIdBounds(
 			verifier.srcClusterInfo,
 			lowerBound,
-			primitive.MaxKey{},
+			bson.MaxKey{},
 		)
 		if err != nil {
 			return 0, 0, 0, errors.Wrapf(err, "getting lower-bound filter predicate (%v)", lowerBound)
@@ -163,7 +162,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 	partitionsCount := 0
 
-	lowerBound := lowerBoundOpt.OrElse(primitive.MinKey{})
+	lowerBound := lowerBoundOpt.OrElse(bson.MinKey{})
 
 	createAndInsertPartition := func(lowerBound, upperBound any) error {
 		partition := partitions.Partition{
@@ -251,7 +250,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		}
 	}
 
-	err = createAndInsertPartition(lowerBound, primitive.MaxKey{})
+	err = createAndInsertPartition(lowerBound, bson.MaxKey{})
 	if err != nil {
 		return 0, 0, 0, err
 	}

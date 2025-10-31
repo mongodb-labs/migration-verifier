@@ -7,7 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/dockey/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestExtractTrueDocKeyFromDoc(t *testing.T) {

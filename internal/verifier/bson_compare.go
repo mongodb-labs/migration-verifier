@@ -3,7 +3,7 @@ package verifier
 import (
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type MismatchDetails struct {
@@ -109,7 +109,9 @@ func bsonUnorderedCompareRawValue(srcValue, dstValue bson.RawValue) (bool, error
 
 	switch srcValue.Type {
 	case bson.TypeArray:
-		return bsonUnorderedCompareRawArray(srcValue.Array(), dstValue.Array())
+		return bsonUnorderedCompareRawArray(
+			bson.Raw(srcValue.Array()), bson.Raw(dstValue.Array()),
+		)
 	case bson.TypeEmbeddedDocument:
 		return BsonUnorderedCompareRawDocument(srcValue.Document(), dstValue.Document())
 	default:

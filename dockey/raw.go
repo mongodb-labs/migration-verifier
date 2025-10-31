@@ -6,8 +6,8 @@ import (
 
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 // ExtractTrueDocKeyFromDoc extracts the document key from a document
@@ -43,7 +43,7 @@ func ExtractTrueDocKeyFromDoc(
 		docBuilder.AppendValue(
 			field,
 			bsoncore.Value{
-				Type: val.Type,
+				Type: bsoncore.Type(val.Type),
 				Data: val.Value,
 			},
 		)

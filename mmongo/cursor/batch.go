@@ -16,10 +16,9 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 var (
@@ -31,14 +30,13 @@ var (
 // because there is no need to clone each document individually, as
 // mongo.Cursor requires.
 type BatchCursor struct {
-	sess         mongo.Session
+	sess         *mongo.Session
 	maxAwaitTime option.Option[time.Duration]
 	id           int64
 	ns           string
 	db           *mongo.Database
 	rawResp      bson.Raw
-	curBatch     bson.Raw // an undecoded array
-	//cursorExtra ExtraMap
+	curBatch     bson.RawArray
 }
 
 // GetCurrentBatchIterator returns an iterator over the BatchCursor’s current batch.
@@ -57,15 +55,19 @@ func (c *BatchCursor) GetCurrentBatchIterator() iter.Seq2[bson.Raw, error] {
 	// NB: This MUST NOT close around c (the receiver), or else there can be
 	// a race condition between this callback and GetNext().
 	return func(yield func(bson.Raw, error) bool) {
-		iterator := &bsoncore.DocumentSequence{
-			Style: bsoncore.ArrayStyle,
-			Data:  batch,
+		iterator := &bsoncore.Iterator{
+			List: bsoncore.Array(batch),
 		}
 
 		for {
-			doc, err := iterator.Next()
+			val, err := iterator.Next()
 			if errors.Is(err, io.EOF) {
 				return
+			}
+
+			doc, ok := val.DocumentOK()
+			if !ok {
+				err = fmt.Errorf("expected BSON %s but found %s", bson.TypeEmbeddedDocument, val.Type)
 			}
 
 			if !yield(bson.Raw(doc), err) {
@@ -80,20 +82,20 @@ func (c *BatchCursor) GetCurrentBatchIterator() iter.Seq2[bson.Raw, error] {
 }
 
 // GetClusterTime returns the server response’s cluster time.
-func (c *BatchCursor) GetClusterTime() (primitive.Timestamp, error) {
+func (c *BatchCursor) GetClusterTime() (bson.Timestamp, error) {
 	ctRV, err := c.rawResp.LookupErr(clusterTimePath...)
 
 	if err != nil {
-		return primitive.Timestamp{}, errors.Wrapf(
+		return bson.Timestamp{}, errors.Wrapf(
 			err,
 			"extracting %#q from server response",
 			clusterTimePath,
 		)
 	}
 
-	ts, err := mbson.CastRawValue[primitive.Timestamp](ctRV)
+	ts, err := mbson.CastRawValue[bson.Timestamp](ctRV)
 	if err != nil {
-		return primitive.Timestamp{}, errors.Wrapf(
+		return bson.Timestamp{}, errors.Wrapf(
 			err,
 			"parsing server response’s %#q",
 			clusterTimePath,
@@ -162,8 +164,8 @@ type cursorResponse struct {
 
 	// These are both BSON arrays. We use bson.Raw here to delay parsing
 	// and avoid allocating a large slice.
-	FirstBatch bson.Raw
-	NextBatch  bson.Raw
+	FirstBatch bson.RawArray
+	NextBatch  bson.RawArray
 }
 
 type baseResponse struct {
@@ -204,7 +206,7 @@ func New(
 	}, nil
 }
 
-func (c *BatchCursor) SetSession(sess mongo.Session) {
+func (c *BatchCursor) SetSession(sess *mongo.Session) {
 	c.sess = sess
 }
 

@@ -31,13 +31,13 @@ import (
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
+	"github.com/samber/lo/mutable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func TestIntegration(t *testing.T) {
@@ -81,7 +81,7 @@ func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
 	require.NoError(db.CreateCollection(ctx, collName))
 
 	task := &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Generation: 0,
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerifyCollection,
@@ -107,14 +107,14 @@ func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
 	require.Equal(verificationTaskVerifyDocuments, foundTask.Type, "task type")
 	assert.Equal(
 		suite.T(),
-		primitive.MinKey{},
+		bson.MinKey{},
 		foundTask.QueryFilter.Partition.Key.Lower,
 		"min bound",
 	)
 
 	assert.Equal(
 		suite.T(),
-		primitive.MaxKey{},
+		bson.MaxKey{},
 		foundTask.QueryFilter.Partition.Upper,
 		"max bound",
 	)
@@ -131,7 +131,7 @@ func (suite *IntegrationTestSuite) TestProcessVerifyTask_Failure() {
 	namespace := dbName + "." + collName
 
 	task := &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		QueryFilter: QueryFilter{
 			Partition: &partitions.Partition{
 				Key: partitions.PartitionKey{
@@ -275,12 +275,13 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 			"Should move upper chunk to the 2nd shard",
 		)
 
-		_, err := coll.InsertMany(ctx, lo.ToAnySlice(lo.Shuffle(docs)))
+		mutable.Shuffle(docs)
+		_, err := coll.InsertMany(ctx, lo.ToAnySlice(docs))
 		require.NoError(err, "should insert all docs")
 	}
 
 	task := &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		QueryFilter: QueryFilter{
 			Namespace: dbName + "." + collName,
 			To:        dbName + "." + collName,
@@ -292,9 +293,9 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 			),
 			Partition: &partitions.Partition{
 				Key: partitions.PartitionKey{
-					Lower: primitive.MinKey{},
+					Lower: bson.MinKey{},
 				},
-				Upper: primitive.MaxKey{},
+				Upper: bson.MaxKey{},
 			},
 		},
 	}
@@ -338,11 +339,11 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 	srcColl := verifier.srcClient.Database(dbName).Collection(collName)
 	dstColl := verifier.dstClient.Database(dbName).Collection(collName)
 
-	id1 := primitive.NewObjectID()
+	id1 := bson.NewObjectID()
 	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", id1}})
 	require.NoError(t, err, "should insert to source")
 
-	id2 := primitive.NewObjectID()
+	id2 := bson.NewObjectID()
 	_, err = srcColl.InsertOne(ctx, bson.D{{"_id", id2}})
 	require.NoError(t, err, "should insert to source")
 
@@ -352,7 +353,7 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 	namespace := dbName + "." + collName
 
 	task := &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Ids:        []any{id1, id2},
 		QueryFilter: QueryFilter{
 			Namespace: namespace,
@@ -379,13 +380,13 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	ctx := suite.Context()
 
 	task := &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		QueryFilter: QueryFilter{
 			Namespace: "keyhole.dealers",
 			To:        "keyhole.dealers",
 			Partition: &partitions.Partition{
 				Key: partitions.PartitionKey{
-					Lower: primitive.MinKey{},
+					Lower: bson.MinKey{},
 				},
 				Upper: int32(999),
 			},
@@ -395,7 +396,7 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", nil}},
 		bson.D{{"_id", int32(123)}},
-		bson.D{{"_id", primitive.Symbol("oh yeah")}},
+		bson.D{{"_id", bson.Symbol("oh yeah")}},
 	})
 	suite.Require().NoError(err)
 
@@ -413,7 +414,7 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	}{
 		{
 			label:     "MinKey to int 999",
-			lower:     primitive.MinKey{},
+			lower:     bson.MinKey{},
 			upper:     int32(999),
 			docsCount: 2,
 		},
@@ -431,28 +432,28 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 		},
 		{
 			label:      "between non-adjacent types, including type of upper",
-			lower:      primitive.Null{},
+			lower:      bson.Null{},
 			upper:      "zzzz",
 			docsCount:  3,
 			mismatches: 2,
 		},
 		{
 			label:     "between non-adjacent types, excluding type of upper",
-			lower:     primitive.Null{},
+			lower:     bson.Null{},
 			upper:     "aaa",
 			docsCount: 2,
 		},
 		{
 			label:      "0 to MaxKey",
 			lower:      0,
-			upper:      primitive.MaxKey{},
+			upper:      bson.MaxKey{},
 			docsCount:  2,
 			mismatches: 2,
 		},
 		{
 			label:      "long 999 to MaxKey",
 			lower:      int64(999),
-			upper:      primitive.MaxKey{},
+			upper:      bson.MaxKey{},
 			docsCount:  1,
 			mismatches: 2,
 		},
@@ -515,7 +516,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	})
 	suite.Require().NoError(err)
 	task := &VerificationTask{
-		PrimaryKey:  primitive.NewObjectID(),
+		PrimaryKey:  bson.NewObjectID(),
 		Generation:  1,
 		Ids:         []any{id, id + 1},
 		QueryFilter: basicQueryFilter("keyhole.dealers"),
@@ -687,7 +688,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
 				DocID:  mbson.ToRawValue("heyhey"),
-				ClusterTime: &primitive.Timestamp{
+				ClusterTime: &bson.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
 			}},
@@ -703,7 +704,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
 				DocID:  mbson.ToRawValue("hoohoo"),
-				ClusterTime: &primitive.Timestamp{
+				ClusterTime: &bson.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
 			}},
@@ -965,7 +966,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 			DB:   "foo",
 			Coll: "bar2",
 		},
-		ClusterTime: &primitive.Timestamp{
+		ClusterTime: &bson.Timestamp{
 			T: uint32(time.Now().Unix()),
 		},
 	}
@@ -1013,7 +1014,10 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		suite.Require().Equal(expectedIds, doc["_ids"])
 		suite.Require().EqualValues(verificationTaskAdded, doc["status"])
 		suite.Require().EqualValues(verificationTaskVerifyDocuments, doc["type"])
-		suite.Require().Equal(expectedNamespace, doc["query_filter"].(bson.M)["namespace"])
+		suite.Require().Equal(
+			expectedNamespace,
+			lo.Must(cur.Current.LookupErr("query_filter", "namespace")).StringValue(),
+		)
 	}
 	verifyTask(bson.A{int32(42), int32(43), int32(44)}, "foo.bar")
 	verifyTask(bson.A{int32(42), int32(55)}, "foo.bar2")
@@ -1155,7 +1159,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 				seq: mseq.FromSliceWithErr(
 					mslices.Of(testutil.MustMarshal(doc)),
 				),
-				ts: primitive.Timestamp{1, uint32(d)},
+				ts: bson.Timestamp{1, uint32(d)},
 			}
 		}
 
@@ -1193,7 +1197,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 				dstChannel := makeDocChannel(dstDocs)
 
 				fauxTask := VerificationTask{
-					PrimaryKey: primitive.NewObjectID(),
+					PrimaryKey: bson.NewObjectID(),
 					QueryFilter: QueryFilter{
 						Namespace: namespace,
 						ShardKeys: indexFields,
@@ -1253,7 +1257,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 func (suite *IntegrationTestSuite) getFailuresForTask(
 	verifier *Verifier,
-	taskID primitive.ObjectID,
+	taskID bson.ObjectID,
 ) []VerificationResult {
 	discrepancies, err := getMismatchesForTasks(
 		suite.Context(),
@@ -1275,7 +1279,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "sameView", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
 	task := &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.sameView",
@@ -1292,7 +1296,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "wrongColl", "testColl2", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.wrongColl",
@@ -1315,7 +1319,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "wrongPipeline", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}, {"a", 0}}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.wrongPipeline",
@@ -1343,7 +1347,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "missingOptionsSrc", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.missingOptionsSrc",
@@ -1366,7 +1370,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "missingOptionsDst", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.missingOptionsDst",
@@ -1388,7 +1392,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	err = suite.dstMongoClient.Database("testDb").CreateView(ctx, "differentOptions", "testColl1", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}}, options.CreateView().SetCollation(&collation2))
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.differentOptions",
@@ -1414,7 +1418,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
 	suite.Require().NoError(err)
 	task := &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl",
@@ -1434,7 +1438,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl",
@@ -1454,7 +1458,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "destOnlyColl")
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.destOnlyColl",
@@ -1476,7 +1480,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "viewOnSrc")
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.viewOnSrc",
@@ -1498,7 +1502,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "cappedOnDst", options.CreateCollection().SetCapped(true).SetSizeInBytes(1024*1024*100))
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.cappedOnDst",
@@ -1520,7 +1524,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 
 	// Default success case
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl",
@@ -1532,7 +1536,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 
 	// Neither collection exists success case
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testCollDNE",
@@ -1560,7 +1564,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	_, err = dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}})
 	suite.Require().NoError(err)
 	task := &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl1",
@@ -1593,7 +1597,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	dstIndexNames, err := dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl2",
@@ -1626,7 +1630,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	dstIndexNames, err = dstColl.Indexes().CreateMany(ctx, []mongo.IndexModel{{Keys: bson.D{{"a", 1}, {"b", -1}}}, {Keys: bson.D{{"x", 1}}}})
 	suite.Require().NoError(err)
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl3",
@@ -1666,7 +1670,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Require().NoError(err)
 	suite.Require().Equal("wrong", dstIndexNames[1])
 	task = &VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: "testDb.testColl4",
@@ -2520,10 +2524,10 @@ func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 
 	// Check that each partition have bounds in the filter.
 	for _, partition := range partitions {
-		if _, isMinKey := partition.Key.Lower.(primitive.MinKey); !isMinKey {
+		if _, isMinKey := partition.Key.Lower.(bson.MinKey); !isMinKey {
 			suite.Require().GreaterOrEqual(partition.Key.Lower.(bson.RawValue).AsInt64(), int64(0))
 		}
-		if _, isMaxKey := partition.Upper.(primitive.MaxKey); !isMaxKey {
+		if _, isMaxKey := partition.Upper.(bson.MaxKey); !isMaxKey {
 			suite.Require().Less(partition.Upper.(bson.RawValue).AsInt64(), int64(30))
 		}
 	}

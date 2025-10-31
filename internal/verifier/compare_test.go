@@ -11,8 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // TestFetchAndCompareDocuments_ContextCancellation ensures that nothing hangs
@@ -35,16 +34,16 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 	}
 
 	task := VerificationTask{
-		PrimaryKey: primitive.NewObjectID(),
+		PrimaryKey: bson.NewObjectID(),
 		Type:       verificationTaskVerifyDocuments,
 		Status:     verificationTaskProcessing,
 		QueryFilter: QueryFilter{
 			Namespace: s.DBNameForTest() + ".stuff",
 			Partition: &partitions.Partition{
 				Key: partitions.PartitionKey{
-					Lower: primitive.MinKey{},
+					Lower: bson.MinKey{},
 				},
-				Upper: primitive.MaxKey{},
+				Upper: bson.MaxKey{},
 			},
 		},
 	}

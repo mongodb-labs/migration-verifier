@@ -12,9 +12,8 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
@@ -55,7 +54,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 			Coll: "namespace",
 		},
 		FullDocument: testutil.MustMarshal(bson.D{{"foo", 1}}),
-		ClusterTime: &primitive.Timestamp{
+		ClusterTime: &bson.Timestamp{
 			T: uint32(time.Now().Unix()),
 		},
 	}

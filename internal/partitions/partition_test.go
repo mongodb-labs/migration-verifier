@@ -5,8 +5,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/stretchr/testify/require"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func (suite *UnitTestSuite) TestVersioning() {
@@ -104,10 +103,10 @@ func (suite *UnitTestSuite) makeTestPartition() (Partition, bson.D) {
 	partition := Partition{
 		Key: PartitionKey{
 			SourceUUID: util.NewUUID(),
-			Lower:      primitive.ObjectID([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}),
+			Lower:      bson.ObjectID([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}),
 		},
 		Ns:    &Namespace{DB: "testDB", Coll: "testColl"},
-		Upper: primitive.ObjectID([12]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2}),
+		Upper: bson.ObjectID([12]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2}),
 	}
 	return partition, suite.makeExpectedFilter(partition.Key.Lower, partition.Upper)
 }

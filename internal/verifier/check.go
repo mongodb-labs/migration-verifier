@@ -12,8 +12,8 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 type GenerationStatus string
@@ -237,7 +237,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 
 			err = verifier.doInMetaTransaction(
 				ctx,
-				func(ctx context.Context, sCtx mongo.SessionContext) error {
+				func(ctx context.Context, sCtx context.Context) error {
 					return verifier.ResetInProgressTasks(sCtx)
 				},
 			)

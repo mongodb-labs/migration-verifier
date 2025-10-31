@@ -4,14 +4,12 @@ import (
 	"fmt"
 	"math"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 type bsonCastRecipient interface {
-	bson.Raw | primitive.Timestamp | string
+	bson.Raw | bson.Timestamp | string
 }
 
 type bsonSourceTypes interface {
@@ -19,7 +17,7 @@ type bsonSourceTypes interface {
 }
 
 type cannotCastErr struct {
-	gotBSONType bsontype.Type
+	gotBSONType bson.Type
 	toGoType    any
 }
 
@@ -31,16 +29,16 @@ func (ce cannotCastErr) Error() string {
 // casting interfaces. Unlike those functions, though, this returns an error
 // if the target type doesn’t match the value.
 //
-// Augment bsonType if you find a type here that’s missing.
+// Augment bsonCastRecipient if you find a type here that’s missing.
 func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 	switch any(*new(T)).(type) {
 	case bson.Raw:
 		if doc, isDoc := in.DocumentOK(); isDoc {
 			return any(doc).(T), nil
 		}
-	case primitive.Timestamp:
+	case bson.Timestamp:
 		if t, i, ok := in.TimestampOK(); ok {
-			return any(primitive.Timestamp{t, i}).(T), nil
+			return any(bson.Timestamp{t, i}).(T), nil
 		}
 	case string:
 		if str, ok := in.StringValueOK(); ok {
@@ -51,6 +49,53 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 	}
 
 	return *new(T), cannotCastErr{in.Type, any(in)}
+}
+
+// Lookup fetches a value from a BSON document, casts it to the appropriate
+// type, then returns the result.
+func Lookup[T bsonCastRecipient](doc bson.Raw, pointer ...string) (T, error) {
+	rv, err := doc.LookupErr(pointer...)
+
+	if err != nil {
+		return *new(T), fmt.Errorf("extracting %#q: %w", pointer, err)
+	}
+
+	return CastRawValue[T](rv)
+}
+
+// LookupTo is like Lookup but assigns to a referent value rather than
+// returning a new one.
+func LookupTo[T bsonCastRecipient](doc bson.Raw, recipient *T, pointer ...string) error {
+	var err error
+	*recipient, err = Lookup[T](doc, pointer...)
+
+	return err
+}
+
+// UnmarshalElementValue is like UnmarshalRawValue but takes a RawElement.
+// Any returned error will include the field name (if it parses validly).
+func UnmarshalElementValue[T bsonCastRecipient](in bson.RawElement, recipient *T) error {
+	rv, err := in.ValueErr()
+
+	if err != nil {
+		key, keyErr := in.KeyErr()
+		if keyErr != nil {
+			return fmt.Errorf("parsing element value (invalid key: %w): %w", keyErr, err)
+		}
+
+		return fmt.Errorf("parsing %#q element: %w", key, err)
+	}
+
+	return UnmarshalRawValue(rv, recipient)
+}
+
+// UnmarshalRawValue implements bson.Unmarshal’s semantics but with additional
+// type constraints that avoid reflection.
+func UnmarshalRawValue[T bsonCastRecipient](in bson.RawValue, recipient *T) error {
+	var err error
+	*recipient, err = CastRawValue[T](in)
+
+	return err
 }
 
 // ToRawValue is a bit like bson.MarshalValue, but:

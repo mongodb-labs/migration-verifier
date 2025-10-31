@@ -11,12 +11,11 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readconcern"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
 
 func ForPartitionAggregation(coll *mongo.Collection) *mongo.Collection {
@@ -80,9 +79,9 @@ func (p *Partition) getIndexKeyBoundString(bound any) string {
 	switch b := bound.(type) {
 	case bson.RawValue:
 		return b.String()
-	case primitive.MinKey:
+	case bson.MinKey:
 		return `{"$minKey":1}`
-	case primitive.MaxKey:
+	case bson.MaxKey:
 		return `{"$maxKey":1}`
 	default:
 		return fmt.Sprintf("%v", b)

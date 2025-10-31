@@ -2,7 +2,7 @@ package test
 
 import (
 	"github.com/10gen/migration-verifier/mslices"
-	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type TestCase struct {

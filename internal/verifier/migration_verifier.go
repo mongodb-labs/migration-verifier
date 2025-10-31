@@ -26,13 +26,12 @@ import (
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readconcern"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
-	"go.mongodb.org/mongo-driver/mongo/writeconcern"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
+	"go.mongodb.org/mongo-driver/v2/mongo/writeconcern"
 )
 
 // ReadConcernSetting describes the verifier’s handling of read
@@ -228,7 +227,7 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	verifier.logger.Debug().
 		Msg("WritesOff called.")
 
-	var srcFinalTs, dstFinalTs primitive.Timestamp
+	var srcFinalTs, dstFinalTs bson.Timestamp
 	var err error
 
 	// The anonymous function here makes it easier to ensure
@@ -305,7 +304,7 @@ func (verifier *Verifier) GetLogger() *logger.Logger {
 func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 	opts := verifier.getClientOpts(uri)
 	var err error
-	verifier.metaClient, err = mongo.Connect(ctx, opts)
+	verifier.metaClient, err = mongo.Connect(opts)
 	if err != nil {
 		return err
 	}
@@ -737,8 +736,8 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 				Coll: namespaceAndUUID.CollName}}}
 	}
 	// Use "open" partitions, otherwise out-of-range keys on the destination might be missed
-	partitionList[0].Key.Lower = primitive.MinKey{}
-	partitionList[len(partitionList)-1].Upper = primitive.MaxKey{}
+	partitionList[0].Key.Lower = bson.MinKey{}
+	partitionList[len(partitionList)-1].Upper = bson.MaxKey{}
 	debugLog := verifier.logger.Debug()
 	if debugLog.Enabled() {
 		debugLog.Msgf("Partitions (%d):", len(partitionList))
@@ -1340,15 +1339,8 @@ func (verifier *Verifier) doIfForceReadConcernMajority(f func()) {
 
 func (verifier *Verifier) verificationDatabase() *mongo.Database {
 	db := verifier.metaClient.Database(verifier.metaDBName)
-	if db.WriteConcern().W != "majority" {
-		verifier.logger.Fatal().Msgf("Verification metadata is not using write concern majority: %+v", db.WriteConcern())
-	}
 
-	verifier.doIfForceReadConcernMajority(func() {
-		if db.ReadConcern().Level != "majority" {
-			verifier.logger.Fatal().Msgf("Verification metadata is not using read concern majority: %+v", db.ReadConcern())
-		}
-	})
+	// TODO REP-6772: Restore read & write concern guard rails.
 
 	return db
 }
@@ -1359,23 +1351,17 @@ func (verifier *Verifier) verificationTaskCollection() *mongo.Collection {
 
 func (verifier *Verifier) srcClientDatabase(dbName string) *mongo.Database {
 	db := verifier.srcClient.Database(dbName)
-	// No need to check the write concern because we do not write to the source database.
-	verifier.doIfForceReadConcernMajority(func() {
-		if db.ReadConcern().Level != "majority" {
-			verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
-		}
-	})
+
+	// TODO REP-6772: Restore read & write concern guard rails.
+
 	return db
 }
 
 func (verifier *Verifier) dstClientDatabase(dbName string) *mongo.Database {
 	db := verifier.dstClient.Database(dbName)
-	// No need to check the write concern because we do not write to the target database.
-	verifier.doIfForceReadConcernMajority(func() {
-		if db.ReadConcern().Level != "majority" {
-			verifier.logger.Fatal().Msgf("Source client is not using read concern majority: %+v", db.ReadConcern())
-		}
-	})
+
+	// TODO REP-6772: Restore read & write concern guard rails.
+
 	return db
 }
 
@@ -1533,7 +1519,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		return
 	}
 
-	verifier.printChangeEventStatistics(strBuilder, reportGenStartTime)
+	verifier.printChangeEventStatistics(strBuilder)
 
 	// Only print the worker status table if debug logging is enabled.
 	if verifier.logger.Debug().Enabled() {
@@ -1597,12 +1583,23 @@ func (verifier *Verifier) writeStringBuilder(builder *strings.Builder) {
 
 func (verifier *Verifier) getNamespaces(ctx context.Context, fieldName string) ([]string, error) {
 	var namespaces []string
-	ret, err := verifier.verificationTaskCollection().Distinct(ctx, fieldName, bson.D{})
+	ret := verifier.verificationTaskCollection().Distinct(ctx, fieldName, bson.D{})
+	if ret.Err() != nil {
+		return nil, ret.Err()
+	}
+
+	raw, err := ret.Raw()
 	if err != nil {
 		return nil, err
 	}
-	for _, v := range ret {
-		namespaces = append(namespaces, v.(string))
+
+	vals, err := raw.Values()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, v := range vals {
+		namespaces = append(namespaces, v.StringValue())
 	}
 	return namespaces, nil
 }

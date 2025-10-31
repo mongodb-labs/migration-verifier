@@ -1,9 +1,8 @@
 package verifier
 
 import (
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 func (suite *IntegrationTestSuite) TestGetNewClusterTime() {
@@ -29,5 +28,5 @@ func (suite *IntegrationTestSuite) TestGetNewClusterTime() {
 	suite.Require().NoError(err)
 
 	suite.Require().NotZero(ts, "timestamp should be nonzero")
-	suite.Assert().True(ts.After(primitive.Timestamp{T: clusterT, I: clusterI}))
+	suite.Assert().True(ts.After(bson.Timestamp{T: clusterT, I: clusterI}))
 }

@@ -4,11 +4,8 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsoncodec"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 const (
@@ -22,10 +19,10 @@ const (
 type UUID uuid.UUID
 
 var (
-	_ bson.ValueMarshaler      = UUID{}
-	_ bson.ValueUnmarshaler    = (*UUID)(nil)
-	_ bsoncodec.KeyMarshaler   = UUID{}
-	_ bsoncodec.KeyUnmarshaler = (*UUID)(nil)
+	_ bson.ValueMarshaler   = UUID{}
+	_ bson.ValueUnmarshaler = (*UUID)(nil)
+	_ bson.KeyMarshaler     = UUID{}
+	_ bson.KeyUnmarshaler   = (*UUID)(nil)
 )
 
 // NewUUID constructs a new, randomly-generated UUID.
@@ -35,16 +32,16 @@ func NewUUID() UUID {
 
 // MarshalBSONValue is used to marshal UUID objects into BSON. This implements the
 // ValueMarshaler interface.
-func (u UUID) MarshalBSONValue() (bsontype.Type, []byte, error) {
+func (u UUID) MarshalBSONValue() (byte, []byte, error) {
 	val := bsoncore.AppendBinary(nil, uuidBinarySubtype, u[:])
-	return bson.TypeBinary, val, nil
+	return byte(bson.TypeBinary), val, nil
 }
 
 // UnmarshalBSONValue is used to unmarshal BSON into UUID objects. This implements the
 // ValueUnmarshaler interface.
-func (u *UUID) UnmarshalBSONValue(bsonType bsontype.Type, data []byte) error {
-	if bsonType != bson.TypeBinary {
-		return fmt.Errorf("cannot decoded BSON value of type %s as a UUID", bsonType)
+func (u *UUID) UnmarshalBSONValue(bsonType byte, data []byte) error {
+	if bson.Type(bsonType) != bson.TypeBinary {
+		return fmt.Errorf("cannot decoded BSON value of type %s as a UUID", bson.Type(bsonType))
 	}
 
 	subtype, binData, rem, ok := bsoncore.ReadBinary(data)
@@ -81,6 +78,6 @@ func (u UUID) String() string {
 }
 
 // ParseBinary returns a UUID from its binary format.
-func ParseBinary(binUUID *primitive.Binary) UUID {
+func ParseBinary(binUUID *bson.Binary) UUID {
 	return UUID(uuid.Must(uuid.FromBytes(binUUID.Data)))
 }

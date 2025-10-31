@@ -6,14 +6,14 @@ import (
 	"github.com/10gen/migration-verifier/internal/comparehashed"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
 )
 
 func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 	opts := verifier.getClientOpts(uri)
 	var err error
-	verifier.srcClient, err = mongo.Connect(ctx, opts)
+	verifier.srcClient, err = mongo.Connect(opts)
 	if err != nil {
 		return errors.Wrapf(err, "failed to connect to source %#q", uri)
 	}
@@ -92,7 +92,7 @@ func isVersionSupported(version []int) bool {
 func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 	opts := verifier.getClientOpts(uri)
 	var err error
-	verifier.dstClient, err = mongo.Connect(ctx, opts)
+	verifier.dstClient, err = mongo.Connect(opts)
 	if err != nil {
 		return errors.Wrapf(err, "failed to connect to destination %#q", uri)
 	}

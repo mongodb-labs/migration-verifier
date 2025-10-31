@@ -6,8 +6,7 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestInt(t *testing.T) {
@@ -109,7 +108,7 @@ func TestRaw(t *testing.T) {
 }
 
 func TestTimestamp(t *testing.T) {
-	vals := []primitive.Timestamp{
+	vals := []bson.Timestamp{
 		{0, 0},
 		{1, 1},
 		{math.MaxUint32, math.MaxUint32},
@@ -118,6 +117,6 @@ func TestTimestamp(t *testing.T) {
 	for _, cur := range vals {
 		viaMarshal := MustConvertToRawValue(cur)
 
-		assert.Equal(t, cur, lo.Must(CastRawValue[primitive.Timestamp](viaMarshal)))
+		assert.Equal(t, cur, lo.Must(CastRawValue[bson.Timestamp](viaMarshal)))
 	}
 }
