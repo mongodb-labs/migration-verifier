@@ -276,8 +276,13 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		Int("processID", os.Getpid()).
 		Msg("migration-verifier started.")
 
+	err := v.SetReadPreference(cCtx.String(readPreference))
+	if err != nil {
+		return nil, err
+	}
+
 	srcConnStr := cCtx.String(srcURI)
-	_, srcConnStr, err := mmongo.MaybeAddDirectConnection(srcConnStr)
+	_, srcConnStr, err = mmongo.MaybeAddDirectConnection(srcConnStr)
 	if err != nil {
 		return nil, errors.Wrap(err, "parsing source connection string")
 	}
@@ -350,10 +355,6 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 	v.SetDocCompareMethod(docCompareMethod)
 
-	err = v.SetReadPreference(cCtx.String(readPreference))
-	if err != nil {
-		return nil, err
-	}
 	v.SetFailureDisplaySize(cCtx.Int64(failureDisplaySize))
 	return v, nil
 }
