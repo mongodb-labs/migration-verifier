@@ -684,7 +684,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 	err := verifier.HandleChangeStreamEvents(
 		ctx,
 		changeEventBatch{
-			events: []*ParsedEvent{{
+			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
 				DocID:  mbson.ToRawValue("heyhey"),
@@ -700,7 +700,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 	err = verifier.HandleChangeStreamEvents(
 		ctx,
 		changeEventBatch{
-			events: []*ParsedEvent{{
+			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
 				DocID:  mbson.ToRawValue("hoohoo"),
@@ -972,7 +972,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	}
 
 	batch := changeEventBatch{
-		events: mslices.Of(&event),
+		events: mslices.Of(event),
 	}
 
 	err = verifier.HandleChangeStreamEvents(ctx, batch, src)

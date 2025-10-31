@@ -56,7 +56,7 @@ func (uee UnknownEventError) Error() string {
 }
 
 type changeEventBatch struct {
-	events      []*ParsedEvent
+	events      []ParsedEvent
 	clusterTime bson.Timestamp
 }
 
@@ -237,7 +237,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 			dataSizes[i] = len(changeEvent.FullDocument)
 		}
 
-		if err := eventRecorder.AddEvent(changeEvent); err != nil {
+		if err := eventRecorder.AddEvent(&changeEvent); err != nil {
 			return errors.Wrapf(
 				err,
 				"failed to augment stats with %s change event (%+v)",
@@ -351,7 +351,12 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	ri *retry.FuncInfo,
 	csCursor *cursor.BatchCursor,
 ) error {
-	changeEvents := make([]*ParsedEvent, 0, 10_000) // TODO
+	batchLen, err := csCursor.GetCurrentBatchLength()
+	if err != nil {
+		return err
+	}
+
+	changeEvents := make([]ParsedEvent, 0, batchLen)
 	var batchTotalBytes int
 	var latestEvent option.Option[ParsedEvent]
 
@@ -367,7 +372,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		}
 
 		batchTotalBytes += len(rawEvent)
-		changeEvents = append(changeEvents, &newEvent)
+		changeEvents = append(changeEvents, newEvent)
 
 		opType := newEvent.OpType
 		if !supportedEventOpTypes.Contains(opType) {

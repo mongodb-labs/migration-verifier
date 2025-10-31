@@ -38,6 +38,21 @@ type BatchCursor struct {
 	curBatch     bson.RawArray
 }
 
+// GetCurrentBatchLength returns the number of documents in the current batch.
+func (c *BatchCursor) GetCurrentBatchLength() (int, error) {
+	count := 0
+
+	for _, err := range c.GetCurrentBatchIterator() {
+		if err != nil {
+			return 0, errors.Wrap(err, "counting documents in batch")
+		}
+
+		count++
+	}
+
+	return count, nil
+}
+
 // GetCurrentBatchIterator returns an iterator over the BatchCursor’s current batch.
 // Note that the iteratees are NOT copied; the expectation is that each batch
 // will be iterated exactly once. (Nothing *requires* that, of course.)
