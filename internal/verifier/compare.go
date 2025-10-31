@@ -609,6 +609,7 @@ func (verifier *Verifier) getDocumentsCursor(
 ) (*cursor.BatchCursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
+	runCommandOptions.SetReadPreference(verifier.readPreference)
 	var andPredicates bson.A
 
 	var aggOptions bson.D
