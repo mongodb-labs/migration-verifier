@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"runtime/pprof"
 	"time"
 
 	"github.com/10gen/migration-verifier/history"
@@ -800,7 +801,15 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 					logEvent.Msg("Retried change stream open succeeded.")
 				}
 
-				return csr.iterateChangeStream(ctx, ri, csCursor)
+				pprof.Do(
+					ctx,
+					pprof.Labels("component", "iterate-change-stream"),
+					func(ctx context.Context) {
+						err = csr.iterateChangeStream(ctx, ri, csCursor)
+					},
+				)
+
+				return err
 			},
 			"running %s", csr,
 		).Run(ctx, csr.logger)

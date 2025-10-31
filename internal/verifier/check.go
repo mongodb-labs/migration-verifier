@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"runtime/pprof"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
@@ -273,7 +274,17 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				return errors.Wrapf(err, "failed to start %s", csReader)
 			}
 			ceHandlerGroup.Go(func() error {
-				return verifier.RunChangeEventHandler(groupCtx, csReader)
+				var err error
+
+				pprof.Do(
+					groupCtx,
+					pprof.Labels("component", "change-event-handler"),
+					func(ctx context.Context) {
+						err = verifier.RunChangeEventHandler(groupCtx, csReader)
+					},
+				)
+
+				return err
 			})
 		}
 	}
