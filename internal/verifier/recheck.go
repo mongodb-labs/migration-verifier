@@ -2,19 +2,22 @@ package verifier
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"strconv"
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
+	"golang.org/x/exp/constraints"
 )
 
 const (
@@ -39,15 +42,37 @@ type RecheckPrimaryKey struct {
 
 var _ bson.Marshaler = &RecheckPrimaryKey{}
 
-func (rk *RecheckPrimaryKey) MarshalBSON() ([]byte, error) {
-	return bsoncore.NewDocumentBuilder().
-		AppendString("db", rk.SrcDatabaseName).
-		AppendString("coll", rk.SrcCollectionName).
-		AppendValue("docID", bsoncore.Value{
-			Type: bsoncore.Type(rk.DocumentID.Type),
-			Data: rk.DocumentID.Value,
-		}).
-		Build(), nil
+// MarshalBSON implements bson.Marshaler .. which is only done to prevent
+// the inefficiency of bson.Marshal().
+func (rk RecheckPrimaryKey) MarshalBSON() ([]byte, error) {
+	panic("Use MarshalToBSON instead.")
+}
+
+func (rk RecheckPrimaryKey) MarshalToBSON() ([]byte, error) {
+	// This is a very “hot” path, so we want to minimize allocations.
+	variableSize := len(rk.SrcDatabaseName) + len(rk.SrcCollectionName) + len(rk.DocumentID.Value)
+
+	// This document’s nonvariable parts comprise 32 bytes.
+	expectedLen := 32 + variableSize
+
+	doc := make(bson.Raw, 4, expectedLen)
+
+	doc = bsoncore.AppendStringElement(doc, "db", rk.SrcDatabaseName)
+	doc = bsoncore.AppendStringElement(doc, "coll", rk.SrcCollectionName)
+	doc = bsoncore.AppendValueElement(doc, "docID", bsoncore.Value{
+		Type: bsoncore.Type(rk.DocumentID.Type),
+		Data: rk.DocumentID.Value,
+	})
+
+	doc = append(doc, 0)
+
+	if len(doc) != expectedLen {
+		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", rk, len(doc), expectedLen))
+	}
+
+	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
+
+	return doc, nil
 }
 
 // RecheckDoc stores the necessary information to know which documents must be rechecked.
@@ -57,22 +82,45 @@ type RecheckDoc struct {
 	// NB: Because we don’t update the recheck queue’s documents, this field
 	// and any others that may be added will remain unchanged even if a recheck
 	// is enqueued multiple times for the same document in the same generation.
-	DataSize int `bson:"dataSize"`
+	DataSize int32 `bson:"dataSize"`
 }
 
 var _ bson.Marshaler = &RecheckDoc{}
 
-func (rd *RecheckDoc) MarshalBSON() ([]byte, error) {
-	return bsoncore.NewDocumentBuilder().
-		AppendDocument("_id", lo.Must(bson.Marshal(rd.PrimaryKey))).
-		AppendInt64("dataSize", int64(rd.DataSize)).
-		Build(), nil
+// MarshalBSON implements bson.Marshaler .. which is only done to prevent
+// the inefficiency of bson.Marshal().
+func (rd RecheckDoc) MarshalBSON() ([]byte, error) {
+	panic("Use MarshalToBSON instead.")
+}
+
+func (rd RecheckDoc) MarshalToBSON() ([]byte, error) {
+	keyRaw, err := rd.PrimaryKey.MarshalToBSON()
+	if err != nil {
+		return nil, errors.Wrapf(err, "marshaling recheck primary key")
+	}
+
+	// This document’s nonvariable parts comprise 24 bytes.
+	expectedLen := 24 + len(keyRaw)
+
+	doc := make(bson.Raw, 4, expectedLen)
+	doc = bsoncore.AppendDocumentElement(doc, "_id", keyRaw)
+	doc = bsoncore.AppendInt32Element(doc, "dataSize", int32(rd.DataSize))
+
+	doc = append(doc, 0)
+
+	if len(doc) != expectedLen {
+		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", rd, len(doc), expectedLen))
+	}
+
+	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
+
+	return doc, nil
 }
 
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	ctx context.Context,
-	namespace string, documentIDs []bson.RawValue, dataSizes []int) error {
+	namespace string, documentIDs []bson.RawValue, dataSizes []int32) error {
 	dbName, collName := SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
@@ -100,7 +148,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	dbNames []string,
 	collNames []string,
 	documentIDs []bson.RawValue,
-	dataSizes []int,
+	dataSizes []int32,
 ) error {
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
@@ -124,11 +172,18 @@ func (verifier *Verifier) insertRecheckDocs(
 			retryer := retry.New()
 			err := retryer.WithCallback(
 				func(retryCtx context.Context, _ *retry.FuncInfo) error {
-					_, err := genCollection.InsertMany(
-						retryCtx,
-						lo.ToAnySlice(rechecks),
-						options.InsertMany().SetOrdered(false),
+					requestBSON := buildRequestBSON(
+						genCollection.Name(),
+						rechecks,
 					)
+
+					// The driver’s InsertMany method inspects each document
+					// to ensure that it has an _id. We can avoid that extra
+					// overhead by calling RunCommand instead.
+					err := genCollection.Database().RunCommand(
+						retryCtx,
+						requestBSON,
+					).Err()
 
 					// We expect duplicate-key errors from the above because:
 					//
@@ -172,7 +227,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			DataSize: dataSizes[i],
 		}
 
-		recheckRaw, err := bson.Marshal(recheckDoc)
+		recheckRaw, err := recheckDoc.MarshalToBSON()
 		if err != nil {
 			return errors.Wrapf(err, "marshaling recheck for %#q", dbName+"."+collNames[i])
 		}
@@ -211,12 +266,64 @@ func (verifier *Verifier) insertRecheckDocs(
 	return nil
 }
 
-func deduplicateRechecks(
+// NB: batchBytes is the total size of all recheck documents. It does NOT include
+// the size of the BSON framing: element keys, doc types, etc.
+func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
+	rechecksBSONSize := mbson.GetBSONArraySize(rechecks)
+
+	rechecksBSON := make(bson.RawArray, 4, rechecksBSONSize)
+	binary.LittleEndian.PutUint32(rechecksBSON, uint32(rechecksBSONSize))
+	for i, recheck := range rechecks {
+		rechecksBSON = bsoncore.AppendDocumentElement(
+			rechecksBSON,
+			strconv.Itoa(i),
+			recheck,
+		)
+	}
+
+	// final NUL
+	rechecksBSON = append(rechecksBSON, 0)
+
+	if len(rechecksBSON) != rechecksBSONSize {
+		panic(fmt.Sprintf("rechecks BSON doc size (%d) != expected (%d)", len(rechecksBSON), rechecksBSONSize))
+	}
+
+	// This BSON doc takes 39 bytes besides the collection name and requests.
+	expectedBSONSize := 39 + len(collName) + rechecksBSONSize
+	requestBSON := make(bson.Raw, 4, expectedBSONSize)
+
+	requestBSON = bsoncore.AppendStringElement(
+		requestBSON,
+		"insert",
+		collName,
+	)
+	requestBSON = bsoncore.AppendBooleanElement(
+		requestBSON,
+		"ordered",
+		false,
+	)
+	requestBSON = bsoncore.AppendArrayElement(
+		requestBSON,
+		"documents",
+		rechecksBSON,
+	)
+	requestBSON = append(requestBSON, 0)
+
+	if len(requestBSON) != expectedBSONSize {
+		panic(fmt.Sprintf("request BSON size (%d) mismatches expected (%d)", len(requestBSON), expectedBSONSize))
+	}
+
+	binary.LittleEndian.PutUint32(requestBSON, uint32(len(requestBSON)))
+
+	return requestBSON
+}
+
+func deduplicateRechecks[T constraints.Integer](
 	dbNames, collNames []string,
 	documentIDs []bson.RawValue,
-	dataSizes []int,
-) ([]string, []string, []bson.RawValue, []int) {
-	dedupeMap := map[string]map[string]map[string]int{}
+	dataSizes []T,
+) ([]string, []string, []bson.RawValue, []T) {
+	dedupeMap := map[string]map[string]map[string]T{}
 
 	uniqueElems := 0
 
@@ -231,7 +338,7 @@ func deduplicateRechecks(
 		docIDStr := string(docIDBuf)
 
 		if _, ok := dedupeMap[dbName]; !ok {
-			dedupeMap[dbName] = map[string]map[string]int{
+			dedupeMap[dbName] = map[string]map[string]T{
 				collName: {
 					docIDStr: dataSize,
 				},
@@ -243,7 +350,7 @@ func deduplicateRechecks(
 		}
 
 		if _, ok := dedupeMap[dbName][collName]; !ok {
-			dedupeMap[dbName][collName] = map[string]int{
+			dedupeMap[dbName][collName] = map[string]T{
 				docIDStr: dataSize,
 			}
 
@@ -261,7 +368,7 @@ func deduplicateRechecks(
 	dbNames = make([]string, 0, uniqueElems)
 	collNames = make([]string, 0, uniqueElems)
 	rawDocIDs := make([]bson.RawValue, 0, uniqueElems)
-	dataSizes = make([]int, 0, uniqueElems)
+	dataSizes = make([]T, 0, uniqueElems)
 
 	for dbName, collMap := range dedupeMap {
 		for collName, docMap := range collMap {

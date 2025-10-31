@@ -27,14 +27,43 @@ type VerificationResult struct {
 	Details   string
 	Cluster   string
 	NameSpace string
+
 	// The data size of the largest of the mismatched objects.
 	// Note this is not persisted; it is used only to ensure recheck tasks
 	// don't get too large.
-	dataSize int
+	dataSize int32
 
 	SrcTimestamp option.Option[bson.Timestamp]
 	DstTimestamp option.Option[bson.Timestamp]
 }
+
+/*
+var _ bson.Marshaler = VerificationResult{}
+
+func (vr VerificationResult) MarshalBSON() ([]byte, error) {
+	panic("Use MarshalToBSON instead.")
+}
+
+func (vr VerificationResult) MarshalToBSON() ([]byte, error) {
+	varSize := len(vr.ID.Value) +
+		len(vr.Field) +
+		len(vr.Details) +
+		len(vr.Cluster) +
+		len(vr.NameSpace)
+
+	if vr.SrcTimestamp.IsSome() {
+		varSize += 8
+	}
+
+	if vr.DstTimestamp.IsSome() {
+		varSize += 8
+	}
+
+	expectedSize := 4 + // BSON header
+		7 * 2 + // each value’s type & field name’s NUL
+		4 * 4 + 4 + // 4 strings, each with a leading int32 & trailing NUL
+}
+*/
 
 // DocumentIsMissing returns a boolean that indicates whether the
 // VerificationResult indicates a document that is missing on either

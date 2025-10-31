@@ -55,6 +55,10 @@ type Namespace struct {
 
 var _ bson.Unmarshaler = &Namespace{}
 
+func (ns *Namespace) UnmarshalBSON(in []byte) error {
+	panic("Use UnmarshalFromBSON instead.")
+}
+
 func (ns *Namespace) String() string {
 	return fmt.Sprintf("{ db: %s, coll: %s }", ns.DB, ns.Coll)
 }
@@ -66,7 +70,7 @@ func (ns *Namespace) FullName() string {
 // UnmarshalBSON implements bson.Unmarshaler. We define this manually to
 // avoid reflection, which can substantially impede performance in “hot”
 // code paths like this.
-func (ns *Namespace) UnmarshalBSON(in []byte) error {
+func (ns *Namespace) UnmarshalFromBSON(in []byte) error {
 	for el, err := range mbson.RawElements(in) {
 		if err != nil {
 			return errors.Wrap(err, "iterating BSON fields")

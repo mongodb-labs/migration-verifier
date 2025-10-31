@@ -565,7 +565,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 				Int("mismatchesCount", len(problems)).
 				Msg("Discrepancies found. Will recheck in the next generation.")
 
-			dataSizes := make([]int, 0, len(problems))
+			dataSizes := make([]int32, 0, len(problems))
 
 			// This stores all IDs for the next generation to check.
 			// Its length should equal len(mismatches) + len(missingIds).
@@ -1350,7 +1350,10 @@ func (verifier *Verifier) verificationTaskCollection() *mongo.Collection {
 }
 
 func (verifier *Verifier) srcClientDatabase(dbName string) *mongo.Database {
-	db := verifier.srcClient.Database(dbName)
+	db := verifier.srcClient.Database(
+		dbName,
+		options.Database().SetReadPreference(verifier.readPreference),
+	)
 
 	// TODO REP-6772: Restore read & write concern guard rails.
 
@@ -1358,7 +1361,10 @@ func (verifier *Verifier) srcClientDatabase(dbName string) *mongo.Database {
 }
 
 func (verifier *Verifier) dstClientDatabase(dbName string) *mongo.Database {
-	db := verifier.dstClient.Database(dbName)
+	db := verifier.dstClient.Database(
+		dbName,
+		options.Database().SetReadPreference(verifier.readPreference),
+	)
 
 	// TODO REP-6772: Restore read & write concern guard rails.
 
