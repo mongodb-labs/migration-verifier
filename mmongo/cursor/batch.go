@@ -15,7 +15,6 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -149,10 +148,28 @@ func (c *BatchCursor) GetNext(ctx context.Context, extraPieces ...bson.E) error 
 		return fmt.Errorf("iterating %#q’s cursor: %w", c.ns, err)
 	}
 
-	c.curBatch = lo.Must(raw.LookupErr("cursor", "nextBatch")).Array()
+	nextBatch, err := raw.LookupErr("cursor", "nextBatch")
+	if err != nil {
+		return errors.Wrap(err, "extracting nextBatch")
+	}
+
+	var ok bool
+	c.curBatch, ok = nextBatch.ArrayOK()
+	if !ok {
+		return fmt.Errorf("nextBatch should be BSON %s but found %s", bson.TypeArray, nextBatch.Type)
+	}
+
 	c.rawResp = raw
-	//c.cursorExtra = baseResp.Cursor.Extra
-	c.id = lo.Must(raw.LookupErr("cursor", "id")).AsInt64() //baseResp.Cursor.ID
+
+	cursorID, err := raw.LookupErr("cursor", "id")
+	if err != nil {
+		return errors.Wrap(err, "extracting cursor ID")
+	}
+
+	c.id, ok = cursorID.AsInt64OK()
+	if !ok {
+		return fmt.Errorf("cursor.id should be numeric but found BSON %s", cursorID.Type)
+	}
 
 	return nil
 }
