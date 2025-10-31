@@ -52,7 +52,9 @@ func (rk RecheckPrimaryKey) MarshalToBSON() ([]byte, error) {
 	variableSize := len(rk.SrcDatabaseName) + len(rk.SrcCollectionName) + len(rk.DocumentID.Value)
 
 	// This document’s nonvariable parts comprise 32 bytes.
-	doc := make(bson.Raw, 4, 32+variableSize)
+	expectedLen := 32 + variableSize
+
+	doc := make(bson.Raw, 4, expectedLen)
 
 	doc = bsoncore.AppendStringElement(doc, "db", rk.SrcDatabaseName)
 	doc = bsoncore.AppendStringElement(doc, "coll", rk.SrcCollectionName)
@@ -62,6 +64,10 @@ func (rk RecheckPrimaryKey) MarshalToBSON() ([]byte, error) {
 	})
 
 	doc = append(doc, 0)
+
+	if len(doc) != expectedLen {
+		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", rk, len(doc), expectedLen))
+	}
 
 	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
 
@@ -93,11 +99,17 @@ func (rd RecheckDoc) MarshalToBSON() ([]byte, error) {
 	}
 
 	// This document’s nonvariable parts comprise 24 bytes.
-	doc := make(bson.Raw, 4, 24+len(keyRaw))
+	expectedLen := 24 + len(keyRaw)
+
+	doc := make(bson.Raw, 4, expectedLen)
 	doc = bsoncore.AppendDocumentElement(doc, "_id", keyRaw)
 	doc = bsoncore.AppendInt32Element(doc, "dataSize", int32(rd.DataSize))
 
 	doc = append(doc, 0)
+
+	if len(doc) != expectedLen {
+		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", rd, len(doc), expectedLen))
+	}
 
 	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
 

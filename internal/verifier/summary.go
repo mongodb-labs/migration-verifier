@@ -557,7 +557,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 
 			fmt.Fprintf(
 				builder,
-				"%s observed change rate: %s/sec%s",
+				"%s observed change rate: %s/sec%s\n",
 				cluster.title,
 				reportutils.FmtReal(eventsPerSec),
 				lagNote,
@@ -566,9 +566,9 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 			const lagWarnThreshold = 5 * time.Minute
 
 			if hasLag && lag > lagWarnThreshold {
-				fmt.Fprintf(
+				fmt.Fprint(
 					builder,
-					"⚠️ Lag is excessive. Verification may fail. See documentation.",
+					"⚠️ Lag is excessive. Verification may fail. See documentation.\n",
 				)
 			}
 		}
@@ -607,6 +607,8 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 				)
 			}
 		}
+
+		fmt.Fprint(builder, "\n")
 	}
 
 	if eventsTable != nil {
