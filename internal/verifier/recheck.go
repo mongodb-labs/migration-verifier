@@ -17,6 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
+	"golang.org/x/exp/constraints"
 )
 
 const (
@@ -81,7 +82,7 @@ type RecheckDoc struct {
 	// NB: Because we don’t update the recheck queue’s documents, this field
 	// and any others that may be added will remain unchanged even if a recheck
 	// is enqueued multiple times for the same document in the same generation.
-	DataSize int `bson:"dataSize"`
+	DataSize int32 `bson:"dataSize"`
 }
 
 var _ bson.Marshaler = &RecheckDoc{}
@@ -119,7 +120,7 @@ func (rd RecheckDoc) MarshalToBSON() ([]byte, error) {
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	ctx context.Context,
-	namespace string, documentIDs []bson.RawValue, dataSizes []int) error {
+	namespace string, documentIDs []bson.RawValue, dataSizes []int32) error {
 	dbName, collName := SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
@@ -147,7 +148,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	dbNames []string,
 	collNames []string,
 	documentIDs []bson.RawValue,
-	dataSizes []int,
+	dataSizes []int32,
 ) error {
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
@@ -317,12 +318,12 @@ func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
 	return requestBSON
 }
 
-func deduplicateRechecks(
+func deduplicateRechecks[T constraints.Integer](
 	dbNames, collNames []string,
 	documentIDs []bson.RawValue,
-	dataSizes []int,
-) ([]string, []string, []bson.RawValue, []int) {
-	dedupeMap := map[string]map[string]map[string]int{}
+	dataSizes []T,
+) ([]string, []string, []bson.RawValue, []T) {
+	dedupeMap := map[string]map[string]map[string]T{}
 
 	uniqueElems := 0
 
@@ -337,7 +338,7 @@ func deduplicateRechecks(
 		docIDStr := string(docIDBuf)
 
 		if _, ok := dedupeMap[dbName]; !ok {
-			dedupeMap[dbName] = map[string]map[string]int{
+			dedupeMap[dbName] = map[string]map[string]T{
 				collName: {
 					docIDStr: dataSize,
 				},
@@ -349,7 +350,7 @@ func deduplicateRechecks(
 		}
 
 		if _, ok := dedupeMap[dbName][collName]; !ok {
-			dedupeMap[dbName][collName] = map[string]int{
+			dedupeMap[dbName][collName] = map[string]T{
 				docIDStr: dataSize,
 			}
 
@@ -367,7 +368,7 @@ func deduplicateRechecks(
 	dbNames = make([]string, 0, uniqueElems)
 	collNames = make([]string, 0, uniqueElems)
 	rawDocIDs := make([]bson.RawValue, 0, uniqueElems)
-	dataSizes = make([]int, 0, uniqueElems)
+	dataSizes = make([]T, 0, uniqueElems)
 
 	for dbName, collMap := range dedupeMap {
 		for collName, docMap := range collMap {

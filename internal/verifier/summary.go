@@ -552,14 +552,15 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 			lag, hasLag := cluster.csReader.GetLag().Get()
 
 			if hasLag {
-				lagNote = fmt.Sprintf(" (lag: %s)", reportutils.DurationToHMS(lag))
+				lagNote = fmt.Sprintf(";lag: %s", reportutils.DurationToHMS(lag))
 			}
 
 			fmt.Fprintf(
 				builder,
-				"%s observed change rate: %s/sec%s\n",
+				"%s: %s writes per second (saturation: %s%%%s)\n",
 				cluster.title,
 				reportutils.FmtReal(eventsPerSec),
+				reportutils.FmtReal(100*cluster.csReader.GetSaturation()),
 				lagNote,
 			)
 

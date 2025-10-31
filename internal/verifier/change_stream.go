@@ -108,7 +108,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 	for _, csr := range mslices.Of(srcReader, dstReader) {
 		csr.logger = verifier.logger
 		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
-		csr.changeEventBatchChan = make(chan changeEventBatch)
+		csr.changeEventBatchChan = make(chan changeEventBatch, 10_000)
 		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
 		csr.readerError = util.NewEventual[error]()
 		csr.handlerError = util.NewEventual[error]()
@@ -174,7 +174,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 	dbNames := make([]string, len(batch.events))
 	collNames := make([]string, len(batch.events))
 	docIDs := make([]bson.RawValue, len(batch.events))
-	dataSizes := make([]int, len(batch.events))
+	dataSizes := make([]int32, len(batch.events))
 
 	latestTimestamp := bson.Timestamp{}
 
@@ -227,14 +227,14 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 		docIDs[i] = changeEvent.DocID
 
 		if changeEvent.FullDocLen.OrZero() > 0 {
-			dataSizes[i] = int(changeEvent.FullDocLen.OrZero())
+			dataSizes[i] = int32(changeEvent.FullDocLen.OrZero())
 		} else if changeEvent.FullDocument == nil {
 			// This happens for deletes and for some updates.
 			// The document is probably, but not necessarily, deleted.
 			dataSizes[i] = fauxDocSizeForDeleteEvents
 		} else {
 			// This happens for inserts, replaces, and most updates.
-			dataSizes[i] = len(changeEvent.FullDocument)
+			dataSizes[i] = int32(len(changeEvent.FullDocument))
 		}
 
 		if err := eventRecorder.AddEvent(&changeEvent); err != nil {
@@ -772,6 +772,10 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 
 func (csr *ChangeStreamReader) GetLag() option.Option[time.Duration] {
 	return csr.lag.Load()
+}
+
+func (csr *ChangeStreamReader) GetSaturation() float64 {
+	return util.DivideToF64(len(csr.changeEventBatchChan), cap(csr.changeEventBatchChan))
 }
 
 func (csr *ChangeStreamReader) GetEventsPerSecond() option.Option[float64] {
