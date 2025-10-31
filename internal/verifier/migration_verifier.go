@@ -1350,7 +1350,10 @@ func (verifier *Verifier) verificationTaskCollection() *mongo.Collection {
 }
 
 func (verifier *Verifier) srcClientDatabase(dbName string) *mongo.Database {
-	db := verifier.srcClient.Database(dbName)
+	db := verifier.srcClient.Database(
+		dbName,
+		options.Database().SetReadPreference(verifier.readPreference),
+	)
 
 	// TODO REP-6772: Restore read & write concern guard rails.
 
