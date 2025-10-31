@@ -2,15 +2,17 @@ package verifier
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"strconv"
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -39,15 +41,31 @@ type RecheckPrimaryKey struct {
 
 var _ bson.Marshaler = &RecheckPrimaryKey{}
 
-func (rk *RecheckPrimaryKey) MarshalBSON() ([]byte, error) {
-	return bsoncore.NewDocumentBuilder().
-		AppendString("db", rk.SrcDatabaseName).
-		AppendString("coll", rk.SrcCollectionName).
-		AppendValue("docID", bsoncore.Value{
-			Type: bsoncore.Type(rk.DocumentID.Type),
-			Data: rk.DocumentID.Value,
-		}).
-		Build(), nil
+// MarshalBSON implements bson.Marshaler .. which is only done to prevent
+// the inefficiency of bson.Marshal().
+func (rk RecheckPrimaryKey) MarshalBSON() ([]byte, error) {
+	panic("Use MarshalToBSON instead.")
+}
+
+func (rk RecheckPrimaryKey) MarshalToBSON() ([]byte, error) {
+	// This is a very “hot” path, so we want to minimize allocations.
+	variableSize := len(rk.SrcDatabaseName) + len(rk.SrcCollectionName) + len(rk.DocumentID.Value)
+
+	// This document’s nonvariable parts comprise 32 bytes.
+	doc := make(bson.Raw, 4, 32+variableSize)
+
+	doc = bsoncore.AppendStringElement(doc, "db", rk.SrcDatabaseName)
+	doc = bsoncore.AppendStringElement(doc, "coll", rk.SrcCollectionName)
+	doc = bsoncore.AppendValueElement(doc, "docID", bsoncore.Value{
+		Type: bsoncore.Type(rk.DocumentID.Type),
+		Data: rk.DocumentID.Value,
+	})
+
+	doc = append(doc, 0)
+
+	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
+
+	return doc, nil
 }
 
 // RecheckDoc stores the necessary information to know which documents must be rechecked.
@@ -62,11 +80,28 @@ type RecheckDoc struct {
 
 var _ bson.Marshaler = &RecheckDoc{}
 
-func (rd *RecheckDoc) MarshalBSON() ([]byte, error) {
-	return bsoncore.NewDocumentBuilder().
-		AppendDocument("_id", lo.Must(bson.Marshal(rd.PrimaryKey))).
-		AppendInt64("dataSize", int64(rd.DataSize)).
-		Build(), nil
+// MarshalBSON implements bson.Marshaler .. which is only done to prevent
+// the inefficiency of bson.Marshal().
+func (rd RecheckDoc) MarshalBSON() ([]byte, error) {
+	panic("Use MarshalToBSON instead.")
+}
+
+func (rd RecheckDoc) MarshalToBSON() ([]byte, error) {
+	keyRaw, err := rd.PrimaryKey.MarshalToBSON()
+	if err != nil {
+		return nil, errors.Wrapf(err, "marshaling recheck primary key")
+	}
+
+	// This document’s nonvariable parts comprise 24 bytes.
+	doc := make(bson.Raw, 4, 24+len(keyRaw))
+	doc = bsoncore.AppendDocumentElement(doc, "_id", keyRaw)
+	doc = bsoncore.AppendInt32Element(doc, "dataSize", int32(rd.DataSize))
+
+	doc = append(doc, 0)
+
+	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
+
+	return doc, nil
 }
 
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
@@ -124,11 +159,18 @@ func (verifier *Verifier) insertRecheckDocs(
 			retryer := retry.New()
 			err := retryer.WithCallback(
 				func(retryCtx context.Context, _ *retry.FuncInfo) error {
-					_, err := genCollection.InsertMany(
-						retryCtx,
-						lo.ToAnySlice(rechecks),
-						options.InsertMany().SetOrdered(false),
+					requestBSON := buildRequestBSON(
+						genCollection.Name(),
+						rechecks,
 					)
+
+					// The driver’s InsertMany method inspects each document
+					// to ensure that it has an _id. We can avoid that extra
+					// overhead by calling RunCommand instead.
+					err := genCollection.Database().RunCommand(
+						retryCtx,
+						requestBSON,
+					).Err()
 
 					// We expect duplicate-key errors from the above because:
 					//
@@ -172,7 +214,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			DataSize: dataSizes[i],
 		}
 
-		recheckRaw, err := bson.Marshal(recheckDoc)
+		recheckRaw, err := recheckDoc.MarshalToBSON()
 		if err != nil {
 			return errors.Wrapf(err, "marshaling recheck for %#q", dbName+"."+collNames[i])
 		}
@@ -209,6 +251,49 @@ func (verifier *Verifier) insertRecheckDocs(
 		Msg("Persisted rechecks.")
 
 	return nil
+}
+
+// NB: batchBytes is the total size of all recheck documents. It does NOT include
+// the size of the BSON framing: element keys, doc types, etc.
+func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
+	rechecksBSONSize := mbson.GetBSONArraySize(rechecks)
+
+	rechecksBSON := make(bson.RawArray, 4, rechecksBSONSize)
+	binary.LittleEndian.PutUint32(rechecksBSON, uint32(rechecksBSONSize))
+	for i, recheck := range rechecks {
+		rechecksBSON = bsoncore.AppendDocumentElement(
+			rechecksBSON,
+			strconv.Itoa(i),
+			recheck,
+		)
+	}
+
+	// final NUL
+	rechecksBSON = append(rechecksBSON, 0)
+
+	if len(rechecksBSON) != rechecksBSONSize {
+		panic(fmt.Sprintf("rechecks BSON doc size (%d) != expected (%d)", len(rechecksBSON), rechecksBSONSize))
+	}
+
+	requestBSON := make(bson.Raw, 4, 50+rechecksBSONSize)
+	requestBSON = bsoncore.AppendStringElement(
+		requestBSON,
+		"insert",
+		collName,
+	)
+	requestBSON = bsoncore.AppendBooleanElement(
+		requestBSON,
+		"ordered",
+		false,
+	)
+	requestBSON = bsoncore.AppendArrayElement(
+		requestBSON,
+		"documents",
+		rechecksBSON,
+	)
+	requestBSON = append(requestBSON, 0)
+
+	return requestBSON
 }
 
 func deduplicateRechecks(
