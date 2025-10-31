@@ -149,7 +149,6 @@ func (c *BatchCursor) GetNext(ctx context.Context, extraPieces ...bson.E) error 
 		return fmt.Errorf("iterating %#q’s cursor: %w", c.ns, err)
 	}
 
-	//c.curBatch = extractBatch(raw, "nextBatch") baseResp.Cursor.NextBatch
 	c.curBatch = lo.Must(raw.LookupErr("cursor", "nextBatch")).Array()
 	c.rawResp = raw
 	//c.cursorExtra = baseResp.Cursor.Extra
@@ -164,8 +163,8 @@ type cursorResponse struct {
 
 	// These are both BSON arrays. We use bson.Raw here to delay parsing
 	// and avoid allocating a large slice.
-	FirstBatch bson.RawArray
-	NextBatch  bson.RawArray
+	FirstBatch bson.Raw
+	NextBatch  bson.Raw
 }
 
 type baseResponse struct {
@@ -202,7 +201,7 @@ func New(
 		id:       baseResp.Cursor.ID,
 		ns:       baseResp.Cursor.Ns,
 		rawResp:  raw,
-		curBatch: baseResp.Cursor.FirstBatch,
+		curBatch: bson.RawArray(baseResp.Cursor.FirstBatch),
 	}, nil
 }
 
