@@ -276,6 +276,7 @@ func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
 	}
 
 	requestBSON := make(bson.Raw, 4, 50+rechecksBSONSize)
+
 	requestBSON = bsoncore.AppendStringElement(
 		requestBSON,
 		"insert",
@@ -292,6 +293,8 @@ func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
 		rechecksBSON,
 	)
 	requestBSON = append(requestBSON, 0)
+
+	binary.LittleEndian.PutUint32(requestBSON, uint32(len(requestBSON)))
 
 	return requestBSON
 }
