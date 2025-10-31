@@ -688,7 +688,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 	myCursor.SetSession(sess)
 	myCursor.SetMaxAwaitTime(maxChangeStreamAwaitTime)
 
-	var startTS bson.Timestamp
+	var startTs bson.Timestamp
 	for firstEvent, err := range myCursor.GetCurrentBatchIterator() {
 		if err != nil {
 			return nil, bson.Timestamp{}, errors.Wrap(err, "reading first event")
@@ -707,7 +707,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 			return nil, bson.Timestamp{}, errors.Wrap(err, "extracting first event’s cluster time")
 		}
 
-		if err := mbson.UnmarshalRawValue(ct, &startTS); err != nil {
+		if err := mbson.UnmarshalRawValue(ct, &startTs); err != nil {
 			return nil, bson.Timestamp{}, errors.Wrap(err, "parsing first event’s cluster time")
 		}
 
@@ -723,7 +723,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 			)
 		}
 
-		startTS, err = extractTimestampFromResumeToken(resumeToken)
+		startTs, err = extractTimestampFromResumeToken(resumeToken)
 		if err != nil {
 			return nil, bson.Timestamp{}, errors.Wrap(
 				err,
@@ -732,7 +732,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 		}
 	}
 
-	return myCursor, startTS, nil
+	return myCursor, startTs, nil
 }
 
 // StartChangeStream starts the change stream.
