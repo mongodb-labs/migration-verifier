@@ -275,7 +275,9 @@ func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
 		panic(fmt.Sprintf("rechecks BSON doc size (%d) != expected (%d)", len(rechecksBSON), rechecksBSONSize))
 	}
 
-	requestBSON := make(bson.Raw, 4, 50+rechecksBSONSize)
+	// This BSON doc takes 39 bytes besides the collection name and requests.
+	expectedBSONSize := 39 + len(collName) + rechecksBSONSize
+	requestBSON := make(bson.Raw, 4, expectedBSONSize)
 
 	requestBSON = bsoncore.AppendStringElement(
 		requestBSON,
@@ -293,6 +295,10 @@ func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
 		rechecksBSON,
 	)
 	requestBSON = append(requestBSON, 0)
+
+	if len(requestBSON) != expectedBSONSize {
+		panic(fmt.Sprintf("request BSON size (%d) mismatches expected (%d)", len(requestBSON), expectedBSONSize))
+	}
 
 	binary.LittleEndian.PutUint32(requestBSON, uint32(len(requestBSON)))
 
