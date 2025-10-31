@@ -730,6 +730,7 @@ func (verifier *Verifier) getDocumentsCursor(
 
 	if err == nil {
 		c.SetSession(mongo.SessionFromContext(ctx))
+		c.SetReadPreference(verifier.readPreference)
 	}
 
 	return c, err

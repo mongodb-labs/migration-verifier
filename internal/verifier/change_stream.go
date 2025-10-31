@@ -23,6 +23,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"golang.org/x/exp/slices"
 )
 
@@ -67,9 +68,10 @@ type ChangeStreamReader struct {
 	logger              *logger.Logger
 	namespaces          []string
 
-	metaDB        *mongo.Database
-	watcherClient *mongo.Client
-	clusterInfo   util.ClusterInfo
+	metaDB         *mongo.Database
+	watcherClient  *mongo.Client
+	readPreference *readpref.ReadPref
+	clusterInfo    util.ClusterInfo
 
 	changeStreamRunning  bool
 	changeEventBatchChan chan changeEventBatch
@@ -108,6 +110,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 	for _, csr := range mslices.Of(srcReader, dstReader) {
 		csr.logger = verifier.logger
 		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
+		csr.readPreference = verifier.readPreference
 		csr.changeEventBatchChan = make(chan changeEventBatch)
 		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
 		csr.readerError = util.NewEventual[error]()
@@ -671,7 +674,11 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 	sctx := mongo.NewSessionContext(ctx, sess)
 	adminDB := sess.Client().Database("admin")
-	result := adminDB.RunCommand(sctx, aggregateCmd)
+	result := adminDB.RunCommand(
+		sctx,
+		aggregateCmd,
+		options.RunCmd().SetReadPreference(csr.readPreference),
+	)
 	myCursor, err := cursor.New(adminDB, result)
 
 	if err != nil {
@@ -687,6 +694,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 	myCursor.SetSession(sess)
 	myCursor.SetMaxAwaitTime(maxChangeStreamAwaitTime)
+	myCursor.SetReadPreference(csr.readPreference)
 
 	var startTs bson.Timestamp
 	for firstEvent, err := range myCursor.GetCurrentBatchIterator() {

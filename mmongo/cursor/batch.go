@@ -17,6 +17,8 @@ import (
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
@@ -29,13 +31,14 @@ var (
 // because there is no need to clone each document individually, as
 // mongo.Cursor requires.
 type BatchCursor struct {
-	sess         *mongo.Session
-	maxAwaitTime option.Option[time.Duration]
-	id           int64
-	ns           string
-	db           *mongo.Database
-	rawResp      bson.Raw
-	curBatch     bson.RawArray
+	sess           *mongo.Session
+	readPreference *readpref.ReadPref
+	maxAwaitTime   option.Option[time.Duration]
+	id             int64
+	ns             string
+	db             *mongo.Database
+	rawResp        bson.Raw
+	curBatch       bson.RawArray
 }
 
 // GetCurrentBatchLength returns the number of documents in the current batch.
@@ -156,7 +159,11 @@ func (c *BatchCursor) GetNext(ctx context.Context, extraPieces ...bson.E) error 
 	if c.sess != nil {
 		ctx = mongo.NewSessionContext(ctx, c.sess)
 	}
-	resp := c.db.RunCommand(ctx, cmd)
+	resp := c.db.RunCommand(
+		ctx,
+		cmd,
+		options.RunCmd().SetReadPreference(c.readPreference),
+	)
 
 	raw, err := resp.Raw()
 	if err != nil {
@@ -239,6 +246,10 @@ func New(
 
 func (c *BatchCursor) SetSession(sess *mongo.Session) {
 	c.sess = sess
+}
+
+func (c *BatchCursor) SetReadPreference(rp *readpref.ReadPref) {
+	c.readPreference = rp
 }
 
 func (c *BatchCursor) SetMaxAwaitTime(d time.Duration) {
