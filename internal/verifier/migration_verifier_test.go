@@ -1156,7 +1156,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 		for d, doc := range docs {
 			theChan <- seqWithTs{
-				seq: mseq.FromSliceWithErr(
+				seq: mseq.FromSliceWithNilErr(
 					mslices.Of(testutil.MustMarshal(doc)),
 				),
 				ts: bson.Timestamp{1, uint32(d)},
