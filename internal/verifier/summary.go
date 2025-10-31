@@ -552,7 +552,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 			lag, hasLag := cluster.csReader.GetLag().Get()
 
 			if hasLag {
-				lagNote = fmt.Sprintf(";lag: %s", reportutils.DurationToHMS(lag))
+				lagNote = fmt.Sprintf("; lag: %s", reportutils.DurationToHMS(lag))
 			}
 
 			fmt.Fprintf(
