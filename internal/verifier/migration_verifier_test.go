@@ -942,21 +942,21 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		ctx,
 		"foo.bar",
 		mslices.Of(mbson.ToRawValue(42)),
-		[]int{100},
+		[]int32{100},
 	)
 	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs(
 		ctx,
 		"foo.bar",
 		mslices.Of(mbson.ToRawValue(43), mbson.ToRawValue(44)),
-		[]int{100, 100},
+		[]int32{100, 100},
 	)
 	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs(
 		ctx,
 		"foo.bar2",
 		mslices.Of(mbson.ToRawValue(42)),
-		[]int{100},
+		[]int32{100},
 	)
 	suite.Require().NoError(err)
 	event := ParsedEvent{
