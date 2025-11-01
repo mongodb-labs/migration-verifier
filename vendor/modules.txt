@@ -152,7 +152,6 @@ github.com/modern-go/concurrent
 github.com/modern-go/reflect2
 # github.com/montanaflynn/stats v0.7.1
 ## explicit; go 1.13
-github.com/montanaflynn/stats
 # github.com/olekukonko/tablewriter v0.0.5
 ## explicit; go 1.12
 github.com/olekukonko/tablewriter
