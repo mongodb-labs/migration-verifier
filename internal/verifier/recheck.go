@@ -271,12 +271,14 @@ func (verifier *Verifier) insertRecheckDocs(
 		)
 	}
 
-	verifier.logger.Info().
-		Int("count", len(documentIDs)).
-		Int("insertThreads", insertThreads).
-		Stringer("avgPending", time.Duration(msWaiting.Load())*time.Millisecond/time.Duration(insertThreads)).
-		Stringer("totalTime", time.Since(start)).
-		Msg("Persisted rechecks.")
+	if time.Since(start) > time.Second {
+		verifier.logger.Warn().
+			Int("count", len(documentIDs)).
+			Int("insertThreads", insertThreads).
+			Stringer("avgPending", time.Duration(msWaiting.Load())*time.Millisecond/time.Duration(insertThreads)).
+			Stringer("totalTime", time.Since(start)).
+			Msg("Slow recheck persistence.")
+	}
 
 	verifier.logger.Trace().
 		Int("generation", generation).
