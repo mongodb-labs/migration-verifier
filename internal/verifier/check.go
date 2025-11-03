@@ -382,6 +382,12 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 			verifier.mux.Lock()
 			verifier.lastGeneration = true
 		}
+
+		// Increment the in-memory generation so that the change streams will
+		// mark rechecks for the next generation. For example, if we just
+		// finished generation 2, the change streams need to mark generation 3
+		// on enqueued rechecks. Meanwhile, generaiton 3’s recheck tasks will
+		// derive from rechecks enqueued during generation 2.
 		verifier.generation++
 		verifier.phase = Recheck
 		verifier.mux.Unlock()

@@ -114,6 +114,9 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	generation, _ := verifier.getGenerationWhileLocked()
 
+	// We enqueue for the generation after the current one.
+	generation++
+
 	eg, groupCtx := contextplus.ErrGroup(ctx)
 
 	genCollection := verifier.getRecheckQueueCollection(generation)
@@ -309,29 +312,10 @@ func (verifier *Verifier) DropOldRecheckQueue(ctx context.Context) error {
 //
 // Note that this function DOES NOT retry on failure, so callers should wrap
 // calls to this function in a retryer.
-//
-// The verifier **MUST** be locked when this function is called (or panic).
 func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
-	prevGeneration := verifier.generation - 1
+	generation, _ := verifier.getGeneration()
 
-	verifier.logger.Debug().
-		Int("priorGeneration", prevGeneration).
-		Msgf("Counting prior generation’s enqueued rechecks.")
-
-	recheckColl := verifier.getRecheckQueueCollection(prevGeneration)
-
-	rechecksCount, err := recheckColl.CountDocuments(ctx, bson.D{})
-	if err != nil {
-		return errors.Wrapf(err,
-			"failed to count generation %d’s rechecks",
-			prevGeneration,
-		)
-	}
-
-	verifier.logger.Debug().
-		Int("priorGeneration", prevGeneration).
-		Int("rechecksCount", int(rechecksCount)).
-		Msgf("Creating recheck tasks from prior generation’s enqueued rechecks.")
+	recheckColl := verifier.getRecheckQueueCollection(generation)
 
 	// We generate one recheck task per collection, unless
 	// 1) The size of the list of IDs would exceed 12MB (a very conservative way of avoiding
@@ -447,7 +431,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 	if err == nil && totalDocs > 0 {
 		verifier.logger.Info().
-			Int("generation", 1+prevGeneration).
+			Int("generation", generation).
 			Int64("totalDocs", int64(totalDocs)).
 			Str("totalData", reportutils.FmtBytes(totalRecheckData)).
 			Msg("Scheduled documents for recheck in the new generation.")
@@ -457,6 +441,10 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 }
 
 func (v *Verifier) getRecheckQueueCollection(generation int) *mongo.Collection {
+	if generation == 0 {
+		panic("Recheck for generation 0 is nonsense!")
+	}
+
 	return v.verificationDatabase().
 		Collection(fmt.Sprintf("%s_gen%d", recheckQueueCollectionNameBase, generation))
 }
