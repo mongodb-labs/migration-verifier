@@ -31,6 +31,9 @@ type ddlEventHandling string
 const (
 	fauxDocSizeForDeleteEvents = 1024
 
+	// The number of batches we’ll hold in memory at once.
+	batchChanBufferSize = 100
+
 	onDDLEventAllow ddlEventHandling = "allow"
 )
 
@@ -108,7 +111,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 	for _, csr := range mslices.Of(srcReader, dstReader) {
 		csr.logger = verifier.logger
 		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
-		csr.changeEventBatchChan = make(chan changeEventBatch)
+		csr.changeEventBatchChan = make(chan changeEventBatch, batchChanBufferSize)
 		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
 		csr.readerError = util.NewEventual[error]()
 		csr.handlerError = util.NewEventual[error]()
