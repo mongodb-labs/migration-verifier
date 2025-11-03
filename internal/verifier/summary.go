@@ -21,7 +21,11 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-const changeEventsTableMaxSize = 10
+const (
+	changeEventsTableMaxSize = 10
+
+	lagWarnThreshold = 2 * time.Minute
+)
 
 // NOTE: Each of the following should print one trailing and one final
 // newline.
@@ -565,8 +569,6 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 				lagNote,
 				reportutils.FmtReal(100*cluster.csReader.GetSaturation()),
 			)
-
-			const lagWarnThreshold = 5 * time.Minute
 
 			if hasLag && lag > lagWarnThreshold {
 				fmt.Fprintf(
