@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strconv"
+	"sync/atomic"
+	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
@@ -166,6 +168,10 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	genCollection := verifier.getRecheckQueueCollection(generation)
 
+	msWaiting := atomic.Int64{}
+
+	start := time.Now()
+
 	sendRechecks := func(rechecks []bson.Raw) {
 		eg.Go(func() error {
 
@@ -177,6 +183,8 @@ func (verifier *Verifier) insertRecheckDocs(
 						rechecks,
 					)
 
+					start := time.Now()
+
 					// The driver’s InsertMany method inspects each document
 					// to ensure that it has an _id. We can avoid that extra
 					// overhead by calling RunCommand instead.
@@ -184,6 +192,8 @@ func (verifier *Verifier) insertRecheckDocs(
 						retryCtx,
 						requestBSON,
 					).Err()
+
+					msWaiting.Add(time.Since(start).Milliseconds())
 
 					// We expect duplicate-key errors from the above because:
 					//
@@ -257,6 +267,12 @@ func (verifier *Verifier) insertRecheckDocs(
 			generation,
 		)
 	}
+
+	verifier.logger.Info().
+		Int("count", len(documentIDs)).
+		Stringer("ioPending", time.Duration(msWaiting.Load())*time.Millisecond).
+		Stringer("totalTime", time.Since(start)).
+		Msg("Persisted rechecks.")
 
 	verifier.logger.Trace().
 		Int("generation", generation).
