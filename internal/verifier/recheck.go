@@ -171,8 +171,11 @@ func (verifier *Verifier) insertRecheckDocs(
 	msWaiting := atomic.Int64{}
 
 	start := time.Now()
+	insertThreads := 0
 
 	sendRechecks := func(rechecks []bson.Raw) {
+		insertThreads++
+
 		eg.Go(func() error {
 
 			retryer := retry.New()
@@ -270,7 +273,8 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	verifier.logger.Info().
 		Int("count", len(documentIDs)).
-		Stringer("ioPending", time.Duration(msWaiting.Load())*time.Millisecond).
+		Int("insertThreads", insertThreads).
+		Stringer("avgPending", time.Duration(msWaiting.Load())*time.Millisecond/time.Duration(insertThreads)).
 		Stringer("totalTime", time.Since(start)).
 		Msg("Persisted rechecks.")
 
