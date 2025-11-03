@@ -576,6 +576,10 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 			}
 		}
 
+		if cluster.csReader == verifier.srcChangeStreamReader {
+			fmt.Fprint(builder, "\n")
+		}
+
 		// We only print event breakdowns for the source because we assume that
 		// events on the destination will largely mirror the source’s.
 		if totalEvents > 0 && cluster.csReader == verifier.srcChangeStreamReader {
