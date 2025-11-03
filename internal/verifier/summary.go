@@ -516,6 +516,8 @@ func (verifier *Verifier) printMismatchInvestigationNotes(strBuilder *strings.Bu
 func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 	var eventsTable *tablewriter.Table
 
+	fmt.Fprint(builder, "\n")
+
 	for _, cluster := range []struct {
 		title         string
 		eventRecorder *EventRecorder
@@ -544,7 +546,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 			)
 		}
 
-		fmt.Fprintf(builder, "\n%s change events this generation: %s\n", cluster.title, eventsDescr)
+		fmt.Fprintf(builder, "%s change events this generation: %s\n", cluster.title, eventsDescr)
 
 		if eventsPerSec, has := cluster.csReader.GetEventsPerSecond().Get(); has {
 			var lagNote string
