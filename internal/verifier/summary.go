@@ -21,7 +21,12 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-const changeEventsTableMaxSize = 10
+const (
+	changeEventsTableMaxSize = 10
+
+	lagWarnThreshold        = 2 * time.Minute
+	saturationWarnThreshold = 0.9
+)
 
 // NOTE: Each of the following should print one trailing and one final
 // newline.
@@ -516,6 +521,8 @@ func (verifier *Verifier) printMismatchInvestigationNotes(strBuilder *strings.Bu
 func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 	var eventsTable *tablewriter.Table
 
+	fmt.Fprint(builder, "\n")
+
 	for _, cluster := range []struct {
 		title         string
 		eventRecorder *EventRecorder
@@ -544,7 +551,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 			)
 		}
 
-		fmt.Fprintf(builder, "\n%s change events this generation: %s\n", cluster.title, eventsDescr)
+		fmt.Fprintf(builder, "%s change events this generation: %s\n", cluster.title, eventsDescr)
 
 		if eventsPerSec, has := cluster.csReader.GetEventsPerSecond().Get(); has {
 			var lagNote string
@@ -552,19 +559,19 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 			lag, hasLag := cluster.csReader.GetLag().Get()
 
 			if hasLag {
-				lagNote = fmt.Sprintf("; lag: %s", reportutils.DurationToHMS(lag))
+				lagNote = fmt.Sprintf("lag: %s; ", reportutils.DurationToHMS(lag))
 			}
+
+			saturation := cluster.csReader.GetSaturation()
 
 			fmt.Fprintf(
 				builder,
-				"%s: %s writes per second (saturation: %s%%%s)\n",
+				"%s: %s writes per second (%sbuffer %s%% full)\n",
 				cluster.title,
 				reportutils.FmtReal(eventsPerSec),
-				reportutils.FmtReal(100*cluster.csReader.GetSaturation()),
 				lagNote,
+				reportutils.FmtReal(100*saturation),
 			)
-
-			const lagWarnThreshold = 5 * time.Minute
 
 			if hasLag && lag > lagWarnThreshold {
 				fmt.Fprint(
@@ -572,6 +579,17 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 					"⚠️ Lag is excessive. Verification may fail. See documentation.\n",
 				)
 			}
+
+			if saturation > saturationWarnThreshold {
+				fmt.Fprint(
+					builder,
+					"⚠️ Buffer almost full. Metadata writes are too slow. See documentation.\n",
+				)
+			}
+		}
+
+		if cluster.csReader == verifier.srcChangeStreamReader {
+			fmt.Fprint(builder, "\n")
 		}
 
 		// We only print event breakdowns for the source because we assume that
