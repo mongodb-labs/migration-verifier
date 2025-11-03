@@ -773,10 +773,22 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 	return nil
 }
 
+// GetLag returns the observed change stream lag (i.e., the delta between
+// cluster time and the most-recently-seen change event).
 func (csr *ChangeStreamReader) GetLag() option.Option[time.Duration] {
 	return csr.lag.Load()
 }
 
+// GetSaturation returns the reader’s internal buffer’s saturation level as
+// a fraction. If saturation rises, that means we’re reading events faster than
+// we can persist them.
+func (csr *ChangeStreamReader) GetSaturation() float64 {
+	return util.DivideToF64(len(csr.changeEventBatchChan), cap(csr.changeEventBatchChan))
+}
+
+// GetEventsPerSecond returns the number of change events per second we’ve been
+// seeing “recently”. (See implementation for the actual period over which we
+// compile this metric.)
 func (csr *ChangeStreamReader) GetEventsPerSecond() option.Option[float64] {
 	logs := csr.batchSizeHistory.Get()
 	lastLog, hasLogs := lo.Last(logs)

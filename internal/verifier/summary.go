@@ -552,15 +552,16 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 			lag, hasLag := cluster.csReader.GetLag().Get()
 
 			if hasLag {
-				lagNote = fmt.Sprintf(" (lag: %s)", reportutils.DurationToHMS(lag))
+				lagNote = fmt.Sprintf("lag: %s; ", reportutils.DurationToHMS(lag))
 			}
 
 			fmt.Fprintf(
 				builder,
-				"%s observed change rate: %s/sec%s",
+				"%s: %s writes per second (%sbuffer %s%% full)\n",
 				cluster.title,
 				reportutils.FmtReal(eventsPerSec),
 				lagNote,
+				reportutils.FmtReal(100*cluster.csReader.GetSaturation()),
 			)
 
 			const lagWarnThreshold = 5 * time.Minute
@@ -568,10 +569,12 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 			if hasLag && lag > lagWarnThreshold {
 				fmt.Fprintf(
 					builder,
-					"⚠️ Lag is excessive. Verification may fail. See documentation.",
+					"⚠️ Lag is excessive. Verification may fail. See documentation.\n",
 				)
 			}
 		}
+
+		fmt.Fprint(builder, "\n")
 
 		// We only print event breakdowns for the source because we assume that
 		// events on the destination will largely mirror the source’s.
