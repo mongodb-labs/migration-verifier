@@ -306,9 +306,9 @@ func (verifier *Verifier) DropOldRecheckQueue(ctx context.Context) error {
 	).Run(ctx, verifier.logger)
 }
 
-// GenerateRecheckTasks fetches the previous generation’s recheck
-// documents from the verifier’s metadata and creates current-generation
-// document-verification tasks from them.
+// GenerateRecheckTasks fetches the rechecks enqueued for the current generation
+// from the verifier’s metadata and creates document-verification tasks from
+// them.
 //
 // Note that this function DOES NOT retry on failure, so callers should wrap
 // calls to this function in a retryer.

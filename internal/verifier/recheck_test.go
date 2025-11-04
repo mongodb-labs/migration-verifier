@@ -83,7 +83,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 }
 
 func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifier *Verifier) []RecheckDoc {
-	metaColl := verifier.getRecheckQueueCollection(verifier.generation)
+	metaColl := verifier.getRecheckQueueCollection(1 + verifier.generation)
 
 	cursor, err := metaColl.Find(
 		ctx,

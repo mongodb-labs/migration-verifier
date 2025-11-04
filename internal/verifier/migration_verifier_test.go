@@ -959,6 +959,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		[]int{100},
 	)
 	suite.Require().NoError(err)
+
 	event := ParsedEvent{
 		DocID:  mbson.ToRawValue(int32(55)),
 		OpType: "delete",
@@ -977,6 +978,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 
 	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
 	suite.Require().NoError(err)
+
 	event.OpType = "insert"
 	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
 	suite.Require().NoError(err)
@@ -996,13 +998,9 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	)
 
 	verifier.generation++
-	func() {
-		verifier.mux.Lock()
-		defer verifier.mux.Unlock()
 
-		err = verifier.GenerateRecheckTasks(ctx)
-		suite.Require().NoError(err)
-	}()
+	err = verifier.GenerateRecheckTasks(ctx)
+	suite.Require().NoError(err)
 
 	var doc bson.M
 	cur, err := verifier.verificationTaskCollection().Find(ctx, bson.M{"generation": 1})
