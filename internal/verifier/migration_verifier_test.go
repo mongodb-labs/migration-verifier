@@ -715,11 +715,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 
 	verifier.generation++
 
-	func() {
-		verifier.mux.Lock()
-		defer func() { verifier.mux.Unlock() }()
-		suite.Require().NoError(verifier.GenerateRecheckTasks(ctx))
-	}()
+	suite.Require().NoError(verifier.GenerateRecheckTasks(ctx))
 
 	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)

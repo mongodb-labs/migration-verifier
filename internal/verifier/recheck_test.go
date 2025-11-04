@@ -254,9 +254,6 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	)
 	suite.Require().NoError(err)
 
-	verifier.mux.Lock()
-	defer verifier.mux.Unlock()
-
 	verifier.generation++
 
 	suite.T().Logf("Generating recheck tasks …")
@@ -293,7 +290,6 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
 
 	verifier.generation++
-	verifier.mux.Lock()
 	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
@@ -353,7 +349,6 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
 
 	verifier.generation++
-	verifier.mux.Lock()
 	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
@@ -403,7 +398,6 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 	suite.Require().NoError(err)
 
 	verifier.generation++
-	verifier.mux.Lock()
 	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
