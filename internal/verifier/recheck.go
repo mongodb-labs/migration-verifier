@@ -24,9 +24,9 @@ const (
 
 	recheckQueueCollectionNameBase = "recheckQueue"
 
-	recheckCauseMismatch    = 0
-	recheckCauseSource      = 1
-	recheckCauseDestination = 2
+	recheckCauseMismatch    int32 = 0
+	recheckCauseSource      int32 = 1
+	recheckCauseDestination int32 = 2
 )
 
 // RecheckPrimaryKey stores the implicit type of recheck to perform
