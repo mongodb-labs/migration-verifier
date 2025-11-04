@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goaux/timer"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -119,15 +120,18 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	var finishedAllTasks bool
 
+	inProgressDone := make(chan struct{})
 	go func() {
+		defer close(inProgressDone)
+
 		delay := 30 * time.Second
 
-		time.Sleep(delay)
+		for {
+			if err := timer.SleepCause(cancelableCtx, delay); err != nil {
+				return
+			}
 
-		for cancelableCtx.Err() == nil {
 			verifier.PrintVerificationSummary(cancelableCtx, GenerationInProgress)
-
-			time.Sleep(delay)
 		}
 	}()
 
@@ -154,9 +158,13 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 				time.Sleep(verifier.verificationStatusCheckInterval)
 			} else {
 				finishedAllTasks = true
+
+				// Stop the thread that prints in-progress notifications.
+				canceler(errors.Errorf("generation %d finished", generation))
+				<-inProgressDone
+
 				verifier.PrintVerificationSummary(ctx, GenerationComplete)
 
-				canceler(errors.Errorf("generation %d finished", generation))
 				return nil
 			}
 		}
