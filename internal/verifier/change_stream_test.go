@@ -256,7 +256,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 
 	// Use of linearizable read concern below seems to freeze pre-4.4 servers.
 	srcVersion := verifier1.srcClusterInfo.VersionArray
-	if util.CmpMinorVersions(srcVersion, []int{4, 4}) == -1 {
+	if util.CmpMinorVersions([2]int(srcVersion), [2]int{4, 4}) == -1 {
 		suite.T().Skipf("Source version (%v) is too old for this test.", srcVersion)
 	}
 

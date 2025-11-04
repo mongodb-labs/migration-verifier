@@ -24,7 +24,7 @@ const (
 	TopologyReplset ClusterTopology = "replset"
 )
 
-func CmpMinorVersions(a, b []int) int {
+func CmpMinorVersions(a, b [2]int) int {
 	return cmp.Or(cmp.Compare(a[0], b[0]), cmp.Compare(a[1], b[1]))
 }
 
