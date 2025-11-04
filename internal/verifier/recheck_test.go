@@ -212,7 +212,7 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 	)
 
 	recheckDocs := suite.fetchVerifierRechecks(ctx, verifier2)
-	suite.Require().Len(recheckDocs, 4, "expect # of rechecks: %+v", recheckDocs)
+	suite.Require().Len(recheckDocs, 2, "expect # of rechecks: %+v", recheckDocs)
 }
 
 func (suite *IntegrationTestSuite) TestDuplicateRecheck() {

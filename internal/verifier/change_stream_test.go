@@ -345,7 +345,21 @@ func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, ve
 	recheckDocs := []bson.M{}
 
 	recheckColl := verifier.getRecheckQueueCollection(verifier.generation)
-	cursor, err := recheckColl.Find(ctx, bson.D{})
+	cursor, err := recheckColl.Aggregate(
+		ctx,
+		mongo.Pipeline{
+			{{"$addFields", bson.D{
+				{"_id.cause", "$$REMOVE"},
+			}}},
+			{{"$group", bson.D{
+				{"_id", "$_id"},
+				{"doc", bson.D{{"$first", "$$ROOT"}}},
+			}}},
+			{{"$replaceRoot", bson.D{
+				{"newRoot", "$doc"},
+			}}},
+		},
+	)
 
 	if !errors.Is(err, mongo.ErrNoDocuments) {
 		suite.Require().NoError(err)
