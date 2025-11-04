@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -14,9 +15,11 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
+	"github.com/goaux/timer"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -243,6 +246,98 @@ func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx cont
 		}
 		suite.Require().NoError(err)
 	}()
+}
+
+func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
+	ctx := suite.T().Context()
+
+	verifier := suite.BuildVerifier()
+
+	srcDB := verifier.srcClient.Database(suite.DBNameForTest())
+	srcColl := srcDB.Collection("coll")
+
+	require.NoError(
+		suite.T(),
+		srcDB.CreateCollection(ctx, srcColl.Name()),
+	)
+
+	verifier1 := suite.BuildVerifier()
+	v1Ctx, v1Cancel := contextplus.WithCancelCause(ctx)
+	defer v1Cancel(ctx.Err())
+	suite.startSrcChangeStreamReaderAndHandler(v1Ctx, verifier1)
+
+	var lastDocID int32
+
+	insertCtx, cancelInserts := contextplus.WithCancelCause(ctx)
+	defer cancelInserts(ctx.Err())
+	insertsDone := make(chan struct{})
+	go func() {
+		defer close(insertsDone)
+
+		sess, err := verifier.srcClient.StartSession(
+			options.Session().SetCausalConsistency(true),
+		)
+		require.NoError(suite.T(), err)
+
+		sessCtx := mongo.NewSessionContext(insertCtx, sess)
+
+		docID := int32(1)
+		for {
+			_, err := srcColl.InsertOne(
+				sessCtx,
+				bson.D{{"_id", docID}},
+			)
+
+			if err != nil {
+				require.ErrorIs(suite.T(), err, context.Canceled)
+				return
+			}
+
+			lastDocID = docID
+
+			docID++
+		}
+	}()
+
+	suite.Require().NoError(timer.SleepCause(ctx, 2*time.Second))
+
+	v1Cancel(fmt.Errorf("killing verifier1"))
+
+	verifier2 := suite.BuildVerifier()
+	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier2)
+
+	cancelInserts(fmt.Errorf("verifier2 started"))
+	<-insertsDone
+
+	assert.Eventually(
+		suite.T(),
+		func() bool {
+			rechecks := suite.fetchVerifierRechecks(ctx, verifier2)
+
+			return lo.SomeBy(
+				rechecks,
+				func(cur bson.M) bool {
+					id := cur["_id"].(bson.D)
+
+					for _, el := range id {
+						if el.Key != "docID" {
+							continue
+						}
+
+						return el.Value.(int32) == lastDocID
+					}
+
+					panic(fmt.Sprintf("no docID in _id: %+v", id))
+				},
+			)
+		},
+		time.Minute,
+		100*time.Millisecond,
+		"last-inserted doc shows as recheck",
+	)
+
+	rechecks := suite.fetchVerifierRechecks(ctx, verifier2)
+	assert.Len(suite.T(), rechecks, int(lastDocID), "all source docs should be rechecked")
 }
 
 // TestChangeStreamResumability creates a verifier, starts its change stream,
