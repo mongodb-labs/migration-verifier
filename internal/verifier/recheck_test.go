@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
@@ -86,11 +87,23 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifier *Verifier) []RecheckDoc {
 	metaColl := verifier.getRecheckQueueCollection(verifier.generation)
 
-	cursor, err := metaColl.Find(
+	cursor, err := metaColl.Aggregate(
 		ctx,
-		bson.D{},
-		options.Find().SetProjection(bson.D{{"dataSize", 0}}),
+		mongo.Pipeline{
+			{{"$addFields", bson.D{
+				{"_id.cause", "$$REMOVE"},
+				{"dataSize", "$$REMOVE"},
+			}}},
+			{{"$group", bson.D{
+				{"_id", "$_id"},
+				{"doc", bson.D{{"$first", "$$ROOT"}}},
+			}}},
+			{{"$replaceRoot", bson.D{
+				{"newRoot", "$doc"},
+			}}},
+		},
 	)
+
 	suite.Require().NoError(err, "find recheck docs")
 
 	var results []RecheckDoc
