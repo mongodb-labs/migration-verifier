@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -15,7 +16,6 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
-	"github.com/goaux/timer"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -266,6 +266,22 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	defer v1Cancel(ctx.Err())
 	suite.startSrcChangeStreamReaderAndHandler(v1Ctx, verifier1)
 
+	changeStreamMetaColl := verifier1.srcChangeStreamReader.getChangeStreamMetadataCollection()
+
+	var originalResumeToken bson.Raw
+
+	assert.Eventually(
+		suite.T(),
+		func() bool {
+			var err error
+			originalResumeToken, err = changeStreamMetaColl.FindOne(ctx, bson.D{}).Raw()
+			return err == nil
+		},
+		time.Minute,
+		50*time.Millisecond,
+		"should see a change stream resume token persisted",
+	)
+
 	insertCtx, cancelInserts := contextplus.WithCancelCause(ctx)
 	defer cancelInserts(ctx.Err())
 	insertsDone := make(chan struct{})
@@ -297,7 +313,20 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 		}
 	}()
 
-	suite.Require().NoError(timer.SleepCause(ctx, 2*time.Second))
+	assert.Eventually(
+		suite.T(),
+		func() bool {
+			rt, err := changeStreamMetaColl.FindOne(ctx, bson.D{}).Raw()
+			require.NoError(suite.T(), err)
+
+			suite.T().Logf("found rt: %v\n", rt)
+
+			return !bytes.Equal(rt, originalResumeToken)
+		},
+		time.Minute,
+		50*time.Millisecond,
+		"should see a new change stream resume token persisted",
+	)
 
 	v1Cancel(fmt.Errorf("killing verifier1"))
 

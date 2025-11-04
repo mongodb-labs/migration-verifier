@@ -140,6 +140,8 @@ func (verifier *Verifier) RunChangeEventHandler(ctx context.Context, reader *Cha
 			} else {
 				lastPersistedTime = time.Now()
 			}
+
+			fmt.Printf("------- persisted resume token after events\n")
 		}
 	}
 
