@@ -105,16 +105,10 @@ func (verifier *Verifier) insertRecheckDocs(
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
 
-	dbNames, collNames, rawDocIDs, dataSizes := deduplicateRechecks(
-		dbNames,
-		collNames,
-		documentIDs,
-		dataSizes,
-	)
-
 	generation, _ := verifier.getGenerationWhileLocked()
 
 	eg, groupCtx := contextplus.ErrGroup(ctx)
+	eg.SetLimit(100)
 
 	genCollection := verifier.getRecheckQueueCollection(generation)
 
@@ -167,7 +161,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			PrimaryKey: RecheckPrimaryKey{
 				SrcDatabaseName:   dbName,
 				SrcCollectionName: collNames[i],
-				DocumentID:        rawDocIDs[i],
+				DocumentID:        documentIDs[i],
 			},
 			DataSize: dataSizes[i],
 		}
@@ -209,78 +203,6 @@ func (verifier *Verifier) insertRecheckDocs(
 		Msg("Persisted rechecks.")
 
 	return nil
-}
-
-func deduplicateRechecks(
-	dbNames, collNames []string,
-	documentIDs []bson.RawValue,
-	dataSizes []int,
-) ([]string, []string, []bson.RawValue, []int) {
-	dedupeMap := map[string]map[string]map[string]int{}
-
-	uniqueElems := 0
-
-	for i, dbName := range dbNames {
-		collName := collNames[i]
-		docIDRaw := documentIDs[i]
-		dataSize := dataSizes[i]
-
-		docIDBuf := make([]byte, 1+len(docIDRaw.Value))
-		docIDBuf[0] = byte(docIDRaw.Type)
-		copy(docIDBuf[1:], docIDRaw.Value)
-		docIDStr := string(docIDBuf)
-
-		if _, ok := dedupeMap[dbName]; !ok {
-			dedupeMap[dbName] = map[string]map[string]int{
-				collName: {
-					docIDStr: dataSize,
-				},
-			}
-
-			uniqueElems++
-
-			continue
-		}
-
-		if _, ok := dedupeMap[dbName][collName]; !ok {
-			dedupeMap[dbName][collName] = map[string]int{
-				docIDStr: dataSize,
-			}
-
-			uniqueElems++
-
-			continue
-		}
-
-		if _, ok := dedupeMap[dbName][collName][docIDStr]; !ok {
-			dedupeMap[dbName][collName][docIDStr] = dataSize
-			uniqueElems++
-		}
-	}
-
-	dbNames = make([]string, 0, uniqueElems)
-	collNames = make([]string, 0, uniqueElems)
-	rawDocIDs := make([]bson.RawValue, 0, uniqueElems)
-	dataSizes = make([]int, 0, uniqueElems)
-
-	for dbName, collMap := range dedupeMap {
-		for collName, docMap := range collMap {
-			for docIDStr, dataSize := range docMap {
-				dbNames = append(dbNames, dbName)
-				collNames = append(collNames, collName)
-				rawDocIDs = append(
-					rawDocIDs,
-					bson.RawValue{
-						Type:  bson.Type(docIDStr[0]),
-						Value: []byte(docIDStr[1:]),
-					},
-				)
-				dataSizes = append(dataSizes, dataSize)
-			}
-		}
-	}
-
-	return dbNames, collNames, rawDocIDs, dataSizes
 }
 
 // DropOldRecheckQueueWhileLocked deletes the previous generation’s recheck
