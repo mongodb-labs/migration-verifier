@@ -168,7 +168,7 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 		verificationStatus, err := verifier.GetVerificationStatus(ctx)
 		suite.Require().NoError(err)
 
-		recheckDocs := suite.fetchVerifierRechecks(ctx, verifier)
+		recheckDocs := suite.fetchPendingVerifierRechecks(ctx, verifier)
 
 		if verificationStatus.FailedTasks != 0 && len(recheckDocs) == 2 {
 			break
@@ -198,7 +198,7 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 		"restarted verifier should immediately see mismatches",
 	)
 
-	recheckDocs := suite.fetchVerifierRechecks(ctx, verifier2)
+	recheckDocs := suite.fetchPendingVerifierRechecks(ctx, verifier2)
 	suite.Require().Len(recheckDocs, 2, "expect # of rechecks: %+v", recheckDocs)
 }
 
