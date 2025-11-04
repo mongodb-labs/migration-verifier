@@ -35,6 +35,7 @@ type RecheckPrimaryKey struct {
 	SrcDatabaseName   string        `bson:"db"`
 	SrcCollectionName string        `bson:"coll"`
 	DocumentID        bson.RawValue `bson:"docID"`
+	Cause             int32         // to prevent dupe-key proliferation
 }
 
 var _ bson.Marshaler = &RecheckPrimaryKey{}
@@ -47,6 +48,7 @@ func (rk *RecheckPrimaryKey) MarshalBSON() ([]byte, error) {
 			Type: bsoncore.Type(rk.DocumentID.Type),
 			Data: rk.DocumentID.Value,
 		}).
+		AppendInt32("cause", rk.Cause).
 		Build(), nil
 }
 
@@ -88,6 +90,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 
 	return verifier.insertRecheckDocs(
 		ctx,
+		recheckCauseMismatch,
 		dbNames,
 		collNames,
 		documentIDs,
@@ -95,8 +98,15 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	)
 }
 
+const (
+	recheckCauseMismatch    = 0
+	recheckCauseSource      = 1
+	recheckCauseDestination = 2
+)
+
 func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
+	cause int32,
 	dbNames []string,
 	collNames []string,
 	documentIDs []bson.RawValue,
@@ -168,6 +178,7 @@ func (verifier *Verifier) insertRecheckDocs(
 				SrcDatabaseName:   dbName,
 				SrcCollectionName: collNames[i],
 				DocumentID:        rawDocIDs[i],
+				Cause:             cause,
 			},
 			DataSize: dataSizes[i],
 		}
@@ -364,7 +375,11 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	cursor, err := recheckColl.Find(
 		ctx,
 		bson.D{},
-		options.Find().SetSort(bson.D{{"_id", 1}}),
+		options.Find().
+			SetSort(bson.D{{"_id", 1}}).
+			SetProjection(bson.D{
+				{"_id.cause", 0},
+			}),
 	)
 	if err != nil {
 		return err
@@ -403,6 +418,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		return nil
 	}
 
+	var lastIDRaw bson.RawValue
+
 	// We group these here using a sort rather than using aggregate because aggregate is
 	// subject to a 16MB limit on group size.
 	for cursor.Next(ctx) {
@@ -439,7 +456,14 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 			idsSizer = util.BSONArraySizer{}
 			dataSizeAccum = 0
 			idAccum = idAccum[:0]
+			lastIDRaw = bson.RawValue{}
 		}
+
+		if idRaw.Equal(lastIDRaw) {
+			continue
+		}
+
+		lastIDRaw = idRaw
 
 		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
