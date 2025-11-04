@@ -306,6 +306,10 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 		"the verifier should enqueue a recheck",
 	)
 
+	require.Len(suite.T(), recheckDocs, 1)
+
+	delete(recheckDocs[0], "cause")
+
 	suite.Assert().Equal(
 		bson.D{
 			{"db", suite.DBNameForTest()},

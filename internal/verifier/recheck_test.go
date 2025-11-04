@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -67,6 +68,11 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 	suite.Require().NoError(err)
 
 	recheckDocs = suite.fetchRecheckDocs(ctx, verifier)
+
+	require.Len(suite.T(), recheckDocs, 1)
+
+	recheckDocs[0].PrimaryKey.Cause = 0
+
 	suite.Assert().Equal(
 		[]RecheckDoc{
 			{
@@ -199,7 +205,7 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 	)
 
 	recheckDocs := suite.fetchVerifierRechecks(ctx, verifier2)
-	suite.Require().Len(recheckDocs, 2, "expect # of rechecks: %+v", recheckDocs)
+	suite.Require().Len(recheckDocs, 4, "expect # of rechecks: %+v", recheckDocs)
 }
 
 func (suite *IntegrationTestSuite) TestDuplicateRecheck() {
