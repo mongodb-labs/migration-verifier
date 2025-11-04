@@ -263,7 +263,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 
 	return verifier.insertRecheckDocs(
 		ctx,
-		lo.Ternary(eventOrigin == src, recheckCauseSource, recheckCauseDestination),
+		lo.Ternary[int32](eventOrigin == src, recheckCauseSource, recheckCauseDestination),
 		dbNames, collNames, docIDs, dataSizes,
 	)
 }
