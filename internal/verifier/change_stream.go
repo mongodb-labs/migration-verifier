@@ -128,6 +128,21 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 func (verifier *Verifier) RunChangeEventHandler(ctx context.Context, reader *ChangeStreamReader) error {
 	var err error
 
+	var lastPersistedTime time.Time
+	persistResumeTokenIfNeeded := func(ctx context.Context, token bson.Raw) {
+		if time.Since(lastPersistedTime) >= minChangeStreamPersistInterval {
+			persistErr := reader.persistChangeStreamResumeToken(ctx, token)
+			if persistErr != nil {
+				verifier.logger.Warn().
+					Stringer("changeReader", reader).
+					Err(persistErr).
+					Msg("Failed to persist resume token. Because of this, if the verifier restarts, it will have to re-process already-handled change events. This error may be transient, but if it recurs, investigate.")
+			} else {
+				lastPersistedTime = time.Now()
+			}
+		}
+	}
+
 HandlerLoop:
 	for err == nil {
 		select {
@@ -159,13 +174,7 @@ HandlerLoop:
 			)
 
 			if err == nil && batch.resumeToken != nil {
-				persistErr := reader.persistChangeStreamResumeToken(ctx, batch.resumeToken)
-				if persistErr != nil {
-					verifier.logger.Warn().
-						Stringer("changeReader", reader).
-						Err(persistErr).
-						Msg("Failed to persist resume token. Because of this, if the verifier restarts, it will have to re-process already-handled change events. This error may be transient, but if it recurs, investigate.")
-				}
+				persistResumeTokenIfNeeded(ctx, batch.resumeToken)
 			}
 		}
 	}
