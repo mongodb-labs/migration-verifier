@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
@@ -353,6 +354,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		Int("rechecksCount", int(rechecksCount)).
 		Msgf("Creating recheck tasks from prior generation’s enqueued rechecks.")
 
+	startTime := time.Now()
+
 	// We generate one recheck task per collection, unless
 	// 1) The size of the list of IDs would exceed 12MB (a very conservative way of avoiding
 	//    the 16MB BSON limit)
@@ -479,6 +482,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 			Int("generation", 1+prevGeneration).
 			Int64("totalDocs", int64(totalDocs)).
 			Str("totalData", reportutils.FmtBytes(totalRecheckData)).
+			Stringer("timeElapsed", time.Since(startTime)).
 			Msg("Scheduled documents for recheck in the new generation.")
 	}
 
