@@ -24,6 +24,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 )
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
@@ -252,6 +253,13 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	ctx := suite.T().Context()
 
 	verifier1 := suite.BuildVerifier()
+
+	// Use of linearizable read concern below seems to freeze pre-4.4 servers.
+	srcVersion := verifier1.srcClusterInfo.VersionArray
+	if util.CmpMinorVersions(srcVersion, []int{4, 4}) == -1 {
+		suite.T().Skipf("Source version (%v) is too old for this test.", srcVersion)
+	}
+
 	srcDB := verifier1.srcClient.Database(suite.DBNameForTest())
 	srcColl := srcDB.Collection("coll")
 
@@ -280,8 +288,6 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 		"should see a change stream resume token persisted",
 	)
 
-	var lastDocID int32
-
 	insertCtx, cancelInserts := contextplus.WithCancelCause(ctx)
 	defer cancelInserts(ctx.Err())
 	insertsDone := make(chan struct{})
@@ -306,19 +312,6 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 
 			if err != nil {
 				require.ErrorIs(suite.T(), err, context.Canceled)
-
-				lastIDRes := srcColl.Database().Collection(
-					srcColl.Name(),
-				).FindOne(
-					ctx,
-					bson.D{},
-					options.FindOne().
-						SetSort(bson.D{{"_id", -1}}),
-				)
-				require.NoError(suite.T(), lastIDRes.Err())
-
-				lastDocID = lo.Must(lo.Must(lastIDRes.Raw()).LookupErr("_id")).Int32()
-
 				return
 			}
 
@@ -348,6 +341,19 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 
 	cancelInserts(fmt.Errorf("verifier2 started"))
 	<-insertsDone
+
+	lastIDRes := srcColl.Database().Collection(
+		srcColl.Name(),
+		options.Collection().SetReadConcern(readconcern.Linearizable()),
+	).FindOne(
+		ctx,
+		bson.D{},
+		options.FindOne().
+			SetSort(bson.D{{"_id", -1}}),
+	)
+	require.NoError(suite.T(), lastIDRes.Err())
+
+	lastDocID := lo.Must(lo.Must(lastIDRes.Raw()).LookupErr("_id")).Int32()
 
 	assert.Eventually(
 		suite.T(),
