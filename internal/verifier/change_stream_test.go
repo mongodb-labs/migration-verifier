@@ -252,9 +252,8 @@ func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx cont
 func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	ctx := suite.T().Context()
 
-	verifier := suite.BuildVerifier()
-
-	srcDB := verifier.srcClient.Database(suite.DBNameForTest())
+	verifier1 := suite.BuildVerifier()
+	srcDB := verifier1.srcClient.Database(suite.DBNameForTest())
 	srcColl := srcDB.Collection("coll")
 
 	require.NoError(
@@ -262,7 +261,6 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 		srcDB.CreateCollection(ctx, srcColl.Name()),
 	)
 
-	verifier1 := suite.BuildVerifier()
 	v1Ctx, v1Cancel := contextplus.WithCancelCause(ctx)
 	defer v1Cancel(ctx.Err())
 	suite.startSrcChangeStreamReaderAndHandler(v1Ctx, verifier1)
@@ -291,7 +289,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 			close(insertsDone)
 		}()
 
-		sess, err := verifier.srcClient.StartSession(
+		sess, err := verifier1.srcClient.StartSession(
 			options.Session().SetCausalConsistency(true),
 		)
 		require.NoError(suite.T(), err)
@@ -377,7 +375,10 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 		"last-inserted doc shows as recheck",
 	)
 
-	rechecks := suite.fetchVerifierRechecks(ctx, verifier2)
+	sess := lo.Must(verifier2.verificationDatabase().Client().StartSession())
+	sctx := mongo.NewSessionContext(ctx, sess)
+
+	rechecks := suite.fetchVerifierRechecks(sctx, verifier2)
 	if !assert.EqualValues(suite.T(), lastDocID, len(rechecks), "all source docs should be rechecked") {
 		for _, recheck := range rechecks {
 			suite.T().Logf("found recheck: %v", recheck)
