@@ -311,10 +311,10 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 	recheckDocs[0]["_id"] = lo.Filter(
 		recheckDocs[0]["_id"].(bson.D),
 		func(el bson.E, _ int) bool {
-			return el.Key != "cause"
+			return el.Key != "rand"
 		},
 	)
-	delete(recheckDocs[0], "cause")
+	delete(recheckDocs[0], "rand")
 
 	suite.Assert().Equal(
 		bson.D{
@@ -349,7 +349,7 @@ func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, ve
 		ctx,
 		mongo.Pipeline{
 			{{"$addFields", bson.D{
-				{"_id.cause", "$$REMOVE"},
+				{"_id.rand", "$$REMOVE"},
 			}}},
 			{{"$group", bson.D{
 				{"_id", "$_id"},

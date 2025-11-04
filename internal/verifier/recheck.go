@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
@@ -23,10 +24,6 @@ const (
 	recheckBatchCountLimit = 1000
 
 	recheckQueueCollectionNameBase = "recheckQueue"
-
-	recheckCauseMismatch    int32 = 0
-	recheckCauseSource      int32 = 1
-	recheckCauseDestination int32 = 2
 )
 
 // RecheckPrimaryKey stores the implicit type of recheck to perform
@@ -40,7 +37,17 @@ type RecheckPrimaryKey struct {
 	SrcDatabaseName   string        `bson:"db"`
 	SrcCollectionName string        `bson:"coll"`
 	DocumentID        bson.RawValue `bson:"docID"`
-	Cause             int32         // to prevent dupe-key proliferation
+
+	// Rand is here to allow “duplicate” entries. We do this because, with
+	// multiple change streams returning the same events, we expect duplicate
+	// key errors to be frequent. The server is quite slow in handling such
+	// errors, though. To avoid that, while still allowing the _id index to
+	// facilitate easy sorting of the duplicates, we set this field to a
+	// random value on each entry.
+	//
+	// This also avoids duplicate-key slowness where the source workload
+	// involves frequent writes to a small number of documents.
+	Rand int32
 }
 
 var _ bson.Marshaler = &RecheckPrimaryKey{}
@@ -53,7 +60,7 @@ func (rk *RecheckPrimaryKey) MarshalBSON() ([]byte, error) {
 			Type: bsoncore.Type(rk.DocumentID.Type),
 			Data: rk.DocumentID.Value,
 		}).
-		AppendInt32("cause", rk.Cause).
+		AppendInt32("rand", rk.Rand).
 		Build(), nil
 }
 
@@ -93,19 +100,11 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		Int("count", len(documentIDs)).
 		Msg("Persisting rechecks for mismatched or missing documents.")
 
-	return verifier.insertRecheckDocs(
-		ctx,
-		recheckCauseMismatch,
-		dbNames,
-		collNames,
-		documentIDs,
-		dataSizes,
-	)
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes)
 }
 
 func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
-	cause int32,
 	dbNames []string,
 	collNames []string,
 	documentIDs []bson.RawValue,
@@ -177,7 +176,7 @@ func (verifier *Verifier) insertRecheckDocs(
 				SrcDatabaseName:   dbName,
 				SrcCollectionName: collNames[i],
 				DocumentID:        rawDocIDs[i],
-				Cause:             cause,
+				Rand:              rand.Int32(),
 			},
 			DataSize: dataSizes[i],
 		}
@@ -379,7 +378,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		options.Find().
 			SetSort(bson.D{{"_id", 1}}).
 			SetProjection(bson.D{
-				{"_id.cause", 0},
+				{"_id.rand", 0},
 			}),
 	)
 	if err != nil {

@@ -68,7 +68,6 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 	suite.Require().NoError(err)
 
 	recheckDocs = suite.fetchRecheckDocs(ctx, verifier)
-
 	suite.Assert().Equal(
 		[]RecheckDoc{
 			{
@@ -91,7 +90,7 @@ func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifie
 		ctx,
 		mongo.Pipeline{
 			{{"$addFields", bson.D{
-				{"_id.cause", "$$REMOVE"},
+				{"_id.rand", "$$REMOVE"},
 				{"dataSize", "$$REMOVE"},
 			}}},
 			{{"$group", bson.D{
@@ -513,12 +512,5 @@ func insertRecheckDocs(
 		},
 	)
 
-	return verifier.insertRecheckDocs(
-		ctx,
-		recheckCauseMismatch,
-		dbNames,
-		collNames,
-		rawIDs,
-		dataSizes,
-	)
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, rawIDs, dataSizes)
 }
