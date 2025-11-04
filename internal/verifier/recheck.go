@@ -457,6 +457,11 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 			lastIDRaw = bson.RawValue{}
 		}
 
+		// We’re iterating the rechecks in order such that, if the same doc
+		// gets enqueued from multiple sources, we’ll see those records
+		// consecutively. We can deduplicate here, then, by checking to see if
+		// the doc ID has changed. (NB: At this point we know the namespace
+		// has *not* changed because we just checked for that.)
 		if idRaw.Equal(lastIDRaw) {
 			continue
 		}
