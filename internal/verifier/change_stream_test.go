@@ -280,6 +280,8 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 		"should see a change stream resume token persisted",
 	)
 
+	var lastDocID int32
+
 	insertCtx, cancelInserts := contextplus.WithCancelCause(ctx)
 	defer cancelInserts(ctx.Err())
 	insertsDone := make(chan struct{})
@@ -304,6 +306,19 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 
 			if err != nil {
 				require.ErrorIs(suite.T(), err, context.Canceled)
+
+				lastIDRes := srcColl.Database().Collection(
+					srcColl.Name(),
+				).FindOne(
+					ctx,
+					bson.D{},
+					options.FindOne().
+						SetSort(bson.D{{"_id", -1}}),
+				)
+				require.NoError(suite.T(), lastIDRes.Err())
+
+				lastDocID = lo.Must(lo.Must(lastIDRes.Raw()).LookupErr("_id")).Int32()
+
 				return
 			}
 
@@ -333,19 +348,6 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 
 	cancelInserts(fmt.Errorf("verifier2 started"))
 	<-insertsDone
-
-	lastIDRes := srcColl.Database().Collection(
-		srcColl.Name(),
-		//options.Collection().SetReadConcern(readconcern.Linearizable()),
-	).FindOne(
-		ctx,
-		bson.D{},
-		options.FindOne().
-			SetSort(bson.D{{"_id", -1}}),
-	)
-	require.NoError(suite.T(), lastIDRes.Err())
-
-	lastDocID := lo.Must(lo.Must(lastIDRes.Raw()).LookupErr("_id")).Int32()
 
 	assert.Eventually(
 		suite.T(),
