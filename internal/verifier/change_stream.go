@@ -140,8 +140,6 @@ func (verifier *Verifier) RunChangeEventHandler(ctx context.Context, reader *Cha
 			} else {
 				lastPersistedTime = time.Now()
 			}
-
-			fmt.Printf("------- persisted resume token after events\n")
 		}
 	}
 
@@ -176,7 +174,6 @@ HandlerLoop:
 			)
 
 			if err == nil && batch.resumeToken != nil {
-				fmt.Printf("--- batch persisted: %+v\n", batch.events)
 				persistResumeTokenIfNeeded(ctx, batch.resumeToken)
 			}
 		}
@@ -519,7 +516,6 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	sess *mongo.Session,
 ) error {
 	for {
-		fmt.Printf("----- iterate loop top\n")
 		var err error
 		var gotwritesOffTimestamp bool
 
@@ -545,7 +541,6 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 		// since there should be no more events.
 		case <-csr.writesOffTs.Ready():
 			writesOffTs := csr.writesOffTs.Get()
-			fmt.Printf("----- got writes off ts: %v\n", writesOffTs)
 
 			csr.logger.Debug().
 				Any("writesOffTimestamp", writesOffTs).
@@ -581,7 +576,6 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			}
 
 		default:
-			fmt.Printf("----- default loop branch\n")
 			err = csr.readAndHandleOneChangeEventBatch(ctx, ri, cs, sess)
 
 			if err != nil {
