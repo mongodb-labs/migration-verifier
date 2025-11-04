@@ -163,7 +163,7 @@ HandlerLoop:
 				if persistErr != nil {
 					verifier.logger.Warn().
 						Stringer("changeReader", reader).
-						Err(err).
+						Err(persistErr).
 						Msg("Failed to persist resume token. Because of this, if the verifier restarts, it will have to re-process already-handled change events. This error may be transient, but if it recurs, investigate.")
 				}
 			}

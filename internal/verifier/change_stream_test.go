@@ -266,13 +266,13 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	defer v1Cancel(ctx.Err())
 	suite.startSrcChangeStreamReaderAndHandler(v1Ctx, verifier1)
 
-	var lastDocID int32
-
 	insertCtx, cancelInserts := contextplus.WithCancelCause(ctx)
 	defer cancelInserts(ctx.Err())
 	insertsDone := make(chan struct{})
 	go func() {
-		defer close(insertsDone)
+		defer func() {
+			close(insertsDone)
+		}()
 
 		sess, err := verifier.srcClient.StartSession(
 			options.Session().SetCausalConsistency(true),
@@ -293,8 +293,6 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 				return
 			}
 
-			lastDocID = docID
-
 			docID++
 		}
 	}()
@@ -308,6 +306,15 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 
 	cancelInserts(fmt.Errorf("verifier2 started"))
 	<-insertsDone
+
+	lastIDRes := srcColl.FindOne(
+		ctx,
+		bson.D{},
+		options.FindOne().SetSort(bson.D{{"_id", -1}}),
+	)
+	require.NoError(suite.T(), lastIDRes.Err())
+
+	lastDocID := lo.Must(lo.Must(lastIDRes.Raw()).LookupErr("_id")).Int32()
 
 	assert.Eventually(
 		suite.T(),
