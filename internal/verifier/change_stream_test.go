@@ -24,6 +24,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 )
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
@@ -336,10 +337,14 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	cancelInserts(fmt.Errorf("verifier2 started"))
 	<-insertsDone
 
-	lastIDRes := srcColl.FindOne(
+	lastIDRes := srcColl.Database().Collection(
+		srcColl.Name(),
+		options.Collection().SetReadConcern(readconcern.Linearizable()),
+	).FindOne(
 		ctx,
 		bson.D{},
-		options.FindOne().SetSort(bson.D{{"_id", -1}}),
+		options.FindOne().
+			SetSort(bson.D{{"_id", -1}}),
 	)
 	require.NoError(suite.T(), lastIDRes.Err())
 
@@ -373,7 +378,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	)
 
 	rechecks := suite.fetchVerifierRechecks(ctx, verifier2)
-	if !assert.EqualValues(suite.T(), len(rechecks), lastDocID, "all source docs should be rechecked") {
+	if !assert.EqualValues(suite.T(), lastDocID, len(rechecks), "all source docs should be rechecked") {
 		for _, recheck := range rechecks {
 			suite.T().Logf("found recheck: %v", recheck)
 		}
