@@ -69,17 +69,24 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 
 	recheckDocs = suite.fetchRecheckDocs(ctx, verifier)
 
-	require.Len(suite.T(), recheckDocs, 1)
+	require.Len(suite.T(), recheckDocs, 2)
 
-	recheckDocs[0].PrimaryKey.Cause = 0
-
-	suite.Assert().Equal(
+	suite.Assert().ElementsMatch(
 		[]RecheckDoc{
 			{
 				PrimaryKey: RecheckPrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
 					DocumentID:        mbson.ToRawValue("theDocID"),
+					Cause:             recheckCauseMismatch,
+				},
+			},
+			{
+				PrimaryKey: RecheckPrimaryKey{
+					SrcDatabaseName:   "the",
+					SrcCollectionName: "namespace",
+					DocumentID:        mbson.ToRawValue("theDocID"),
+					Cause:             recheckCauseSource,
 				},
 			},
 		},

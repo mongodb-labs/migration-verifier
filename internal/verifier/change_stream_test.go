@@ -308,6 +308,12 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	require.Len(suite.T(), recheckDocs, 1)
 
+	recheckDocs[0]["_id"] = lo.Filter(
+		recheckDocs[0]["_id"].(bson.D),
+		func(el bson.E, _ int) bool {
+			return el.Key != "cause"
+		},
+	)
 	delete(recheckDocs[0], "cause")
 
 	suite.Assert().Equal(
