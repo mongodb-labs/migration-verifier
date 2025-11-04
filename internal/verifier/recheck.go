@@ -118,6 +118,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	generation++
 
 	eg, groupCtx := contextplus.ErrGroup(ctx)
+	eg.SetLimit(100)
 
 	genCollection := verifier.getRecheckQueueCollection(generation)
 
@@ -286,23 +287,24 @@ func deduplicateRechecks(
 	return dbNames, collNames, rawDocIDs, dataSizes
 }
 
-// DropOldRecheckQueue deletes the previous generation’s recheck
-// documents from the verifier’s metadata.
-func (verifier *Verifier) DropOldRecheckQueue(ctx context.Context) error {
-	prevGeneration := verifier.generation - 1
+// DropCurrentGenRecheckQueue deletes the current generation’s recheck
+// documents from the verifier’s metadata. This should only be called
+// after new recheck tasks have been created from those rechecks.
+func (verifier *Verifier) DropCurrentGenRecheckQueue(ctx context.Context) error {
+	generation := verifier.generation
 
 	verifier.logger.Debug().
-		Int("previousGeneration", prevGeneration).
-		Msg("Deleting previous generation's enqueued rechecks.")
+		Int("generation", generation).
+		Msg("Deleting current generation's enqueued rechecks.")
 
-	genCollection := verifier.getRecheckQueueCollection(prevGeneration)
+	genCollection := verifier.getRecheckQueueCollection(generation)
 
 	return retry.New().WithCallback(
 		func(ctx context.Context, i *retry.FuncInfo) error {
 			return genCollection.Drop(ctx)
 		},
 		"deleting generation %d's enqueued rechecks",
-		prevGeneration,
+		generation,
 	).Run(ctx, verifier.logger)
 }
 

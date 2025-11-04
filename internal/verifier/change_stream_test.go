@@ -896,7 +896,7 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			recheckColl := verifier.getRecheckQueueCollection(verifier.generation)
+			recheckColl := verifier.getRecheckQueueCollection(1 + verifier.generation)
 			cursor, err := recheckColl.Find(ctx, bson.D{})
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				return false

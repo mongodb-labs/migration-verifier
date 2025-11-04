@@ -457,7 +457,7 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 
 	verifier.generation++
 
-	err = verifier.DropOldRecheckQueue(ctx)
+	err = verifier.DropCurrentGenRecheckQueue(ctx)
 	suite.Require().NoError(err)
 
 	// This never happens in real life but is needed for this test.
