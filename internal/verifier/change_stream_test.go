@@ -24,7 +24,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 )
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
@@ -337,7 +336,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 
 	lastIDRes := srcColl.Database().Collection(
 		srcColl.Name(),
-		options.Collection().SetReadConcern(readconcern.Linearizable()),
+		//options.Collection().SetReadConcern(readconcern.Linearizable()),
 	).FindOne(
 		ctx,
 		bson.D{},
