@@ -499,5 +499,12 @@ func insertRecheckDocs(
 		},
 	)
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, rawIDs, dataSizes)
+	return verifier.insertRecheckDocs(
+		ctx,
+		recheckCauseMismatch,
+		dbNames,
+		collNames,
+		rawIDs,
+		dataSizes,
+	)
 }
