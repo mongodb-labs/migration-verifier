@@ -2326,10 +2326,12 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 }
 
 func (suite *IntegrationTestSuite) awaitEnqueueOfRechecks(verifier *Verifier, minDocs int) {
+	suite.T().Helper()
+
 	var lastNonzeroRechecksCount int
 
 	suite.Eventually(func() bool {
-		cursor, err := verifier.getRecheckQueueCollection(verifier.generation).
+		cursor, err := verifier.getRecheckQueueCollection(1+verifier.generation).
 			Find(suite.Context(), bson.D{})
 		var rechecks []bson.D
 		suite.Require().NoError(err)
