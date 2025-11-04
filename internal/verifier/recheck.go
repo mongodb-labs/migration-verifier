@@ -22,6 +22,10 @@ const (
 	recheckBatchCountLimit = 1000
 
 	recheckQueueCollectionNameBase = "recheckQueue"
+
+	recheckCauseMismatch    = 0
+	recheckCauseSource      = 1
+	recheckCauseDestination = 2
 )
 
 // RecheckPrimaryKey stores the implicit type of recheck to perform
@@ -97,12 +101,6 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		dataSizes,
 	)
 }
-
-const (
-	recheckCauseMismatch    = 0
-	recheckCauseSource      = 1
-	recheckCauseDestination = 2
-)
 
 func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
