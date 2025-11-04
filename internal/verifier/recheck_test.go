@@ -12,7 +12,6 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -69,24 +68,13 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 
 	recheckDocs = suite.fetchRecheckDocs(ctx, verifier)
 
-	require.Len(suite.T(), recheckDocs, 2)
-
-	suite.Assert().ElementsMatch(
+	suite.Assert().Equal(
 		[]RecheckDoc{
 			{
 				PrimaryKey: RecheckPrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
 					DocumentID:        mbson.ToRawValue("theDocID"),
-					Cause:             recheckCauseMismatch,
-				},
-			},
-			{
-				PrimaryKey: RecheckPrimaryKey{
-					SrcDatabaseName:   "the",
-					SrcCollectionName: "namespace",
-					DocumentID:        mbson.ToRawValue("theDocID"),
-					Cause:             recheckCauseSource,
 				},
 			},
 		},
