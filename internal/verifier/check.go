@@ -405,11 +405,13 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 			return err
 		}
 
-		err = verifier.DropOldRecheckQueue(ctx)
-		if err != nil {
-			verifier.logger.Warn().
-				Err(err).
-				Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
+		if verifier.generation > 1 {
+			err = verifier.DropOldRecheckQueue(ctx)
+			if err != nil {
+				verifier.logger.Warn().
+					Err(err).
+					Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
+			}
 		}
 	}
 }
