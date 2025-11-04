@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/mmongo"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -494,11 +495,14 @@ func TolerateSimpleDuplicateKeyInBulk(
 	codesSet := mapset.NewSet(writeCodes...)
 	if codesSet.Cardinality() == 1 && writeCodes[0] == DuplicateKeyErrCode {
 		// This will be fairly common since we now listen for change events
-		// on both source & destination, so use trace level here.
-		logger.Trace().
-			Int("documentsSubmitted", docsCount).
-			Int("duplicates", len(writeCodes)).
-			Msg("Ignoring duplicate key error on recheck inserts.")
+		// on both source & destination, so use trace level here, and don’t
+		// do the logger calls at all unless the level warrants.
+		if logger.GetLevel() <= zerolog.TraceLevel {
+			logger.Trace().
+				Int("documentsSubmitted", docsCount).
+				Int("duplicates", len(writeCodes)).
+				Msg("Ignoring duplicate key error on recheck inserts.")
+		}
 
 		err = nil
 	}
