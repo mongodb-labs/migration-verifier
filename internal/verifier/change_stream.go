@@ -176,6 +176,7 @@ HandlerLoop:
 			)
 
 			if err == nil && batch.resumeToken != nil {
+				fmt.Printf("--- batch persisted: %+v\n", batch.events)
 				persistResumeTokenIfNeeded(ctx, batch.resumeToken)
 			}
 		}
