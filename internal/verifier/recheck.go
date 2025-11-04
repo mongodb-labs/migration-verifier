@@ -373,19 +373,14 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
 	// namespace will be consecutive in this query’s result.
-	cursor, err := recheckColl.Aggregate(
+	cursor, err := recheckColl.Find(
 		ctx,
-		mongo.Pipeline{
-			{{"$sort", bson.D{{"_id", 1}}}},
-			{{"$addFields", bson.D{{"_id.cause", 0}}}},
-			{{"$group", bson.D{
-				{"_id", "$_id"},
-				{"doc", bson.D{{"$first", "$$ROOT"}}},
-			}}},
-			{{"$replaceRoot", bson.D{
-				{"newRoot", "$doc"},
-			}}},
-		},
+		bson.D{},
+		options.Find().
+			SetSort(bson.D{{"_id", 1}}).
+			SetProjection(bson.D{
+				{"_id.cause", 0},
+			}),
 	)
 	if err != nil {
 		return err
@@ -424,6 +419,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		return nil
 	}
 
+	var lastIDRaw bson.RawValue
+
 	// We group these here using a sort rather than using aggregate because aggregate is
 	// subject to a 16MB limit on group size.
 	for cursor.Next(ctx) {
@@ -460,7 +457,19 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 			idsSizer = util.BSONArraySizer{}
 			dataSizeAccum = 0
 			idAccum = idAccum[:0]
+			lastIDRaw = bson.RawValue{}
 		}
+
+		// We’re iterating the rechecks in order such that, if the same doc
+		// gets enqueued from multiple sources, we’ll see those records
+		// consecutively. We can deduplicate here, then, by checking to see if
+		// the doc ID has changed. (NB: At this point we know the namespace
+		// has *not* changed because we just checked for that.)
+		if idRaw.Equal(lastIDRaw) {
+			continue
+		}
+
+		lastIDRaw = idRaw
 
 		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
