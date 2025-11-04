@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strconv"
-	"sync/atomic"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
@@ -168,8 +167,6 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	genCollection := verifier.getRecheckQueueCollection(generation)
 
-	msWaiting := atomic.Int64{}
-
 	start := time.Now()
 	insertThreads := 0
 
@@ -186,8 +183,6 @@ func (verifier *Verifier) insertRecheckDocs(
 						rechecks,
 					)
 
-					start := time.Now()
-
 					// The driver’s InsertMany method inspects each document
 					// to ensure that it has an _id. We can avoid that extra
 					// overhead by calling RunCommand instead.
@@ -195,8 +190,6 @@ func (verifier *Verifier) insertRecheckDocs(
 						retryCtx,
 						requestBSON,
 					).Err()
-
-					msWaiting.Add(time.Since(start).Milliseconds())
 
 					// We expect duplicate-key errors from the above because:
 					//
@@ -275,7 +268,6 @@ func (verifier *Verifier) insertRecheckDocs(
 		verifier.logger.Warn().
 			Int("count", len(documentIDs)).
 			Int("insertThreads", insertThreads).
-			Stringer("avgPending", time.Duration(msWaiting.Load())*time.Millisecond/time.Duration(insertThreads)).
 			Stringer("totalTime", time.Since(start)).
 			Msg("Slow recheck persistence.")
 	}
