@@ -344,7 +344,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	)
 
 	rechecks := suite.fetchVerifierRechecks(ctx, verifier2)
-	assert.Len(suite.T(), rechecks, int(lastDocID), "all source docs should be rechecked")
+	assert.EqualValues(suite.T(), len(rechecks), lastDocID, "all source docs should be rechecked")
 }
 
 // TestChangeStreamResumability creates a verifier, starts its change stream,
