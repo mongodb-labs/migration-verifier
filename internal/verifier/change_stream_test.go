@@ -127,7 +127,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 	suite.Assert().Less(len(cs.Current), 10_000, "event should not be large")
 
 	parsed := ParsedEvent{}
-	suite.Require().NoError(cs.Decode(&parsed))
+	suite.Require().NoError((&parsed).UnmarshalFromBSON(cs.Current))
 	suite.Require().Equal("insert", parsed.OpType)
 
 	suite.Require().Equal(
@@ -144,7 +144,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 
 	suite.Require().True(cs.Next(ctx), "should get event")
 	parsed = ParsedEvent{}
-	suite.Require().NoError(cs.Decode(&parsed))
+	suite.Require().NoError((&parsed).UnmarshalFromBSON(cs.Current))
 	suite.Require().Equal("delete", parsed.OpType)
 	suite.Require().True(parsed.FullDocLen.IsNone(), "full doc len not in delete")
 }
