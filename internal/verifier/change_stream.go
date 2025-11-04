@@ -60,6 +60,7 @@ func (uee UnknownEventError) Error() string {
 
 type changeEventBatch struct {
 	events      []ParsedEvent
+	resumeToken bson.Raw
 	clusterTime bson.Timestamp
 }
 
@@ -156,6 +157,16 @@ HandlerLoop:
 				verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType),
 				"failed to handle change stream events",
 			)
+
+			if err == nil && batch.resumeToken != nil {
+				persistErr := reader.persistChangeStreamResumeToken(ctx, batch.resumeToken)
+				if persistErr != nil {
+					verifier.logger.Warn().
+						Stringer("changeReader", reader).
+						Err(err).
+						Msg("Failed to persist resume token. Because of this, if the verifier restarts, it will have to re-process already-handled change events. This error may be transient, but if it recurs, investigate.")
+				}
+			}
 		}
 	}
 
@@ -470,6 +481,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	case csr.changeEventBatchChan <- changeEventBatch{
 		events: changeEvents,
 
+		resumeToken: cs.ResumeToken(),
+
 		// NB: We know by now that OperationTime is non-nil.
 		clusterTime: *sess.OperationTime(),
 	}:
@@ -493,21 +506,6 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	cs *mongo.ChangeStream,
 	sess *mongo.Session,
 ) error {
-	var lastPersistedTime time.Time
-
-	persistResumeTokenIfNeeded := func() error {
-		if time.Since(lastPersistedTime) <= minChangeStreamPersistInterval {
-			return nil
-		}
-
-		err := csr.persistChangeStreamResumeToken(ctx, cs)
-		if err == nil {
-			lastPersistedTime = time.Now()
-		}
-
-		return err
-	}
-
 	for {
 		var err error
 		var gotwritesOffTimestamp bool
@@ -570,10 +568,6 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 		default:
 			err = csr.readAndHandleOneChangeEventBatch(ctx, ri, cs, sess)
-
-			if err == nil {
-				err = persistResumeTokenIfNeeded()
-			}
 
 			if err != nil {
 				return err
@@ -659,7 +653,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
 
-	err = csr.persistChangeStreamResumeToken(ctx, changeStream)
+	err = csr.persistChangeStreamResumeToken(ctx, changeStream.ResumeToken())
 	if err != nil {
 		return nil, nil, bson.Timestamp{}, err
 	}
@@ -852,9 +846,7 @@ func (csr *ChangeStreamReader) resumeTokenDocID() string {
 	}
 }
 
-func (csr *ChangeStreamReader) persistChangeStreamResumeToken(ctx context.Context, cs *mongo.ChangeStream) error {
-	token := cs.ResumeToken()
-
+func (csr *ChangeStreamReader) persistChangeStreamResumeToken(ctx context.Context, token bson.Raw) error {
 	coll := csr.getChangeStreamMetadataCollection()
 	_, err := coll.ReplaceOne(
 		ctx,
