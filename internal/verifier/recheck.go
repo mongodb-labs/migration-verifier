@@ -328,6 +328,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	defer cursor.Close(ctx)
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
+	eg.SetLimit(100)
 
 	taskCount := 0
 	persistBufferedRechecks := func() error {
