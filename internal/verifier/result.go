@@ -88,19 +88,34 @@ func (vr *VerificationResult) UnmarshalBSON(in []byte) error {
 				return err
 			}
 		case "srctimestamp":
-			var ts bson.Timestamp
-			if err := mbson.UnmarshalElementValue(el, &ts); err != nil {
-				return err
+			rv, err := el.ValueErr()
+			if err != nil {
+				return errors.Wrapf(err, "parsing %#q field", key)
 			}
 
-			vr.SrcTimestamp = option.Some(ts)
+			if rv.Type != bson.TypeNull {
+				var ts bson.Timestamp
+				if err := mbson.UnmarshalRawValue(rv, &ts); err != nil {
+					return err
+				}
+
+				vr.SrcTimestamp = option.Some(ts)
+			}
+
 		case "dsttimestamp":
-			var ts bson.Timestamp
-			if err := mbson.UnmarshalElementValue(el, &ts); err != nil {
-				return err
+			rv, err := el.ValueErr()
+			if err != nil {
+				return errors.Wrapf(err, "parsing %#q field", key)
 			}
 
-			vr.DstTimestamp = option.Some(ts)
+			if rv.Type != bson.TypeNull {
+				var ts bson.Timestamp
+				if err := mbson.UnmarshalRawValue(rv, &ts); err != nil {
+					return err
+				}
+
+				vr.DstTimestamp = option.Some(ts)
+			}
 		}
 	}
 
