@@ -20,7 +20,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
-	"golang.org/x/exp/constraints"
 )
 
 const (
@@ -184,8 +183,6 @@ func (verifier *Verifier) insertRecheckDocs(
 	return nil
 }
 
-// NB: batchBytes is the total size of all recheck documents. It does NOT include
-// the size of the BSON framing: element keys, doc types, etc.
 func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
 	rechecksBSONSize := mbson.GetBSONArraySize(rechecks)
 
@@ -234,78 +231,6 @@ func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
 	binary.LittleEndian.PutUint32(requestBSON, uint32(len(requestBSON)))
 
 	return requestBSON
-}
-
-func deduplicateRechecks[T constraints.Integer](
-	dbNames, collNames []string,
-	documentIDs []bson.RawValue,
-	dataSizes []T,
-) ([]string, []string, []bson.RawValue, []T) {
-	dedupeMap := map[string]map[string]map[string]T{}
-
-	uniqueElems := 0
-
-	for i, dbName := range dbNames {
-		collName := collNames[i]
-		docIDRaw := documentIDs[i]
-		dataSize := dataSizes[i]
-
-		docIDBuf := make([]byte, 1+len(docIDRaw.Value))
-		docIDBuf[0] = byte(docIDRaw.Type)
-		copy(docIDBuf[1:], docIDRaw.Value)
-		docIDStr := string(docIDBuf)
-
-		if _, ok := dedupeMap[dbName]; !ok {
-			dedupeMap[dbName] = map[string]map[string]T{
-				collName: {
-					docIDStr: dataSize,
-				},
-			}
-
-			uniqueElems++
-
-			continue
-		}
-
-		if _, ok := dedupeMap[dbName][collName]; !ok {
-			dedupeMap[dbName][collName] = map[string]T{
-				docIDStr: dataSize,
-			}
-
-			uniqueElems++
-
-			continue
-		}
-
-		if _, ok := dedupeMap[dbName][collName][docIDStr]; !ok {
-			dedupeMap[dbName][collName][docIDStr] = dataSize
-			uniqueElems++
-		}
-	}
-
-	dbNames = make([]string, 0, uniqueElems)
-	collNames = make([]string, 0, uniqueElems)
-	rawDocIDs := make([]bson.RawValue, 0, uniqueElems)
-	dataSizes = make([]T, 0, uniqueElems)
-
-	for dbName, collMap := range dedupeMap {
-		for collName, docMap := range collMap {
-			for docIDStr, dataSize := range docMap {
-				dbNames = append(dbNames, dbName)
-				collNames = append(collNames, collName)
-				rawDocIDs = append(
-					rawDocIDs,
-					bson.RawValue{
-						Type:  bson.Type(docIDStr[0]),
-						Value: []byte(docIDStr[1:]),
-					},
-				)
-				dataSizes = append(dataSizes, dataSize)
-			}
-		}
-	}
-
-	return dbNames, collNames, rawDocIDs, dataSizes
 }
 
 // DropOldRecheckQueueWhileLocked deletes the previous generation’s recheck

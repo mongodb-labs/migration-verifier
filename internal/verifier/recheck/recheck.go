@@ -20,7 +20,17 @@ type PrimaryKey struct {
 	SrcDatabaseName   string        `bson:"db"`
 	SrcCollectionName string        `bson:"coll"`
 	DocumentID        bson.RawValue `bson:"docID"`
-	Rand              int32
+
+	// Rand is here to allow “duplicate” entries. We do this because, with
+	// multiple change streams returning the same events, we expect duplicate
+	// key errors to be frequent. The server is quite slow in handling such
+	// errors, though. To avoid that, while still allowing the _id index to
+	// facilitate easy sorting of the duplicates, we set this field to a
+	// random value on each entry.
+	//
+	// This also avoids duplicate-key slowness where the source workload
+	// involves frequent writes to a small number of documents.
+	Rand int32
 }
 
 var _ bson.Marshaler = &PrimaryKey{}
