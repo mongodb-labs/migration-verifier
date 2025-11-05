@@ -24,6 +24,10 @@ type MismatchInfo struct {
 var _ bson.Unmarshaler = &MismatchInfo{}
 
 func (mi *MismatchInfo) UnmarshalBSON(in []byte) error {
+	panic("Use UnmarshalFromBSON().")
+}
+
+func (mi *MismatchInfo) UnmarshalFromBSON(in []byte) error {
 	for el, err := range mbson.RawElements(bson.Raw(in)) {
 		if err != nil {
 			return errors.Wrap(err, "iterating BSON doc fields")
@@ -102,7 +106,7 @@ func getMismatchesForTasks(
 		}
 
 		var d MismatchInfo
-		if err := cursor.Decode(&d); err != nil {
+		if err := (&d).UnmarshalFromBSON(cursor.Current); err != nil {
 			return nil, errors.Wrapf(err, "parsing discrepancy %+v", cursor.Current)
 		}
 

@@ -327,6 +327,9 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	}
 	defer cursor.Close(ctx)
 
+	eg, egCtx := contextplus.ErrGroup(ctx)
+
+	taskCount := 0
 	persistBufferedRechecks := func() error {
 		if len(idAccum) == 0 {
 			return nil
@@ -334,27 +337,35 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 
 		namespace := prevDBName + "." + prevCollName
 
-		task, err := verifier.InsertDocumentRecheckTask(
-			ctx,
-			idAccum,
-			types.ByteCount(dataSizeAccum),
-			namespace,
-		)
-		if err != nil {
-			return errors.Wrapf(
-				err,
-				"failed to create a %d-document recheck task for collection %#q",
-				len(idAccum),
-				namespace,
-			)
-		}
+		eg.Go(
+			func() error {
+				task, err := verifier.InsertDocumentRecheckTask(
+					egCtx,
+					idAccum,
+					types.ByteCount(dataSizeAccum),
+					namespace,
+				)
+				if err != nil {
+					return errors.Wrapf(
+						err,
+						"failed to create a %d-document recheck task for collection %#q",
+						len(idAccum),
+						namespace,
+					)
+				}
 
-		verifier.logger.Debug().
-			Any("task", task.PrimaryKey).
-			Str("namespace", namespace).
-			Int("numDocuments", len(idAccum)).
-			Str("dataSize", reportutils.FmtBytes(dataSizeAccum)).
-			Msg("Created document recheck task.")
+				verifier.logger.Debug().
+					Any("task", task.PrimaryKey).
+					Str("namespace", namespace).
+					Int("numDocuments", len(idAccum)).
+					Str("dataSize", reportutils.FmtBytes(dataSizeAccum)).
+					Msg("Created document recheck task.")
+
+				return nil
+			},
+		)
+
+		taskCount++
 
 		return nil
 	}
@@ -418,15 +429,20 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 
 	err = cursor.Err()
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "reading persisted rechecks")
 	}
 
 	err = persistBufferedRechecks()
+
+	if err := eg.Wait(); err != nil {
+		return errors.Wrapf(err, "persisting new recheck tasks")
+	}
 
 	if err == nil && totalDocs > 0 {
 		verifier.logger.Info().
 			Int("generation", 1+prevGeneration).
 			Int64("totalDocs", int64(totalDocs)).
+			Int("tasks", taskCount).
 			Str("totalData", reportutils.FmtBytes(totalRecheckData)).
 			Stringer("timeElapsed", time.Since(startTime)).
 			Msg("Scheduled documents for recheck in the new generation.")
