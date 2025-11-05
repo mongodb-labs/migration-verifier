@@ -33,7 +33,7 @@ func (pe *ParsedEvent) UnmarshalBSON(in []byte) error {
 }
 
 // UnmarshalFromBSON unmarshals from BSON without the overhead of
-// bsonl.Unmarshal.
+// bson.Unmarshal.
 func (pe *ParsedEvent) UnmarshalFromBSON(in []byte) error {
 	for el, err := range mbson.RawElements(in) {
 		if err != nil {
