@@ -163,7 +163,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 				canceler(errors.Errorf("generation %d finished", generation))
 				<-inProgressDone
 
-				verifier.PrintVerificationSummary(ctx, GenerationComplete)
+				verifier.PrintVerificationSummary(ctxIn, GenerationComplete)
 
 				return nil
 			}
