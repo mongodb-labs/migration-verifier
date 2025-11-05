@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/mmongo"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -465,26 +466,45 @@ func TolerateSimpleDuplicateKeyInBulk(
 	docsCount int,
 	err error,
 ) error {
-	bwe := mongo.BulkWriteException{}
-	if errors.As(err, &bwe) && bwe.WriteConcernError == nil {
-		writeCodes := lo.Map(
-			bwe.WriteErrors,
-			func(we mongo.BulkWriteError, _ int) int {
-				return we.Code
-			},
-		)
+	if err == nil {
+		return nil
+	}
 
-		codesSet := mapset.NewSet(writeCodes...)
-		if codesSet.Cardinality() == 1 && writeCodes[0] == DuplicateKeyErrCode {
-			// This will be fairly common since we now listen for change events
-			// on both source & destination, so use trace level here.
+	var writeCodes []int
+
+	if bwe := (mongo.BulkWriteException{}); errors.As(err, &bwe) {
+		if bwe.WriteConcernError == nil {
+			writeCodes = lo.Map(
+				bwe.WriteErrors,
+				func(we mongo.BulkWriteError, _ int) int {
+					return we.Code
+				},
+			)
+		}
+	} else if we := (mongo.WriteException{}); errors.As(err, &we) {
+		if we.WriteConcernError == nil {
+			writeCodes = lo.Map(
+				we.WriteErrors,
+				func(we mongo.WriteError, _ int) int {
+					return we.Code
+				},
+			)
+		}
+	}
+
+	codesSet := mapset.NewSet(writeCodes...)
+	if codesSet.Cardinality() == 1 && writeCodes[0] == DuplicateKeyErrCode {
+		// This will be fairly common since we now listen for change events
+		// on both source & destination, so use trace level here, and don’t
+		// do the logger calls at all unless the level warrants.
+		if logger.GetLevel() <= zerolog.TraceLevel {
 			logger.Trace().
 				Int("documentsSubmitted", docsCount).
 				Int("duplicates", len(writeCodes)).
 				Msg("Ignoring duplicate key error on recheck inserts.")
-
-			err = nil
 		}
+
+		err = nil
 	}
 
 	return err

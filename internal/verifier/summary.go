@@ -24,7 +24,8 @@ import (
 const (
 	changeEventsTableMaxSize = 10
 
-	lagWarnThreshold = 2 * time.Minute
+	lagWarnThreshold        = 2 * time.Minute
+	saturationWarnThreshold = 0.9
 )
 
 // NOTE: Each of the following should print one trailing and one final
@@ -561,19 +562,28 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 				lagNote = fmt.Sprintf("lag: %s; ", reportutils.DurationToHMS(lag))
 			}
 
+			saturation := cluster.csReader.GetSaturation()
+
 			fmt.Fprintf(
 				builder,
 				"%s: %s writes per second (%sbuffer %s%% full)\n",
 				cluster.title,
 				reportutils.FmtReal(eventsPerSec),
 				lagNote,
-				reportutils.FmtReal(100*cluster.csReader.GetSaturation()),
+				reportutils.FmtReal(100*saturation),
 			)
 
 			if hasLag && lag > lagWarnThreshold {
-				fmt.Fprintf(
+				fmt.Fprint(
 					builder,
 					"⚠️ Lag is excessive. Verification may fail. See documentation.\n",
+				)
+			}
+
+			if saturation > saturationWarnThreshold {
+				fmt.Fprint(
+					builder,
+					"⚠️ Buffer almost full. Metadata writes are too slow. See documentation.\n",
 				)
 			}
 		}
@@ -616,6 +626,8 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 				)
 			}
 		}
+
+		fmt.Fprint(builder, "\n")
 	}
 
 	if eventsTable != nil {

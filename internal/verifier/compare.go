@@ -322,7 +322,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 				Details:      Missing,
 				Cluster:      ClusterTarget,
 				NameSpace:    namespace,
-				dataSize:     len(docWithTs.doc),
+				dataSize:     int32(len(docWithTs.doc)),
 				SrcTimestamp: option.Some(docWithTs.ts),
 			},
 		)
@@ -339,7 +339,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 				Details:      Missing,
 				Cluster:      ClusterSource,
 				NameSpace:    namespace,
-				dataSize:     len(docWithTs.doc),
+				dataSize:     int32(len(docWithTs.doc)),
 				DstTimestamp: option.Some(docWithTs.ts),
 			},
 		)
@@ -732,7 +732,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 			Details:   Mismatch + fmt.Sprintf(" : Document %s has fields in different order", srcClientDoc.Lookup("_id")),
 			Cluster:   ClusterTarget,
 			NameSpace: namespace,
-			dataSize:  dataSize,
+			dataSize:  int32(dataSize),
 		}}, nil
 	}
 	results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, srcClientDoc.Lookup("_id"), "" /* fieldPrefix */)

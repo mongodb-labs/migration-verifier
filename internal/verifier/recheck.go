@@ -2,8 +2,10 @@ package verifier
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/rand/v2"
+	"strconv"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
@@ -11,8 +13,9 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/recheck"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -26,67 +29,10 @@ const (
 	recheckQueueCollectionNameBase = "recheckQueue"
 )
 
-// RecheckPrimaryKey stores the implicit type of recheck to perform
-// Currently, we only handle document mismatches/change stream updates,
-// so SrcDatabaseName, SrcCollectionName, and DocumentID must always be specified.
-//
-// NB: Order is important here so that, within a given generation,
-// sorting by _id will guarantee that all rechecks for a given
-// namespace appear consecutively.
-type RecheckPrimaryKey struct {
-	SrcDatabaseName   string        `bson:"db"`
-	SrcCollectionName string        `bson:"coll"`
-	DocumentID        bson.RawValue `bson:"docID"`
-
-	// Rand is here to allow “duplicate” entries. We do this because, with
-	// multiple change streams returning the same events, we expect duplicate
-	// key errors to be frequent. The server is quite slow in handling such
-	// errors, though. To avoid that, while still allowing the _id index to
-	// facilitate easy sorting of the duplicates, we set this field to a
-	// random value on each entry.
-	//
-	// This also avoids duplicate-key slowness where the source workload
-	// involves frequent writes to a small number of documents.
-	Rand int32
-}
-
-var _ bson.Marshaler = &RecheckPrimaryKey{}
-
-func (rk *RecheckPrimaryKey) MarshalBSON() ([]byte, error) {
-	return bsoncore.NewDocumentBuilder().
-		AppendString("db", rk.SrcDatabaseName).
-		AppendString("coll", rk.SrcCollectionName).
-		AppendValue("docID", bsoncore.Value{
-			Type: bsoncore.Type(rk.DocumentID.Type),
-			Data: rk.DocumentID.Value,
-		}).
-		AppendInt32("rand", rk.Rand).
-		Build(), nil
-}
-
-// RecheckDoc stores the necessary information to know which documents must be rechecked.
-type RecheckDoc struct {
-	PrimaryKey RecheckPrimaryKey `bson:"_id"`
-
-	// NB: Because we don’t update the recheck queue’s documents, this field
-	// and any others that may be added will remain unchanged even if a recheck
-	// is enqueued multiple times for the same document in the same generation.
-	DataSize int `bson:"dataSize"`
-}
-
-var _ bson.Marshaler = &RecheckDoc{}
-
-func (rd *RecheckDoc) MarshalBSON() ([]byte, error) {
-	return bsoncore.NewDocumentBuilder().
-		AppendDocument("_id", lo.Must(bson.Marshal(rd.PrimaryKey))).
-		AppendInt64("dataSize", int64(rd.DataSize)).
-		Build(), nil
-}
-
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	ctx context.Context,
-	namespace string, documentIDs []bson.RawValue, dataSizes []int) error {
+	namespace string, documentIDs []bson.RawValue, dataSizes []int32) error {
 	dbName, collName := SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
@@ -108,19 +54,10 @@ func (verifier *Verifier) insertRecheckDocs(
 	dbNames []string,
 	collNames []string,
 	documentIDs []bson.RawValue,
-	dataSizes []int,
+	dataSizes []int32,
 ) error {
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
-
-	start := time.Now()
-	dbNames, collNames, documentIDs, dataSizes = deduplicateRechecks(
-		dbNames,
-		collNames,
-		documentIDs,
-		dataSizes,
-	)
-	fmt.Printf("----- deduplicate time: %s\n", time.Since(start))
 
 	generation, _ := verifier.getGenerationWhileLocked()
 
@@ -132,17 +69,29 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	genCollection := verifier.getRecheckQueueCollection(generation)
 
+	start := time.Now()
+	insertThreads := 0
+
 	sendRechecks := func(rechecks []bson.Raw) {
+		insertThreads++
+
 		eg.Go(func() error {
 
 			retryer := retry.New()
 			err := retryer.WithCallback(
 				func(retryCtx context.Context, _ *retry.FuncInfo) error {
-					_, err := genCollection.InsertMany(
-						retryCtx,
-						lo.ToAnySlice(rechecks),
-						options.InsertMany().SetOrdered(false),
+					requestBSON := buildRequestBSON(
+						genCollection.Name(),
+						rechecks,
 					)
+
+					// The driver’s InsertMany method inspects each document
+					// to ensure that it has an _id. We can avoid that extra
+					// overhead by calling RunCommand instead.
+					err := genCollection.Database().RunCommand(
+						retryCtx,
+						requestBSON,
+					).Err()
 
 					// We expect duplicate-key errors from the above because:
 					//
@@ -177,8 +126,8 @@ func (verifier *Verifier) insertRecheckDocs(
 	curRechecks := make([]bson.Raw, 0, recheckBatchCountLimit)
 	curBatchBytes := 0
 	for i, dbName := range dbNames {
-		recheckDoc := RecheckDoc{
-			PrimaryKey: RecheckPrimaryKey{
+		recheckDoc := recheck.Doc{
+			PrimaryKey: recheck.PrimaryKey{
 				SrcDatabaseName:   dbName,
 				SrcCollectionName: collNames[i],
 				DocumentID:        documentIDs[i],
@@ -187,7 +136,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			DataSize: dataSizes[i],
 		}
 
-		recheckRaw, err := bson.Marshal(recheckDoc)
+		recheckRaw, err := recheckDoc.MarshalToBSON()
 		if err != nil {
 			return errors.Wrapf(err, "marshaling recheck for %#q", dbName+"."+collNames[i])
 		}
@@ -218,6 +167,14 @@ func (verifier *Verifier) insertRecheckDocs(
 		)
 	}
 
+	if time.Since(start) > time.Second {
+		verifier.logger.Warn().
+			Int("count", len(documentIDs)).
+			Int("insertThreads", insertThreads).
+			Stringer("totalTime", time.Since(start)).
+			Msg("Slow recheck persistence.")
+	}
+
 	verifier.logger.Trace().
 		Int("generation", generation).
 		Int("count", len(documentIDs)).
@@ -226,101 +183,54 @@ func (verifier *Verifier) insertRecheckDocs(
 	return nil
 }
 
-func deduplicateRechecks(
-	dbNames, collNames []string,
-	documentIDs []bson.RawValue,
-	dataSizes []int,
-) ([]string, []string, []bson.RawValue, []int) {
+func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
+	rechecksBSONSize := mbson.GetBSONArraySize(rechecks)
 
-	/*
-		for i := len(dbNames) - 1; i >= 0; i-- {
-			for j := i - 1; j >= 0; j-- {
-				if dbNames[i] != dbNames[j] {
-					continue
-				}
-
-				if collNames[i] != collNames[j] {
-					continue
-				}
-
-				if !documentIDs[i].Equal(documentIDs[j]) {
-					continue
-				}
-
-				dbNames = slices.Delete(dbNames, i, 1+i)
-				collNames = slices.Delete(collNames, i, 1+i)
-				documentIDs = slices.Delete(documentIDs, i, 1+i)
-				dataSizes = slices.Delete(dataSizes, i, 1+i)
-				break
-			}
-		}
-	*/
-
-	dedupeMap := map[string]map[string]map[string]int{}
-
-	uniqueElems := 0
-
-	for i, dbName := range dbNames {
-		collName := collNames[i]
-		docIDRaw := documentIDs[i]
-		dataSize := dataSizes[i]
-
-		docIDBuf := make([]byte, 1+len(docIDRaw.Value))
-		docIDBuf[0] = byte(docIDRaw.Type)
-		copy(docIDBuf[1:], docIDRaw.Value)
-		docIDStr := string(docIDBuf)
-
-		if _, ok := dedupeMap[dbName]; !ok {
-			dedupeMap[dbName] = map[string]map[string]int{
-				collName: {
-					docIDStr: dataSize,
-				},
-			}
-
-			uniqueElems++
-
-			continue
-		}
-
-		if _, ok := dedupeMap[dbName][collName]; !ok {
-			dedupeMap[dbName][collName] = map[string]int{
-				docIDStr: dataSize,
-			}
-
-			uniqueElems++
-
-			continue
-		}
-
-		if _, ok := dedupeMap[dbName][collName][docIDStr]; !ok {
-			dedupeMap[dbName][collName][docIDStr] = dataSize
-			uniqueElems++
-		}
+	rechecksBSON := make(bson.RawArray, 4, rechecksBSONSize)
+	binary.LittleEndian.PutUint32(rechecksBSON, uint32(rechecksBSONSize))
+	for i, recheck := range rechecks {
+		rechecksBSON = bsoncore.AppendDocumentElement(
+			rechecksBSON,
+			strconv.Itoa(i),
+			recheck,
+		)
 	}
 
-	dbNames = make([]string, 0, uniqueElems)
-	collNames = make([]string, 0, uniqueElems)
-	rawDocIDs := make([]bson.RawValue, 0, uniqueElems)
-	dataSizes = make([]int, 0, uniqueElems)
+	// final NUL
+	rechecksBSON = append(rechecksBSON, 0)
 
-	for dbName, collMap := range dedupeMap {
-		for collName, docMap := range collMap {
-			for docIDStr, dataSize := range docMap {
-				dbNames = append(dbNames, dbName)
-				collNames = append(collNames, collName)
-				rawDocIDs = append(
-					rawDocIDs,
-					bson.RawValue{
-						Type:  bson.Type(docIDStr[0]),
-						Value: []byte(docIDStr[1:]),
-					},
-				)
-				dataSizes = append(dataSizes, dataSize)
-			}
-		}
+	if len(rechecksBSON) != rechecksBSONSize {
+		panic(fmt.Sprintf("rechecks BSON doc size (%d) != expected (%d)", len(rechecksBSON), rechecksBSONSize))
 	}
 
-	return dbNames, collNames, rawDocIDs, dataSizes
+	// This BSON doc takes 39 bytes besides the collection name and requests.
+	expectedBSONSize := 39 + len(collName) + rechecksBSONSize
+	requestBSON := make(bson.Raw, 4, expectedBSONSize)
+
+	requestBSON = bsoncore.AppendStringElement(
+		requestBSON,
+		"insert",
+		collName,
+	)
+	requestBSON = bsoncore.AppendBooleanElement(
+		requestBSON,
+		"ordered",
+		false,
+	)
+	requestBSON = bsoncore.AppendArrayElement(
+		requestBSON,
+		"documents",
+		rechecksBSON,
+	)
+	requestBSON = append(requestBSON, 0)
+
+	if len(requestBSON) != expectedBSONSize {
+		panic(fmt.Sprintf("request BSON size (%d) mismatches expected (%d)", len(requestBSON), expectedBSONSize))
+	}
+
+	binary.LittleEndian.PutUint32(requestBSON, uint32(len(requestBSON)))
+
+	return requestBSON
 }
 
 // DropOldRecheckQueueWhileLocked deletes the previous generation’s recheck
@@ -454,7 +364,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	// We group these here using a sort rather than using aggregate because aggregate is
 	// subject to a 16MB limit on group size.
 	for cursor.Next(ctx) {
-		var doc RecheckDoc
+		var doc recheck.Doc
 		err = cursor.Decode(&doc)
 		if err != nil {
 			return err

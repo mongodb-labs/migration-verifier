@@ -177,7 +177,7 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 	dbNames := make([]string, len(batch.events))
 	collNames := make([]string, len(batch.events))
 	docIDs := make([]bson.RawValue, len(batch.events))
-	dataSizes := make([]int, len(batch.events))
+	dataSizes := make([]int32, len(batch.events))
 
 	latestTimestamp := bson.Timestamp{}
 
@@ -230,14 +230,14 @@ func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch ch
 		docIDs[i] = changeEvent.DocID
 
 		if changeEvent.FullDocLen.OrZero() > 0 {
-			dataSizes[i] = int(changeEvent.FullDocLen.OrZero())
+			dataSizes[i] = int32(changeEvent.FullDocLen.OrZero())
 		} else if changeEvent.FullDocument == nil {
 			// This happens for deletes and for some updates.
 			// The document is probably, but not necessarily, deleted.
 			dataSizes[i] = fauxDocSizeForDeleteEvents
 		} else {
 			// This happens for inserts, replaces, and most updates.
-			dataSizes[i] = len(changeEvent.FullDocument)
+			dataSizes[i] = int32(len(changeEvent.FullDocument))
 		}
 
 		if err := eventRecorder.AddEvent(&changeEvent); err != nil {
@@ -382,7 +382,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 		batchTotalBytes += len(cs.Current)
 
-		if err := cs.Decode(&changeEvents[eventsRead]); err != nil {
+		if err := (&changeEvents[eventsRead]).UnmarshalFromBSON(cs.Current); err != nil {
 			return errors.Wrapf(err, "failed to decode change event to %T", changeEvents[eventsRead])
 		}
 
