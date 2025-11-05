@@ -365,15 +365,12 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	// subject to a 16MB limit on group size.
 	for cursor.Next(ctx) {
 		var doc recheck.Doc
-		err = cursor.Decode(&doc)
+		err = (&doc).UnmarshalFromBSON(cursor.Current)
 		if err != nil {
 			return err
 		}
 
-		idRaw, err := cursor.Current.LookupErr("_id", "docID")
-		if err != nil {
-			return errors.Wrapf(err, "failed to find docID in enqueued recheck %v", cursor.Current)
-		}
+		idRaw := doc.PrimaryKey.DocumentID
 
 		// We persist rechecks if any of these happen:
 		// - the namespace has changed

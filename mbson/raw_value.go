@@ -9,7 +9,7 @@ import (
 )
 
 type bsonCastRecipient interface {
-	bson.Raw | bson.Timestamp | string
+	bson.Raw | bson.Timestamp | string | int32
 }
 
 type bsonSourceTypes interface {
@@ -43,6 +43,10 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 	case string:
 		if str, ok := in.StringValueOK(); ok {
 			return any(str).(T), nil
+		}
+	case int32:
+		if val, ok := in.Int32OK(); ok {
+			return any(val).(T), nil
 		}
 	default:
 		panic(fmt.Sprintf("Unrecognized Go type: %T (maybe augment bsonType?)", in))

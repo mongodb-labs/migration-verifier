@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -33,40 +34,82 @@ type PrimaryKey struct {
 	Rand int32
 }
 
-var _ bson.Marshaler = &PrimaryKey{}
+var _ bson.Marshaler = PrimaryKey{}
+var _ bson.Unmarshaler = &PrimaryKey{}
 
 // MarshalBSON implements bson.Marshaler .. which is only done to prevent
 // the inefficiency of bson.Marshal().
-func (rk PrimaryKey) MarshalBSON() ([]byte, error) {
+func (pk PrimaryKey) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON instead.")
 }
 
-func (rk PrimaryKey) MarshalToBSON() ([]byte, error) {
+func (pk PrimaryKey) MarshalToBSON() ([]byte, error) {
 	// This is a very “hot” path, so we want to minimize allocations.
-	variableSize := len(rk.SrcDatabaseName) + len(rk.SrcCollectionName) + len(rk.DocumentID.Value)
+	variableSize := len(pk.SrcDatabaseName) + len(pk.SrcCollectionName) + len(pk.DocumentID.Value)
 
 	// This document’s nonvariable parts:
 	expectedLen := 42 + variableSize
 
 	doc := make(bson.Raw, 4, expectedLen)
 
-	doc = bsoncore.AppendStringElement(doc, "db", rk.SrcDatabaseName)
-	doc = bsoncore.AppendStringElement(doc, "coll", rk.SrcCollectionName)
+	doc = bsoncore.AppendStringElement(doc, "db", pk.SrcDatabaseName)
+	doc = bsoncore.AppendStringElement(doc, "coll", pk.SrcCollectionName)
 	doc = bsoncore.AppendValueElement(doc, "docID", bsoncore.Value{
-		Type: bsoncore.Type(rk.DocumentID.Type),
-		Data: rk.DocumentID.Value,
+		Type: bsoncore.Type(pk.DocumentID.Type),
+		Data: pk.DocumentID.Value,
 	})
-	doc = bsoncore.AppendInt32Element(doc, "rand", rk.Rand)
+	doc = bsoncore.AppendInt32Element(doc, "rand", pk.Rand)
 
 	doc = append(doc, 0)
 
 	if len(doc) != expectedLen {
-		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", rk, len(doc), expectedLen))
+		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", pk, len(doc), expectedLen))
 	}
 
 	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
 
 	return doc, nil
+}
+
+func (pk *PrimaryKey) UnmarshalBSON(in []byte) error {
+	panic("Use UnmarshalFromBSON instead!")
+}
+
+func (pk *PrimaryKey) UnmarshalFromBSON(in []byte) error {
+	for el, err := range mbson.RawElements(bson.Raw(in)) {
+		if err != nil {
+			return errors.Wrap(err, "iterating BSON doc fields")
+		}
+
+		key, err := el.KeyErr()
+		if err != nil {
+			return errors.Wrap(err, "extracting BSON doc’s field name")
+		}
+
+		switch key {
+		case "db":
+			if err := mbson.UnmarshalElementValue(el, &pk.SrcDatabaseName); err != nil {
+				return err
+			}
+		case "coll":
+			if err := mbson.UnmarshalElementValue(el, &pk.SrcCollectionName); err != nil {
+				return err
+			}
+		case "docID":
+			rv, err := el.ValueErr()
+			if err != nil {
+				return errors.Wrapf(err, "parsing %#q field", key)
+			}
+
+			pk.DocumentID = rv
+		case "rand":
+			if err := mbson.UnmarshalElementValue(el, &pk.Rand); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // Doc stores the necessary information to know which documents must be rechecked.
@@ -79,7 +122,8 @@ type Doc struct {
 	DataSize int32 `bson:"dataSize"`
 }
 
-var _ bson.Marshaler = &Doc{}
+var _ bson.Marshaler = Doc{}
+var _ bson.Unmarshaler = &Doc{}
 
 // MarshalBSON implements bson.Marshaler .. which is only done to prevent
 // the inefficiency of bson.Marshal().
@@ -109,4 +153,39 @@ func (rd Doc) MarshalToBSON() ([]byte, error) {
 	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
 
 	return doc, nil
+}
+
+func (rd *Doc) UnmarshalBSON(in []byte) error {
+	panic("Use UnmarshalFromBSON instead!")
+}
+
+func (rd *Doc) UnmarshalFromBSON(in []byte) error {
+	for el, err := range mbson.RawElements(bson.Raw(in)) {
+		if err != nil {
+			return errors.Wrap(err, "iterating BSON doc fields")
+		}
+
+		key, err := el.KeyErr()
+		if err != nil {
+			return errors.Wrap(err, "extracting BSON doc’s field name")
+		}
+
+		switch key {
+		case "_id":
+			var rvDoc bson.Raw
+			if err := mbson.UnmarshalElementValue(el, &rvDoc); err != nil {
+				return err
+			}
+
+			if err := (&rd.PrimaryKey).UnmarshalFromBSON(rvDoc); err != nil {
+				return err
+			}
+		case "dataSize":
+			if err := mbson.UnmarshalElementValue(el, &rd.DataSize); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
