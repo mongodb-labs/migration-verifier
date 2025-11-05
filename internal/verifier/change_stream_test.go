@@ -306,6 +306,16 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 		"the verifier should enqueue a recheck",
 	)
 
+	require.Len(suite.T(), recheckDocs, 1)
+
+	recheckDocs[0]["_id"] = lo.Filter(
+		recheckDocs[0]["_id"].(bson.D),
+		func(el bson.E, _ int) bool {
+			return el.Key != "rand"
+		},
+	)
+	delete(recheckDocs[0], "rand")
+
 	suite.Assert().Equal(
 		bson.D{
 			{"db", suite.DBNameForTest()},
@@ -335,7 +345,21 @@ func (suite *IntegrationTestSuite) fetchPendingVerifierRechecks(ctx context.Cont
 	recheckDocs := []bson.M{}
 
 	recheckColl := verifier.getRecheckQueueCollection(1 + verifier.generation)
-	cursor, err := recheckColl.Find(ctx, bson.D{})
+	cursor, err := recheckColl.Aggregate(
+		ctx,
+		mongo.Pipeline{
+			{{"$addFields", bson.D{
+				{"_id.rand", "$$REMOVE"},
+			}}},
+			{{"$group", bson.D{
+				{"_id", "$_id"},
+				{"doc", bson.D{{"$first", "$$ROOT"}}},
+			}}},
+			{{"$replaceRoot", bson.D{
+				{"newRoot", "$doc"},
+			}}},
+		},
+	)
 
 	if !errors.Is(err, mongo.ErrNoDocuments) {
 		suite.Require().NoError(err)

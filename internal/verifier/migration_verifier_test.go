@@ -26,7 +26,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
-	"github.com/10gen/migration-verifier/mseq"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
@@ -1145,15 +1144,13 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	namespace := "testdb.testns"
 
-	makeDocChannel := func(docs []bson.D) <-chan seqWithTs {
-		theChan := make(chan seqWithTs, len(docs))
+	makeDocChannel := func(docs []bson.D) <-chan docWithTs {
+		theChan := make(chan docWithTs, len(docs))
 
 		for d, doc := range docs {
-			theChan <- seqWithTs{
-				seq: mseq.FromSliceWithNilErr(
-					mslices.Of(testutil.MustMarshal(doc)),
-				),
-				ts: bson.Timestamp{1, uint32(d)},
+			theChan <- docWithTs{
+				doc: testutil.MustMarshal(doc),
+				ts:  bson.Timestamp{1, uint32(d)},
 			}
 		}
 
