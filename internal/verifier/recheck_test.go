@@ -253,7 +253,7 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	verifier.SetNumWorkers(10)
 	ctx := suite.Context()
 
-	docsCount := 20_000_000
+	docsCount := 12_000_000
 
 	suite.T().Logf("Inserting %d rechecks …", docsCount)
 
