@@ -21,7 +21,7 @@ func TestPrimaryKeyBSON(t *testing.T) {
 
 	assert.Panics(
 		t,
-		func() { bson.Marshal(pk) },
+		func() { _, _ = bson.Marshal(pk) },
 		"plain Marshal() panics",
 	)
 
@@ -44,7 +44,7 @@ func TestDocBSON(t *testing.T) {
 
 	assert.Panics(
 		t,
-		func() { bson.Marshal(doc) },
+		func() { _, _ = bson.Marshal(doc) },
 		"plain Marshal() panics",
 	)
 
