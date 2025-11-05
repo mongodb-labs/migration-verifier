@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -18,6 +19,39 @@ const (
 type MismatchInfo struct {
 	Task   bson.ObjectID
 	Detail VerificationResult
+}
+
+var _ bson.Unmarshaler = &MismatchInfo{}
+
+func (mi *MismatchInfo) UnmarshalBSON(in []byte) error {
+	for el, err := range mbson.RawElements(bson.Raw(in)) {
+		if err != nil {
+			return errors.Wrap(err, "iterating BSON doc fields")
+		}
+
+		key, err := el.KeyErr()
+		if err != nil {
+			return errors.Wrap(err, "extracting BSON doc’s field name")
+		}
+
+		switch key {
+		case "task":
+			if err := mbson.UnmarshalElementValue(el, &mi.Task); err != nil {
+				return err
+			}
+		case "detail":
+			var doc bson.Raw
+			if err := mbson.UnmarshalElementValue(el, &doc); err != nil {
+				return err
+			}
+
+			if err := (&mi.Detail).UnmarshalBSON(doc); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
