@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -27,96 +28,6 @@ const (
 
 	recheckQueueCollectionNameBase = "recheckQueue"
 )
-
-// RecheckPrimaryKey stores the implicit type of recheck to perform
-// Currently, we only handle document mismatches/change stream updates,
-// so SrcDatabaseName, SrcCollectionName, and DocumentID must always be specified.
-//
-// NB: Order is important here so that, within a given generation,
-// sorting by _id will guarantee that all rechecks for a given
-// namespace appear consecutively.
-type RecheckPrimaryKey struct {
-	SrcDatabaseName   string        `bson:"db"`
-	SrcCollectionName string        `bson:"coll"`
-	DocumentID        bson.RawValue `bson:"docID"`
-}
-
-var _ bson.Marshaler = &RecheckPrimaryKey{}
-
-// MarshalBSON implements bson.Marshaler .. which is only done to prevent
-// the inefficiency of bson.Marshal().
-func (rk RecheckPrimaryKey) MarshalBSON() ([]byte, error) {
-	panic("Use MarshalToBSON instead.")
-}
-
-func (rk RecheckPrimaryKey) MarshalToBSON() ([]byte, error) {
-	// This is a very “hot” path, so we want to minimize allocations.
-	variableSize := len(rk.SrcDatabaseName) + len(rk.SrcCollectionName) + len(rk.DocumentID.Value)
-
-	// This document’s nonvariable parts comprise 32 bytes.
-	expectedLen := 32 + variableSize
-
-	doc := make(bson.Raw, 4, expectedLen)
-
-	doc = bsoncore.AppendStringElement(doc, "db", rk.SrcDatabaseName)
-	doc = bsoncore.AppendStringElement(doc, "coll", rk.SrcCollectionName)
-	doc = bsoncore.AppendValueElement(doc, "docID", bsoncore.Value{
-		Type: bsoncore.Type(rk.DocumentID.Type),
-		Data: rk.DocumentID.Value,
-	})
-
-	doc = append(doc, 0)
-
-	if len(doc) != expectedLen {
-		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", rk, len(doc), expectedLen))
-	}
-
-	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
-
-	return doc, nil
-}
-
-// RecheckDoc stores the necessary information to know which documents must be rechecked.
-type RecheckDoc struct {
-	PrimaryKey RecheckPrimaryKey `bson:"_id"`
-
-	// NB: Because we don’t update the recheck queue’s documents, this field
-	// and any others that may be added will remain unchanged even if a recheck
-	// is enqueued multiple times for the same document in the same generation.
-	DataSize int32 `bson:"dataSize"`
-}
-
-var _ bson.Marshaler = &RecheckDoc{}
-
-// MarshalBSON implements bson.Marshaler .. which is only done to prevent
-// the inefficiency of bson.Marshal().
-func (rd RecheckDoc) MarshalBSON() ([]byte, error) {
-	panic("Use MarshalToBSON instead.")
-}
-
-func (rd RecheckDoc) MarshalToBSON() ([]byte, error) {
-	keyRaw, err := rd.PrimaryKey.MarshalToBSON()
-	if err != nil {
-		return nil, errors.Wrapf(err, "marshaling recheck primary key")
-	}
-
-	// This document’s nonvariable parts comprise 24 bytes.
-	expectedLen := 24 + len(keyRaw)
-
-	doc := make(bson.Raw, 4, expectedLen)
-	doc = bsoncore.AppendDocumentElement(doc, "_id", keyRaw)
-	doc = bsoncore.AppendInt32Element(doc, "dataSize", int32(rd.DataSize))
-
-	doc = append(doc, 0)
-
-	if len(doc) != expectedLen {
-		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", rd, len(doc), expectedLen))
-	}
-
-	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
-
-	return doc, nil
-}
 
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
@@ -224,8 +135,8 @@ func (verifier *Verifier) insertRecheckDocs(
 	curRechecks := make([]bson.Raw, 0, recheckBatchCountLimit)
 	curBatchBytes := 0
 	for i, dbName := range dbNames {
-		recheckDoc := RecheckDoc{
-			PrimaryKey: RecheckPrimaryKey{
+		recheckDoc := recheck.Doc{
+			PrimaryKey: recheck.PrimaryKey{
 				SrcDatabaseName:   dbName,
 				SrcCollectionName: collNames[i],
 				DocumentID:        rawDocIDs[i],
@@ -527,7 +438,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	// We group these here using a sort rather than using aggregate because aggregate is
 	// subject to a 16MB limit on group size.
 	for cursor.Next(ctx) {
-		var doc RecheckDoc
+		var doc recheck.Doc
 		err = cursor.Decode(&doc)
 		if err != nil {
 			return err

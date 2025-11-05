@@ -8,6 +8,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/rs/zerolog"
@@ -33,9 +34,9 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 	recheckDocs := suite.fetchRecheckDocs(ctx, verifier)
 
 	suite.Assert().Equal(
-		[]RecheckDoc{
+		[]recheck.Doc{
 			{
-				PrimaryKey: RecheckPrimaryKey{
+				PrimaryKey: recheck.PrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
 					DocumentID:        mbson.ToRawValue("theDocID"),
@@ -68,9 +69,9 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 
 	recheckDocs = suite.fetchRecheckDocs(ctx, verifier)
 	suite.Assert().Equal(
-		[]RecheckDoc{
+		[]recheck.Doc{
 			{
-				PrimaryKey: RecheckPrimaryKey{
+				PrimaryKey: recheck.PrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
 					DocumentID:        mbson.ToRawValue("theDocID"),
@@ -82,7 +83,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 	)
 }
 
-func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifier *Verifier) []RecheckDoc {
+func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifier *Verifier) []recheck.Doc {
 	metaColl := verifier.getRecheckQueueCollection(verifier.generation)
 
 	cursor, err := metaColl.Find(
@@ -92,7 +93,7 @@ func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifie
 	)
 	suite.Require().NoError(err, "find recheck docs")
 
-	var results []RecheckDoc
+	var results []recheck.Doc
 	err = cursor.All(ctx, &results)
 	suite.Require().NoError(err, "read recheck docs cursor")
 
@@ -277,8 +278,8 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
-	d1 := RecheckDoc{
-		PrimaryKey: RecheckPrimaryKey{
+	d1 := recheck.Doc{
+		PrimaryKey: recheck.PrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
 			DocumentID:        mbson.ToRawValue(id1),
@@ -337,8 +338,8 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	dataSizes := []int32{400 * 1024, 700 * 1024, 1024}
 	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
-	d1 := RecheckDoc{
-		PrimaryKey: RecheckPrimaryKey{
+	d1 := recheck.Doc{
+		PrimaryKey: recheck.PrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
 			DocumentID:        mbson.ToRawValue(id1),
@@ -446,8 +447,8 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 	err := insertRecheckDocs(ctx, verifier, "testDB", "testColl", ids, dataSizes)
 	suite.Require().NoError(err)
 
-	d1 := RecheckDoc{
-		PrimaryKey: RecheckPrimaryKey{
+	d1 := recheck.Doc{
+		PrimaryKey: recheck.PrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
 			DocumentID:        mbson.ToRawValue(id1),

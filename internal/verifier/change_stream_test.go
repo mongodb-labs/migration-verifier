@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
@@ -892,7 +893,7 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	_, err = coll2.InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 
-	var rechecks []RecheckDoc
+	var rechecks []recheck.Doc
 	require.Eventually(
 		suite.T(),
 		func() bool {
