@@ -20,6 +20,7 @@ type PrimaryKey struct {
 	SrcDatabaseName   string        `bson:"db"`
 	SrcCollectionName string        `bson:"coll"`
 	DocumentID        bson.RawValue `bson:"docID"`
+	Rand              int32
 }
 
 var _ bson.Marshaler = &PrimaryKey{}

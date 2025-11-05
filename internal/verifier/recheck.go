@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/rand/v2"
 	"strconv"
 	"time"
 
@@ -46,13 +47,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		Int("count", len(documentIDs)).
 		Msg("Persisting rechecks for mismatched or missing documents.")
 
-	return verifier.insertRecheckDocs(
-		ctx,
-		dbNames,
-		collNames,
-		documentIDs,
-		dataSizes,
-	)
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes)
 }
 
 func (verifier *Verifier) insertRecheckDocs(
@@ -65,16 +60,13 @@ func (verifier *Verifier) insertRecheckDocs(
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
 
-	dbNames, collNames, rawDocIDs, dataSizes := deduplicateRechecks(
-		dbNames,
-		collNames,
-		documentIDs,
-		dataSizes,
-	)
-
 	generation, _ := verifier.getGenerationWhileLocked()
 
 	eg, groupCtx := contextplus.ErrGroup(ctx)
+
+	// MongoDB’s Go driver starts failing requests if we try to exceed
+	// its connection pool’s size. To avoid that, we limit our concurrency.
+	eg.SetLimit(100)
 
 	genCollection := verifier.getRecheckQueueCollection(generation)
 
@@ -139,7 +131,8 @@ func (verifier *Verifier) insertRecheckDocs(
 			PrimaryKey: recheck.PrimaryKey{
 				SrcDatabaseName:   dbName,
 				SrcCollectionName: collNames[i],
-				DocumentID:        rawDocIDs[i],
+				DocumentID:        documentIDs[i],
+				Rand:              rand.Int32(),
 			},
 			DataSize: dataSizes[i],
 		}
@@ -376,6 +369,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		Int("rechecksCount", int(rechecksCount)).
 		Msgf("Creating recheck tasks from prior generation’s enqueued rechecks.")
 
+	startTime := time.Now()
+
 	// We generate one recheck task per collection, unless
 	// 1) The size of the list of IDs would exceed 12MB (a very conservative way of avoiding
 	//    the 16MB BSON limit)
@@ -396,7 +391,11 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	cursor, err := recheckColl.Find(
 		ctx,
 		bson.D{},
-		options.Find().SetSort(bson.D{{"_id", 1}}),
+		options.Find().
+			SetSort(bson.D{{"_id", 1}}).
+			SetProjection(bson.D{
+				{"_id.rand", 0},
+			}),
 	)
 	if err != nil {
 		return err
@@ -435,6 +434,8 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 		return nil
 	}
 
+	var lastIDRaw bson.RawValue
+
 	// We group these here using a sort rather than using aggregate because aggregate is
 	// subject to a 16MB limit on group size.
 	for cursor.Next(ctx) {
@@ -471,7 +472,19 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 			idsSizer = util.BSONArraySizer{}
 			dataSizeAccum = 0
 			idAccum = idAccum[:0]
+			lastIDRaw = bson.RawValue{}
 		}
+
+		// We’re iterating the rechecks in order such that, if the same doc
+		// gets enqueued from multiple sources, we’ll see those records
+		// consecutively. We can deduplicate here, then, by checking to see if
+		// the doc ID has changed. (NB: At this point we know the namespace
+		// has *not* changed because we just checked for that.)
+		if idRaw.Equal(lastIDRaw) {
+			continue
+		}
+
+		lastIDRaw = idRaw
 
 		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
@@ -493,6 +506,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 			Int("generation", 1+prevGeneration).
 			Int64("totalDocs", int64(totalDocs)).
 			Str("totalData", reportutils.FmtBytes(totalRecheckData)).
+			Stringer("timeElapsed", time.Since(startTime)).
 			Msg("Scheduled documents for recheck in the new generation.")
 	}
 

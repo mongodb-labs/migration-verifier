@@ -1,6 +1,7 @@
 package recheck
 
 import (
+	"math/rand/v2"
 	"testing"
 
 	"github.com/10gen/migration-verifier/mbson"
@@ -15,6 +16,7 @@ func TestPrimaryKeyBSON(t *testing.T) {
 		SrcDatabaseName:   "mydb",
 		SrcCollectionName: "mycoll",
 		DocumentID:        mbson.ToRawValue(123123),
+		Rand:              rand.Int32(),
 	}
 
 	assert.Panics(
