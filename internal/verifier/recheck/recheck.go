@@ -45,8 +45,8 @@ func (rk PrimaryKey) MarshalToBSON() ([]byte, error) {
 	// This is a very “hot” path, so we want to minimize allocations.
 	variableSize := len(rk.SrcDatabaseName) + len(rk.SrcCollectionName) + len(rk.DocumentID.Value)
 
-	// This document’s nonvariable parts comprise 32 bytes.
-	expectedLen := 32 + variableSize
+	// This document’s nonvariable parts:
+	expectedLen := 42 + variableSize
 
 	doc := make(bson.Raw, 4, expectedLen)
 
@@ -56,6 +56,7 @@ func (rk PrimaryKey) MarshalToBSON() ([]byte, error) {
 		Type: bsoncore.Type(rk.DocumentID.Type),
 		Data: rk.DocumentID.Value,
 	})
+	doc = bsoncore.AppendInt32Element(doc, "rand", rk.Rand)
 
 	doc = append(doc, 0)
 
