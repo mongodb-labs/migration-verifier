@@ -118,6 +118,9 @@ func (verifier *Verifier) insertRecheckDocs(
 	generation, _ := verifier.getGenerationWhileLocked()
 
 	eg, groupCtx := contextplus.ErrGroup(ctx)
+
+	// MongoDB’s Go driver starts failing requests if we try to exceed
+	// its connection pool’s size. To avoid that, we limit our concurrency.
 	eg.SetLimit(100)
 
 	genCollection := verifier.getRecheckQueueCollection(generation)
