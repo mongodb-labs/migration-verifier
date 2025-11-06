@@ -199,8 +199,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 	return &task, err
 }
 
-func (verifier *Verifier) InsertDocumentRecheckTask(
-	ctx context.Context,
+func (verifier *Verifier) createDocumentRecheckTask(
 	ids []any,
 	dataSize types.ByteCount,
 	srcNamespace string,
@@ -214,7 +213,7 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 		}
 	}
 
-	task := VerificationTask{
+	return &VerificationTask{
 		PrimaryKey: bson.NewObjectID(),
 		Generation: verifier.generation,
 		Ids:        ids,
@@ -226,20 +225,24 @@ func (verifier *Verifier) InsertDocumentRecheckTask(
 		},
 		SourceDocumentCount: types.DocumentCount(len(ids)),
 		SourceByteCount:     dataSize,
-	}
+	}, nil
+}
 
+func (verifier *Verifier) insertDocumentRecheckTasks(
+	ctx context.Context,
+	tasks []bson.Raw,
+) error {
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
-			_, err := verifier.verificationTaskCollection().InsertOne(ctx, &task)
+			_, err := verifier.verificationTaskCollection().InsertMany(ctx, tasks)
 
 			return err
 		},
-		"persisting recheck task for namespace %#q (%d document(s))",
-		task.QueryFilter.Namespace,
-		len(ids),
+		"persisting %d recheck tasks",
+		len(tasks),
 	).Run(ctx, verifier.logger)
 
-	return &task, err
+	return err
 }
 
 func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
