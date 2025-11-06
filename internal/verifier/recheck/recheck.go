@@ -43,7 +43,7 @@ func (pk PrimaryKey) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON instead.")
 }
 
-func (pk PrimaryKey) MarshalToBSON() ([]byte, error) {
+func (pk PrimaryKey) MarshalToBSON() []byte {
 	// This is a very “hot” path, so we want to minimize allocations.
 	variableSize := len(pk.SrcDatabaseName) + len(pk.SrcCollectionName) + len(pk.DocumentID.Value)
 
@@ -68,7 +68,7 @@ func (pk PrimaryKey) MarshalToBSON() ([]byte, error) {
 
 	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
 
-	return doc, nil
+	return doc
 }
 
 func (pk *PrimaryKey) UnmarshalBSON(in []byte) error {
@@ -131,11 +131,8 @@ func (rd Doc) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON instead.")
 }
 
-func (rd Doc) MarshalToBSON() ([]byte, error) {
-	keyRaw, err := rd.PrimaryKey.MarshalToBSON()
-	if err != nil {
-		return nil, errors.Wrapf(err, "marshaling recheck primary key")
-	}
+func (rd Doc) MarshalToBSON() []byte {
+	keyRaw := rd.PrimaryKey.MarshalToBSON()
 
 	// This document’s nonvariable parts comprise 24 bytes.
 	expectedLen := 24 + len(keyRaw)
@@ -152,7 +149,7 @@ func (rd Doc) MarshalToBSON() ([]byte, error) {
 
 	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
 
-	return doc, nil
+	return doc
 }
 
 func (rd *Doc) UnmarshalBSON(in []byte) error {

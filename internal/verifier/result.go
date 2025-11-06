@@ -1,10 +1,14 @@
 package verifier
 
 import (
+	"encoding/binary"
+	"fmt"
+
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 const (
@@ -49,7 +53,61 @@ func (vr VerificationResult) DocumentIsMissing() bool {
 	return vr.Details == Missing && vr.Field == ""
 }
 
+var _ bson.Marshaler = VerificationResult{}
 var _ bson.Unmarshaler = &VerificationResult{}
+
+func (vr VerificationResult) MarshalBSON() ([]byte, error) {
+	panic("Use MarshalToBSON.")
+}
+
+func (vr VerificationResult) MarshalToBSON() []byte {
+	bsonLen := 4 + // header
+		1 + 2 + 1 + // ID
+		1 + 5 + 1 + // Field
+		1 + 6 + 1 + // Details
+		1 + 6 + 1 + // Cluster
+		1 + 9 + 1 + // NameSpace
+		0 // NUL
+
+	bsonLen += len(vr.ID.Value) + len(vr.Field) + len(vr.Details) + len(vr.Cluster) + len(vr.NameSpace)
+
+	if vr.SrcTimestamp.IsSome() {
+		bsonLen += 1 + 12 + 1 + 8
+	}
+
+	if vr.DstTimestamp.IsSome() {
+		bsonLen += 1 + 12 + 1 + 8
+	}
+
+	buf := make(bson.Raw, 4, bsonLen)
+
+	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
+
+	buf = bsoncore.AppendValueElement(buf, "id", bsoncore.Value{
+		Type: bsoncore.Type(vr.ID.Type),
+		Data: vr.ID.Value,
+	})
+	buf = bsoncore.AppendStringElement(buf, "field", vr.Field)
+	buf = bsoncore.AppendStringElement(buf, "details", vr.Details)
+	buf = bsoncore.AppendStringElement(buf, "cluster", vr.Cluster)
+	buf = bsoncore.AppendStringElement(buf, "namespace", vr.NameSpace)
+
+	if ts, has := vr.SrcTimestamp.Get(); has {
+		buf = bsoncore.AppendTimestampElement(buf, "srctimestamp", ts.T, ts.I)
+	}
+
+	if ts, has := vr.DstTimestamp.Get(); has {
+		buf = bsoncore.AppendTimestampElement(buf, "dsttimestamp", ts.T, ts.I)
+	}
+
+	buf = append(buf, 0)
+
+	if len(buf) != bsonLen {
+		panic(fmt.Sprintf("BSON length is %d but expected %d", len(buf), bsonLen))
+	}
+
+	return buf
+}
 
 func (vr *VerificationResult) UnmarshalBSON(in []byte) error {
 	panic("Use UnmarshalFromBSON.")

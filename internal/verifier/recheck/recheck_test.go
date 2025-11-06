@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/10gen/migration-verifier/mbson"
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -25,7 +24,7 @@ func TestPrimaryKeyBSON(t *testing.T) {
 		"plain Marshal() panics",
 	)
 
-	raw := lo.Must(pk.MarshalToBSON())
+	raw := pk.MarshalToBSON()
 
 	assert.NoError(t, bson.Unmarshal(raw, &bson.D{}), "marshal outputs BSON")
 
@@ -56,7 +55,7 @@ func TestDocBSON(t *testing.T) {
 		"plain Marshal() panics",
 	)
 
-	raw := lo.Must(doc.MarshalToBSON())
+	raw := doc.MarshalToBSON()
 
 	assert.NoError(t, bson.Unmarshal(raw, &bson.D{}), "marshal outputs BSON")
 

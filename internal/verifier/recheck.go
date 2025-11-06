@@ -136,10 +136,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			DataSize: dataSizes[i],
 		}
 
-		recheckRaw, err := recheckDoc.MarshalToBSON()
-		if err != nil {
-			return errors.Wrapf(err, "marshaling recheck for %#q", dbName+"."+collNames[i])
-		}
+		recheckRaw := recheckDoc.MarshalToBSON()
 
 		curRechecks = append(
 			curRechecks,
