@@ -51,8 +51,11 @@ func (vr VerificationResult) DocumentIsMissing() bool {
 
 var _ bson.Unmarshaler = &VerificationResult{}
 
-// TODO: Forbid UnmarshalBSON.
 func (vr *VerificationResult) UnmarshalBSON(in []byte) error {
+	panic("Use UnmarshalFromBSON.")
+}
+
+func (vr *VerificationResult) UnmarshalFromBSON(in []byte) error {
 	for el, err := range mbson.RawElements(bson.Raw(in)) {
 		if err != nil {
 			return errors.Wrap(err, "iterating BSON doc fields")
