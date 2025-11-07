@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -106,8 +107,7 @@ func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifie
 
 	suite.Require().NoError(err, "find recheck docs")
 
-	var results []recheck.Doc
-	err = cursor.All(ctx, &results)
+	results, err := mmongo.UnmarshalCursor[recheck.Doc](ctx, cursor)
 	suite.Require().NoError(err, "read recheck docs cursor")
 
 	return results
