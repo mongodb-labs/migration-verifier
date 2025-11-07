@@ -1,7 +1,9 @@
 package verifier
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -18,10 +20,12 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 )
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
@@ -244,6 +248,150 @@ func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx cont
 		}
 		suite.Require().NoError(err)
 	}()
+}
+
+func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
+	ctx := suite.T().Context()
+
+	verifier1 := suite.BuildVerifier()
+
+	// Use of linearizable read concern below seems to freeze pre-4.4 servers.
+	srcVersion := verifier1.srcClusterInfo.VersionArray
+	if util.CmpMinorVersions([2]int(srcVersion), [2]int{4, 4}) == -1 {
+		suite.T().Skipf("Source version (%v) is too old for this test.", srcVersion)
+	}
+
+	srcDB := verifier1.srcClient.Database(suite.DBNameForTest())
+	srcColl := srcDB.Collection("coll")
+
+	require.NoError(
+		suite.T(),
+		srcDB.CreateCollection(ctx, srcColl.Name()),
+	)
+
+	v1Ctx, v1Cancel := contextplus.WithCancelCause(ctx)
+	defer v1Cancel(ctx.Err())
+	suite.startSrcChangeStreamReaderAndHandler(v1Ctx, verifier1)
+
+	changeStreamMetaColl := verifier1.srcChangeStreamReader.getChangeStreamMetadataCollection()
+
+	var originalResumeToken bson.Raw
+
+	assert.Eventually(
+		suite.T(),
+		func() bool {
+			var err error
+			originalResumeToken, err = changeStreamMetaColl.FindOne(ctx, bson.D{}).Raw()
+			return err == nil
+		},
+		time.Minute,
+		50*time.Millisecond,
+		"should see a change stream resume token persisted",
+	)
+
+	insertCtx, cancelInserts := contextplus.WithCancelCause(ctx)
+	defer cancelInserts(ctx.Err())
+	insertsDone := make(chan struct{})
+	go func() {
+		defer func() {
+			close(insertsDone)
+		}()
+
+		sess, err := verifier1.srcClient.StartSession(
+			options.Session().SetCausalConsistency(true),
+		)
+		require.NoError(suite.T(), err)
+
+		sessCtx := mongo.NewSessionContext(insertCtx, sess)
+
+		docID := int32(1)
+		for {
+			_, err := srcColl.InsertOne(
+				sessCtx,
+				bson.D{{"_id", docID}},
+			)
+
+			if err != nil {
+				require.ErrorIs(suite.T(), err, context.Canceled)
+				return
+			}
+
+			docID++
+		}
+	}()
+
+	assert.Eventually(
+		suite.T(),
+		func() bool {
+			rt, err := changeStreamMetaColl.FindOne(ctx, bson.D{}).Raw()
+			require.NoError(suite.T(), err)
+
+			suite.T().Logf("found rt: %v\n", rt)
+
+			return !bytes.Equal(rt, originalResumeToken)
+		},
+		time.Minute,
+		50*time.Millisecond,
+		"should see a new change stream resume token persisted",
+	)
+
+	v1Cancel(fmt.Errorf("killing verifier1"))
+
+	verifier2 := suite.BuildVerifier()
+	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier2)
+
+	cancelInserts(fmt.Errorf("verifier2 started"))
+	<-insertsDone
+
+	lastIDRes := srcColl.Database().Collection(
+		srcColl.Name(),
+		options.Collection().SetReadConcern(readconcern.Linearizable()),
+	).FindOne(
+		ctx,
+		bson.D{},
+		options.FindOne().
+			SetSort(bson.D{{"_id", -1}}),
+	)
+	require.NoError(suite.T(), lastIDRes.Err())
+
+	lastDocID := lo.Must(lo.Must(lastIDRes.Raw()).LookupErr("_id")).Int32()
+
+	assert.Eventually(
+		suite.T(),
+		func() bool {
+			rechecks := suite.fetchVerifierRechecks(ctx, verifier2)
+
+			return lo.SomeBy(
+				rechecks,
+				func(cur bson.M) bool {
+					id := cur["_id"].(bson.D)
+
+					for _, el := range id {
+						if el.Key != "docID" {
+							continue
+						}
+
+						return el.Value.(int32) == lastDocID
+					}
+
+					panic(fmt.Sprintf("no docID in _id: %+v", id))
+				},
+			)
+		},
+		time.Minute,
+		100*time.Millisecond,
+		"last-inserted doc shows as recheck",
+	)
+
+	sess := lo.Must(verifier2.verificationDatabase().Client().StartSession())
+	sctx := mongo.NewSessionContext(ctx, sess)
+
+	rechecks := suite.fetchVerifierRechecks(sctx, verifier2)
+	if !assert.EqualValues(suite.T(), lastDocID, len(rechecks), "all source docs should be rechecked") {
+		for _, recheck := range rechecks {
+			suite.T().Logf("found recheck: %v", recheck)
+		}
+	}
 }
 
 // TestChangeStreamResumability creates a verifier, starts its change stream,

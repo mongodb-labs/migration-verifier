@@ -1,6 +1,7 @@
 package util
 
 import (
+	"cmp"
 	"context"
 
 	"github.com/10gen/migration-verifier/internal/logger"
@@ -22,6 +23,10 @@ const (
 	TopologySharded ClusterTopology = "sharded"
 	TopologyReplset ClusterTopology = "replset"
 )
+
+func CmpMinorVersions(a, b [2]int) int {
+	return cmp.Or(cmp.Compare(a[0], b[0]), cmp.Compare(a[1], b[1]))
+}
 
 func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Client) (ClusterInfo, error) {
 	va, err := getVersionArray(ctx, client)
