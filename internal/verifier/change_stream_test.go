@@ -15,7 +15,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
-	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/pkg/errors"
@@ -1053,16 +1052,28 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			recheckColl := verifier.getRecheckQueueCollection(1 + verifier.generation)
-			cursor, err := recheckColl.Find(ctx, bson.D{})
-			if errors.Is(err, mongo.ErrNoDocuments) {
+			rechecksM := suite.fetchPendingVerifierRechecks(ctx, verifier)
+
+			if len(rechecksM) < 3 {
 				return false
 			}
 
-			suite.Require().NoError(err)
-			rechecks, err = mmongo.UnmarshalCursor[recheck.Doc](ctx, cursor, rechecks)
-			suite.Require().NoError(err)
-			return len(rechecks) == 3
+			require.Len(suite.T(), rechecksM, 3)
+
+			rechecks = lo.Map(
+				rechecksM,
+				func(m bson.M, _ int) recheck.Doc {
+					raw, err := bson.Marshal(m)
+					require.NoError(suite.T(), err)
+
+					doc := recheck.Doc{}
+					require.NoError(suite.T(), (&doc).UnmarshalFromBSON(raw))
+
+					return doc
+				},
+			)
+
+			return true
 		},
 		time.Minute,
 		500*time.Millisecond,
