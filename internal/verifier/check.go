@@ -390,30 +390,35 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 			verifier.mux.Lock()
 			verifier.lastGeneration = true
 		}
+
+		// Increment the in-memory generation so that the change streams will
+		// mark rechecks for the next generation. For example, if we just
+		// finished generation 2, the change streams need to mark generation 3
+		// on enqueued rechecks. Meanwhile, generaiton 3’s recheck tasks will
+		// derive from rechecks enqueued during generation 2.
 		verifier.generation++
 		verifier.phase = Recheck
+		verifier.mux.Unlock()
 
 		// Generation of recheck tasks can partial-fail. The following will
 		// cause a full redo in that case, which is inefficient but simple.
 		// Such failures seem unlikely anyhow.
 		err = retry.New().WithCallback(
 			func(ctx context.Context, _ *retry.FuncInfo) error {
-				return verifier.GenerateRecheckTasksWhileLocked(ctx)
+				return verifier.GenerateRecheckTasks(ctx)
 			},
 			"generating recheck tasks",
 		).Run(ctx, verifier.logger)
 		if err != nil {
-			verifier.mux.Unlock()
 			return err
 		}
 
-		err = verifier.DropOldRecheckQueueWhileLocked(ctx)
+		err = verifier.DropCurrentGenRecheckQueue(ctx)
 		if err != nil {
 			verifier.logger.Warn().
 				Err(err).
 				Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
 		}
-		verifier.mux.Unlock()
 	}
 }
 

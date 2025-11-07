@@ -86,7 +86,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 }
 
 func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifier *Verifier) []recheck.Doc {
-	metaColl := verifier.getRecheckQueueCollection(verifier.generation)
+	metaColl := verifier.getRecheckQueueCollection(1 + verifier.generation)
 
 	cursor, err := metaColl.Aggregate(
 		ctx,
@@ -182,7 +182,7 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 		verificationStatus, err := verifier.GetVerificationStatus(ctx)
 		suite.Require().NoError(err)
 
-		recheckDocs := suite.fetchVerifierRechecks(ctx, verifier)
+		recheckDocs := suite.fetchPendingVerifierRechecks(ctx, verifier)
 
 		if verificationStatus.FailedTasks != 0 && len(recheckDocs) == 2 {
 			break
@@ -212,7 +212,7 @@ func (suite *IntegrationTestSuite) TestRecheckResumability_Mismatch() {
 		"restarted verifier should immediately see mismatches",
 	)
 
-	recheckDocs := suite.fetchVerifierRechecks(ctx, verifier2)
+	recheckDocs := suite.fetchPendingVerifierRechecks(ctx, verifier2)
 	suite.Require().Len(recheckDocs, 2, "expect # of rechecks: %+v", recheckDocs)
 }
 
@@ -268,13 +268,10 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	)
 	suite.Require().NoError(err)
 
-	verifier.mux.Lock()
-	defer verifier.mux.Unlock()
-
 	verifier.generation++
 
 	suite.T().Logf("Generating recheck tasks …")
-	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
+	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 }
 
@@ -307,8 +304,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
 
 	verifier.generation++
-	verifier.mux.Lock()
-	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
+	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -367,8 +363,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
 
 	verifier.generation++
-	verifier.mux.Lock()
-	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
+	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -417,8 +412,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 	suite.Require().NoError(err)
 
 	verifier.generation++
-	verifier.mux.Lock()
-	err = verifier.GenerateRecheckTasksWhileLocked(ctx)
+	err = verifier.GenerateRecheckTasks(ctx)
 	suite.Require().NoError(err)
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -477,7 +471,7 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 
 	verifier.generation++
 
-	err = verifier.DropOldRecheckQueueWhileLocked(ctx)
+	err = verifier.DropCurrentGenRecheckQueue(ctx)
 	suite.Require().NoError(err)
 
 	// This never happens in real life but is needed for this test.
