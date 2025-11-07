@@ -230,8 +230,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 						panic(fmt.Sprintf("got empty src doc! (ts: %v)", srcDocWithTs.ts))
 					}
 
-					//fmt.Printf("----- got src doc: %+v %#q\n", srcDocWithTs.doc, string(srcDocWithTs.doc))
-
 					fi.NoteSuccess("received document from source")
 
 					srcDocCount++
