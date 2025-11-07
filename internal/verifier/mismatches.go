@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -84,17 +85,17 @@ func countMismatchesForTasks(
 	}
 
 	if len(got) != 1 {
-		return 0, 0, errors.Wrapf(err, "unexpected mismatch count result: %+v")
+		return 0, 0, fmt.Errorf("unexpected mismatch count result: %+v", got)
 	}
 
 	totalRV, err := got[0].LookupErr("total")
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "getting mismatch count: %+v")
+		return 0, 0, errors.Wrap(err, "getting mismatch count’s total")
 	}
 
 	matchRV, err := got[0].LookupErr("match")
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "getting mismatch count: %+v")
+		return 0, 0, errors.Wrap(err, "getting mismatch count’s filter-match count")
 	}
 
 	matched := matchRV.AsInt64()
