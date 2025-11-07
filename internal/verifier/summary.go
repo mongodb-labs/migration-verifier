@@ -213,7 +213,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	)
 
 	if err := eg.Wait(); err != nil {
-		return false, false, err
+		return false, false, errors.Wrapf(err, "gathering mismatch data")
 	}
 
 	countsTable.Append([]string{
