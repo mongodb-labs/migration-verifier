@@ -32,9 +32,8 @@ const (
 	maxTasksPerRequest = 500
 	maxInsertSize      = 256 << 10
 
-	// The server’s max storage transaction size is 256 KiB. We want to stay
-	// comfortably beneath that.
-	maxRecheckIDsBytes = 250 << 10
+	// TODO: Try something beneath 256 KiB instead.
+	maxRecheckIDsBytes = 1024 * 1024 // 1 MiB
 
 	// The max # of docs that we want each recheck task’s cursor to return.
 	maxRecheckIDs = 10_000
