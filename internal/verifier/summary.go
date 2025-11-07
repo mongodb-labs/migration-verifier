@@ -158,7 +158,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	eg.Go(
 		func() error {
 			var err error
-			contentMismatchCount, missingOrChangedCount, err = countMismatchesForTasks(
+			missingOrChangedCount, contentMismatchCount, err = countMismatchesForTasks(
 				egCtx,
 				verifier.verificationDatabase(),
 				failedTaskIDs,
