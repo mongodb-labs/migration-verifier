@@ -15,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/pkg/errors"
@@ -1059,7 +1060,8 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 			}
 
 			suite.Require().NoError(err)
-			suite.Require().NoError(cursor.All(ctx, &rechecks))
+			rechecks, err = mmongo.UnmarshalCursor[recheck.Doc](ctx, cursor, rechecks)
+			suite.Require().NoError(err)
 			return len(rechecks) == 3
 		},
 		time.Minute,
