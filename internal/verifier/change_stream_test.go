@@ -359,7 +359,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	assert.Eventually(
 		suite.T(),
 		func() bool {
-			rechecks := suite.fetchVerifierRechecks(ctx, verifier2)
+			rechecks := suite.fetchPendingVerifierRechecks(ctx, verifier2)
 
 			return lo.SomeBy(
 				rechecks,
@@ -386,7 +386,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	sess := lo.Must(verifier2.verificationDatabase().Client().StartSession())
 	sctx := mongo.NewSessionContext(ctx, sess)
 
-	rechecks := suite.fetchVerifierRechecks(sctx, verifier2)
+	rechecks := suite.fetchPendingVerifierRechecks(sctx, verifier2)
 	if !assert.EqualValues(suite.T(), lastDocID, len(rechecks), "all source docs should be rechecked") {
 		for _, recheck := range rechecks {
 			suite.T().Logf("found recheck: %v", recheck)
