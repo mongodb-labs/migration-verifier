@@ -2,6 +2,7 @@ package mmongo
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/pkg/errors"
@@ -18,7 +19,7 @@ func GetBatch(
 	buffer []byte,
 ) ([]bson.Raw, []byte, error) {
 	if cursor.RemainingBatchLength() != 0 {
-		panic("only call this between batches")
+		panic(fmt.Sprintf("only call this between batches! batchlen=%d", cursor.RemainingBatchLength()))
 	}
 
 	if !cursor.Next(ctx) {
