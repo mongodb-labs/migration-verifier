@@ -107,7 +107,7 @@ func (suite *IntegrationTestSuite) fetchRecheckDocs(ctx context.Context, verifie
 
 	suite.Require().NoError(err, "find recheck docs")
 
-	results, err := mmongo.UnmarshalCursor[recheck.Doc](ctx, cursor)
+	results, err := mmongo.UnmarshalCursor(ctx, cursor, []recheck.Doc{})
 	suite.Require().NoError(err, "read recheck docs cursor")
 
 	return results

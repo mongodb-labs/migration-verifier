@@ -1077,7 +1077,7 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 			}
 
 			suite.Require().NoError(err)
-			_, err = mmongo.UnmarshalCursor[recheck.Doc](ctx, cursor)
+			_, err = mmongo.UnmarshalCursor(ctx, cursor, []recheck.Doc{})
 			suite.Require().NoError(err)
 			return len(rechecks) == 3
 		},

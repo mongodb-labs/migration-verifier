@@ -12,19 +12,25 @@ type BSONUnmarshaler interface {
 	UnmarshalFromBSON([]byte) error
 }
 
+// UnmarshalCursor is like mongo.Cursor.All, with 2 major differences:
+//   - It uses BSONUnmarshaler rather than the driver’s own unmarshaling.
+//     This avoids reflection & so is much faster.
+//   - It creates
+//
+// Because Go generics can’t distinguish value vs. pointer receivers, this
+// can’t check that the type argument is a BSONUnmarshaler until runtime.
 func UnmarshalCursor[V any](
 	ctx context.Context,
 	cursor *mongo.Cursor,
+	in []V,
 ) ([]V, error) {
 	var raws []bson.Raw
 	if err := cursor.All(ctx, &raws); err != nil {
 		return nil, err
 	}
 
-	ret := make([]V, len(raws))
-	for i, raw := range raws {
-		// Take a pointer to the slice element (type *V).
-		p := &ret[i]
+	for _, raw := range raws {
+		p := new(V)
 
 		// Runtime check: does *V implement BSONUnmarshaler?
 		um, ok := any(p).(BSONUnmarshaler)
@@ -35,37 +41,9 @@ func UnmarshalCursor[V any](
 		if err := um.UnmarshalFromBSON([]byte(raw)); err != nil {
 			return nil, err
 		}
+
+		in = append(in, *p)
 	}
 
-	return ret, nil
+	return in, nil
 }
-
-/*
-func UnmarshalCursor[T BSONUnmarshaler](
-	ctx context.Context,
-	cursor *mongo.Cursor,
-) ([]T, error) {
-
-	return unmarshalCursorInternal[T, *T](ctx, cursor)
-}
-
-func unmarshalCursorInternal[V any, P bsonUnmarshalerPointer[V]](
-	ctx context.Context,
-	cursor *mongo.Cursor,
-) ([]V, error) {
-	var raws []bson.Raw
-
-	if err := cursor.All(ctx, &raws); err != nil {
-		return nil, err
-	}
-
-	ret := make([]V, len(raws))
-	for i, raw := range raws {
-		if err := P(&ret[i]).UnmarshalFromBSON(raw); err != nil {
-			return nil, err
-		}
-	}
-
-	return ret, nil
-}
-*/
