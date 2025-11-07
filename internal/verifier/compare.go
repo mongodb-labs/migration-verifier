@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -519,29 +520,39 @@ func iterateCursorToChannel(
 
 	sess := mongo.SessionFromContext(sctx)
 
-	for cursor.Next(sctx) {
-		state.NoteSuccess("received a document")
+	var batch []bson.Raw
+	for {
+		batch = batch[:0]
+		buffer := make([]byte, 0, 16<<20) // max BSON payload
+
+		batch, _, err := mmongo.GetBatch(sctx, cursor, batch, buffer)
+		if err != nil {
+			return errors.Wrap(err, "iterating cursor")
+		}
+		state.NoteSuccess("received a batch of %d document(s)", len(batch))
 
 		clusterTime, err := util.GetClusterTimeFromSession(sess)
 		if err != nil {
 			return errors.Wrap(err, "reading cluster time from session")
 		}
 
-		err = chanutil.WriteWithDoneCheck(
-			sctx,
-			writer,
-			docWithTs{
-				doc: slices.Clone(cursor.Current),
-				ts:  clusterTime,
-			},
-		)
+		for _, doc := range batch {
 
-		if err != nil {
-			return errors.Wrapf(err, "sending document to compare thread")
+			err = chanutil.WriteWithDoneCheck(
+				sctx,
+				writer,
+				docWithTs{
+					doc: doc,
+					ts:  clusterTime,
+				},
+			)
+
+			if err != nil {
+				return errors.Wrapf(err, "sending document to compare thread")
+			}
 		}
 	}
 
-	return errors.Wrap(cursor.Err(), "failed to iterate cursor")
 }
 
 func getMapKey(docKeyValues []bson.RawValue) string {
