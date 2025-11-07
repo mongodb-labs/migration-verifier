@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -25,7 +24,6 @@ type MismatchInfo struct {
 }
 
 var _ bson.Marshaler = MismatchInfo{}
-var _ bson.Unmarshaler = &MismatchInfo{}
 
 func (mi MismatchInfo) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON().")
@@ -53,41 +51,6 @@ func (mi MismatchInfo) MarshalToBSON() []byte {
 	}
 
 	return buf
-}
-
-func (mi *MismatchInfo) UnmarshalBSON(in []byte) error {
-	panic("Use UnmarshalFromBSON().")
-}
-
-func (mi *MismatchInfo) UnmarshalFromBSON(in []byte) error {
-	for el, err := range mbson.RawElements(bson.Raw(in)) {
-		if err != nil {
-			return errors.Wrap(err, "iterating BSON doc fields")
-		}
-
-		key, err := el.KeyErr()
-		if err != nil {
-			return errors.Wrap(err, "extracting BSON doc’s field name")
-		}
-
-		switch key {
-		case "task":
-			if err := mbson.UnmarshalElementValue(el, &mi.Task); err != nil {
-				return err
-			}
-		case "detail":
-			var doc bson.Raw
-			if err := mbson.UnmarshalElementValue(el, &doc); err != nil {
-				return err
-			}
-
-			if err := (&mi.Detail).UnmarshalFromBSON(doc); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
 }
 
 func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
@@ -138,7 +101,7 @@ func getMismatchesForTasks(
 		}
 
 		var d MismatchInfo
-		if err := (&d).UnmarshalFromBSON(cursor.Current); err != nil {
+		if err := cursor.Decode(&d); err != nil {
 			return nil, errors.Wrapf(err, "parsing discrepancy %+v", cursor.Current)
 		}
 

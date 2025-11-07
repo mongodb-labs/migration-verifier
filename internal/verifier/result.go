@@ -4,9 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
-	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
@@ -54,7 +52,6 @@ func (vr VerificationResult) DocumentIsMissing() bool {
 }
 
 var _ bson.Marshaler = VerificationResult{}
-var _ bson.Unmarshaler = &VerificationResult{}
 
 func (vr VerificationResult) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON.")
@@ -116,78 +113,4 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 	}
 
 	return buf
-}
-
-func (vr *VerificationResult) UnmarshalBSON(in []byte) error {
-	panic("Use UnmarshalFromBSON.")
-}
-
-func (vr *VerificationResult) UnmarshalFromBSON(in []byte) error {
-	for el, err := range mbson.RawElements(bson.Raw(in)) {
-		if err != nil {
-			return errors.Wrap(err, "iterating BSON doc fields")
-		}
-
-		key, err := el.KeyErr()
-		if err != nil {
-			return errors.Wrap(err, "extracting BSON doc’s field name")
-		}
-
-		switch key {
-		case "id":
-			rv, err := el.ValueErr()
-			if err != nil {
-				return errors.Wrapf(err, "parsing %#q field", key)
-			}
-
-			vr.ID = rv
-		case "field":
-			if err := mbson.UnmarshalElementValue(el, &vr.Field); err != nil {
-				return err
-			}
-		case "details":
-			if err := mbson.UnmarshalElementValue(el, &vr.Details); err != nil {
-				return err
-			}
-		case "cluster":
-			if err := mbson.UnmarshalElementValue(el, &vr.Cluster); err != nil {
-				return err
-			}
-		case "namespace":
-			if err := mbson.UnmarshalElementValue(el, &vr.NameSpace); err != nil {
-				return err
-			}
-		case "srctimestamp":
-			rv, err := el.ValueErr()
-			if err != nil {
-				return errors.Wrapf(err, "parsing %#q field", key)
-			}
-
-			if rv.Type != bson.TypeNull {
-				var ts bson.Timestamp
-				if err := mbson.UnmarshalRawValue(rv, &ts); err != nil {
-					return err
-				}
-
-				vr.SrcTimestamp = option.Some(ts)
-			}
-
-		case "dsttimestamp":
-			rv, err := el.ValueErr()
-			if err != nil {
-				return errors.Wrapf(err, "parsing %#q field", key)
-			}
-
-			if rv.Type != bson.TypeNull {
-				var ts bson.Timestamp
-				if err := mbson.UnmarshalRawValue(rv, &ts); err != nil {
-					return err
-				}
-
-				vr.DstTimestamp = option.Some(ts)
-			}
-		}
-	}
-
-	return nil
 }
