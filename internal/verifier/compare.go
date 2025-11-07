@@ -226,6 +226,12 @@ func (verifier *Verifier) compareDocsFromChannels(
 						break
 					}
 
+					if len(srcDocWithTs.doc) == 0 {
+						panic(fmt.Sprintf("got empty src doc! (ts: %v)", srcDocWithTs.ts))
+					}
+
+					//fmt.Printf("----- got src doc: %+v %#q\n", srcDocWithTs.doc, string(srcDocWithTs.doc))
+
 					fi.NoteSuccess("received document from source")
 
 					srcDocCount++
@@ -522,6 +528,7 @@ func iterateCursorToChannel(
 
 	var batch []bson.Raw
 	for {
+		//batch = make([]bson.Raw, 0, len(batch))
 		batch = batch[:0]
 		buffer := make([]byte, 0, 16<<20) // max BSON payload
 
@@ -529,7 +536,14 @@ func iterateCursorToChannel(
 		if err != nil {
 			return errors.Wrap(err, "iterating cursor")
 		}
+
+		if len(batch) == 0 {
+			return nil
+		}
+
 		state.NoteSuccess("received a batch of %d document(s)", len(batch))
+
+		//fmt.Printf("----- the batch (%d): %+v\n", len(batch), batch)
 
 		clusterTime, err := util.GetClusterTimeFromSession(sess)
 		if err != nil {
@@ -537,14 +551,17 @@ func iterateCursorToChannel(
 		}
 
 		for _, doc := range batch {
+			payload := docWithTs{
+				doc: doc,
+				ts:  clusterTime,
+			}
+
+			//fmt.Printf("----- sending: %+v\n", payload)
 
 			err = chanutil.WriteWithDoneCheck(
 				sctx,
 				writer,
-				docWithTs{
-					doc: doc,
-					ts:  clusterTime,
-				},
+				payload,
 			)
 
 			if err != nil {
