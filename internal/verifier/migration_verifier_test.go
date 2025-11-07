@@ -714,11 +714,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 
 	verifier.generation++
 
-	func() {
-		verifier.mux.Lock()
-		defer func() { verifier.mux.Unlock() }()
-		suite.Require().NoError(verifier.GenerateRecheckTasksWhileLocked(ctx))
-	}()
+	suite.Require().NoError(verifier.GenerateRecheckTasks(ctx))
 
 	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
@@ -958,6 +954,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		[]int32{100},
 	)
 	suite.Require().NoError(err)
+
 	event := ParsedEvent{
 		DocID:  mbson.ToRawValue(int32(55)),
 		OpType: "delete",
@@ -976,6 +973,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 
 	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
 	suite.Require().NoError(err)
+
 	event.OpType = "insert"
 	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
 	suite.Require().NoError(err)
@@ -995,13 +993,9 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	)
 
 	verifier.generation++
-	func() {
-		verifier.mux.Lock()
-		defer verifier.mux.Unlock()
 
-		err = verifier.GenerateRecheckTasksWhileLocked(ctx)
-		suite.Require().NoError(err)
-	}()
+	err = verifier.GenerateRecheckTasks(ctx)
+	suite.Require().NoError(err)
 
 	var doc bson.M
 	cur, err := verifier.verificationTaskCollection().Find(ctx, bson.M{"generation": 1})
@@ -2323,10 +2317,12 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 }
 
 func (suite *IntegrationTestSuite) awaitEnqueueOfRechecks(verifier *Verifier, minDocs int) {
+	suite.T().Helper()
+
 	var lastNonzeroRechecksCount int
 
 	suite.Eventually(func() bool {
-		cursor, err := verifier.getRecheckQueueCollection(verifier.generation).
+		cursor, err := verifier.getRecheckQueueCollection(1+verifier.generation).
 			Find(suite.Context(), bson.D{})
 		var rechecks []bson.D
 		suite.Require().NoError(err)

@@ -359,7 +359,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	assert.Eventually(
 		suite.T(),
 		func() bool {
-			rechecks := suite.fetchVerifierRechecks(ctx, verifier2)
+			rechecks := suite.fetchPendingVerifierRechecks(ctx, verifier2)
 
 			return lo.SomeBy(
 				rechecks,
@@ -386,7 +386,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	sess := lo.Must(verifier2.verificationDatabase().Client().StartSession())
 	sctx := mongo.NewSessionContext(ctx, sess)
 
-	rechecks := suite.fetchVerifierRechecks(sctx, verifier2)
+	rechecks := suite.fetchPendingVerifierRechecks(sctx, verifier2)
 	if !assert.EqualValues(suite.T(), lastDocID, len(rechecks), "all source docs should be rechecked") {
 		for _, recheck := range rechecks {
 			suite.T().Logf("found recheck: %v", recheck)
@@ -426,7 +426,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 	verifier2 := suite.BuildVerifier()
 
 	suite.Require().Empty(
-		suite.fetchVerifierRechecks(ctx, verifier2),
+		suite.fetchPendingVerifierRechecks(ctx, verifier2),
 		"no rechecks should be enqueued before starting change stream",
 	)
 
@@ -446,7 +446,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			recheckDocs = suite.fetchVerifierRechecks(ctx, verifier2)
+			recheckDocs = suite.fetchPendingVerifierRechecks(ctx, verifier2)
 
 			return len(recheckDocs) > 0
 		},
@@ -490,10 +490,10 @@ func (suite *IntegrationTestSuite) getClusterTime(ctx context.Context, client *m
 	return newTime
 }
 
-func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, verifier *Verifier) []bson.M {
+func (suite *IntegrationTestSuite) fetchPendingVerifierRechecks(ctx context.Context, verifier *Verifier) []bson.M {
 	recheckDocs := []bson.M{}
 
-	recheckColl := verifier.getRecheckQueueCollection(verifier.generation)
+	recheckColl := verifier.getRecheckQueueCollection(1 + verifier.generation)
 	cursor, err := recheckColl.Aggregate(
 		ctx,
 		mongo.Pipeline{
@@ -732,7 +732,7 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			rechecks = suite.fetchVerifierRechecks(ctx, verifier)
+			rechecks = suite.fetchPendingVerifierRechecks(ctx, verifier)
 			return len(rechecks) == 3
 		},
 		time.Minute,
@@ -1069,7 +1069,7 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			recheckColl := verifier.getRecheckQueueCollection(verifier.generation)
+			recheckColl := verifier.getRecheckQueueCollection(1 + verifier.generation)
 			cursor, err := recheckColl.Find(ctx, bson.D{})
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				return false
