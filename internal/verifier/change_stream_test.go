@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
@@ -127,7 +128,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 	suite.Assert().Less(len(cs.Current), 10_000, "event should not be large")
 
 	parsed := ParsedEvent{}
-	suite.Require().NoError(cs.Decode(&parsed))
+	suite.Require().NoError((&parsed).UnmarshalFromBSON(cs.Current))
 	suite.Require().Equal("insert", parsed.OpType)
 
 	suite.Require().Equal(
@@ -144,7 +145,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 
 	suite.Require().True(cs.Next(ctx), "should get event")
 	parsed = ParsedEvent{}
-	suite.Require().NoError(cs.Decode(&parsed))
+	suite.Require().NoError((&parsed).UnmarshalFromBSON(cs.Current))
 	suite.Require().Equal("delete", parsed.OpType)
 	suite.Require().True(parsed.FullDocLen.IsNone(), "full doc len not in delete")
 }
@@ -916,7 +917,7 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	_, err = coll2.InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 
-	var rechecks []RecheckDoc
+	var rechecks []recheck.Doc
 	require.Eventually(
 		suite.T(),
 		func() bool {

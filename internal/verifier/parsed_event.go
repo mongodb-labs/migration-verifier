@@ -26,16 +26,20 @@ func (pe *ParsedEvent) String() string {
 
 var _ bson.Unmarshaler = &ParsedEvent{}
 
-// UnmarshalBSON implements bson.Unmarshaler. We define this manually to
-// avoid reflection, which can substantially impede performance in “hot”
-// code paths like this.
+// UnmarshalBSON implements bson.Unmarshaler but panics because
+// it’s faster to use UnmarshalFromBSON than bson.Unmarshal().
 func (pe *ParsedEvent) UnmarshalBSON(in []byte) error {
-	els, err := bson.Raw(in).Elements()
-	if err != nil {
-		return errors.Wrapf(err, "parsing elements")
-	}
+	panic("Use UnmarshalFromBSON instead.")
+}
 
-	for _, el := range els {
+// UnmarshalFromBSON unmarshals from BSON without the overhead of
+// bson.Unmarshal.
+func (pe *ParsedEvent) UnmarshalFromBSON(in []byte) error {
+	for el, err := range mbson.RawElements(in) {
+		if err != nil {
+			return errors.Wrapf(err, "parsing elements")
+		}
+
 		key, err := el.KeyErr()
 		if err != nil {
 			return errors.Wrapf(err, "parsing field name")
@@ -59,7 +63,7 @@ func (pe *ParsedEvent) UnmarshalBSON(in []byte) error {
 
 			ns := Namespace{}
 
-			err = bson.Unmarshal(rvDoc, &ns)
+			err = (&ns).UnmarshalFromBSON(rvDoc)
 			if err != nil {
 				return errors.Wrapf(err, "unmarshaling %#q value", key)
 			}
