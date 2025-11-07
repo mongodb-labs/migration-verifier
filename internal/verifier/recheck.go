@@ -28,6 +28,16 @@ const (
 	recheckBatchCountLimit = 1000
 
 	recheckQueueCollectionNameBase = "recheckQueue"
+
+	maxTasksPerRequest = 500
+	maxInsertSize      = 256 << 10
+
+	// The server’s max storage transaction size is 256 KiB. We want to stay
+	// comfortably beneath that.
+	maxRecheckIDsBytes = 250 << 10
+
+	// The max # of docs that we want each recheck task’s cursor to return.
+	maxRecheckIDs = 10_000
 )
 
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
@@ -330,8 +340,6 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 
 	var curTasks []bson.Raw
 	var curTasksBytes int
-	const maxTasksPerRequest = 500
-	const maxInsertSize = 256 << 10
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
 
@@ -404,10 +412,7 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 			return err
 		}
 
-		idRaw, err := cursor.Current.LookupErr("_id", "docID")
-		if err != nil {
-			return errors.Wrapf(err, "failed to find docID in enqueued recheck %v", cursor.Current)
-		}
+		idRaw := doc.PrimaryKey.DocumentID
 
 		// We persist rechecks if any of these happen:
 		// - the namespace has changed
