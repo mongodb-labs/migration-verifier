@@ -15,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
@@ -140,7 +141,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				verifier.verificationDatabase(),
 				failedTaskIDs,
 				option.Some(
-					bson.D{{"$not", getMismatchDocMissingQueryPieces("")}},
+					bson.D{{"$nor", mslices.Of(getMismatchDocMissingQueryPieces(""))}},
 				),
 				option.Some(verifier.failureDisplaySize),
 			)
@@ -160,7 +161,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				verifier.verificationDatabase(),
 				failedTaskIDs,
 				option.Some(
-					bson.D{{"$not", getMismatchDocMissingQueryPieces("")}},
+					bson.D{{"$nor", mslices.Of(getMismatchDocMissingQueryPieces(""))}},
 				),
 			)
 
