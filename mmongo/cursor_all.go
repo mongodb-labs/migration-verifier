@@ -12,10 +12,9 @@ type BSONUnmarshaler interface {
 	UnmarshalFromBSON([]byte) error
 }
 
-// UnmarshalCursor is like mongo.Cursor.All, with 2 major differences:
-//   - It uses BSONUnmarshaler rather than the driver’s own unmarshaling.
-//     This avoids reflection & so is much faster.
-//   - It creates
+// UnmarshalCursor is like mongo.Cursor.All, excet that it uses BSONUnmarshaler
+// rather than the driver’s own unmarshaling. This avoids reflection & so is
+// much faster.
 //
 // Because Go generics can’t distinguish value vs. pointer receivers, this
 // can’t check that the type argument is a BSONUnmarshaler until runtime.
