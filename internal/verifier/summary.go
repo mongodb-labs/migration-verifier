@@ -253,9 +253,9 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	if mismatchedDocsTableRows > 0 {
 		strBuilder.WriteString("\n")
 		if printAll {
-			strBuilder.WriteString("All documents in tasks in failed status due to differing content:\n")
+			strBuilder.WriteString("All documents found with differing content:\n")
 		} else {
-			fmt.Fprintf(strBuilder, "First %d documents in tasks in failed status due to differing content:\n", verifier.failureDisplaySize)
+			fmt.Fprintf(strBuilder, "First %d documents found with differing content:\n", verifier.failureDisplaySize)
 		}
 		mismatchedDocsTable.Render()
 	}
