@@ -37,7 +37,7 @@ func (mi MismatchInfo) MarshalToBSON() []byte {
 	bsonLen := 4 + // header
 		1 + 4 + 1 + len(bson.ObjectID{}) + // Task
 		1 + 6 + 1 + len(detail) + // Detail
-		0 // NUL
+		1 // NUL
 
 	buf := make(bson.Raw, 4, bsonLen)
 
@@ -49,7 +49,7 @@ func (mi MismatchInfo) MarshalToBSON() []byte {
 	buf = append(buf, 0)
 
 	if len(buf) != bsonLen {
-		panic(fmt.Sprintf("BSON length is %d but expected %d", len(buf), bsonLen))
+		panic(fmt.Sprintf("%T BSON length is %d but expected %d", mi, len(buf), bsonLen))
 	}
 
 	return buf
@@ -81,7 +81,7 @@ func (mi *MismatchInfo) UnmarshalFromBSON(in []byte) error {
 				return err
 			}
 
-			if err := (&mi.Detail).UnmarshalBSON(doc); err != nil {
+			if err := (&mi.Detail).UnmarshalFromBSON(doc); err != nil {
 				return err
 			}
 		}

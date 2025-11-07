@@ -61,15 +61,23 @@ func (vr VerificationResult) MarshalBSON() ([]byte, error) {
 }
 
 func (vr VerificationResult) MarshalToBSON() []byte {
+	if vr.ID.IsZero() {
+		vr.ID = bson.RawValue{Type: bson.TypeNull}
+	}
+
 	bsonLen := 4 + // header
 		1 + 2 + 1 + // ID
-		1 + 5 + 1 + // Field
-		1 + 6 + 1 + // Details
-		1 + 6 + 1 + // Cluster
-		1 + 9 + 1 + // NameSpace
-		0 // NUL
+		1 + 5 + 1 + 4 + 1 + // Field
+		1 + 7 + 1 + 4 + 1 + // Details
+		1 + 7 + 1 + 4 + 1 + // Cluster
+		1 + 9 + 1 + 4 + 1 + // NameSpace
+		1 // NUL
 
-	bsonLen += len(vr.ID.Value) + len(vr.Field) + len(vr.Details) + len(vr.Cluster) + len(vr.NameSpace)
+	bsonLen += len(vr.ID.Value) +
+		len(vr.Field) +
+		len(vr.Details) +
+		len(vr.Cluster) +
+		len(vr.NameSpace)
 
 	if vr.SrcTimestamp.IsSome() {
 		bsonLen += 1 + 12 + 1 + 8
@@ -87,6 +95,7 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 		Type: bsoncore.Type(vr.ID.Type),
 		Data: vr.ID.Value,
 	})
+
 	buf = bsoncore.AppendStringElement(buf, "field", vr.Field)
 	buf = bsoncore.AppendStringElement(buf, "details", vr.Details)
 	buf = bsoncore.AppendStringElement(buf, "cluster", vr.Cluster)
@@ -103,7 +112,7 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 	buf = append(buf, 0)
 
 	if len(buf) != bsonLen {
-		panic(fmt.Sprintf("BSON length is %d but expected %d", len(buf), bsonLen))
+		panic(fmt.Sprintf("%T BSON length is %d but expected %d", vr, len(buf), bsonLen))
 	}
 
 	return buf
