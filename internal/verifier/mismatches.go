@@ -20,8 +20,13 @@ type MismatchInfo struct {
 	Detail VerificationResult
 }
 
-func getMismatchDocMissingQueryPieces(fieldPrefix string) bson.D {
-	return getResultDocMissingQueryPieces(fieldPrefix + "detail.")
+func getMismatchDocMissingAggExpr(docExpr any) bson.D {
+	return getResultDocMissingAggExpr(
+		bson.D{{"$getField", bson.D{
+			{"input", docExpr},
+			{"field", "detail"},
+		}}},
+	)
 }
 
 func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
@@ -47,22 +52,54 @@ func countMismatchesForTasks(
 	ctx context.Context,
 	db *mongo.Database,
 	taskIDs []bson.ObjectID,
-	filter option.Option[bson.D],
-) (int64, error) {
-	query := bson.D{
-		{"task", bson.D{{"$in", taskIDs}}},
-	}
-
-	if filter, has := filter.Get(); has {
-		query = bson.D{
-			{"$and", []bson.D{query, filter}},
-		}
-	}
-
-	return db.Collection(mismatchesCollectionName).CountDocuments(
+	filter bson.D,
+) (int64, int64, error) {
+	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(
 		ctx,
-		query,
+		mongo.Pipeline{
+			{{"$match", bson.D{
+				{"task", bson.D{{"$in", taskIDs}}},
+			}}},
+			{{"$group", bson.D{
+				{"_id", nil},
+				{"total", bson.D{{"$sum", 1}}},
+				{"match", bson.D{{"$sum", bson.D{
+					{"$cond", bson.D{
+						{"if", filter},
+						{"then", 1},
+						{"else", 0},
+					}},
+				}}}},
+			}}},
+		},
 	)
+
+	if err != nil {
+		return 0, 0, errors.Wrap(err, "sending mismatch-counting query")
+	}
+
+	var got []bson.Raw
+	if err := cursor.All(ctx, &got); err != nil {
+		return 0, 0, errors.Wrap(err, "reading mismatch counts")
+	}
+
+	if len(got) != 1 {
+		return 0, 0, errors.Wrapf(err, "unexpected mismatch count result: %+v")
+	}
+
+	totalRV, err := got[0].LookupErr("total")
+	if err != nil {
+		return 0, 0, errors.Wrapf(err, "getting mismatch count: %+v")
+	}
+
+	matchRV, err := got[0].LookupErr("match")
+	if err != nil {
+		return 0, 0, errors.Wrapf(err, "getting mismatch count: %+v")
+	}
+
+	matched := matchRV.AsInt64()
+
+	return matched, totalRV.AsInt64() - matched, nil
 }
 
 func getMismatchesForTasks(

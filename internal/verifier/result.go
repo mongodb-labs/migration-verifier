@@ -47,9 +47,23 @@ func (vr VerificationResult) DocumentIsMissing() bool {
 	return vr.Details == Missing && vr.Field == ""
 }
 
-func getResultDocMissingQueryPieces(fieldPrefix string) bson.D {
+func getResultDocMissingAggExpr(docExpr any) bson.D {
 	return bson.D{
-		{fieldPrefix + "details", Missing},
-		{fieldPrefix + "field", ""},
+		{"$and", []bson.D{
+			{{"$eq", bson.A{
+				Missing,
+				bson.D{{"$getField", bson.D{
+					{"input", docExpr},
+					{"field", "details"},
+				}}},
+			}}},
+			{{"$eq", bson.A{
+				"",
+				bson.D{{"$getField", bson.D{
+					{"input", docExpr},
+					{"field", "field"},
+				}}},
+			}}},
+		}},
 	}
 }

@@ -15,7 +15,6 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
@@ -141,7 +140,9 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				verifier.verificationDatabase(),
 				failedTaskIDs,
 				option.Some(
-					bson.D{{"$nor", mslices.Of(getMismatchDocMissingQueryPieces(""))}},
+					bson.D{{"$expr", bson.D{
+						{"$not", getMismatchDocMissingAggExpr("$$ROOT")},
+					}}},
 				),
 				option.Some(verifier.failureDisplaySize),
 			)
@@ -153,21 +154,20 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			)
 		},
 	)
+
 	eg.Go(
 		func() error {
 			var err error
-			contentMismatchCount, err = countMismatchesForTasks(
+			contentMismatchCount, missingOrChangedCount, err = countMismatchesForTasks(
 				egCtx,
 				verifier.verificationDatabase(),
 				failedTaskIDs,
-				option.Some(
-					bson.D{{"$nor", mslices.Of(getMismatchDocMissingQueryPieces(""))}},
-				),
+				getMismatchDocMissingAggExpr("$$ROOT"),
 			)
 
 			return errors.Wrapf(
 				err,
-				"counting %d failed tasks’ content-mismatch discrepancies",
+				"counting %d failed tasks’ discrepancies",
 				len(failedTasks),
 			)
 		},
@@ -181,7 +181,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				verifier.verificationDatabase(),
 				failedTaskIDs,
 				option.Some(
-					getMismatchDocMissingQueryPieces(""),
+					bson.D{{"$expr", getMismatchDocMissingAggExpr("$$ROOT")}},
 				),
 				option.Some(verifier.failureDisplaySize),
 			)
@@ -189,25 +189,6 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			return errors.Wrapf(
 				err,
 				"fetching %d failed tasks' missing/changed discrepancies",
-				len(failedTasks),
-			)
-		},
-	)
-	eg.Go(
-		func() error {
-			var err error
-			missingOrChangedCount, err = countMismatchesForTasks(
-				egCtx,
-				verifier.verificationDatabase(),
-				failedTaskIDs,
-				option.Some(
-					getMismatchDocMissingQueryPieces(""),
-				),
-			)
-
-			return errors.Wrapf(
-				err,
-				"counting %d failed tasks’ missing/changed discrepancies",
 				len(failedTasks),
 			)
 		},
