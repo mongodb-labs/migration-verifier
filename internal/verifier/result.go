@@ -58,23 +58,22 @@ func (vr VerificationResult) MarshalBSON() ([]byte, error) {
 }
 
 func (vr VerificationResult) MarshalToBSON() []byte {
-	if vr.ID.IsZero() {
-		vr.ID = bson.RawValue{Type: bson.TypeNull}
-	}
-
 	bsonLen := 4 + // header
-		1 + 2 + 1 + // ID
 		1 + 5 + 1 + 4 + 1 + // Field
 		1 + 7 + 1 + 4 + 1 + // Details
 		1 + 7 + 1 + 4 + 1 + // Cluster
 		1 + 9 + 1 + 4 + 1 + // NameSpace
 		1 // NUL
 
-	bsonLen += len(vr.ID.Value) +
+	bsonLen += 0 +
 		len(vr.Field) +
 		len(vr.Details) +
 		len(vr.Cluster) +
 		len(vr.NameSpace)
+
+	if !vr.ID.IsZero() {
+		bsonLen += 1 + 2 + 1 + len(vr.ID.Value)
+	}
 
 	if vr.SrcTimestamp.IsSome() {
 		bsonLen += 1 + 12 + 1 + 8
@@ -88,10 +87,12 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 
 	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
 
-	buf = bsoncore.AppendValueElement(buf, "id", bsoncore.Value{
-		Type: bsoncore.Type(vr.ID.Type),
-		Data: vr.ID.Value,
-	})
+	if !vr.ID.IsZero() {
+		buf = bsoncore.AppendValueElement(buf, "id", bsoncore.Value{
+			Type: bsoncore.Type(vr.ID.Type),
+			Data: vr.ID.Value,
+		})
+	}
 
 	buf = bsoncore.AppendStringElement(buf, "field", vr.Field)
 	buf = bsoncore.AppendStringElement(buf, "details", vr.Details)
