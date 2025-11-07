@@ -20,6 +20,10 @@ type MismatchInfo struct {
 	Detail VerificationResult
 }
 
+func getMismatchDocMissingQueryPieces(fieldPrefix string) bson.D {
+	return getResultDocMissingQueryPieces(fieldPrefix + "detail.")
+}
+
 func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 	_, err := db.Collection(mismatchesCollectionName).Indexes().CreateMany(
 		ctx,
@@ -39,21 +43,59 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 	return nil
 }
 
+func countMismatchesForTasks(
+	ctx context.Context,
+	db *mongo.Database,
+	taskIDs []bson.ObjectID,
+	filter option.Option[bson.D],
+) (int64, error) {
+	query := bson.D{
+		{"task", bson.D{{"$in", taskIDs}}},
+	}
+
+	if filter, has := filter.Get(); has {
+		query = bson.D{
+			{"$and", []bson.D{query, filter}},
+		}
+	}
+
+	return db.Collection(mismatchesCollectionName).CountDocuments(
+		ctx,
+		query,
+	)
+}
+
 func getMismatchesForTasks(
 	ctx context.Context,
 	db *mongo.Database,
 	taskIDs []bson.ObjectID,
+	filter option.Option[bson.D],
+	limit option.Option[int64],
 ) (map[bson.ObjectID][]VerificationResult, error) {
-	cursor, err := db.Collection(mismatchesCollectionName).Find(
-		ctx,
-		bson.D{
-			{"task", bson.D{{"$in", taskIDs}}},
-		},
-		options.Find().SetSort(
+	findOpts := options.Find().
+		SetSort(
 			bson.D{
 				{"detail.id", 1},
 			},
-		),
+		)
+
+	if limit, has := limit.Get(); has {
+		findOpts.SetLimit(limit)
+	}
+
+	query := bson.D{
+		{"task", bson.D{{"$in", taskIDs}}},
+	}
+
+	if filter, has := filter.Get(); has {
+		query = bson.D{
+			{"$and", []bson.D{query, filter}},
+		}
+	}
+	cursor, err := db.Collection(mismatchesCollectionName).Find(
+		ctx,
+		query,
+		findOpts,
 	)
 
 	if err != nil {

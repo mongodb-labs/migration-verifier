@@ -46,3 +46,10 @@ func (vr VerificationResult) DocumentIsMissing() bool {
 	// absent we have to check Field as well.
 	return vr.Details == Missing && vr.Field == ""
 }
+
+func getResultDocMissingQueryPieces(fieldPrefix string) bson.D {
+	return bson.D{
+		{fieldPrefix + "details", Missing},
+		{fieldPrefix + "field", ""},
+	}
+}
