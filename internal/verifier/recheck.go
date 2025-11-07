@@ -327,9 +327,6 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	}
 	defer cursor.Close(ctx)
 
-	eg, egCtx := contextplus.ErrGroup(ctx)
-	eg.SetLimit(100)
-
 	taskCount := 0
 	persistBufferedRechecks := func() error {
 		if len(idAccum) == 0 {
@@ -338,35 +335,27 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 
 		namespace := prevDBName + "." + prevCollName
 
-		eg.Go(
-			func() error {
-				task, err := verifier.InsertDocumentRecheckTask(
-					egCtx,
-					idAccum,
-					types.ByteCount(dataSizeAccum),
-					namespace,
-				)
-				if err != nil {
-					return errors.Wrapf(
-						err,
-						"failed to create a %d-document recheck task for collection %#q",
-						len(idAccum),
-						namespace,
-					)
-				}
-
-				verifier.logger.Debug().
-					Any("task", task.PrimaryKey).
-					Str("namespace", namespace).
-					Int("numDocuments", len(idAccum)).
-					Str("dataSize", reportutils.FmtBytes(dataSizeAccum)).
-					Msg("Created document recheck task.")
-
-				return nil
-			},
+		task, err := verifier.InsertDocumentRecheckTask(
+			ctx,
+			idAccum,
+			types.ByteCount(dataSizeAccum),
+			namespace,
 		)
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"failed to create a %d-document recheck task for collection %#q",
+				len(idAccum),
+				namespace,
+			)
+		}
 
-		taskCount++
+		verifier.logger.Debug().
+			Any("task", task.PrimaryKey).
+			Str("namespace", namespace).
+			Int("numDocuments", len(idAccum)).
+			Str("dataSize", reportutils.FmtBytes(dataSizeAccum)).
+			Msg("Created document recheck task.")
 
 		return nil
 	}
@@ -434,10 +423,6 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	}
 
 	err = persistBufferedRechecks()
-
-	if err := eg.Wait(); err != nil {
-		return errors.Wrapf(err, "persisting new recheck tasks")
-	}
 
 	if err == nil && totalDocs > 0 {
 		verifier.logger.Info().
