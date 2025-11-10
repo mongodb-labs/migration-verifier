@@ -12,7 +12,7 @@ type BSONUnmarshaler interface {
 	UnmarshalFromBSON([]byte) error
 }
 
-// UnmarshalCursor is like mongo.Cursor.All, excet that it uses BSONUnmarshaler
+// UnmarshalCursor is like mongo.Cursor.All, except that it uses BSONUnmarshaler
 // rather than the driver’s own unmarshaling. This avoids reflection & so is
 // much faster.
 //
