@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/10gen/migration-verifier/mbson"
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -25,10 +24,18 @@ func TestPrimaryKeyBSON(t *testing.T) {
 		"plain Marshal() panics",
 	)
 
-	raw := lo.Must(pk.MarshalToBSON())
+	raw := pk.MarshalToBSON()
+
+	assert.NoError(t, bson.Unmarshal(raw, &bson.D{}), "marshal outputs BSON")
 
 	var rt PrimaryKey
-	require.NoError(t, bson.Unmarshal(raw, &rt))
+	assert.Panics(
+		t,
+		func() { _ = bson.Unmarshal(raw, &rt) },
+		"plain Unmarshal() panics",
+	)
+
+	require.NoError(t, (&rt).UnmarshalFromBSON(raw))
 
 	assert.Equal(t, pk, rt, "should round-trip")
 }
@@ -48,10 +55,19 @@ func TestDocBSON(t *testing.T) {
 		"plain Marshal() panics",
 	)
 
-	raw := lo.Must(doc.MarshalToBSON())
+	raw := doc.MarshalToBSON()
+
+	assert.NoError(t, bson.Unmarshal(raw, &bson.D{}), "marshal outputs BSON")
 
 	var rt Doc
-	require.NoError(t, bson.Unmarshal(raw, &rt))
+
+	assert.Panics(
+		t,
+		func() { _ = bson.Unmarshal(raw, &rt) },
+		"plain Unmarshal() panics",
+	)
+
+	require.NoError(t, (&rt).UnmarshalFromBSON(raw))
 
 	assert.Equal(t, doc, rt, "doc should round-trip")
 }

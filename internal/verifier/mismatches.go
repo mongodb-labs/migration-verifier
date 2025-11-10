@@ -2,6 +2,8 @@ package verifier
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
 
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -9,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 const (
@@ -18,6 +21,36 @@ const (
 type MismatchInfo struct {
 	Task   bson.ObjectID
 	Detail VerificationResult
+}
+
+var _ bson.Marshaler = MismatchInfo{}
+
+func (mi MismatchInfo) MarshalBSON() ([]byte, error) {
+	panic("Use MarshalToBSON().")
+}
+
+func (mi MismatchInfo) MarshalToBSON() []byte {
+	detail := mi.Detail.MarshalToBSON()
+
+	bsonLen := 4 + // header
+		1 + 4 + 1 + len(bson.ObjectID{}) + // Task
+		1 + 6 + 1 + len(detail) + // Detail
+		1 // NUL
+
+	buf := make(bson.Raw, 4, bsonLen)
+
+	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
+
+	buf = bsoncore.AppendObjectIDElement(buf, "task", mi.Task)
+	buf = bsoncore.AppendDocumentElement(buf, "detail", detail)
+
+	buf = append(buf, 0)
+
+	if len(buf) != bsonLen {
+		panic(fmt.Sprintf("%T BSON length is %d but expected %d", mi, len(buf), bsonLen))
+	}
+
+	return buf
 }
 
 func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
@@ -108,7 +141,7 @@ func recordMismatches(
 				Document: MismatchInfo{
 					Task:   taskID,
 					Detail: r,
-				},
+				}.MarshalToBSON(),
 			}
 		},
 	)

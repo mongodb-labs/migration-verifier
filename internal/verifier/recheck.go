@@ -139,10 +139,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			DataSize: dataSizes[i],
 		}
 
-		recheckRaw, err := recheckDoc.MarshalToBSON()
-		if err != nil {
-			return errors.Wrapf(err, "marshaling recheck for %#q", dbName+"."+collNames[i])
-		}
+		recheckRaw := recheckDoc.MarshalToBSON()
 
 		curRechecks = append(
 			curRechecks,
@@ -339,15 +336,12 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	// subject to a 16MB limit on group size.
 	for cursor.Next(ctx) {
 		var doc recheck.Doc
-		err = cursor.Decode(&doc)
+		err = (&doc).UnmarshalFromBSON(cursor.Current)
 		if err != nil {
 			return err
 		}
 
-		idRaw, err := cursor.Current.LookupErr("_id", "docID")
-		if err != nil {
-			return errors.Wrapf(err, "failed to find docID in enqueued recheck %v", cursor.Current)
-		}
+		idRaw := doc.PrimaryKey.DocumentID
 
 		// We persist rechecks if any of these happen:
 		// - the namespace has changed
@@ -395,7 +389,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 	err = cursor.Err()
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "reading persisted rechecks")
 	}
 
 	err = persistBufferedRechecks()
