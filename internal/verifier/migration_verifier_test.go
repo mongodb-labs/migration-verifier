@@ -680,7 +680,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
 
-	err := verifier.HandleChangeStreamEvents(
+	err := verifier.PersistChangeEvents(
 		ctx,
 		changeEventBatch{
 			events: []ParsedEvent{{
@@ -696,7 +696,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 	)
 	suite.Require().NoError(err)
 
-	err = verifier.HandleChangeStreamEvents(
+	err = verifier.PersistChangeEvents(
 		ctx,
 		changeEventBatch{
 			events: []ParsedEvent{{
@@ -971,23 +971,23 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		events: mslices.Of(event),
 	}
 
-	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, src)
 	suite.Require().NoError(err)
 
 	event.OpType = "insert"
-	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, src)
 	suite.Require().NoError(err)
 	event.OpType = "replace"
-	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, src)
 	suite.Require().NoError(err)
 	event.OpType = "update"
-	err = verifier.HandleChangeStreamEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, src)
 	suite.Require().NoError(err)
 
 	batch.events[0].OpType = "flibbity"
 	suite.Assert().Panics(
 		func() {
-			_ = verifier.HandleChangeStreamEvents(ctx, batch, src)
+			_ = verifier.PersistChangeEvents(ctx, batch, src)
 		},
 		"HandleChangeStreamEvents should panic if it gets an unknown optype",
 	)

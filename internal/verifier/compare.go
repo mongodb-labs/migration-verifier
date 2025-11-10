@@ -452,7 +452,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.srcClientCollection(task),
 			verifier.srcClusterInfo,
-			verifier.srcChangeStreamReader.startAtTs,
+			verifier.srcChangeReader.getStartTimestamp(),
 			task,
 		)
 
@@ -485,7 +485,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.dstClientCollection(task),
 			verifier.dstClusterInfo,
-			verifier.dstChangeStreamReader.startAtTs,
+			verifier.dstChangeReader.getStartTimestamp(),
 			task,
 		)
 
@@ -556,7 +556,7 @@ func getMapKey(docKeyValues []bson.RawValue) string {
 }
 
 func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
-	startAtTs *bson.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
+	startAtTs bson.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
 	var andPredicates bson.A
@@ -640,18 +640,17 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 
 	if verifier.readPreference.Mode() != readpref.PrimaryMode {
 		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
-		if startAtTs != nil {
-			readConcern := bson.D{
-				{"afterClusterTime", *startAtTs},
-			}
 
-			// We never want to read before the change stream start time,
-			// or for the last generation, the change stream end time.
-			cmd = append(
-				cmd,
-				bson.E{"readConcern", readConcern},
-			)
+		readConcern := bson.D{
+			{"afterClusterTime", startAtTs},
 		}
+
+		// We never want to read before the change stream start time,
+		// or for the last generation, the change stream end time.
+		cmd = append(
+			cmd,
+			bson.E{"readConcern", readConcern},
+		)
 	}
 
 	// Suppress this log for recheck tasks because the list of IDs can be

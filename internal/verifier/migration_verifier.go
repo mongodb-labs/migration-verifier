@@ -132,8 +132,8 @@ type Verifier struct {
 
 	mux sync.RWMutex
 
-	srcChangeStreamReader *ChangeStreamReader
-	dstChangeStreamReader *ChangeStreamReader
+	srcChangeReader changeReader
+	dstChangeReader changeReader
 
 	readConcernSetting ReadConcernSetting
 
@@ -273,19 +273,19 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	// might be inserting docs into the recheck queue, which happens
 	// under the lock.
 	select {
-	case <-verifier.srcChangeStreamReader.readerError.Ready():
-		err := verifier.srcChangeStreamReader.readerError.Get()
-		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.srcChangeStreamReader)
+	case <-verifier.srcChangeReader.getError().Ready():
+		err := verifier.srcChangeReader.getError().Get()
+		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.srcChangeReader)
 	default:
-		verifier.srcChangeStreamReader.writesOffTs.Set(srcFinalTs)
+		verifier.srcChangeReader.setWritesOff(srcFinalTs)
 	}
 
 	select {
-	case <-verifier.dstChangeStreamReader.readerError.Ready():
-		err := verifier.dstChangeStreamReader.readerError.Get()
-		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.dstChangeStreamReader)
+	case <-verifier.dstChangeReader.getError().Ready():
+		err := verifier.dstChangeReader.getError().Get()
+		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.dstChangeReader)
 	default:
-		verifier.dstChangeStreamReader.writesOffTs.Set(dstFinalTs)
+		verifier.dstChangeReader.setWritesOff(dstFinalTs)
 	}
 
 	return nil

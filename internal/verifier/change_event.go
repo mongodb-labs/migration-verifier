@@ -10,6 +10,12 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+type changeEventBatch struct {
+	events      []ParsedEvent
+	resumeToken bson.Raw
+	clusterTime bson.Timestamp
+}
+
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
 type ParsedEvent struct {
 	OpType       string                         `bson:"operationType"`

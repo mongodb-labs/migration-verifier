@@ -50,16 +50,16 @@ func (verifier *Verifier) Check(ctx context.Context, filter bson.D) {
 	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
 }
 
-func (verifier *Verifier) waitForChangeStream(ctx context.Context, csr *ChangeStreamReader) error {
+func (verifier *Verifier) waitForChangeStream(ctx context.Context, csr changeReader) error {
 	select {
 	case <-ctx.Done():
 		return util.WrapCtxErrWithCause(ctx)
-	case <-csr.readerError.Ready():
-		err := csr.readerError.Get()
+	case <-csr.getError().Ready():
+		err := csr.getError().Get()
 		verifier.logger.Warn().Err(err).
 			Msgf("Received error from %s.", csr)
 		return err
-	case <-csr.doneChan:
+	case <-csr.done():
 		verifier.logger.Debug().
 			Msgf("Received completion signal from %s.", csr)
 		break
@@ -93,12 +93,12 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	// If the change stream fails, everything should stop.
 	eg.Go(func() error {
 		select {
-		case <-verifier.srcChangeStreamReader.readerError.Ready():
-			err := verifier.srcChangeStreamReader.readerError.Get()
-			return errors.Wrapf(err, "%s failed", verifier.srcChangeStreamReader)
-		case <-verifier.dstChangeStreamReader.readerError.Ready():
-			err := verifier.dstChangeStreamReader.readerError.Get()
-			return errors.Wrapf(err, "%s failed", verifier.dstChangeStreamReader)
+		case <-verifier.srcChangeReader.getError().Ready():
+			err := verifier.srcChangeReader.getError().Get()
+			return errors.Wrapf(err, "%s failed", verifier.srcChangeReader)
+		case <-verifier.dstChangeReader.getError().Ready():
+			err := verifier.dstChangeReader.getError().Get()
+			return errors.Wrapf(err, "%s failed", verifier.dstChangeReader)
 		case <-ctx.Done():
 			return nil
 		}
@@ -270,18 +270,31 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	}()
 
 	ceHandlerGroup, groupCtx := contextplus.ErrGroup(ctx)
-	for _, csReader := range []*ChangeStreamReader{verifier.srcChangeStreamReader, verifier.dstChangeStreamReader} {
-		if csReader.changeStreamRunning {
+	for _, csReader := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
+		if csReader.isRunning() {
 			verifier.logger.Debug().Msgf("Check: %s already running.", csReader)
 		} else {
 			verifier.logger.Debug().Msgf("%s not running; starting change stream", csReader)
 
-			err = csReader.StartChangeStream(ctx)
+			err = csReader.start(ctx)
 			if err != nil {
 				return errors.Wrapf(err, "failed to start %s", csReader)
 			}
 			ceHandlerGroup.Go(func() error {
-				return verifier.RunChangeEventHandler(groupCtx, csReader)
+				err := verifier.RunChangeEventPersistor(
+					groupCtx,
+					csReader.getWhichCluster(),
+					csReader.persistChangeStreamResumeToken,
+					csReader.getReadChannel(),
+				)
+
+				// This will prevent the reader from hanging because the reader checks
+				// this along with checks for context expiry.
+				if err != nil {
+					csReader.setPersistorError(err)
+				}
+
+				return err
 			})
 		}
 	}
@@ -370,7 +383,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 			// generation number, or the last changes will not be checked.
 			verifier.mux.Unlock()
 
-			for _, csr := range mslices.Of(verifier.srcChangeStreamReader, verifier.dstChangeStreamReader) {
+			for _, csr := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
 				if err = verifier.waitForChangeStream(ctx, csr); err != nil {
 					return errors.Wrapf(
 						err,
