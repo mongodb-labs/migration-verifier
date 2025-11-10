@@ -204,7 +204,7 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 		},
 	)
 
-	if csr.hasBsonSize() {
+	if util.ClusterHasBSONSize(csr.clusterInfo.VersionArray) {
 		pipeline = append(
 			pipeline,
 			bson.D{
@@ -217,16 +217,6 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 	}
 
 	return pipeline
-}
-
-func (csr *ChangeStreamReader) hasBsonSize() bool {
-	major := csr.clusterInfo.VersionArray[0]
-
-	if major == 4 {
-		return csr.clusterInfo.VersionArray[1] >= 4
-	}
-
-	return major > 4
 }
 
 // This function reads a single `getMore` response into a slice.

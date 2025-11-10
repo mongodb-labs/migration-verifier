@@ -281,20 +281,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				return errors.Wrapf(err, "failed to start %s", csReader)
 			}
 			ceHandlerGroup.Go(func() error {
-				err := verifier.RunChangeEventPersistor(
-					groupCtx,
-					csReader.getWhichCluster(),
-					csReader.persistChangeStreamResumeToken,
-					csReader.getReadChannel(),
-				)
-
-				// This will prevent the reader from hanging because the reader checks
-				// this along with checks for context expiry.
-				if err != nil {
-					csReader.setPersistorError(err)
-				}
-
-				return err
+				return verifier.RunChangeEventPersistor(groupCtx, csReader)
 			})
 		}
 	}

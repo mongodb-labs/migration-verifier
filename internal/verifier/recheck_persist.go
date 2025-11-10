@@ -15,10 +15,12 @@ import (
 // goroutine.
 func (verifier *Verifier) RunChangeEventPersistor(
 	ctx context.Context,
-	clusterName whichCluster,
-	persistCallback func(context.Context, bson.Raw) error,
-	in <-chan changeEventBatch,
+	reader changeReader,
 ) error {
+	clusterName := reader.getWhichCluster()
+	persistCallback := reader.persistChangeStreamResumeToken
+	in := reader.getReadChannel()
+
 	var err error
 
 	var lastPersistedTime time.Time
@@ -70,6 +72,12 @@ HandlerLoop:
 				persistResumeTokenIfNeeded(ctx, batch.resumeToken)
 			}
 		}
+	}
+
+	// This will prevent the reader from hanging because the reader checks
+	// this along with checks for context expiry.
+	if err != nil {
+		reader.setPersistorError(err)
 	}
 
 	return err
