@@ -32,7 +32,12 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
 
 	verifier := suite.BuildVerifier()
 
-	filter := verifier.srcChangeReader.GetChangeStreamFilter()
+	changeStreamReader, ok := verifier.srcChangeReader.(*ChangeStreamReader)
+	if !ok {
+		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeReader, changeStreamReader)
+	}
+
+	filter := changeStreamReader.GetChangeStreamFilter()
 
 	_, err := suite.srcMongoClient.
 		Database("realUserDatabase").
@@ -100,14 +105,19 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 		suite.T().Skip("Need a source version that has $bsonSize")
 	}
 
+	changeStreamReader, ok := verifier.srcChangeReader.(*ChangeStreamReader)
+	if !ok {
+		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeReader, changeStreamReader)
+	}
+
 	srcColl := verifier.srcClient.Database(suite.DBNameForTest()).Collection("coll")
 
 	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", 123}})
 	suite.Require().NoError(err)
 
-	verifier.srcChangeReader.namespaces = mslices.Of(FullName(srcColl))
+	changeStreamReader.namespaces = mslices.Of(FullName(srcColl))
 
-	filter := verifier.srcChangeReader.GetChangeStreamFilter()
+	filter := changeStreamReader.GetChangeStreamFilter()
 
 	cs, err := suite.srcMongoClient.Watch(
 		ctx,
@@ -157,14 +167,20 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 	ctx := suite.Context()
 
 	verifier := suite.BuildVerifier()
-	verifier.srcChangeReader.namespaces = []string{
+
+	changeStreamReader, ok := verifier.srcChangeReader.(*ChangeStreamReader)
+	if !ok {
+		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeReader, changeStreamReader)
+	}
+
+	changeStreamReader.namespaces = []string{
 		"foo.bar",
 		"foo.baz",
 		"test.car",
 		"test.chaz",
 	}
 
-	filter := verifier.srcChangeReader.GetChangeStreamFilter()
+	filter := changeStreamReader.GetChangeStreamFilter()
 
 	cs, err := suite.srcMongoClient.Watch(ctx, filter)
 	suite.Require().NoError(err)
