@@ -61,6 +61,9 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	generation, _ := verifier.getGenerationWhileLocked()
 
+	// We enqueue for the generation after the current one.
+	generation++
+
 	eg, groupCtx := contextplus.ErrGroup(ctx)
 
 	// MongoDB’s Go driver starts failing requests if we try to exceed
@@ -136,10 +139,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			DataSize: dataSizes[i],
 		}
 
-		recheckRaw, err := recheckDoc.MarshalToBSON()
-		if err != nil {
-			return errors.Wrapf(err, "marshaling recheck for %#q", dbName+"."+collNames[i])
-		}
+		recheckRaw := recheckDoc.MarshalToBSON()
 
 		curRechecks = append(
 			curRechecks,
@@ -233,66 +233,37 @@ func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
 	return requestBSON
 }
 
-// DropOldRecheckQueueWhileLocked deletes the previous generation’s recheck
-// documents from the verifier’s metadata.
-//
-// The verifier **MUST** be locked when this function is called (or panic).
-func (verifier *Verifier) DropOldRecheckQueueWhileLocked(ctx context.Context) error {
-	prevGeneration := verifier.getPreviousGenerationWhileLocked()
+// DropCurrentGenRecheckQueue deletes the current generation’s recheck
+// documents from the verifier’s metadata. This should only be called
+// after new recheck tasks have been created from those rechecks.
+func (verifier *Verifier) DropCurrentGenRecheckQueue(ctx context.Context) error {
+	generation := verifier.generation
 
 	verifier.logger.Debug().
-		Int("previousGeneration", prevGeneration).
-		Msg("Deleting previous generation's enqueued rechecks.")
+		Int("generation", generation).
+		Msg("Deleting current generation's enqueued rechecks.")
 
-	genCollection := verifier.getRecheckQueueCollection(prevGeneration)
+	genCollection := verifier.getRecheckQueueCollection(generation)
 
 	return retry.New().WithCallback(
 		func(ctx context.Context, i *retry.FuncInfo) error {
 			return genCollection.Drop(ctx)
 		},
 		"deleting generation %d's enqueued rechecks",
-		prevGeneration,
+		generation,
 	).Run(ctx, verifier.logger)
 }
 
-func (verifier *Verifier) getPreviousGenerationWhileLocked() int {
-	generation, _ := verifier.getGenerationWhileLocked()
-	if generation < 1 {
-		panic("This function is forbidden before generation 1!")
-	}
-
-	return generation - 1
-}
-
-// GenerateRecheckTasksWhileLocked fetches the previous generation’s recheck
-// documents from the verifier’s metadata and creates current-generation
-// document-verification tasks from them.
+// GenerateRecheckTasks fetches the rechecks enqueued for the current generation
+// from the verifier’s metadata and creates document-verification tasks from
+// them.
 //
 // Note that this function DOES NOT retry on failure, so callers should wrap
 // calls to this function in a retryer.
-//
-// The verifier **MUST** be locked when this function is called (or panic).
-func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) error {
-	prevGeneration := verifier.getPreviousGenerationWhileLocked()
+func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
+	generation, _ := verifier.getGeneration()
 
-	verifier.logger.Debug().
-		Int("priorGeneration", prevGeneration).
-		Msgf("Counting prior generation’s enqueued rechecks.")
-
-	recheckColl := verifier.getRecheckQueueCollection(prevGeneration)
-
-	rechecksCount, err := recheckColl.CountDocuments(ctx, bson.D{})
-	if err != nil {
-		return errors.Wrapf(err,
-			"failed to count generation %d’s rechecks",
-			prevGeneration,
-		)
-	}
-
-	verifier.logger.Debug().
-		Int("priorGeneration", prevGeneration).
-		Int("rechecksCount", int(rechecksCount)).
-		Msgf("Creating recheck tasks from prior generation’s enqueued rechecks.")
+	recheckColl := verifier.getRecheckQueueCollection(generation)
 
 	startTime := time.Now()
 
@@ -365,15 +336,12 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 	// subject to a 16MB limit on group size.
 	for cursor.Next(ctx) {
 		var doc recheck.Doc
-		err = cursor.Decode(&doc)
+		err = (&doc).UnmarshalFromBSON(cursor.Current)
 		if err != nil {
 			return err
 		}
 
-		idRaw, err := cursor.Current.LookupErr("_id", "docID")
-		if err != nil {
-			return errors.Wrapf(err, "failed to find docID in enqueued recheck %v", cursor.Current)
-		}
+		idRaw := doc.PrimaryKey.DocumentID
 
 		// We persist rechecks if any of these happen:
 		// - the namespace has changed
@@ -421,14 +389,14 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 
 	err = cursor.Err()
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "reading persisted rechecks")
 	}
 
 	err = persistBufferedRechecks()
 
 	if err == nil && totalDocs > 0 {
 		verifier.logger.Info().
-			Int("generation", 1+prevGeneration).
+			Int("generation", generation).
 			Int64("totalDocs", int64(totalDocs)).
 			Str("totalData", reportutils.FmtBytes(totalRecheckData)).
 			Stringer("timeElapsed", time.Since(startTime)).
@@ -439,6 +407,10 @@ func (verifier *Verifier) GenerateRecheckTasksWhileLocked(ctx context.Context) e
 }
 
 func (v *Verifier) getRecheckQueueCollection(generation int) *mongo.Collection {
+	if generation == 0 {
+		panic("Recheck for generation 0 is nonsense!")
+	}
+
 	return v.verificationDatabase().
 		Collection(fmt.Sprintf("%s_gen%d", recheckQueueCollectionNameBase, generation))
 }

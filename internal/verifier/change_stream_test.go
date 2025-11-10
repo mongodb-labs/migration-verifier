@@ -25,7 +25,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 )
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
@@ -255,12 +254,6 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 
 	verifier1 := suite.BuildVerifier()
 
-	// Use of linearizable read concern below seems to freeze pre-4.4 servers.
-	srcVersion := verifier1.srcClusterInfo.VersionArray
-	if util.CmpMinorVersions([2]int(srcVersion), [2]int{4, 4}) == -1 {
-		suite.T().Skipf("Source version (%v) is too old for this test.", srcVersion)
-	}
-
 	srcDB := verifier1.srcClient.Database(suite.DBNameForTest())
 	srcColl := srcDB.Collection("coll")
 
@@ -289,9 +282,10 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 		"should see a change stream resume token persisted",
 	)
 
-	insertCtx, cancelInserts := contextplus.WithCancelCause(ctx)
-	defer cancelInserts(ctx.Err())
+	stopInserts := make(chan struct{})
 	insertsDone := make(chan struct{})
+
+	var insertedIDs []any
 	go func() {
 		defer func() {
 			close(insertsDone)
@@ -302,21 +296,25 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 		)
 		require.NoError(suite.T(), err)
 
-		sessCtx := mongo.NewSessionContext(insertCtx, sess)
+		sessCtx := mongo.NewSessionContext(ctx, sess)
 
-		docID := int32(1)
 		for {
-			_, err := srcColl.InsertOne(
-				sessCtx,
-				bson.D{{"_id", docID}},
-			)
-
-			if err != nil {
-				require.ErrorIs(suite.T(), err, context.Canceled)
+			select {
+			case <-ctx.Done():
 				return
+			case <-stopInserts:
+				return
+			default:
 			}
 
-			docID++
+			inserted, err := srcColl.InsertOne(
+				sessCtx,
+				bson.D{},
+			)
+
+			require.NoError(suite.T(), err, "should insert")
+
+			insertedIDs = append(insertedIDs, inserted.InsertedID)
 		}
 	}()
 
@@ -340,58 +338,43 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	verifier2 := suite.BuildVerifier()
 	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier2)
 
-	cancelInserts(fmt.Errorf("verifier2 started"))
+	close(stopInserts)
 	<-insertsDone
 
-	lastIDRes := srcColl.Database().Collection(
-		srcColl.Name(),
-		options.Collection().SetReadConcern(readconcern.Linearizable()),
-	).FindOne(
-		ctx,
-		bson.D{},
-		options.FindOne().
-			SetSort(bson.D{{"_id", -1}}),
-	)
-	require.NoError(suite.T(), lastIDRes.Err())
-
-	lastDocID := lo.Must(lo.Must(lastIDRes.Raw()).LookupErr("_id")).Int32()
-
+	var foundIDs []any
 	assert.Eventually(
 		suite.T(),
 		func() bool {
-			rechecks := suite.fetchVerifierRechecks(ctx, verifier2)
+			rechecks := suite.fetchPendingVerifierRechecks(ctx, verifier2)
 
-			return lo.SomeBy(
+			foundIDs = lo.Map(
 				rechecks,
-				func(cur bson.M) bool {
+				func(cur bson.M, _ int) any {
 					id := cur["_id"].(bson.D)
 
 					for _, el := range id {
-						if el.Key != "docID" {
-							continue
+						if el.Key == "docID" {
+							return el.Value
 						}
-
-						return el.Value.(int32) == lastDocID
 					}
 
 					panic(fmt.Sprintf("no docID in _id: %+v", id))
 				},
 			)
+
+			return len(foundIDs) == len(insertedIDs)
 		},
 		time.Minute,
 		100*time.Millisecond,
 		"last-inserted doc shows as recheck",
 	)
 
-	sess := lo.Must(verifier2.verificationDatabase().Client().StartSession())
-	sctx := mongo.NewSessionContext(ctx, sess)
-
-	rechecks := suite.fetchVerifierRechecks(sctx, verifier2)
-	if !assert.EqualValues(suite.T(), lastDocID, len(rechecks), "all source docs should be rechecked") {
-		for _, recheck := range rechecks {
-			suite.T().Logf("found recheck: %v", recheck)
-		}
-	}
+	assert.ElementsMatch(
+		suite.T(),
+		insertedIDs,
+		foundIDs,
+		"all source docs should be rechecked",
+	)
 }
 
 // TestChangeStreamResumability creates a verifier, starts its change stream,
@@ -426,7 +409,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 	verifier2 := suite.BuildVerifier()
 
 	suite.Require().Empty(
-		suite.fetchVerifierRechecks(ctx, verifier2),
+		suite.fetchPendingVerifierRechecks(ctx, verifier2),
 		"no rechecks should be enqueued before starting change stream",
 	)
 
@@ -446,7 +429,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			recheckDocs = suite.fetchVerifierRechecks(ctx, verifier2)
+			recheckDocs = suite.fetchPendingVerifierRechecks(ctx, verifier2)
 
 			return len(recheckDocs) > 0
 		},
@@ -490,10 +473,10 @@ func (suite *IntegrationTestSuite) getClusterTime(ctx context.Context, client *m
 	return newTime
 }
 
-func (suite *IntegrationTestSuite) fetchVerifierRechecks(ctx context.Context, verifier *Verifier) []bson.M {
+func (suite *IntegrationTestSuite) fetchPendingVerifierRechecks(ctx context.Context, verifier *Verifier) []bson.M {
 	recheckDocs := []bson.M{}
 
-	recheckColl := verifier.getRecheckQueueCollection(verifier.generation)
+	recheckColl := verifier.getRecheckQueueCollection(1 + verifier.generation)
 	cursor, err := recheckColl.Aggregate(
 		ctx,
 		mongo.Pipeline{
@@ -732,7 +715,7 @@ func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			rechecks = suite.fetchVerifierRechecks(ctx, verifier)
+			rechecks = suite.fetchPendingVerifierRechecks(ctx, verifier)
 			return len(rechecks) == 3
 		},
 		time.Minute,
@@ -1069,15 +1052,28 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	require.Eventually(
 		suite.T(),
 		func() bool {
-			recheckColl := verifier.getRecheckQueueCollection(verifier.generation)
-			cursor, err := recheckColl.Find(ctx, bson.D{})
-			if errors.Is(err, mongo.ErrNoDocuments) {
+			rechecksM := suite.fetchPendingVerifierRechecks(ctx, verifier)
+
+			if len(rechecksM) < 3 {
 				return false
 			}
 
-			suite.Require().NoError(err)
-			suite.Require().NoError(cursor.All(ctx, &rechecks))
-			return len(rechecks) == 3
+			require.Len(suite.T(), rechecksM, 3)
+
+			rechecks = lo.Map(
+				rechecksM,
+				func(m bson.M, _ int) recheck.Doc {
+					raw, err := bson.Marshal(m)
+					require.NoError(suite.T(), err)
+
+					doc := recheck.Doc{}
+					require.NoError(suite.T(), (&doc).UnmarshalFromBSON(raw))
+
+					return doc
+				},
+			)
+
+			return true
 		},
 		time.Minute,
 		500*time.Millisecond,
