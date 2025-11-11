@@ -793,25 +793,6 @@ func addTimestampToLogEvent(ts bson.Timestamp, event *zerolog.Event) *zerolog.Ev
 		Time("time", time.Unix(int64(ts.T), int64(0)))
 }
 
-func (csr *ChangeStreamReader) getChangeStreamMetadataCollection() *mongo.Collection {
-	return csr.metaDB.Collection(metadataChangeStreamCollectionName)
-}
-
-func (csr *ChangeStreamReader) loadChangeStreamResumeToken(ctx context.Context) (bson.Raw, error) {
-	coll := csr.getChangeStreamMetadataCollection()
-
-	token, err := coll.FindOne(
-		ctx,
-		bson.D{{"_id", csr.resumeTokenDocID()}},
-	).Raw()
-
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
-	}
-
-	return token, err
-}
-
 func (csr *ChangeStreamReader) String() string {
 	return fmt.Sprintf("%s change stream reader", csr.readerType)
 }
