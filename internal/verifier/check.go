@@ -471,7 +471,7 @@ func (v *Verifier) initializeChangeReaders() {
 			*v.dstClusterInfo,
 		)
 	} else {
-		v.srcChangeReader = v.newChangeStreamReader(
+		v.dstChangeReader = v.newChangeStreamReader(
 			v.dstNamespaces,
 			dst,
 			v.dstClient,
