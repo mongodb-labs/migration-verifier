@@ -19,6 +19,8 @@ type ClusterInfo struct {
 	Topology     ClusterTopology
 }
 
+// ClusterHasBSONSize indicates whether a cluster with the given
+// major & minor version numbers supports the $bsonSize aggregation operator.
 func ClusterHasBSONSize(va [2]int) bool {
 	major := va[0]
 
