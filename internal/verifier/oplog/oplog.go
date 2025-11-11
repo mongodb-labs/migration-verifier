@@ -64,7 +64,9 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 			err = mbson.UnmarshalElementValue(el, &o.DocLen)
 		case "docID":
 			o.DocID, err = el.ValueErr()
-			o.DocID.Value = slices.Clone(o.DocID.Value)
+			if err != nil {
+				o.DocID.Value = slices.Clone(o.DocID.Value)
+			}
 		case "ops":
 			var arr bson.RawArray
 			err = mbson.UnmarshalElementValue(el, &arr)

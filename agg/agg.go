@@ -120,6 +120,14 @@ type SwitchCase struct {
 	Then any
 }
 
+func (s Switch) D() bson.D {
+	return bson.D{{"$switch", s}}
+}
+
+func (s Switch) MarshalBSON() ([]byte, error) {
+	return bson.Marshal(s.D())
+}
+
 // ---------------------------------------------
 
 type Map struct {
