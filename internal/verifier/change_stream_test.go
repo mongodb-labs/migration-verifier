@@ -223,7 +223,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 	for {
 		gotEvent := cs.TryNext(ctx)
 		suite.Require().NoError(cs.Err())
-		csOpTime, err := extractTimestampFromResumeToken(cs.ResumeToken())
+		csOpTime, err := extractTSFromChangeStreamResumeToken(cs.ResumeToken())
 		suite.Require().NoError(err, "should get timestamp from resume token")
 
 		if gotEvent {

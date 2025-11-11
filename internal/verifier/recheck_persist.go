@@ -10,6 +10,12 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+type changeEventBatch struct {
+	events      []ParsedEvent
+	resumeToken bson.Raw
+	clusterTime bson.Timestamp
+}
+
 // RunChangeEventPersistor persists rechecks from change event batches.
 // It needs to be started after the reader starts and should run in its own
 // goroutine.

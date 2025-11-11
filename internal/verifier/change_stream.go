@@ -16,8 +16,6 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
 	"github.com/pkg/errors"
-	"github.com/rs/zerolog"
-	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -56,12 +54,6 @@ func (uee UnknownEventError) Error() string {
 	return fmt.Sprintf("received event with unknown optype: %+v", uee.Event)
 }
 
-type changeEventBatch struct {
-	events      []ParsedEvent
-	resumeToken bson.Raw
-	clusterTime bson.Timestamp
-}
-
 type ChangeStreamReader struct {
 	ChangeReaderCommon
 }
@@ -97,11 +89,11 @@ func (verifier *Verifier) initializeChangeReaders() {
 		csr.changeEventBatchChan = make(chan changeEventBatch, batchChanBufferSize)
 		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
 		csr.readerError = util.NewEventual[error]()
-		csr.handlerError = util.NewEventual[error]()
+		csr.persistorError = util.NewEventual[error]()
 		csr.doneChan = make(chan struct{})
 		csr.lag = msync.NewTypedAtomic(option.None[time.Duration]())
 		csr.batchSizeHistory = history.New[int](time.Minute)
-		csr.resumeTokenTSExtractor = extractTimestampFromResumeToken
+		csr.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
 	}
 }
 
@@ -157,7 +149,7 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 		},
 	)
 
-	if csr.hasBsonSize() {
+	if util.ClusterHasBSONSize([2]int(csr.clusterInfo.VersionArray)) {
 		pipeline = append(
 			pipeline,
 			bson.D{
@@ -170,16 +162,6 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 	}
 
 	return pipeline
-}
-
-func (csr *ChangeStreamReader) hasBsonSize() bool {
-	major := csr.clusterInfo.VersionArray[0]
-
-	if major == 4 {
-		return csr.clusterInfo.VersionArray[1] >= 4
-	}
-
-	return major > 4
 }
 
 // This function reads a single `getMore` response into a slice.
@@ -294,8 +276,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	select {
 	case <-ctx.Done():
 		return util.WrapCtxErrWithCause(ctx)
-	case <-csr.handlerError.Ready():
-		return csr.wrapHandlerErrorForReader()
+	case <-csr.persistorError.Ready():
+		return csr.wrapPersistorErrorForReader()
 	case csr.changeEventBatchChan <- changeEventBatch{
 		events: changeEvents,
 
@@ -309,13 +291,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	ri.NoteSuccess("sent %d-event batch to handler", len(changeEvents))
 
 	return nil
-}
-
-func (csr *ChangeStreamReader) wrapHandlerErrorForReader() error {
-	return errors.Wrap(
-		csr.handlerError.Get(),
-		"event handler failed, so no more events can be processed",
-	)
 }
 
 func (csr *ChangeStreamReader) iterateChangeStream(
@@ -341,8 +316,8 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 			return err
 
-		case <-csr.handlerError.Ready():
-			return csr.wrapHandlerErrorForReader()
+		case <-csr.persistorError.Ready():
+			return csr.wrapPersistorErrorForReader()
 
 		// If the ChangeStreamEnderChan has a message, the user has indicated that
 		// source writes are ended and the migration tool is finished / committed.
@@ -585,56 +560,11 @@ func (csr *ChangeStreamReader) start(ctx context.Context) error {
 	return nil
 }
 
-// GetLag returns the observed change stream lag (i.e., the delta between
-// cluster time and the most-recently-seen change event).
-func (csr *ChangeStreamReader) GetLag() option.Option[time.Duration] {
-	return csr.lag.Load()
-}
-
-// GetSaturation returns the reader’s internal buffer’s saturation level as
-// a fraction. If saturation rises, that means we’re reading events faster than
-// we can persist them.
-func (csr *ChangeStreamReader) GetSaturation() float64 {
-	return util.DivideToF64(len(csr.changeEventBatchChan), cap(csr.changeEventBatchChan))
-}
-
-// GetEventsPerSecond returns the number of change events per second we’ve been
-// seeing “recently”. (See implementation for the actual period over which we
-// compile this metric.)
-func (csr *ChangeStreamReader) GetEventsPerSecond() option.Option[float64] {
-	logs := csr.batchSizeHistory.Get()
-	lastLog, hasLogs := lo.Last(logs)
-
-	if hasLogs && lastLog.At != logs[0].At {
-		span := lastLog.At.Sub(logs[0].At)
-
-		// Each log contains a time and a # of events that happened since
-		// the prior log. Thus, each log’s Datum is a count of events that
-		// happened before the timestamp. Since we want the # of events that
-		// happened between the first & last times, we only want events *after*
-		// the first time. Thus, we skip the first log entry here.
-		totalEvents := 0
-		for _, log := range logs[1:] {
-			totalEvents += log.Datum
-		}
-
-		return option.Some(util.DivideToF64(totalEvents, span.Seconds()))
-	}
-
-	return option.None[float64]()
-}
-
-func addTimestampToLogEvent(ts bson.Timestamp, event *zerolog.Event) *zerolog.Event {
-	return event.
-		Any("timestamp", ts).
-		Time("time", time.Unix(int64(ts.T), int64(0)))
-}
-
 func (csr *ChangeStreamReader) String() string {
 	return fmt.Sprintf("%s change stream reader", csr.readerType)
 }
 
-func extractTimestampFromResumeToken(resumeToken bson.Raw) (bson.Timestamp, error) {
+func extractTSFromChangeStreamResumeToken(resumeToken bson.Raw) (bson.Timestamp, error) {
 	// Change stream token is always a V1 keystring in the _data field
 	tokenDataRV, err := resumeToken.LookupErr("_data")
 

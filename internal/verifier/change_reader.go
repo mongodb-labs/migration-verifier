@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -54,7 +55,7 @@ type ChangeReaderCommon struct {
 	changeEventBatchChan chan changeEventBatch
 	writesOffTs          *util.Eventual[bson.Timestamp]
 	readerError          *util.Eventual[error]
-	handlerError         *util.Eventual[error]
+	persistorError       *util.Eventual[error]
 	doneChan             chan struct{}
 
 	startAtTs *bson.Timestamp
@@ -70,7 +71,7 @@ func (rc *ChangeReaderCommon) getWhichCluster() whichCluster {
 }
 
 func (rc *ChangeReaderCommon) setPersistorError(err error) {
-	rc.handlerError.Set(err)
+	rc.persistorError.Set(err)
 }
 
 func (rc *ChangeReaderCommon) getError() *util.Eventual[error] {
@@ -207,4 +208,17 @@ func (rc *ChangeReaderCommon) logIgnoredDDL(rawEvent bson.Raw) {
 		Str("reader", string(rc.readerType)).
 		Stringer("event", rawEvent).
 		Msg("Ignoring event with unrecognized type on destination. (It’s assumedly internal to the migration.)")
+}
+
+func (rc *ChangeReaderCommon) wrapPersistorErrorForReader() error {
+	return errors.Wrap(
+		rc.persistorError.Get(),
+		"event persistor failed, so no more events can be processed",
+	)
+}
+
+func addTimestampToLogEvent(ts bson.Timestamp, event *zerolog.Event) *zerolog.Event {
+	return event.
+		Any("timestamp", ts).
+		Time("time", time.Unix(int64(ts.T), int64(0)))
 }
