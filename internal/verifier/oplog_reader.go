@@ -62,12 +62,26 @@ func (v *Verifier) newOplogReader(
 func (o *OplogReader) start(ctx context.Context) error {
 	// TODO: retryer
 
-	startOpTime, err := oplog.GetTailingStartTime(ctx, o.client)
+	savedResumeToken, err := o.loadResumeToken(ctx)
 	if err != nil {
-		return errors.Wrapf(err, "getting start optime")
+		return errors.Wrap(err, "loading persisted resume token")
 	}
 
-	o.startAtTS = option.Some(startOpTime.TS)
+	if token, has := savedResumeToken.Get(); has {
+		var rt oplog.ResumeToken
+		if err := bson.Unmarshal(token, &rt); err != nil {
+			return errors.Wrap(err, "parsing persisted resume token")
+		}
+
+		o.startAtTS = option.Some(rt.TS)
+	} else {
+		startOpTime, err := oplog.GetTailingStartTime(ctx, o.client)
+		if err != nil {
+			return errors.Wrapf(err, "getting start optime from %s", o.clusterName)
+		}
+
+		o.startAtTS = option.Some(startOpTime.TS)
+	}
 
 	sess, err := o.client.StartSession()
 	if err != nil {
@@ -85,7 +99,7 @@ func (o *OplogReader) start(ctx context.Context) error {
 		Find(
 			sctx,
 			bson.D{{"$and", []any{
-				bson.D{{"ts", bson.D{{"$gte", startOpTime.TS}}}},
+				bson.D{{"ts", bson.D{{"$gte", o.startAtTS.MustGet()}}}},
 
 				bson.D{{"$expr", agg.Or{
 					// plain ops: one write per op
@@ -124,9 +138,20 @@ func (o *OplogReader) start(ctx context.Context) error {
 
 					{"docID", getOplogDocIDExpr("$$ROOT")},
 
-					// debugging
-					{"o", 1},
-					{"o2", 1},
+					{"cmdName", agg.Cond{
+						If: agg.Eq("$op", "c"),
+						Then: agg.ArrayElemAt{
+							Array: agg.Map{
+								Input: bson.D{
+									{"$objectToArray", "$o"},
+								},
+								As: "field",
+								In: "$$field.k",
+							},
+							Index: 0,
+						},
+						Else: "$$REMOVE",
+					}},
 
 					{"ops", agg.Cond{
 						If: agg.Eq("$op", "c"),

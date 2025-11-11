@@ -133,6 +133,24 @@ func (s Switch) MarshalBSON() ([]byte, error) {
 
 // ---------------------------------------------
 
+type ArrayElemAt struct {
+	Array any
+	Index int
+}
+
+func (a ArrayElemAt) D() bson.D {
+	return bson.D{{"$arrayElemAt", bson.A{
+		a.Array,
+		a.Index,
+	}}}
+}
+
+func (a ArrayElemAt) MarshalBSON() ([]byte, error) {
+	return bson.Marshal(a.D())
+}
+
+// ---------------------------------------------
+
 type Map struct {
 	Input, As, In any
 }
@@ -162,14 +180,16 @@ type Filter struct {
 var _ bson.Marshaler = Filter{}
 
 func (f Filter) D() bson.D {
-	return bson.D{
-		{"$filter", bson.D{
-			{"input", f.Input},
-			{"as", f.As},
-			{"cond", f.Cond},
-			{"limit", f.Limit},
-		}},
+	d := bson.D{
+		{"input", f.Input},
+		{"as", f.As},
+		{"cond", f.Cond},
 	}
+
+	if f.Limit != nil {
+		d = append(d, bson.E{"limit", f.Limit})
+	}
+	return bson.D{{"$filter", d}}
 }
 
 func (f Filter) MarshalBSON() ([]byte, error) {

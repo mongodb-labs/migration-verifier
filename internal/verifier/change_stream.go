@@ -41,7 +41,7 @@ var supportedEventOpTypes = mapset.NewSet(
 const (
 	minChangeStreamPersistInterval     = time.Second * 10
 	maxChangeStreamAwaitTime           = time.Second
-	metadataChangeStreamCollectionName = "changeStream"
+	metadataChangeStreamCollectionName = "changeReader"
 )
 
 type UnknownEventError struct {
@@ -437,18 +437,18 @@ func (csr *ChangeStreamReader) createChangeStream(
 		)
 	}
 
-	savedResumeToken, err := csr.loadChangeStreamResumeToken(ctx)
+	savedResumeToken, err := csr.loadResumeToken(ctx)
 	if err != nil {
 		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
 	}
 
 	csStartLogEvent := csr.logger.Info()
 
-	if savedResumeToken != nil {
+	if token, has := savedResumeToken.Get(); has {
 		logEvent := csStartLogEvent.
-			Stringer(csr.resumeTokenDocID(), savedResumeToken)
+			Stringer(csr.resumeTokenDocID(), token)
 
-		ts, err := extractTimestampFromResumeToken(savedResumeToken)
+		ts, err := extractTimestampFromResumeToken(token)
 		if err == nil {
 			logEvent = addTimestampToLogEvent(ts, logEvent)
 		} else {
@@ -593,7 +593,7 @@ func (csr *ChangeStreamReader) String() string {
 }
 
 func (csr *ChangeStreamReader) persistChangeStreamResumeToken(ctx context.Context, token bson.Raw) error {
-	coll := csr.getChangeStreamMetadataCollection()
+	coll := csr.getMetadataCollection()
 	_, err := coll.ReplaceOne(
 		ctx,
 		bson.D{{"_id", csr.resumeTokenDocID()}},

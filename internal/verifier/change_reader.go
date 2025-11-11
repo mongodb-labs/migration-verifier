@@ -177,12 +177,12 @@ func (rc ChangeReaderCommon) resumeTokenDocID() string {
 	}
 }
 
-func (rc ChangeReaderCommon) getChangeStreamMetadataCollection() *mongo.Collection {
+func (rc ChangeReaderCommon) getMetadataCollection() *mongo.Collection {
 	return rc.metaDB.Collection(metadataChangeStreamCollectionName)
 }
 
-func (rc ChangeReaderCommon) loadChangeStreamResumeToken(ctx context.Context) (bson.Raw, error) {
-	coll := rc.getChangeStreamMetadataCollection()
+func (rc ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Option[bson.Raw], error) {
+	coll := rc.getMetadataCollection()
 
 	token, err := coll.FindOne(
 		ctx,
@@ -190,10 +190,10 @@ func (rc ChangeReaderCommon) loadChangeStreamResumeToken(ctx context.Context) (b
 	).Raw()
 
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
+		return option.None[bson.Raw](), nil
 	}
 
-	return token, err
+	return option.Some(token), err
 }
 
 func (rc *ChangeReaderCommon) updateLag(sess *mongo.Session, token bson.Raw) {

@@ -16,12 +16,13 @@ const (
 )
 
 type Op struct {
-	Op     string
-	TS     bson.Timestamp
-	Ns     string
-	DocLen int32
-	DocID  bson.RawValue
-	Ops    []Op
+	Op      string
+	TS      bson.Timestamp
+	Ns      string
+	CmdName string
+	DocLen  int32
+	DocID   bson.RawValue
+	Ops     []Op
 }
 
 type ResumeToken struct {
@@ -71,6 +72,8 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 			err = mbson.UnmarshalElementValue(el, &o.TS)
 		case "ns":
 			err = mbson.UnmarshalElementValue(el, &o.Ns)
+		case "cmdName":
+			err = mbson.UnmarshalElementValue(el, &o.CmdName)
 		case "docLen":
 			err = mbson.UnmarshalElementValue(el, &o.DocLen)
 		case "docID":
