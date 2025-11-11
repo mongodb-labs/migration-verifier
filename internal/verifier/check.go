@@ -269,18 +269,18 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		verifier.phase = Idle
 	}()
 
-	ceHandlerGroup, groupCtx := contextplus.ErrGroup(ctx)
+	changeReaderGroup, groupCtx := contextplus.ErrGroup(ctx)
 	for _, csReader := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
 		if csReader.isRunning() {
 			verifier.logger.Debug().Msgf("Check: %s already running.", csReader)
 		} else {
 			verifier.logger.Debug().Msgf("%s not running; starting change stream", csReader)
 
-			err = csReader.start(ctx)
+			err = csReader.start(groupCtx)
 			if err != nil {
 				return errors.Wrapf(err, "failed to start %s", csReader)
 			}
-			ceHandlerGroup.Go(func() error {
+			changeReaderGroup.Go(func() error {
 				return verifier.RunChangeEventPersistor(groupCtx, csReader)
 			})
 		}
@@ -384,7 +384,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 					Msg("Change stream reader finished.")
 			}
 
-			if err = ceHandlerGroup.Wait(); err != nil {
+			if err = changeReaderGroup.Wait(); err != nil {
 				return err
 			}
 			verifier.mux.Lock()

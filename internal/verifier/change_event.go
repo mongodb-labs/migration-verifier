@@ -10,6 +10,11 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+const (
+	// The number of batches we’ll hold in memory at once.
+	batchChanBufferSize = 100
+)
+
 type changeEventBatch struct {
 	events      []ParsedEvent
 	resumeToken bson.Raw

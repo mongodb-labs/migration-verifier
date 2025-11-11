@@ -104,6 +104,17 @@ func NewNamespace(db, coll string) *Namespace {
 	}
 }
 
+/*
+func SplitNamespace(ns string) *Namespace {
+	db, coll, ok := strings.Cut(ns, ".")
+	if !ok {
+		panic("bad namespace: " + ns)
+	}
+
+	return NewNamespace(db, coll)
+}
+*/
+
 // Refetch contains the data necessary to track a refretch
 type Refetch struct {
 	ID            any    `bson:"id"`

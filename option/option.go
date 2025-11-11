@@ -150,3 +150,12 @@ func (o Option[T]) IsNone() bool {
 func (o Option[T]) IsSome() bool {
 	return o.val != nil
 }
+
+func (o Option[T]) Clone() Option[T] {
+	if o.val == nil {
+		return Option[T]{}
+	}
+
+	val := *o.val
+	return Option[T]{&val}
+}

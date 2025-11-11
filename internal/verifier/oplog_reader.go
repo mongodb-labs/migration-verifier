@@ -1,0 +1,320 @@
+package verifier
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/10gen/migration-verifier/agg"
+	"github.com/10gen/migration-verifier/agg/helpers"
+	"github.com/10gen/migration-verifier/history"
+	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/oplog"
+	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/msync"
+	"github.com/10gen/migration-verifier/option"
+	"github.com/pkg/errors"
+	"github.com/samber/lo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+)
+
+// OplogReader reads change events via oplog tailing instead of a change stream.
+// This significantly lightens server load and allows verification of heavier
+// workloads than change streams allow. It only works with replica sets.
+type OplogReader struct {
+	curDocs []bson.Raw
+	scratch []byte
+	ChangeReaderCommon
+}
+
+var _ changeReader = &OplogReader{}
+
+func (v *Verifier) NewOplogReader(cluster whichCluster) *OplogReader {
+	return &OplogReader{
+		ChangeReaderCommon: ChangeReaderCommon{
+			clusterName:      cluster,
+			logger:           v.logger,
+			metaDB:           v.metaClient.Database(v.metaDBName),
+			eventsChan:       make(chan changeEventBatch, batchChanBufferSize),
+			writesOffTS:      util.NewEventual[bson.Timestamp](),
+			readerError:      util.NewEventual[error](),
+			persistorError:   util.NewEventual[error](),
+			doneChan:         make(chan struct{}),
+			lag:              msync.NewTypedAtomic(option.None[time.Duration]()),
+			batchSizeHistory: history.New[int](time.Minute),
+		},
+	}
+}
+
+func (o *OplogReader) start(ctx context.Context) error {
+	// TODO: retryer
+
+	sess, err := o.client.StartSession()
+	if err != nil {
+		return errors.Wrap(err, "creating session")
+	}
+
+	sctx := mongo.NewSessionContext(ctx, sess)
+
+	cursor, err := o.client.Database("local").Collection("oplog.rs").
+		Find(
+			sctx,
+			bson.D{{"$expr", agg.Or{
+				// plain ops: one write per op
+				agg.And{
+					agg.In("$op", "d", "i", "u"),
+
+					// TODO: This logic is for all-namespace listening.
+					// If ns filtering is in play we need something smarter.
+					agg.Not{helpers.StringHasPrefix{
+						FieldRef: "$ns",
+						Prefix:   "config.",
+					}},
+					agg.Not{helpers.StringHasPrefix{
+						FieldRef: "$ns",
+						Prefix:   "admin.",
+					}},
+				},
+
+				// applyOps ops combine multiple writes into a single op
+				agg.And{
+					agg.Eq("$op", "c"),
+					agg.Eq("$ns", "admin.$cmd"),
+					agg.Eq(agg.Type("$o.applyOps"), "array"),
+				},
+
+				// no-ops, to stay up-to-date if no events of note happen
+				agg.Eq("$op", "n"),
+			}}},
+			options.Find().
+				SetCursorType(options.TailableAwait).
+				SetProjection(bson.D{
+					{"ts", 1},
+
+					{"op", 1},
+
+					{"ns", agg.Cond{
+						If:   agg.Eq("$op", "c"),
+						Then: "$$REMOVE",
+						Else: "$ns",
+					}},
+
+					// TODO: Adjust for 4.2.
+					{"docLen", getOplogDocLenExpr("$$ROOT")},
+
+					{"docID", getOplogDocIDExpr("$$ROOT")},
+
+					{"ops", agg.Cond{
+						If: agg.Eq("$op", "c"),
+						Then: agg.Map{
+							Input: "$o.applyOps",
+							As:    "opEntry",
+							In: bson.D{
+								{"op", "$$opEntry.op"},
+								// TODO: Add a ns filter here.
+								{"ns", "$$opEntry.ns"},
+								{"docID", getOplogDocIDExpr("$$opEntry")},
+								{"docLen", getOplogDocLenExpr("$$opEntry")},
+							},
+						},
+						Else: "$$REMOVE",
+					}},
+				}),
+		)
+
+	if err != nil {
+		return errors.Wrapf(err, "opening cursor to tail oplog")
+	}
+
+	go func() {
+		if err := o.iterateCursor(sctx, cursor); err != nil {
+			o.readerError.Set(err)
+		}
+	}()
+
+	return nil
+}
+
+func (o *OplogReader) iterateCursor(
+	sctx context.Context,
+	cursor *mongo.Cursor,
+) error {
+CursorLoop:
+	for {
+		var err error
+
+		select {
+		case <-sctx.Done():
+			return sctx.Err()
+		case <-o.persistorError.Ready():
+			return o.wrapPersistorErrorForReader()
+
+		case <-o.writesOffTS.Ready():
+			break CursorLoop
+		default:
+			err = o.readAndHandleOneBatch(sctx, cursor)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	writesOffTS := o.writesOffTS.Get()
+
+	for {
+		if lastTime, has := o.lastChangeTime.Get(); has {
+			if !lastTime.Before(writesOffTS) {
+				fmt.Printf("----------- %s reached writes off ts %#q", o, writesOffTS)
+				break
+			}
+		}
+
+		err := o.readAndHandleOneBatch(sctx, cursor)
+		if err != nil {
+			return err
+		}
+	}
+
+	// TODO: deduplicate
+	o.running = false
+
+	// since we have started Recheck, we must signal that we have
+	// finished the change stream changes so that Recheck can continue.
+	close(o.doneChan)
+
+	infoLog := o.logger.Info()
+	if lastTime, has := o.lastChangeTime.Get(); has {
+		infoLog = infoLog.Any("lastEventTime", lastTime)
+		o.startAtTS = o.lastChangeTime.Clone()
+	} else {
+		infoLog = infoLog.Str("lastEventTime", "none")
+	}
+
+	infoLog.
+		Stringer("reader", o).
+		Msg("Change stream reader is done.")
+
+	return nil
+}
+
+var oplogOpToOperationType = map[string]string{
+	"i": "insert",
+	"u": "update", // don’t need to distinguish from replace
+	"d": "delete",
+}
+
+func (o *OplogReader) readAndHandleOneBatch(
+	sctx context.Context,
+	cursor *mongo.Cursor,
+) error {
+	var err error
+	o.curDocs, o.scratch, err = mmongo.GetBatch(sctx, cursor, o.curDocs, o.scratch)
+	if err != nil {
+		return errors.Wrap(err, "reading cursor")
+	}
+
+	events := make([]ParsedEvent, 0, len(o.curDocs))
+
+	var latestTS bson.Timestamp
+
+	for _, rawDoc := range o.curDocs {
+		var op oplog.Op
+
+		if err := (&op).UnmarshalFromBSON(rawDoc); err != nil {
+			return errors.Wrapf(err, "reading oplog entry")
+		}
+
+		latestTS = op.TS
+
+		switch op.Op {
+		case "n":
+		case "c":
+			events = append(
+				events,
+				lo.Map(
+					op.Ops,
+					func(subOp oplog.Op, _ int) ParsedEvent {
+						return ParsedEvent{
+							OpType:      oplogOpToOperationType[subOp.Op],
+							Ns:          NewNamespace(SplitNamespace(subOp.Ns)),
+							DocID:       subOp.DocID,
+							FullDocLen:  option.Some(types.ByteCount(subOp.DocLen)),
+							ClusterTime: &op.TS,
+						}
+					},
+				)...,
+			)
+		default:
+			events = append(
+				events,
+				ParsedEvent{
+					OpType:      oplogOpToOperationType[op.Op],
+					Ns:          NewNamespace(SplitNamespace(op.Ns)),
+					DocID:       op.DocID,
+					FullDocLen:  option.Some(types.ByteCount(op.DocLen)),
+					ClusterTime: &op.TS,
+				},
+			)
+		}
+	}
+
+	select {
+	case <-sctx.Done():
+		return err
+	case <-o.persistorError.Ready():
+		return o.wrapPersistorErrorForReader()
+	case o.eventsChan <- changeEventBatch{
+		events:      events,
+		resumeToken: oplog.ResumeToken{latestTS}.MarshalToBSON(),
+		clusterTime: *mongo.SessionFromContext(sctx).OperationTime(),
+	}:
+	}
+
+	o.lastChangeTime = option.Some(latestTS)
+
+	return nil
+}
+
+func getOplogDocLenExpr(docroot string) any {
+	return agg.Switch{
+		Branches: []agg.SwitchCase{
+			{
+				Case: agg.Or{
+					agg.Eq(docroot+".op", "i"),
+					agg.And{
+						agg.Eq(docroot+".op", "u"),
+						agg.Not{agg.Eq("missing", docroot+".o._id")},
+					},
+				},
+				Then: agg.BSONSize(docroot + ".o"),
+			},
+		},
+		Default: "$$REMOVE",
+	}
+}
+
+func getOplogDocIDExpr(docroot string) any {
+	return agg.Switch{
+		Branches: []agg.SwitchCase{
+			{
+				Case: agg.Eq(docroot+".op", "c"),
+				Then: "$$REMOVE",
+			},
+			{
+				Case: agg.In(docroot+".op", "i", "d"),
+				Then: "$o._id",
+			},
+			{
+				Case: agg.In(docroot+".op", "u"),
+				Then: "$o2._id",
+			},
+		},
+	}
+}
+
+func (o *OplogReader) String() string {
+	return fmt.Sprintf("%s oplog reader", o.ChangeReaderCommon.clusterName)
+}

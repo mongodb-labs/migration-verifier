@@ -7,7 +7,6 @@ import (
 
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/keystring"
-	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
@@ -17,8 +16,6 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
 	"github.com/pkg/errors"
-	"github.com/rs/zerolog"
-	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -30,9 +27,6 @@ type ddlEventHandling string
 
 const (
 	fauxDocSizeForDeleteEvents = 1024
-
-	// The number of batches we’ll hold in memory at once.
-	batchChanBufferSize = 100
 
 	onDDLEventAllow ddlEventHandling = "allow"
 )
@@ -59,82 +53,31 @@ func (uee UnknownEventError) Error() string {
 }
 
 type ChangeStreamReader struct {
-	readerType whichCluster
-
-	lastChangeEventTime *bson.Timestamp
-	logger              *logger.Logger
-	namespaces          []string
-
-	metaDB        *mongo.Database
-	watcherClient *mongo.Client
-	clusterInfo   util.ClusterInfo
-
-	changeStreamRunning  bool
-	changeEventBatchChan chan changeEventBatch
-	writesOffTs          *util.Eventual[bson.Timestamp]
-	readerError          *util.Eventual[error]
-	persistorError       *util.Eventual[error]
-	doneChan             chan struct{}
-
-	startAtTs *bson.Timestamp
-
-	lag              *msync.TypedAtomic[option.Option[time.Duration]]
-	batchSizeHistory *history.History[int]
+	ChangeReaderCommon
 
 	onDDLEvent ddlEventHandling
 }
 
-func (csr *ChangeStreamReader) getWhichCluster() whichCluster {
-	return csr.readerType
-}
-
-func (csr *ChangeStreamReader) setPersistorError(err error) {
-	csr.persistorError.Set(err)
-}
-
-func (csr *ChangeStreamReader) getError() *util.Eventual[error] {
-	return csr.readerError
-}
-
-func (csr *ChangeStreamReader) getStartTimestamp() bson.Timestamp {
-	if csr.startAtTs == nil {
-		panic(csr.String() + " startAtTs should be non-nil")
-	}
-
-	return *csr.startAtTs
-}
-
-func (csr *ChangeStreamReader) setWritesOff(ts bson.Timestamp) {
-	csr.writesOffTs.Set(ts)
-}
-
-func (csr *ChangeStreamReader) isRunning() bool {
-	return csr.changeStreamRunning
-}
-
-func (csr *ChangeStreamReader) getReadChannel() <-chan changeEventBatch {
-	return csr.changeEventBatchChan
-}
-
-func (csr *ChangeStreamReader) done() <-chan struct{} {
-	return csr.doneChan
-}
-
 func (verifier *Verifier) initializeChangeStreamReaders() {
 	srcReader := &ChangeStreamReader{
-		readerType:    src,
-		namespaces:    verifier.srcNamespaces,
-		watcherClient: verifier.srcClient,
-		clusterInfo:   *verifier.srcClusterInfo,
+		ChangeReaderCommon: ChangeReaderCommon{
+			clusterName: src,
+			namespaces:  verifier.srcNamespaces,
+			client:      verifier.srcClient,
+			clusterInfo: *verifier.srcClusterInfo,
+		},
 	}
 	verifier.srcChangeReader = srcReader
 
 	dstReader := &ChangeStreamReader{
-		readerType:    dst,
-		namespaces:    verifier.dstNamespaces,
-		watcherClient: verifier.dstClient,
-		clusterInfo:   *verifier.dstClusterInfo,
-		onDDLEvent:    onDDLEventAllow,
+		ChangeReaderCommon: ChangeReaderCommon{
+			clusterName: dst,
+			namespaces:  verifier.dstNamespaces,
+			client:      verifier.dstClient,
+			clusterInfo: *verifier.dstClusterInfo,
+		},
+
+		onDDLEvent: onDDLEventAllow,
 	}
 	verifier.dstChangeReader = dstReader
 
@@ -142,8 +85,8 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 	for _, csr := range mslices.Of(srcReader, dstReader) {
 		csr.logger = verifier.logger
 		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
-		csr.changeEventBatchChan = make(chan changeEventBatch, batchChanBufferSize)
-		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
+		csr.eventsChan = make(chan changeEventBatch, batchChanBufferSize)
+		csr.writesOffTS = util.NewEventual[bson.Timestamp]()
 		csr.readerError = util.NewEventual[error]()
 		csr.persistorError = util.NewEventual[error]()
 		csr.doneChan = make(chan struct{})
@@ -301,11 +244,9 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			return errors.Errorf("Change event lacks a namespace: %+v", changeEvents[eventsRead])
 		}
 
-		if changeEvents[eventsRead].ClusterTime != nil &&
-			(csr.lastChangeEventTime == nil ||
-				csr.lastChangeEventTime.Before(*changeEvents[eventsRead].ClusterTime)) {
+		if changeEvents[eventsRead].ClusterTime != nil && csr.lastChangeTime.OrZero().Before(*changeEvents[eventsRead].ClusterTime) {
 
-			csr.lastChangeEventTime = changeEvents[eventsRead].ClusterTime
+			csr.lastChangeTime = option.FromPointer(changeEvents[eventsRead].ClusterTime)
 			latestEvent = option.Some(changeEvents[eventsRead])
 		}
 
@@ -344,8 +285,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	case <-ctx.Done():
 		return util.WrapCtxErrWithCause(ctx)
 	case <-csr.persistorError.Ready():
-		return csr.wrapHandlerErrorForReader()
-	case csr.changeEventBatchChan <- changeEventBatch{
+		return csr.wrapPersistorErrorForReader()
+	case csr.eventsChan <- changeEventBatch{
 		events: changeEvents,
 
 		resumeToken: cs.ResumeToken(),
@@ -358,13 +299,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	ri.NoteSuccess("sent %d-event batch to handler", len(changeEvents))
 
 	return nil
-}
-
-func (csr *ChangeStreamReader) wrapHandlerErrorForReader() error {
-	return errors.Wrap(
-		csr.persistorError.Get(),
-		"event handler failed, so no more events can be processed",
-	)
 }
 
 func (csr *ChangeStreamReader) iterateChangeStream(
@@ -391,14 +325,14 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			return err
 
 		case <-csr.persistorError.Ready():
-			return csr.wrapHandlerErrorForReader()
+			return csr.wrapPersistorErrorForReader()
 
 		// If the ChangeStreamEnderChan has a message, the user has indicated that
 		// source writes are ended and the migration tool is finished / committed.
 		// This means we should exit rather than continue reading the change stream
 		// since there should be no more events.
-		case <-csr.writesOffTs.Ready():
-			writesOffTs := csr.writesOffTs.Get()
+		case <-csr.writesOffTS.Ready():
+			writesOffTs := csr.writesOffTS.Get()
 
 			csr.logger.Debug().
 				Any("writesOffTimestamp", writesOffTs).
@@ -442,9 +376,9 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 		}
 
 		if gotwritesOffTimestamp {
-			csr.changeStreamRunning = false
-			if csr.lastChangeEventTime != nil {
-				csr.startAtTs = csr.lastChangeEventTime
+			csr.running = false
+			if csr.lastChangeTime.IsSome() {
+				csr.startAtTS = csr.lastChangeTime.Clone()
 			}
 			// since we have started Recheck, we must signal that we have
 			// finished the change stream changes so that Recheck can continue.
@@ -454,10 +388,10 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	}
 
 	infoLog := csr.logger.Info()
-	if csr.lastChangeEventTime == nil {
-		infoLog = infoLog.Str("lastEventTime", "none")
+	if lastTime, has := csr.lastChangeTime.Get(); has {
+		infoLog = infoLog.Any("lastEventTime", lastTime)
 	} else {
-		infoLog = infoLog.Any("lastEventTime", *csr.lastChangeEventTime)
+		infoLog = infoLog.Str("lastEventTime", "none")
 	}
 
 	infoLog.
@@ -507,15 +441,15 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 		opts = opts.SetStartAfter(savedResumeToken)
 	} else {
-		csStartLogEvent.Msgf("Starting change stream from current %s cluster time.", csr.readerType)
+		csStartLogEvent.Msgf("Starting change stream from current %s cluster time.", csr.clusterName)
 	}
 
-	sess, err := csr.watcherClient.StartSession()
+	sess, err := csr.client.StartSession()
 	if err != nil {
 		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to start session")
 	}
 	sctx := mongo.NewSessionContext(ctx, sess)
-	changeStream, err := csr.watcherClient.Watch(sctx, pipeline, opts)
+	changeStream, err := csr.client.Watch(sctx, pipeline, opts)
 	if err != nil {
 		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
@@ -560,14 +494,14 @@ func (csr *ChangeStreamReader) start(ctx context.Context) error {
 	initialCreateResultChan := make(chan mo.Result[bson.Timestamp])
 
 	go func() {
-		// Closing changeEventBatchChan at the end of change stream goroutine
-		// notifies the verifier's change event handler to exit.
+		// Closing eventsChan at the end of change stream goroutine
+		// notifies the verifier's recheck persistor to exit.
 		defer func() {
 			csr.logger.Debug().
 				Stringer("changeStreamReader", csr).
 				Msg("Closing change event batch channel.")
 
-			close(csr.changeEventBatchChan)
+			close(csr.eventsChan)
 		}()
 
 		retryer := retry.New().WithErrorCodes(util.CursorKilledErrCode)
@@ -627,90 +561,15 @@ func (csr *ChangeStreamReader) start(ctx context.Context) error {
 		return err
 	}
 
-	csr.startAtTs = &startTs
+	csr.startAtTS = option.Some(startTs)
 
-	csr.changeStreamRunning = true
+	csr.running = true
 
 	return nil
 }
 
-// getLag returns the observed change stream lag (i.e., the delta between
-// cluster time and the most-recently-seen change event).
-func (csr *ChangeStreamReader) getLag() option.Option[time.Duration] {
-	return csr.lag.Load()
-}
-
-// getBufferSaturation returns the reader’s internal buffer’s saturation level as
-// a fraction. If saturation rises, that means we’re reading events faster than
-// we can persist them.
-func (csr *ChangeStreamReader) getBufferSaturation() float64 {
-	return util.DivideToF64(len(csr.changeEventBatchChan), cap(csr.changeEventBatchChan))
-}
-
-// getEventsPerSecond returns the number of change events per second we’ve been
-// seeing “recently”. (See implementation for the actual period over which we
-// compile this metric.)
-func (csr *ChangeStreamReader) getEventsPerSecond() option.Option[float64] {
-	logs := csr.batchSizeHistory.Get()
-	lastLog, hasLogs := lo.Last(logs)
-
-	if hasLogs && lastLog.At != logs[0].At {
-		span := lastLog.At.Sub(logs[0].At)
-
-		// Each log contains a time and a # of events that happened since
-		// the prior log. Thus, each log’s Datum is a count of events that
-		// happened before the timestamp. Since we want the # of events that
-		// happened between the first & last times, we only want events *after*
-		// the first time. Thus, we skip the first log entry here.
-		totalEvents := 0
-		for _, log := range logs[1:] {
-			totalEvents += log.Datum
-		}
-
-		return option.Some(util.DivideToF64(totalEvents, span.Seconds()))
-	}
-
-	return option.None[float64]()
-}
-
-func addTimestampToLogEvent(ts bson.Timestamp, event *zerolog.Event) *zerolog.Event {
-	return event.
-		Any("timestamp", ts).
-		Time("time", time.Unix(int64(ts.T), int64(0)))
-}
-
-func (csr *ChangeStreamReader) getChangeStreamMetadataCollection() *mongo.Collection {
-	return csr.metaDB.Collection(metadataChangeStreamCollectionName)
-}
-
-func (csr *ChangeStreamReader) loadChangeStreamResumeToken(ctx context.Context) (bson.Raw, error) {
-	coll := csr.getChangeStreamMetadataCollection()
-
-	token, err := coll.FindOne(
-		ctx,
-		bson.D{{"_id", csr.resumeTokenDocID()}},
-	).Raw()
-
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
-	}
-
-	return token, err
-}
-
 func (csr *ChangeStreamReader) String() string {
-	return fmt.Sprintf("%s change stream reader", csr.readerType)
-}
-
-func (csr *ChangeStreamReader) resumeTokenDocID() string {
-	switch csr.readerType {
-	case src:
-		return "srcResumeToken"
-	case dst:
-		return "dstResumeToken"
-	default:
-		panic("unknown readerType: " + csr.readerType)
-	}
+	return fmt.Sprintf("%s change stream reader", csr.clusterName)
 }
 
 func (csr *ChangeStreamReader) persistChangeStreamResumeToken(ctx context.Context, token bson.Raw) error {
