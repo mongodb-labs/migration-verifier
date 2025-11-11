@@ -32,7 +32,12 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
 
 	verifier := suite.BuildVerifier()
 
-	filter := verifier.srcChangeStreamReader.GetChangeStreamFilter()
+	changeStreamReader, ok := verifier.srcChangeStreamReader.(*ChangeStreamReader)
+	if !ok {
+		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeStreamReader, changeStreamReader)
+	}
+
+	filter := changeStreamReader.GetChangeStreamFilter()
 
 	_, err := suite.srcMongoClient.
 		Database("realUserDatabase").
@@ -96,8 +101,13 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 	ctx := suite.Context()
 
 	verifier := suite.BuildVerifier()
-	if !verifier.srcChangeStreamReader.hasBsonSize() {
+	if !util.ClusterHasBSONSize([2]int(verifier.srcClusterInfo.VersionArray)) {
 		suite.T().Skip("Need a source version that has $bsonSize")
+	}
+
+	changeStreamReader, ok := verifier.srcChangeStreamReader.(*ChangeStreamReader)
+	if !ok {
+		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeStreamReader, changeStreamReader)
 	}
 
 	srcColl := verifier.srcClient.Database(suite.DBNameForTest()).Collection("coll")
@@ -105,9 +115,9 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", 123}})
 	suite.Require().NoError(err)
 
-	verifier.srcChangeStreamReader.namespaces = mslices.Of(FullName(srcColl))
+	changeStreamReader.namespaces = mslices.Of(FullName(srcColl))
 
-	filter := verifier.srcChangeStreamReader.GetChangeStreamFilter()
+	filter := changeStreamReader.GetChangeStreamFilter()
 
 	cs, err := suite.srcMongoClient.Watch(
 		ctx,
@@ -157,14 +167,20 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 	ctx := suite.Context()
 
 	verifier := suite.BuildVerifier()
-	verifier.srcChangeStreamReader.namespaces = []string{
+
+	changeStreamReader, ok := verifier.srcChangeStreamReader.(*ChangeStreamReader)
+	if !ok {
+		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeStreamReader, changeStreamReader)
+	}
+
+	changeStreamReader.namespaces = []string{
 		"foo.bar",
 		"foo.baz",
 		"test.car",
 		"test.chaz",
 	}
 
-	filter := verifier.srcChangeStreamReader.GetChangeStreamFilter()
+	filter := changeStreamReader.GetChangeStreamFilter()
 
 	cs, err := suite.srcMongoClient.Watch(ctx, filter)
 	suite.Require().NoError(err)
@@ -188,7 +204,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 	suite.Require().NoError(err)
 	sctx := mongo.NewSessionContext(ctx, sess)
 
-	for _, ns := range verifier.srcChangeStreamReader.namespaces {
+	for _, ns := range changeStreamReader.namespaces {
 		dbAndColl := strings.Split(ns, ".")
 
 		_, err := suite.srcMongoClient.
@@ -223,7 +239,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 
 	suite.Assert().Len(
 		events,
-		len(verifier.srcChangeStreamReader.namespaces),
+		len(changeStreamReader.namespaces),
 		"should have 1 event per in-filter namespace",
 	)
 	suite.Assert().True(
@@ -266,7 +282,9 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	defer v1Cancel(ctx.Err())
 	suite.startSrcChangeStreamReaderAndHandler(v1Ctx, verifier1)
 
-	changeStreamMetaColl := verifier1.srcChangeStreamReader.getChangeStreamMetadataCollection()
+	changeStreamMetaColl := verifier1.metaClient.
+		Database(verifier1.metaDBName).
+		Collection(metadataChangeStreamCollectionName)
 
 	var originalResumeToken bson.Raw
 
@@ -417,10 +435,12 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier2)
 
-	suite.Require().NotNil(verifier2.srcChangeStreamReader.startAtTs)
+	startAtTs, hasStartAtTs := verifier2.srcChangeStreamReader.getStartTimestamp().Get()
+
+	suite.Require().True(hasStartAtTs)
 
 	suite.Assert().False(
-		verifier2.srcChangeStreamReader.startAtTs.After(newTime),
+		startAtTs.After(newTime),
 		"verifier2's change stream should be no later than this new session",
 	)
 
@@ -569,7 +589,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 				verifierRunner.AwaitGenerationEnd(),
 			)
 
-			return verifier.srcChangeStreamReader.GetLag().IsSome()
+			return verifier.srcChangeStreamReader.getLag().IsSome()
 		},
 		time.Minute,
 		100*time.Millisecond,
@@ -578,7 +598,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 	// NB: The lag will include whatever time elapsed above before
 	// verifier read the event, so it can be several seconds.
 	suite.Assert().Less(
-		verifier.srcChangeStreamReader.GetLag().MustGet(),
+		verifier.srcChangeStreamReader.getLag().MustGet(),
 		10*time.Minute,
 		"verifier lag is as expected",
 	)
@@ -605,18 +625,20 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 
 		suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
-		startAtTs := verifier.srcChangeStreamReader.startAtTs
-		suite.Require().NotNil(startAtTs, "startAtTs should be set")
+		startAtTs, hasStartAtTs := verifier.srcChangeStreamReader.getStartTimestamp().Get()
+		suite.Require().True(hasStartAtTs, "startAtTs should be set")
 
-		verifier.srcChangeStreamReader.writesOffTs.Set(insertTs)
+		verifier.srcChangeStreamReader.setWritesOff(insertTs)
 
-		<-verifier.srcChangeStreamReader.doneChan
+		<-verifier.srcChangeStreamReader.done()
+
+		startAtTs2 := verifier.srcChangeStreamReader.getStartTimestamp().MustGet()
 
 		suite.Require().False(
-			verifier.srcChangeStreamReader.startAtTs.Before(*startAtTs),
+			startAtTs2.Before(startAtTs),
 			"new startAtTs (%+v) should be no earlier than last one (%+v)",
-			verifier.srcChangeStreamReader.startAtTs,
-			*startAtTs,
+			startAtTs2,
+			startAtTs,
 		)
 	}
 }
@@ -635,10 +657,13 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	suite.Require().NotNil(origSessionTime)
 	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
+	startAtTs, hasStartAtTs := verifier.srcChangeStreamReader.getStartTimestamp().Get()
+	suite.Require().True(hasStartAtTs, "startAtTs should be set")
+
 	// srcStartAtTs derives from the change stream’s resume token, which can
 	// postdate our session time but should not precede it.
 	suite.Require().False(
-		verifier.srcChangeStreamReader.startAtTs.Before(*origSessionTime),
+		startAtTs.Before(*origSessionTime),
 		"srcStartAtTs should be >= the insert’s optime",
 	)
 
@@ -662,12 +687,15 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 		"session time after events should exceed the original",
 	)
 
-	verifier.srcChangeStreamReader.writesOffTs.Set(*postEventsSessionTime)
-	<-verifier.srcChangeStreamReader.doneChan
+	verifier.srcChangeStreamReader.setWritesOff(*postEventsSessionTime)
+	<-verifier.srcChangeStreamReader.done()
+
+	startAtTs, hasStartAtTs = verifier.srcChangeStreamReader.getStartTimestamp().Get()
+	suite.Require().True(hasStartAtTs, "startAtTs should be set")
 
 	suite.Assert().Equal(
 		*postEventsSessionTime,
-		*verifier.srcChangeStreamReader.startAtTs,
+		startAtTs,
 		"verifier.srcStartAtTs should now be our session timestamp",
 	)
 }
@@ -684,8 +712,12 @@ func (suite *IntegrationTestSuite) TestNoStartAtTime() {
 	origStartTs := sess.OperationTime()
 	suite.Require().NotNil(origStartTs)
 	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
-	suite.Require().NotNil(verifier.srcChangeStreamReader.startAtTs)
-	suite.Require().LessOrEqual(origStartTs.Compare(*verifier.srcChangeStreamReader.startAtTs), 0)
+
+	startAtTs, hasStartAtTs := verifier.srcChangeStreamReader.getStartTimestamp().Get()
+	suite.Require().True(hasStartAtTs, "startAtTs should be set")
+
+	suite.Require().NotNil(startAtTs)
+	suite.Require().LessOrEqual(origStartTs.Compare(startAtTs), 0)
 }
 
 func (suite *IntegrationTestSuite) TestWithChangeEventsBatching() {

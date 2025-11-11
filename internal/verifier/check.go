@@ -50,16 +50,16 @@ func (verifier *Verifier) Check(ctx context.Context, filter bson.D) {
 	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
 }
 
-func (verifier *Verifier) waitForChangeStream(ctx context.Context, csr *ChangeStreamReader) error {
+func (verifier *Verifier) waitForChangeStream(ctx context.Context, csr changeReader) error {
 	select {
 	case <-ctx.Done():
 		return util.WrapCtxErrWithCause(ctx)
-	case <-csr.readerError.Ready():
-		err := csr.readerError.Get()
+	case <-csr.getError().Ready():
+		err := csr.getError().Get()
 		verifier.logger.Warn().Err(err).
 			Msgf("Received error from %s.", csr)
 		return err
-	case <-csr.doneChan:
+	case <-csr.done():
 		verifier.logger.Debug().
 			Msgf("Received completion signal from %s.", csr)
 		break
@@ -93,11 +93,11 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	// If the change stream fails, everything should stop.
 	eg.Go(func() error {
 		select {
-		case <-verifier.srcChangeStreamReader.readerError.Ready():
-			err := verifier.srcChangeStreamReader.readerError.Get()
+		case <-verifier.srcChangeStreamReader.getError().Ready():
+			err := verifier.srcChangeStreamReader.getError().Get()
 			return errors.Wrapf(err, "%s failed", verifier.srcChangeStreamReader)
-		case <-verifier.dstChangeStreamReader.readerError.Ready():
-			err := verifier.dstChangeStreamReader.readerError.Get()
+		case <-verifier.dstChangeStreamReader.getError().Ready():
+			err := verifier.dstChangeStreamReader.getError().Get()
 			return errors.Wrapf(err, "%s failed", verifier.dstChangeStreamReader)
 		case <-ctx.Done():
 			return nil
@@ -270,8 +270,8 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	}()
 
 	ceHandlerGroup, groupCtx := contextplus.ErrGroup(ctx)
-	for _, csReader := range []*ChangeStreamReader{verifier.srcChangeStreamReader, verifier.dstChangeStreamReader} {
-		if csReader.changeStreamRunning {
+	for _, csReader := range mslices.Of(verifier.srcChangeStreamReader, verifier.dstChangeStreamReader) {
+		if csReader.isRunning() {
 			verifier.logger.Debug().Msgf("Check: %s already running.", csReader)
 		} else {
 			verifier.logger.Debug().Msgf("%s not running; starting change stream", csReader)

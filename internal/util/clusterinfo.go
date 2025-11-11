@@ -19,6 +19,16 @@ type ClusterInfo struct {
 	Topology     ClusterTopology
 }
 
+func ClusterHasBSONSize(va [2]int) bool {
+	major := va[0]
+
+	if major == 4 {
+		return va[1] >= 4
+	}
+
+	return major > 4
+}
+
 const (
 	TopologySharded ClusterTopology = "sharded"
 	TopologyReplset ClusterTopology = "replset"

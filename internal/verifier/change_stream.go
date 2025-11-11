@@ -7,7 +7,6 @@ import (
 
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/keystring"
-	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
@@ -64,35 +63,11 @@ type changeEventBatch struct {
 	clusterTime bson.Timestamp
 }
 
-type ChangeReaderCommon struct {
-	readerType whichCluster
-
-	lastChangeEventTime *bson.Timestamp
-	logger              *logger.Logger
-	namespaces          []string
-
-	metaDB        *mongo.Database
-	watcherClient *mongo.Client
-	clusterInfo   util.ClusterInfo
-
-	changeStreamRunning  bool
-	changeEventBatchChan chan changeEventBatch
-	writesOffTs          *util.Eventual[bson.Timestamp]
-	readerError          *util.Eventual[error]
-	handlerError         *util.Eventual[error]
-	doneChan             chan struct{}
-
-	startAtTs *bson.Timestamp
-
-	lag              *msync.TypedAtomic[option.Option[time.Duration]]
-	batchSizeHistory *history.History[int]
-
-	onDDLEvent ddlEventHandling
-}
-
 type ChangeStreamReader struct {
 	ChangeReaderCommon
 }
+
+var _ changeReader = &ChangeStreamReader{}
 
 func (verifier *Verifier) initializeChangeStreamReaders() {
 	srcReader := &ChangeStreamReader{
@@ -133,7 +108,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 // RunChangeEventHandler handles change event batches from the reader.
 // It needs to be started after the reader starts and should run in its own
 // goroutine.
-func (verifier *Verifier) RunChangeEventHandler(ctx context.Context, reader *ChangeStreamReader) error {
+func (verifier *Verifier) RunChangeEventHandler(ctx context.Context, reader changeReader) error {
 	var err error
 
 	var lastPersistedTime time.Time
@@ -161,7 +136,7 @@ HandlerLoop:
 				Err(err).
 				Stringer("changeStreamReader", reader).
 				Msg("Change event handler failed.")
-		case batch, more := <-reader.changeEventBatchChan:
+		case batch, more := <-reader.getReadChannel():
 			if !more {
 				verifier.logger.Debug().
 					Stringer("changeStreamReader", reader).
@@ -177,7 +152,7 @@ HandlerLoop:
 				Msg("Handling change event batch.")
 
 			err = errors.Wrap(
-				verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType),
+				verifier.HandleChangeStreamEvents(ctx, batch, reader.getWhichCluster()),
 				"failed to handle change stream events",
 			)
 
@@ -190,7 +165,7 @@ HandlerLoop:
 	// This will prevent the reader from hanging because the reader checks
 	// this along with checks for context expiry.
 	if err != nil {
-		reader.handlerError.Set(err)
+		reader.setPersistorError(err)
 	}
 
 	return err

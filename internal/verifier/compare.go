@@ -467,7 +467,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.srcClientCollection(task),
 			verifier.srcClusterInfo,
-			verifier.srcChangeStreamReader.startAtTs,
+			verifier.srcChangeStreamReader.getStartTimestamp().ToPointer(),
 			task,
 		)
 
@@ -500,7 +500,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.dstClientCollection(task),
 			verifier.dstClusterInfo,
-			verifier.dstChangeStreamReader.startAtTs,
+			verifier.dstChangeStreamReader.getStartTimestamp().ToPointer(),
 			task,
 		)
 
