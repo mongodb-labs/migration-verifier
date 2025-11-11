@@ -9,11 +9,14 @@ type StringHasPrefix struct {
 
 func (sp StringHasPrefix) MarshalBSON() ([]byte, error) {
 	return bson.Marshal(bson.D{
-		{"$indexOfCP", bson.A{
-			sp.FieldRef,
-			sp.Prefix,
+		{"$eq", bson.A{
 			0,
-			1,
+			bson.D{{"$indexOfCP", bson.A{
+				sp.FieldRef,
+				sp.Prefix,
+				0,
+				1,
+			}}},
 		}},
 	})
 }
