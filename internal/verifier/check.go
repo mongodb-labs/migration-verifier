@@ -480,7 +480,7 @@ func (v *Verifier) initializeChangeReaders() {
 	}
 
 	v.logger.Info().
-		Stringer("reader", v.srcChangeReader).
+		Stringer("reader", v.dstChangeReader).
 		Msg("Listening for writes to destination.")
 }
 
