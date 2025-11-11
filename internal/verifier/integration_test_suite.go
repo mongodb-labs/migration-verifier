@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -191,7 +194,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		"should set metadata connection string",
 	)
 	verifier.SetMetaDBName(metaDBName)
-	verifier.initializeChangeReaders()
+	verifier.initializeChangeReadersForTest()
 
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))
 	suite.Require().NoError(verifier.dstClientCollection(&task).Drop(ctx))
@@ -206,4 +209,19 @@ func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {
 		".",
 		"-",
 	) + strings.Join(suffixes, "")
+}
+
+func (v *Verifier) initializeChangeReadersForTest() {
+	v.initializeChangeReaders()
+
+	for _, rdr := range mslices.Of(v.srcChangeReader, v.dstChangeReader) {
+		switch typed := rdr.(type) {
+		case *ChangeStreamReader:
+			typed.ChangeReaderCommon.startAtTS = option.Some(bson.Timestamp{})
+		case *OplogReader:
+			typed.ChangeReaderCommon.startAtTS = option.Some(bson.Timestamp{})
+		default:
+			panic(fmt.Sprintf("unknown reader type: %T", rdr))
+		}
+	}
 }
