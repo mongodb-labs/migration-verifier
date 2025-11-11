@@ -7,4 +7,4 @@ package verifier
 //    rechecked rather than the generation during which they were enqueued.
 // 4: Use “changeReader” instead of “changeStream” collection name.
 
-const verifierMetadataVersion = 3
+const verifierMetadataVersion = 4
