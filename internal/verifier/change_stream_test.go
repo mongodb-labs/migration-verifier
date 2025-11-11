@@ -215,6 +215,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 	}
 
 	changeStreamStopTime := sess.OperationTime()
+	suite.Require().NotNil(changeStreamStopTime, "we need an optime")
 
 	suite.T().Logf("Insert op time: %v", changeStreamStopTime)
 
