@@ -13,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/option"
+	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -179,6 +180,9 @@ func (verifier *Verifier) compareDocsFromChannels(
 			return errors.Wrap(err, "failed to compare documents")
 		}
 
+		pool.Put(srcDoc.doc)
+		pool.Put(dstDoc.doc)
+
 		for i := range mismatches {
 			mismatches[i].SrcTimestamp = option.Some(srcDoc.ts)
 			mismatches[i].DstTimestamp = option.Some(dstDoc.ts)
@@ -326,6 +330,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 				SrcTimestamp: option.Some(docWithTs.ts),
 			},
 		)
+
+		pool.Put(docWithTs.doc)
 	}
 
 	for _, docWithTs := range dstCache {
@@ -343,6 +349,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 				DstTimestamp: option.Some(docWithTs.ts),
 			},
 		)
+
+		pool.Put(docWithTs.doc)
 	}
 
 	return results, srcDocCount, srcByteCount, nil
@@ -352,14 +360,21 @@ func getDocIdFromComparison(
 	docCompareMethod DocCompareMethod,
 	doc bson.Raw,
 ) bson.RawValue {
+	var docID bson.RawValue
+
 	switch docCompareMethod {
 	case DocCompareBinary, DocCompareIgnoreOrder:
-		return doc.Lookup("_id")
+		docID = doc.Lookup("_id")
 	case DocCompareToHashedIndexKey:
-		return doc.Lookup(docKeyInHashedCompare, "_id")
+		docID = doc.Lookup(docKeyInHashedCompare, "_id")
 	default:
 		panic("bad doc compare method: " + docCompareMethod)
 	}
+
+	// We clone the value because the document might be from a pool.
+	docID.Value = slices.Clone(docID.Value)
+
+	return docID
 }
 
 func getDocKeyValues(
@@ -527,11 +542,14 @@ func iterateCursorToChannel(
 			return errors.Wrap(err, "reading cluster time from session")
 		}
 
+		buf := pool.Get(len(cursor.Current))
+		copy(buf, cursor.Current)
+
 		err = chanutil.WriteWithDoneCheck(
 			sctx,
 			writer,
 			docWithTs{
-				doc: slices.Clone(cursor.Current),
+				doc: buf,
 				ts:  clusterTime,
 			},
 		)
