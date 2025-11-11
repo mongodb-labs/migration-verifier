@@ -195,3 +195,16 @@ func (rc ChangeReaderCommon) loadChangeStreamResumeToken(ctx context.Context) (b
 
 	return token, err
 }
+
+func (rc *ChangeReaderCommon) updateLag(sess *mongo.Session, token bson.Raw) {
+	var tokenTs bson.Timestamp
+	tokenTs, err := rc.resumeTokenTSExtractor(token)
+	if err == nil {
+		lagSecs := int64(sess.OperationTime().T) - int64(tokenTs.T)
+		rc.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
+	} else {
+		rc.logger.Warn().
+			Err(err).
+			Msgf("Failed to extract timestamp from %s's resume token to compute lag.", rc.clusterName)
+	}
+}

@@ -282,16 +282,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
-	var tokenTs bson.Timestamp
-	tokenTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
-	if err == nil {
-		lagSecs := int64(sess.OperationTime().T) - int64(tokenTs.T)
-		csr.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
-	} else {
-		csr.logger.Warn().
-			Err(err).
-			Msgf("Failed to extract timestamp from %s's resume token to compute change stream lag.", csr)
-	}
+	csr.updateLag(sess, cs.ResumeToken())
 
 	if eventsRead == 0 {
 		ri.NoteSuccess("received an empty change stream response")

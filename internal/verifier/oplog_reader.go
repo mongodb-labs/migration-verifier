@@ -41,27 +41,20 @@ func (v *Verifier) newOplogReader(
 ) *OplogReader {
 	return &OplogReader{
 		ChangeReaderCommon: ChangeReaderCommon{
-			namespaces:       namespaces,
-			clusterName:      cluster,
-			client:           client,
-			clusterInfo:      clusterInfo,
-			logger:           v.logger,
-			metaDB:           v.metaClient.Database(v.metaDBName),
-			eventsChan:       make(chan changeEventBatch, batchChanBufferSize),
-			writesOffTS:      util.NewEventual[bson.Timestamp](),
-			readerError:      util.NewEventual[error](),
-			persistorError:   util.NewEventual[error](),
-			doneChan:         make(chan struct{}),
-			lag:              msync.NewTypedAtomic(option.None[time.Duration]()),
-			batchSizeHistory: history.New[int](time.Minute),
-			resumeTokenTSExtractor: func(token bson.Raw) (bson.Timestamp, error) {
-				var rt oplog.ResumeToken
-				if err := bson.Unmarshal(token, &rt); err != nil {
-					return bson.Timestamp{}, err
-				}
-
-				return rt.TS, nil
-			},
+			namespaces:             namespaces,
+			clusterName:            cluster,
+			client:                 client,
+			clusterInfo:            clusterInfo,
+			logger:                 v.logger,
+			metaDB:                 v.metaClient.Database(v.metaDBName),
+			eventsChan:             make(chan changeEventBatch, batchChanBufferSize),
+			writesOffTS:            util.NewEventual[bson.Timestamp](),
+			readerError:            util.NewEventual[error](),
+			persistorError:         util.NewEventual[error](),
+			doneChan:               make(chan struct{}),
+			lag:                    msync.NewTypedAtomic(option.None[time.Duration]()),
+			batchSizeHistory:       history.New[int](time.Minute),
+			resumeTokenTSExtractor: oplog.GetRawResumeTokenTimestamp,
 		},
 	}
 }
@@ -303,6 +296,13 @@ func (o *OplogReader) readAndHandleOneBatch(
 		return nil
 	}
 
+	sess := mongo.SessionFromContext(sctx)
+	resumeToken := oplog.ResumeToken{latestTS}.MarshalToBSON()
+
+	o.updateLag(sess, resumeToken)
+
+	o.batchSizeHistory.Add(len(events))
+
 	select {
 	case <-sctx.Done():
 		return err
@@ -310,8 +310,8 @@ func (o *OplogReader) readAndHandleOneBatch(
 		return o.wrapPersistorErrorForReader()
 	case o.eventsChan <- changeEventBatch{
 		events:      events,
-		resumeToken: oplog.ResumeToken{latestTS}.MarshalToBSON(),
-		clusterTime: *mongo.SessionFromContext(sctx).OperationTime(),
+		resumeToken: resumeToken,
+		clusterTime: *sess.OperationTime(),
 	}:
 	}
 

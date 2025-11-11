@@ -28,6 +28,15 @@ type ResumeToken struct {
 	TS bson.Timestamp
 }
 
+func GetRawResumeTokenTimestamp(token bson.Raw) (bson.Timestamp, error) {
+	rv, err := token.LookupErr("ts")
+	if err != nil {
+		return bson.Timestamp{}, errors.Wrap(err, "getting ts")
+	}
+
+	return mbson.CastRawValue[bson.Timestamp](rv)
+}
+
 func (rt ResumeToken) MarshalToBSON() []byte {
 	buf := make([]byte, 4, rtBSONLength)
 
