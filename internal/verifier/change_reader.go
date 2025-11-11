@@ -17,7 +17,16 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
+type ddlEventHandling string
+
 const (
+	fauxDocSizeForDeleteEvents = 1024
+
+	// The number of batches we’ll hold in memory at once.
+	batchChanBufferSize = 100
+
+	onDDLEventAllow ddlEventHandling = "allow"
+
 	changeReaderCollectionName = "changeReader"
 )
 
