@@ -540,35 +540,6 @@ func (csr *ChangeStreamReader) String() string {
 	return fmt.Sprintf("%s change stream reader", csr.clusterName)
 }
 
-func (csr *ChangeStreamReader) persistChangeStreamResumeToken(ctx context.Context, token bson.Raw) error {
-	coll := csr.getMetadataCollection()
-	_, err := coll.ReplaceOne(
-		ctx,
-		bson.D{{"_id", csr.resumeTokenDocID()}},
-		token,
-		options.Replace().SetUpsert(true),
-	)
-
-	if err == nil {
-		ts, err := extractTimestampFromResumeToken(token)
-
-		logEvent := csr.logger.Debug()
-
-		if err == nil {
-			logEvent = addTimestampToLogEvent(ts, logEvent)
-		} else {
-			csr.logger.Warn().Err(err).
-				Msg("failed to extract resume token timestamp")
-		}
-
-		logEvent.Msgf("Persisted %s's resume token.", csr)
-
-		return nil
-	}
-
-	return errors.Wrapf(err, "failed to persist change stream resume token (%v)", token)
-}
-
 func extractTimestampFromResumeToken(resumeToken bson.Raw) (bson.Timestamp, error) {
 	// Change stream token is always a V1 keystring in the _data field
 	tokenDataRV, err := resumeToken.LookupErr("_data")
