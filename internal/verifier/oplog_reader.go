@@ -237,6 +237,10 @@ func (o *OplogReader) readAndHandleOneBatch(
 	cursor *mongo.Cursor,
 ) error {
 	var err error
+
+	o.curDocs = o.curDocs[:0]
+	o.scratch = o.scratch[:0]
+
 	o.curDocs, o.scratch, err = mmongo.GetBatch(sctx, cursor, o.curDocs, o.scratch)
 	if err != nil {
 		return errors.Wrap(err, "reading cursor")
