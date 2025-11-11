@@ -294,7 +294,7 @@ func getOplogDefaultNSExclusions(docroot string) agg.And {
 			Prefix:   "config.",
 		}},
 		agg.Not{helpers.StringHasPrefix{
-			FieldRef: docroot + "ns",
+			FieldRef: docroot + ".ns",
 			Prefix:   "admin.",
 		}},
 	}
