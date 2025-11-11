@@ -44,9 +44,8 @@ var supportedEventOpTypes = mapset.NewSet(
 )
 
 const (
-	minChangeStreamPersistInterval     = time.Second * 10
-	maxChangeStreamAwaitTime           = time.Second
-	metadataChangeStreamCollectionName = "changeStream"
+	minChangeStreamPersistInterval = time.Second * 10
+	maxChangeStreamAwaitTime       = time.Second
 )
 
 type UnknownEventError struct {
@@ -394,7 +393,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 		}
 
 		if gotwritesOffTimestamp {
-			csr.changeStreamRunning = false
+			csr.running = false
 			if csr.lastChangeEventTime != nil {
 				csr.startAtTs = csr.lastChangeEventTime
 			}
@@ -472,7 +471,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
 
-	err = csr.persistChangeStreamResumeToken(ctx, changeStream.ResumeToken())
+	err = csr.persistResumeToken(ctx, changeStream.ResumeToken())
 	if err != nil {
 		return nil, nil, bson.Timestamp{}, err
 	}
@@ -581,7 +580,7 @@ func (csr *ChangeStreamReader) start(ctx context.Context) error {
 
 	csr.startAtTs = &startTs
 
-	csr.changeStreamRunning = true
+	csr.running = true
 
 	return nil
 }

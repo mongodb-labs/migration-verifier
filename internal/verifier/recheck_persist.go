@@ -18,7 +18,7 @@ func (verifier *Verifier) RunChangeEventPersistor(
 	reader changeReader,
 ) error {
 	clusterName := reader.getWhichCluster()
-	persistCallback := reader.persistChangeStreamResumeToken
+	persistCallback := reader.persistResumeToken
 	in := reader.getReadChannel()
 
 	var err error

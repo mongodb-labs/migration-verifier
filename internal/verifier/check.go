@@ -232,7 +232,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	verifier.logger.Info().Msg("Starting change readers.")
 
 	// Now that we’ve initialized verifier.generation we can
-	// start the change stream readers.
+	// start the change readers.
 	verifier.initializeChangeReaders()
 	verifier.mux.Unlock()
 
@@ -380,8 +380,8 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				}
 
 				verifier.logger.Debug().
-					Stringer("changeStreamReader", csr).
-					Msg("Change stream reader finished.")
+					Stringer("changeReader", csr).
+					Msg("Change reader finished.")
 			}
 
 			if err = ceHandlerGroup.Wait(); err != nil {
@@ -391,9 +391,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 			verifier.lastGeneration = true
 		}
 
-		// Increment the in-memory generation so that the change streams will
+		// Increment the in-memory generation so that the change readers will
 		// mark rechecks for the next generation. For example, if we just
-		// finished generation 2, the change streams need to mark generation 3
+		// finished generation 2, the change readers need to mark generation 3
 		// on enqueued rechecks. Meanwhile, generaiton 3’s recheck tasks will
 		// derive from rechecks enqueued during generation 2.
 		verifier.generation++

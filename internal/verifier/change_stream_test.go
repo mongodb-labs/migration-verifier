@@ -284,7 +284,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 
 	changeStreamMetaColl := verifier1.metaClient.
 		Database(verifier1.metaDBName).
-		Collection(metadataChangeStreamCollectionName)
+		Collection(changeReaderCollectionName)
 
 	var originalResumeToken bson.Raw
 

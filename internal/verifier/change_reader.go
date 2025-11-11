@@ -16,6 +16,10 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
+const (
+	changeReaderCollectionName = "changeReader"
+)
+
 type changeReader interface {
 	getWhichCluster() whichCluster
 	getReadChannel() <-chan changeEventBatch
@@ -28,7 +32,7 @@ type changeReader interface {
 	setPersistorError(error)
 	start(context.Context) error
 	done() <-chan struct{}
-	persistChangeStreamResumeToken(context.Context, bson.Raw) error
+	persistResumeToken(context.Context, bson.Raw) error
 	isRunning() bool
 	String() string
 }
@@ -46,7 +50,7 @@ type ChangeReaderCommon struct {
 
 	resumeTokenTSExtractor func(bson.Raw) (bson.Timestamp, error)
 
-	changeStreamRunning  bool
+	running              bool
 	changeEventBatchChan chan changeEventBatch
 	writesOffTs          *util.Eventual[bson.Timestamp]
 	readerError          *util.Eventual[error]
@@ -82,7 +86,7 @@ func (rc *ChangeReaderCommon) setWritesOff(ts bson.Timestamp) {
 }
 
 func (rc *ChangeReaderCommon) isRunning() bool {
-	return rc.changeStreamRunning
+	return rc.running
 }
 
 func (rc *ChangeReaderCommon) getReadChannel() <-chan changeEventBatch {
@@ -127,8 +131,8 @@ func (rc *ChangeReaderCommon) getEventsPerSecond() option.Option[float64] {
 	return option.None[float64]()
 }
 
-func (rc *ChangeReaderCommon) persistChangeStreamResumeToken(ctx context.Context, token bson.Raw) error {
-	coll := rc.metaDB.Collection(metadataChangeStreamCollectionName)
+func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson.Raw) error {
+	coll := rc.metaDB.Collection(changeReaderCollectionName)
 	_, err := coll.ReplaceOne(
 		ctx,
 		bson.D{{"_id", rc.resumeTokenDocID()}},
@@ -153,7 +157,7 @@ func (rc *ChangeReaderCommon) persistChangeStreamResumeToken(ctx context.Context
 		return nil
 	}
 
-	return errors.Wrapf(err, "failed to persist change stream resume token (%v)", token)
+	return errors.Wrapf(err, "failed to persist %s resume token (%v)", rc.readerType, token)
 }
 
 func (rc *ChangeReaderCommon) resumeTokenDocID() string {
@@ -168,7 +172,7 @@ func (rc *ChangeReaderCommon) resumeTokenDocID() string {
 }
 
 func (rc *ChangeReaderCommon) getMetadataCollection() *mongo.Collection {
-	return rc.metaDB.Collection(metadataChangeStreamCollectionName)
+	return rc.metaDB.Collection(changeReaderCollectionName)
 }
 
 func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Option[bson.Raw], error) {
