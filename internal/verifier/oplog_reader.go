@@ -247,7 +247,9 @@ func (o *OplogReader) readAndHandleOneBatch(
 		return errors.Wrap(err, "reading cursor")
 	}
 
-	fmt.Printf("--- %s: %d events\n", o.clusterName, len(o.curDocs))
+	if o.clusterName == dst {
+		fmt.Printf("--- %s: %d events\n", o.clusterName, len(o.curDocs))
+	}
 
 	events := make([]ParsedEvent, 0, len(o.curDocs))
 
