@@ -130,12 +130,15 @@ func (o *OplogReader) start(ctx context.Context) error {
 					{"ops", agg.Cond{
 						If: agg.Eq("$op", "c"),
 						Then: agg.Map{
-							Input: agg.Filter{
-								Input: "$o.applyOps",
-								As:    "opEntry",
-								Cond:  getOplogDefaultNSExclusions("$$opEntry"),
-							},
-							As: "opEntry",
+							/*
+								Input: agg.Filter{
+									Input: "$o.applyOps",
+									As:    "opEntry",
+									Cond:  getOplogDefaultNSExclusions("$$opEntry"),
+								},
+							*/
+							Input: "$o.applyOps",
+							As:    "opEntry",
 							In: bson.D{
 								{"op", "$$opEntry.op"},
 								{"ns", "$$opEntry.ns"},
@@ -284,6 +287,10 @@ func (o *OplogReader) readAndHandleOneBatch(
 				},
 			)
 		}
+	}
+
+	if len(events) == 0 {
+		return nil
 	}
 
 	select {
