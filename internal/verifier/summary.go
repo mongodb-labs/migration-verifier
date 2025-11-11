@@ -12,8 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -63,6 +65,8 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 					return ft.PrimaryKey
 				},
 			),
+			option.None[bson.D](),
+			option.None[int64](),
 		)
 		if err != nil {
 			return false, false, errors.Wrapf(
@@ -112,85 +116,117 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	strBuilder.WriteString("\n")
 
 	// First present summaries of failures based on present/missing and differing content
-	failureTypesTable := tablewriter.NewWriter(strBuilder)
-	failureTypesTable.SetHeader([]string{"Failure Type", "Count"})
+	countsTable := tablewriter.NewWriter(strBuilder)
+	countsTable.SetHeader([]string{"Failure Type", "Count"})
 
-	taskDiscrepancies, err := getMismatchesForTasks(
-		ctx,
-		verifier.verificationDatabase(),
-		lo.Map(
-			failedTasks,
-			func(ft VerificationTask, _ int) bson.ObjectID {
-				return ft.PrimaryKey
-			},
-		),
+	failedTaskIDs := lo.Map(
+		failedTasks,
+		func(ft VerificationTask, _ int) bson.ObjectID {
+			return ft.PrimaryKey
+		},
 	)
-	if err != nil {
-		return false, false, errors.Wrapf(
-			err,
-			"fetching %d failed tasks' discrepancies",
-			len(failedTasks),
-		)
-	}
 
-	contentMismatchCount := 0
-	missingOrChangedCount := 0
-	for _, task := range failedTasks {
-		discrepancies, hasDiscrepancies := taskDiscrepancies[task.PrimaryKey]
-		if !hasDiscrepancies {
-			return false, false, errors.Wrapf(
-				err,
-				"task %v is marked %#q but has no recorded discrepancies; internal error?",
-				task.PrimaryKey,
-				task.Status,
+	var mismatchTaskDiscrepancies, missingOrChangedDiscrepancies map[bson.ObjectID][]VerificationResult
+
+	contentMismatchCount := int64(0)
+	missingOrChangedCount := int64(0)
+
+	eg, egCtx := contextplus.ErrGroup(ctx)
+	eg.Go(
+		func() error {
+			var err error
+			mismatchTaskDiscrepancies, err = getMismatchesForTasks(
+				egCtx,
+				verifier.verificationDatabase(),
+				failedTaskIDs,
+				option.Some(
+					bson.D{{"$expr", bson.D{
+						{"$not", getMismatchDocMissingAggExpr("$$ROOT")},
+					}}},
+				),
+				option.Some(verifier.failureDisplaySize),
 			)
-		}
 
-		missingCount := lo.CountBy(
-			discrepancies,
-			func(d VerificationResult) bool {
-				return d.DocumentIsMissing()
-			},
-		)
+			return errors.Wrapf(
+				err,
+				"fetching %d failed tasks’ content-mismatch discrepancies",
+				len(failedTasks),
+			)
+		},
+	)
 
-		contentMismatchCount += len(discrepancies) - missingCount
-		missingOrChangedCount += missingCount
+	eg.Go(
+		func() error {
+			var err error
+			missingOrChangedCount, contentMismatchCount, err = countMismatchesForTasks(
+				egCtx,
+				verifier.verificationDatabase(),
+				failedTaskIDs,
+				getMismatchDocMissingAggExpr("$$ROOT"),
+			)
+
+			return errors.Wrapf(
+				err,
+				"counting %d failed tasks’ discrepancies",
+				len(failedTasks),
+			)
+		},
+	)
+
+	eg.Go(
+		func() error {
+			var err error
+			missingOrChangedDiscrepancies, err = getMismatchesForTasks(
+				egCtx,
+				verifier.verificationDatabase(),
+				failedTaskIDs,
+				option.Some(
+					bson.D{{"$expr", getMismatchDocMissingAggExpr("$$ROOT")}},
+				),
+				option.Some(verifier.failureDisplaySize),
+			)
+
+			return errors.Wrapf(
+				err,
+				"fetching %d failed tasks' missing/changed discrepancies",
+				len(failedTasks),
+			)
+		},
+	)
+
+	if err := eg.Wait(); err != nil {
+		return false, false, errors.Wrapf(err, "gathering mismatch data")
 	}
 
-	failureTypesTable.Append([]string{
+	countsTable.Append([]string{
 		"Documents With Differing Content",
-		fmt.Sprintf("%v", reportutils.FmtReal(contentMismatchCount)),
+		reportutils.FmtReal(contentMismatchCount),
 	})
-	failureTypesTable.Append([]string{
+	countsTable.Append([]string{
 		"Missing or Changed Documents",
-		fmt.Sprintf("%v", reportutils.FmtReal(missingOrChangedCount)),
+		reportutils.FmtReal(missingOrChangedCount),
 	})
-	strBuilder.WriteString("Failure summary:\n")
-	failureTypesTable.Render()
+	countsTable.Render()
 
 	mismatchedDocsTable := tablewriter.NewWriter(strBuilder)
 	mismatchedDocsTableRows := types.ToNumericTypeOf(0, verifier.failureDisplaySize)
 	mismatchedDocsTable.SetHeader([]string{"ID", "Cluster", "Field", "Namespace", "Details"})
 
-	printAll := int64(contentMismatchCount) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
-OUTA:
-	for _, task := range failedTasks {
-		for _, d := range taskDiscrepancies[task.PrimaryKey] {
-			if d.DocumentIsMissing() {
-				continue
-			}
+	printAll := int64(contentMismatchCount) <= verifier.failureDisplaySize
 
-			if !printAll && mismatchedDocsTableRows >= verifier.failureDisplaySize {
-				break OUTA
+	for _, task := range failedTasks {
+		for _, d := range mismatchTaskDiscrepancies[task.PrimaryKey] {
+			if d.DocumentIsMissing() {
+				panic(fmt.Sprintf("found missing-type mismatch but expected content-mismatch: %+v", d))
 			}
 
 			mismatchedDocsTableRows++
 			mismatchedDocsTable.Append([]string{
 				fmt.Sprintf("%v", d.ID),
-				fmt.Sprintf("%v", d.Cluster),
-				fmt.Sprintf("%v", d.Field),
-				fmt.Sprintf("%v", d.NameSpace),
-				fmt.Sprintf("%v", d.Details),
+				d.Cluster,
+				d.Field,
+				d.NameSpace,
+				d.Details,
 			})
 		}
 	}
@@ -198,9 +234,9 @@ OUTA:
 	if mismatchedDocsTableRows > 0 {
 		strBuilder.WriteString("\n")
 		if printAll {
-			strBuilder.WriteString("All documents in tasks in failed status due to differing content:\n")
+			strBuilder.WriteString("All documents found with differing content:\n")
 		} else {
-			fmt.Fprintf(strBuilder, "First %d documents in tasks in failed status due to differing content:\n", verifier.failureDisplaySize)
+			fmt.Fprintf(strBuilder, "First %d documents found with differing content:\n", verifier.failureDisplaySize)
 		}
 		mismatchedDocsTable.Render()
 	}
@@ -209,23 +245,18 @@ OUTA:
 	missingOrChangedDocsTableRows := types.ToNumericTypeOf(0, verifier.failureDisplaySize)
 	missingOrChangedDocsTable.SetHeader([]string{"Document ID", "Source Namespace", "Destination Namespace"})
 
-	printAll = int64(missingOrChangedCount) < (verifier.failureDisplaySize + int64(0.25*float32(verifier.failureDisplaySize)))
-OUTB:
+	printAll = int64(missingOrChangedCount) <= verifier.failureDisplaySize
 	for _, task := range failedTasks {
-		for _, d := range taskDiscrepancies[task.PrimaryKey] {
+		for _, d := range missingOrChangedDiscrepancies[task.PrimaryKey] {
 			if !d.DocumentIsMissing() {
-				continue
-			}
-
-			if !printAll && missingOrChangedDocsTableRows >= verifier.failureDisplaySize {
-				break OUTB
+				panic(fmt.Sprintf("found content-mismatch mismatch but expected missing/changed: %+v", d))
 			}
 
 			missingOrChangedDocsTableRows++
 			missingOrChangedDocsTable.Append([]string{
 				fmt.Sprintf("%v", d.ID),
-				fmt.Sprintf("%v", task.QueryFilter.Namespace),
-				fmt.Sprintf("%v", task.QueryFilter.To),
+				task.QueryFilter.Namespace,
+				task.QueryFilter.To,
 			})
 		}
 	}

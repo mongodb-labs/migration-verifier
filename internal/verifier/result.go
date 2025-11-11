@@ -51,6 +51,27 @@ func (vr VerificationResult) DocumentIsMissing() bool {
 	return vr.Details == Missing && vr.Field == ""
 }
 
+func getResultDocMissingAggExpr(docExpr any) bson.D {
+	return bson.D{
+		{"$and", []bson.D{
+			{{"$eq", bson.A{
+				Missing,
+				bson.D{{"$getField", bson.D{
+					{"input", docExpr},
+					{"field", "details"},
+				}}},
+			}}},
+			{{"$eq", bson.A{
+				"",
+				bson.D{{"$getField", bson.D{
+					{"input", docExpr},
+					{"field", "field"},
+				}}},
+			}}},
+		}},
+	}
+}
+
 var _ bson.Marshaler = VerificationResult{}
 
 func (vr VerificationResult) MarshalBSON() ([]byte, error) {
