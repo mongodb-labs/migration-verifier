@@ -84,7 +84,7 @@ func (o *OplogReader) start(ctx context.Context) error {
 		Find(
 			sctx,
 			bson.D{{"$and", []any{
-				bson.D{{"ts", bson.D{{"$gte", startOpTime}}}},
+				bson.D{{"ts", bson.D{{"$gte", startOpTime.TS}}}},
 
 				bson.D{{"$expr", agg.Or{
 					// plain ops: one write per op
