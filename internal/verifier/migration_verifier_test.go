@@ -990,7 +990,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		func() {
 			_ = verifier.PersistChangeEvents(ctx, batch, src)
 		},
-		"HandleChangeStreamEvents should panic if it gets an unknown optype",
+		"PersistChangeEvents should panic if it gets an unknown optype",
 	)
 
 	verifier.generation++
