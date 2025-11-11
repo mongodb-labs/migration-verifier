@@ -45,6 +45,8 @@ func (v *Verifier) newOplogReader(
 	common.logger = v.logger
 	common.metaDB = v.metaClient.Database(v.metaDBName)
 
+	common.resumeTokenTSExtractor = oplog.GetRawResumeTokenTimestamp
+
 	return &OplogReader{ChangeReaderCommon: common}
 }
 

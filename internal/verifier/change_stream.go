@@ -70,6 +70,8 @@ func (v *Verifier) newChangeStreamReader(
 	common.logger = v.logger
 	common.metaDB = v.metaClient.Database(v.metaDBName)
 
+	common.resumeTokenTSExtractor = extractTimestampFromResumeToken
+
 	return &ChangeStreamReader{ChangeReaderCommon: common}
 }
 

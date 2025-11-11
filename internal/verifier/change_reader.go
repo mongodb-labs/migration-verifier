@@ -7,7 +7,6 @@ import (
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/10gen/migration-verifier/internal/verifier/oplog"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -75,15 +74,14 @@ type ChangeReaderCommon struct {
 
 func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 	return ChangeReaderCommon{
-		clusterName:            clusterName,
-		eventsChan:             make(chan changeEventBatch, batchChanBufferSize),
-		writesOffTS:            util.NewEventual[bson.Timestamp](),
-		readerError:            util.NewEventual[error](),
-		persistorError:         util.NewEventual[error](),
-		doneChan:               make(chan struct{}),
-		lag:                    msync.NewTypedAtomic(option.None[time.Duration]()),
-		batchSizeHistory:       history.New[int](time.Minute),
-		resumeTokenTSExtractor: oplog.GetRawResumeTokenTimestamp,
+		clusterName:      clusterName,
+		eventsChan:       make(chan changeEventBatch, batchChanBufferSize),
+		writesOffTS:      util.NewEventual[bson.Timestamp](),
+		readerError:      util.NewEventual[error](),
+		persistorError:   util.NewEventual[error](),
+		doneChan:         make(chan struct{}),
+		lag:              msync.NewTypedAtomic(option.None[time.Duration]()),
+		batchSizeHistory: history.New[int](time.Minute),
 		onDDLEvent: lo.Ternary(
 			clusterName == dst,
 			onDDLEventAllow,
