@@ -107,10 +107,15 @@ func (rc *ChangeReaderCommon) done() <-chan struct{} {
 	return rc.doneChan
 }
 
+// getBufferSaturation returns the reader’s internal buffer’s saturation level
+// as a fraction. If saturation rises, that means we’re reading events faster
+// than we can persist them.
 func (rc *ChangeReaderCommon) getBufferSaturation() float64 {
 	return util.DivideToF64(len(rc.changeEventBatchChan), cap(rc.changeEventBatchChan))
 }
 
+// getLag returns the observed change stream lag (i.e., the delta between
+// cluster time and the most-recently-seen change event).
 func (rc *ChangeReaderCommon) getLag() option.Option[time.Duration] {
 	return rc.lag.Load()
 }
