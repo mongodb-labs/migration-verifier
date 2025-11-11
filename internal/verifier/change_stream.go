@@ -64,7 +64,7 @@ type changeEventBatch struct {
 	clusterTime bson.Timestamp
 }
 
-type ChangeStreamReader struct {
+type ChangeReaderCommon struct {
 	readerType whichCluster
 
 	lastChangeEventTime *bson.Timestamp
@@ -90,21 +90,29 @@ type ChangeStreamReader struct {
 	onDDLEvent ddlEventHandling
 }
 
+type ChangeStreamReader struct {
+	ChangeReaderCommon
+}
+
 func (verifier *Verifier) initializeChangeStreamReaders() {
 	srcReader := &ChangeStreamReader{
-		readerType:    src,
-		namespaces:    verifier.srcNamespaces,
-		watcherClient: verifier.srcClient,
-		clusterInfo:   *verifier.srcClusterInfo,
+		ChangeReaderCommon: ChangeReaderCommon{
+			readerType:    src,
+			namespaces:    verifier.srcNamespaces,
+			watcherClient: verifier.srcClient,
+			clusterInfo:   *verifier.srcClusterInfo,
+		},
 	}
 	verifier.srcChangeStreamReader = srcReader
 
 	dstReader := &ChangeStreamReader{
-		readerType:    dst,
-		namespaces:    verifier.dstNamespaces,
-		watcherClient: verifier.dstClient,
-		clusterInfo:   *verifier.dstClusterInfo,
-		onDDLEvent:    onDDLEventAllow,
+		ChangeReaderCommon: ChangeReaderCommon{
+			readerType:    dst,
+			namespaces:    verifier.dstNamespaces,
+			watcherClient: verifier.dstClient,
+			clusterInfo:   *verifier.dstClusterInfo,
+			onDDLEvent:    onDDLEventAllow,
+		},
 	}
 	verifier.dstChangeStreamReader = dstReader
 
