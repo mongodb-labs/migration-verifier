@@ -434,6 +434,8 @@ func (v *Verifier) initializeChangeReaders() {
 		whyCS = "no $bsonSize"
 	}
 
+	srcLogEvent := v.logger.Info()
+
 	if whyCS == "" {
 		v.srcChangeReader = v.newOplogReader(
 			v.srcNamespaces,
@@ -442,6 +444,8 @@ func (v *Verifier) initializeChangeReaders() {
 			*v.srcClusterInfo,
 		)
 	} else {
+		srcLogEvent.Str("whyChangeStream", whyCS)
+
 		v.srcChangeReader = v.newChangeStreamReader(
 			v.srcNamespaces,
 			src,
@@ -450,7 +454,7 @@ func (v *Verifier) initializeChangeReaders() {
 		)
 	}
 
-	v.logger.Info().
+	srcLogEvent.
 		Stringer("reader", v.srcChangeReader).
 		Msg("Listening for writes to source.")
 
@@ -463,6 +467,8 @@ func (v *Verifier) initializeChangeReaders() {
 		whyCS = "no $bsonSize"
 	}
 
+	dstLogEvent := v.logger.Info()
+
 	if whyCS == "" {
 		v.dstChangeReader = v.newOplogReader(
 			v.dstNamespaces,
@@ -471,6 +477,8 @@ func (v *Verifier) initializeChangeReaders() {
 			*v.dstClusterInfo,
 		)
 	} else {
+		dstLogEvent.Str("whyChangeStream", whyCS)
+
 		v.dstChangeReader = v.newChangeStreamReader(
 			v.dstNamespaces,
 			dst,
@@ -479,7 +487,7 @@ func (v *Verifier) initializeChangeReaders() {
 		)
 	}
 
-	v.logger.Info().
+	dstLogEvent.
 		Stringer("reader", v.dstChangeReader).
 		Msg("Listening for writes to destination.")
 }
