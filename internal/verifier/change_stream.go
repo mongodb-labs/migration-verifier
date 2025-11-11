@@ -10,12 +10,12 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -58,6 +58,35 @@ type ChangeStreamReader struct {
 	onDDLEvent ddlEventHandling
 }
 
+func (v *Verifier) NewChangeStreamReader()
+
+func (v *Verifier) newChangeStreamReader(
+	namespaces []string,
+	cluster whichCluster,
+	client *mongo.Client,
+	clusterInfo util.ClusterInfo,
+) *ChangeStreamReader {
+	return &ChangeStreamReader{
+		ChangeReaderCommon: ChangeReaderCommon{
+			namespaces:       namespaces,
+			clusterName:      cluster,
+			client:           client,
+			clusterInfo:      clusterInfo,
+			logger:           v.logger,
+			metaDB:           v.metaClient.Database(v.metaDBName),
+			eventsChan:       make(chan changeEventBatch, batchChanBufferSize),
+			writesOffTS:      util.NewEventual[bson.Timestamp](),
+			readerError:      util.NewEventual[error](),
+			persistorError:   util.NewEventual[error](),
+			doneChan:         make(chan struct{}),
+			lag:              msync.NewTypedAtomic(option.None[time.Duration]()),
+			batchSizeHistory: history.New[int](time.Minute),
+		},
+		onDDLEvent: lo.Ternary(cluster == dst, onDDLEventAllow, ""),
+	}
+}
+
+/*
 func (verifier *Verifier) initializeChangeStreamReaders() {
 	srcReader := &ChangeStreamReader{
 		ChangeReaderCommon: ChangeReaderCommon{
@@ -94,6 +123,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		csr.batchSizeHistory = history.New[int](time.Minute)
 	}
 }
+*/
 
 // GetChangeStreamFilter returns an aggregation pipeline that filters
 // namespaces as per configuration.

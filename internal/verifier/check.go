@@ -233,7 +233,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 
 	// Now that we’ve initialized verifier.generation we can
 	// start the change stream readers.
-	verifier.initializeChangeStreamReaders()
+	verifier.initializeChangeReaders()
 	verifier.mux.Unlock()
 
 	err = retry.New().WithCallback(
@@ -420,6 +420,68 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
 		}
 	}
+}
+
+func (v *Verifier) initializeChangeReaders() {
+	var whyCS string
+
+	switch {
+	case len(v.srcNamespaces) > 0:
+		whyCS = "ns filter"
+	case v.srcClusterInfo.Topology == util.TopologySharded:
+		whyCS = "sharded"
+	case !util.ClusterHasBSONSize(v.srcClusterInfo.VersionArray):
+		whyCS = "no $bsonSize"
+	}
+
+	if whyCS == "" {
+		v.srcChangeReader = v.newOplogReader(
+			v.srcNamespaces,
+			src,
+			v.srcClient,
+			*v.srcClusterInfo,
+		)
+	} else {
+		v.srcChangeReader = v.newChangeStreamReader(
+			v.srcNamespaces,
+			src,
+			v.srcClient,
+			*v.srcClusterInfo,
+		)
+	}
+
+	v.logger.Info().
+		Stringer("reader", v.srcChangeReader).
+		Msg("Listening for writes to source.")
+
+	switch {
+	case len(v.dstNamespaces) > 0:
+		whyCS = "ns filter"
+	case v.dstClusterInfo.Topology == util.TopologySharded:
+		whyCS = "sharded"
+	case !util.ClusterHasBSONSize(v.dstClusterInfo.VersionArray):
+		whyCS = "no $bsonSize"
+	}
+
+	if whyCS == "" {
+		v.dstChangeReader = v.newOplogReader(
+			v.dstNamespaces,
+			dst,
+			v.dstClient,
+			*v.dstClusterInfo,
+		)
+	} else {
+		v.srcChangeReader = v.newChangeStreamReader(
+			v.dstNamespaces,
+			dst,
+			v.dstClient,
+			*v.dstClusterInfo,
+		)
+	}
+
+	v.logger.Info().
+		Stringer("reader", v.srcChangeReader).
+		Msg("Listening for writes to destination.")
 }
 
 func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {

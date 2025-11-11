@@ -32,10 +32,18 @@ type OplogReader struct {
 
 var _ changeReader = &OplogReader{}
 
-func (v *Verifier) NewOplogReader(cluster whichCluster) *OplogReader {
+func (v *Verifier) newOplogReader(
+	namespaces []string,
+	cluster whichCluster,
+	client *mongo.Client,
+	clusterInfo util.ClusterInfo,
+) *OplogReader {
 	return &OplogReader{
 		ChangeReaderCommon: ChangeReaderCommon{
+			namespaces:       namespaces,
 			clusterName:      cluster,
+			client:           client,
+			clusterInfo:      clusterInfo,
 			logger:           v.logger,
 			metaDB:           v.metaClient.Database(v.metaDBName),
 			eventsChan:       make(chan changeEventBatch, batchChanBufferSize),
