@@ -121,7 +121,10 @@ type SwitchCase struct {
 }
 
 func (s Switch) D() bson.D {
-	return bson.D{{"$switch", s}}
+	return bson.D{{"$switch", bson.D{
+		{"branches", s.Branches},
+		{"default", s.Default},
+	}}}
 }
 
 func (s Switch) MarshalBSON() ([]byte, error) {
