@@ -407,7 +407,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 		logEvent.Msg("Starting change stream from persisted resume token.")
 
-		opts = opts.SetStartAfter(savedResumeToken)
+		opts = opts.SetStartAfter(token)
 	} else {
 		csStartLogEvent.Msgf("Starting change stream from current %s cluster time.", csr.clusterName)
 	}
