@@ -27,6 +27,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -1254,6 +1255,8 @@ func (suite *IntegrationTestSuite) getFailuresForTask(
 		suite.Context(),
 		verifier.verificationDatabase(),
 		mslices.Of(taskID),
+		option.None[bson.D](),
+		option.None[int64](),
 	)
 
 	require.NoError(suite.T(), err)
