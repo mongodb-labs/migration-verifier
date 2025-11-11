@@ -72,20 +72,10 @@ func (o *OplogReader) start(ctx context.Context) error {
 			sctx,
 			bson.D{{"$expr", agg.Or{
 				// plain ops: one write per op
-				agg.And{
-					agg.In("$op", "d", "i", "u"),
-
-					// TODO: This logic is for all-namespace listening.
-					// If ns filtering is in play we need something smarter.
-					agg.Not{helpers.StringHasPrefix{
-						FieldRef: "$ns",
-						Prefix:   "config.",
-					}},
-					agg.Not{helpers.StringHasPrefix{
-						FieldRef: "$ns",
-						Prefix:   "admin.",
-					}},
-				},
+				append(
+					agg.And{agg.In("$op", "d", "i", "u")},
+					getOplogDefaultNSExclusions("$$ROOT")...,
+				),
 
 				// applyOps ops combine multiple writes into a single op
 				agg.And{
@@ -118,11 +108,14 @@ func (o *OplogReader) start(ctx context.Context) error {
 					{"ops", agg.Cond{
 						If: agg.Eq("$op", "c"),
 						Then: agg.Map{
-							Input: "$o.applyOps",
-							As:    "opEntry",
+							Input: agg.Filter{
+								Input: "$o.applyOps",
+								As:    "opEntry",
+								Cond:  getOplogDefaultNSExclusions("$$opEntry"),
+							},
+							As: "opEntry",
 							In: bson.D{
 								{"op", "$$opEntry.op"},
-								// TODO: Add a ns filter here.
 								{"ns", "$$opEntry.ns"},
 								{"docID", getOplogDocIDExpr("$$opEntry")},
 								{"docLen", getOplogDocLenExpr("$$opEntry")},
@@ -284,6 +277,21 @@ func (o *OplogReader) readAndHandleOneBatch(
 	o.lastChangeTime = option.Some(latestTS)
 
 	return nil
+}
+
+func getOplogDefaultNSExclusions(docroot string) agg.And {
+	return agg.And{
+		// TODO: This logic is for all-namespace listening.
+		// If ns filtering is in play we need something smarter.
+		agg.Not{helpers.StringHasPrefix{
+			FieldRef: docroot + ".ns",
+			Prefix:   "config.",
+		}},
+		agg.Not{helpers.StringHasPrefix{
+			FieldRef: docroot + "ns",
+			Prefix:   "admin.",
+		}},
+	}
 }
 
 func getOplogDocLenExpr(docroot string) any {
