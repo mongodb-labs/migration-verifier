@@ -123,6 +123,10 @@ func (o *OplogReader) start(ctx context.Context) error {
 
 					{"docID", getOplogDocIDExpr("$$ROOT")},
 
+					// debugging
+					{"o", 1},
+					{"o2", 1},
+
 					{"ops", agg.Cond{
 						If: agg.Eq("$op", "c"),
 						Then: agg.Map{
