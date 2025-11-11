@@ -58,8 +58,6 @@ type ChangeStreamReader struct {
 	onDDLEvent ddlEventHandling
 }
 
-func (v *Verifier) NewChangeStreamReader()
-
 func (v *Verifier) newChangeStreamReader(
 	namespaces []string,
 	cluster whichCluster,
