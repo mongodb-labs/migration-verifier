@@ -204,7 +204,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 	suite.Require().NoError(err)
 	sctx := mongo.NewSessionContext(ctx, sess)
 
-	for _, ns := range verifier.srcNamespaces {
+	for _, ns := range changeStreamReader.namespaces {
 		dbAndColl := strings.Split(ns, ".")
 
 		_, err := suite.srcMongoClient.
@@ -240,7 +240,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 
 	suite.Assert().Len(
 		events,
-		len(verifier.srcNamespaces),
+		len(changeStreamReader.namespaces),
 		"should have 1 event per in-filter namespace",
 	)
 	suite.Assert().True(
