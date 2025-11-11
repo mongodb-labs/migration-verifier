@@ -19,6 +19,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 )
 
 // OplogReader reads change events via oplog tailing instead of a change stream.
@@ -67,7 +68,12 @@ func (o *OplogReader) start(ctx context.Context) error {
 
 	sctx := mongo.NewSessionContext(ctx, sess)
 
-	cursor, err := o.client.Database("local").Collection("oplog.rs").
+	cursor, err := o.client.
+		Database("local").
+		Collection(
+			"oplog.rs",
+			options.Collection().SetReadConcern(readconcern.Majority()),
+		).
 		Find(
 			sctx,
 			bson.D{{"$expr", agg.Or{
