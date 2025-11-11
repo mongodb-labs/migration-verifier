@@ -247,6 +247,7 @@ func (o *OplogReader) readAndHandleOneBatch(
 	sctx context.Context,
 	cursor *mongo.Cursor,
 ) error {
+	fmt.Printf("----- reading a batch\n")
 	var err error
 
 	o.curDocs = o.curDocs[:0]
@@ -256,6 +257,7 @@ func (o *OplogReader) readAndHandleOneBatch(
 	if err != nil {
 		return errors.Wrap(err, "reading cursor")
 	}
+	fmt.Printf("----- batch: %+v\n", o.curDocs)
 
 	events := make([]ParsedEvent, 0, len(o.curDocs))
 
@@ -274,7 +276,7 @@ func (o *OplogReader) readAndHandleOneBatch(
 		case "n":
 		case "c":
 			if op.CmdName != "applyOps" {
-				if o.onDDLEvent == onDDLEventAllow {
+				if true || o.onDDLEvent == onDDLEventAllow {
 					o.logIgnoredDDL(rawDoc)
 					continue
 				}
@@ -309,10 +311,6 @@ func (o *OplogReader) readAndHandleOneBatch(
 				},
 			)
 		}
-	}
-
-	if len(events) == 0 {
-		return nil
 	}
 
 	sess := mongo.SessionFromContext(sctx)

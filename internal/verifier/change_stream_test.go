@@ -269,15 +269,15 @@ func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx cont
 func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	ctx := suite.T().Context()
 
-	verifier1 := suite.BuildVerifier()
-
-	srcDB := verifier1.srcClient.Database(suite.DBNameForTest())
+	srcDB := suite.srcMongoClient.Database(suite.DBNameForTest())
 	srcColl := srcDB.Collection("coll")
 
 	require.NoError(
 		suite.T(),
 		srcDB.CreateCollection(ctx, srcColl.Name()),
 	)
+
+	verifier1 := suite.BuildVerifier()
 
 	v1Ctx, v1Cancel := contextplus.WithCancelCause(ctx)
 	defer v1Cancel(ctx.Err())
@@ -291,7 +291,15 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 		suite.T(),
 		func() bool {
 			var err error
-			originalResumeToken, err = changeStreamMetaColl.FindOne(ctx, bson.D{}).Raw()
+
+			select {
+			case <-verifier1.srcChangeReader.getError().Ready():
+				suite.T().Logf("reader failed: %v", verifier1.srcChangeReader.getError().Get())
+				err = errors.Wrap(err, "reader failed")
+			default:
+				originalResumeToken, err = changeStreamMetaColl.FindOne(ctx, bson.D{}).Raw()
+			}
+
 			return err == nil
 		},
 		time.Minute,
@@ -308,7 +316,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 			close(insertsDone)
 		}()
 
-		sess, err := verifier1.srcClient.StartSession(
+		sess, err := suite.srcMongoClient.StartSession(
 			options.Session().SetCausalConsistency(true),
 		)
 		require.NoError(suite.T(), err)
