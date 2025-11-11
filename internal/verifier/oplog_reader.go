@@ -179,7 +179,7 @@ func (o *OplogReader) start(ctx context.Context) error {
 	}
 
 	go func() {
-		if err := o.iterateCursor(sctx, cursor); err != nil {
+		if err := o.iterate(sctx, cursor); err != nil {
 			o.readerError.Set(err)
 		}
 	}()
@@ -187,7 +187,7 @@ func (o *OplogReader) start(ctx context.Context) error {
 	return nil
 }
 
-func (o *OplogReader) iterateCursor(
+func (o *OplogReader) iterate(
 	sctx context.Context,
 	cursor *mongo.Cursor,
 ) error {
@@ -285,6 +285,10 @@ func (o *OplogReader) readAndHandleOneBatch(
 		switch op.Op {
 		case "n":
 		case "c":
+			if op.CmdName != "applyOps" {
+				return fmt.Errorf("got forbidden oplog command %#q", op.CmdName)
+			}
+
 			events = append(
 				events,
 				lo.Map(
