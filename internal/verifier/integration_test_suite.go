@@ -191,7 +191,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		"should set metadata connection string",
 	)
 	verifier.SetMetaDBName(metaDBName)
-	verifier.initializeChangeStreamReaders()
+	verifier.initializeChangeReaders()
 
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))
 	suite.Require().NoError(verifier.dstClientCollection(&task).Drop(ctx))

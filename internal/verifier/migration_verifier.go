@@ -132,8 +132,8 @@ type Verifier struct {
 
 	mux sync.RWMutex
 
-	srcChangeStreamReader changeReader
-	dstChangeStreamReader changeReader
+	srcChangeReader changeReader
+	dstChangeReader changeReader
 
 	readConcernSetting ReadConcernSetting
 
@@ -188,7 +188,7 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		readConcernSetting: readConcern,
 
 		// This will get recreated once gen0 starts, but we want it
-		// here in case the change streams gets an event before then.
+		// here in case the change readers get an event before then.
 		srcEventRecorder: NewEventRecorder(),
 		dstEventRecorder: NewEventRecorder(),
 
@@ -269,23 +269,23 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 		return err
 	}
 
-	// This has to happen outside the lock because the change streams
+	// This has to happen outside the lock because the change readers
 	// might be inserting docs into the recheck queue, which happens
 	// under the lock.
 	select {
-	case <-verifier.srcChangeStreamReader.getError().Ready():
-		err := verifier.srcChangeStreamReader.getError().Get()
-		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.srcChangeStreamReader)
+	case <-verifier.srcChangeReader.getError().Ready():
+		err := verifier.srcChangeReader.getError().Get()
+		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change reader already failed", verifier.srcChangeReader)
 	default:
-		verifier.srcChangeStreamReader.setWritesOff(srcFinalTs)
+		verifier.srcChangeReader.setWritesOff(srcFinalTs)
 	}
 
 	select {
-	case <-verifier.dstChangeStreamReader.getError().Ready():
-		err := verifier.dstChangeStreamReader.getError().Get()
-		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change stream already failed", verifier.dstChangeStreamReader)
+	case <-verifier.dstChangeReader.getError().Ready():
+		err := verifier.dstChangeReader.getError().Get()
+		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change reader already failed", verifier.dstChangeReader)
 	default:
-		verifier.dstChangeStreamReader.setWritesOff(dstFinalTs)
+		verifier.dstChangeReader.setWritesOff(dstFinalTs)
 	}
 
 	return nil

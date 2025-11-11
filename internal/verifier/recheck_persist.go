@@ -1,0 +1,180 @@
+package verifier
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/pkg/errors"
+	"go.mongodb.org/mongo-driver/v2/bson"
+)
+
+// RunChangeEventPersistor persists rechecks from change event batches.
+// It needs to be started after the reader starts and should run in its own
+// goroutine.
+func (verifier *Verifier) RunChangeEventPersistor(
+	ctx context.Context,
+	reader changeReader,
+) error {
+	clusterName := reader.getWhichCluster()
+	persistCallback := reader.persistChangeStreamResumeToken
+	in := reader.getReadChannel()
+
+	var err error
+
+	var lastPersistedTime time.Time
+	persistResumeTokenIfNeeded := func(ctx context.Context, token bson.Raw) {
+		if time.Since(lastPersistedTime) >= minChangeStreamPersistInterval {
+			persistErr := persistCallback(ctx, token)
+			if persistErr != nil {
+				verifier.logger.Warn().
+					Str("changeReader", string(clusterName)).
+					Err(persistErr).
+					Msg("Failed to persist resume token. Because of this, if the verifier restarts, it will have to re-process already-handled change events. This error may be transient, but if it recurs, investigate.")
+			} else {
+				lastPersistedTime = time.Now()
+			}
+		}
+	}
+
+HandlerLoop:
+	for err == nil {
+		select {
+		case <-ctx.Done():
+			err = util.WrapCtxErrWithCause(ctx)
+
+			verifier.logger.Debug().
+				Err(err).
+				Str("changeReader", string(clusterName)).
+				Msg("Change event handler failed.")
+		case batch, more := <-in:
+			if !more {
+				verifier.logger.Debug().
+					Str("changeReader", string(clusterName)).
+					Msg("Change event batch channel has been closed.")
+
+				break HandlerLoop
+			}
+
+			verifier.logger.Trace().
+				Str("changeReader", string(clusterName)).
+				Int("batchSize", len(batch.events)).
+				Any("batch", batch).
+				Msg("Handling change event batch.")
+
+			err = errors.Wrap(
+				verifier.PersistChangeEvents(ctx, batch, clusterName),
+				"failed to handle change stream events",
+			)
+
+			if err == nil && batch.resumeToken != nil {
+				persistResumeTokenIfNeeded(ctx, batch.resumeToken)
+			}
+		}
+	}
+
+	// This will prevent the reader from hanging because the reader checks
+	// this along with checks for context expiry.
+	if err != nil {
+		reader.setPersistorError(err)
+	}
+
+	return err
+}
+
+// PersistChangeEvents performs the necessary work for change events after receiving a batch.
+func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeEventBatch, eventOrigin whichCluster) error {
+	if len(batch.events) == 0 {
+		return nil
+	}
+
+	dbNames := make([]string, len(batch.events))
+	collNames := make([]string, len(batch.events))
+	docIDs := make([]bson.RawValue, len(batch.events))
+	dataSizes := make([]int32, len(batch.events))
+
+	latestTimestamp := bson.Timestamp{}
+
+	for i, changeEvent := range batch.events {
+		if !supportedEventOpTypes.Contains(changeEvent.OpType) {
+			panic(fmt.Sprintf("Unsupported optype in event; should have failed already! event=%+v", changeEvent))
+		}
+
+		if changeEvent.ClusterTime == nil {
+			verifier.logger.Warn().
+				Any("event", changeEvent).
+				Msg("Change event unexpectedly lacks a clusterTime?!?")
+		} else if changeEvent.ClusterTime.After(latestTimestamp) {
+			latestTimestamp = *changeEvent.ClusterTime
+		}
+
+		var srcDBName, srcCollName string
+
+		var eventRecorder EventRecorder
+
+		// Recheck Docs are keyed by source namespaces.
+		// We need to retrieve the source namespaces if change events are from the destination.
+		switch eventOrigin {
+		case dst:
+			eventRecorder = *verifier.dstEventRecorder
+
+			if verifier.nsMap.Len() == 0 {
+				// Namespace is not remapped. Source namespace is the same as the destination.
+				srcDBName = changeEvent.Ns.DB
+				srcCollName = changeEvent.Ns.Coll
+			} else {
+				dstNs := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
+				srcNs, exist := verifier.nsMap.GetSrcNamespace(dstNs)
+				if !exist {
+					return errors.Errorf("no source namespace corresponding to the destination namepsace %s", dstNs)
+				}
+				srcDBName, srcCollName = SplitNamespace(srcNs)
+			}
+		case src:
+			eventRecorder = *verifier.srcEventRecorder
+
+			srcDBName = changeEvent.Ns.DB
+			srcCollName = changeEvent.Ns.Coll
+		default:
+			panic(fmt.Sprintf("unknown event origin: %s", eventOrigin))
+		}
+
+		dbNames[i] = srcDBName
+		collNames[i] = srcCollName
+		docIDs[i] = changeEvent.DocID
+
+		if changeEvent.FullDocLen.OrZero() > 0 {
+			dataSizes[i] = int32(changeEvent.FullDocLen.OrZero())
+		} else if changeEvent.FullDocument == nil {
+			// This happens for deletes and for some updates.
+			// The document is probably, but not necessarily, deleted.
+			dataSizes[i] = fauxDocSizeForDeleteEvents
+		} else {
+			// This happens for inserts, replaces, and most updates.
+			dataSizes[i] = int32(len(changeEvent.FullDocument))
+		}
+
+		if err := eventRecorder.AddEvent(&changeEvent); err != nil {
+			return errors.Wrapf(
+				err,
+				"failed to augment stats with %s change event (%+v)",
+				eventOrigin,
+				changeEvent,
+			)
+		}
+	}
+
+	latestTimestampTime := time.Unix(int64(latestTimestamp.T), 0)
+	lag := time.Unix(int64(batch.clusterTime.T), 0).Sub(latestTimestampTime)
+
+	verifier.logger.Trace().
+		Str("origin", string(eventOrigin)).
+		Int("count", len(docIDs)).
+		Any("latestTimestamp", latestTimestamp).
+		Time("latestTimestampTime", latestTimestampTime).
+		Stringer("lag", lag).
+		Msg("Persisting rechecks for change events.")
+
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes)
+}

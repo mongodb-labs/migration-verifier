@@ -32,9 +32,9 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
 
 	verifier := suite.BuildVerifier()
 
-	changeStreamReader, ok := verifier.srcChangeStreamReader.(*ChangeStreamReader)
+	changeStreamReader, ok := verifier.srcChangeReader.(*ChangeStreamReader)
 	if !ok {
-		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeStreamReader, changeStreamReader)
+		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeReader, changeStreamReader)
 	}
 
 	filter := changeStreamReader.GetChangeStreamFilter()
@@ -105,9 +105,9 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 		suite.T().Skip("Need a source version that has $bsonSize")
 	}
 
-	changeStreamReader, ok := verifier.srcChangeStreamReader.(*ChangeStreamReader)
+	changeStreamReader, ok := verifier.srcChangeReader.(*ChangeStreamReader)
 	if !ok {
-		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeStreamReader, changeStreamReader)
+		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeReader, changeStreamReader)
 	}
 
 	srcColl := verifier.srcClient.Database(suite.DBNameForTest()).Collection("coll")
@@ -168,9 +168,9 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 
 	verifier := suite.BuildVerifier()
 
-	changeStreamReader, ok := verifier.srcChangeStreamReader.(*ChangeStreamReader)
+	changeStreamReader, ok := verifier.srcChangeReader.(*ChangeStreamReader)
 	if !ok {
-		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeStreamReader, changeStreamReader)
+		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeReader, changeStreamReader)
 	}
 
 	changeStreamReader.namespaces = []string{
@@ -254,10 +254,10 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 }
 
 func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx context.Context, verifier *Verifier) {
-	err := verifier.srcChangeStreamReader.StartChangeStream(ctx)
+	err := verifier.srcChangeReader.start(ctx)
 	suite.Require().NoError(err)
 	go func() {
-		err := verifier.RunChangeEventHandler(ctx, verifier.srcChangeStreamReader)
+		err := verifier.RunChangeEventPersistor(ctx, verifier.srcChangeReader)
 		if errors.Is(err, context.Canceled) {
 			return
 		}
@@ -435,7 +435,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier2)
 
-	startAtTs, hasStartAtTs := verifier2.srcChangeStreamReader.getStartTimestamp().Get()
+	startAtTs, hasStartAtTs := verifier2.srcChangeReader.getStartTimestamp().Get()
 
 	suite.Require().True(hasStartAtTs)
 
@@ -589,7 +589,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 				verifierRunner.AwaitGenerationEnd(),
 			)
 
-			return verifier.srcChangeStreamReader.getLag().IsSome()
+			return verifier.srcChangeReader.getLag().IsSome()
 		},
 		time.Minute,
 		100*time.Millisecond,
@@ -598,7 +598,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 	// NB: The lag will include whatever time elapsed above before
 	// verifier read the event, so it can be several seconds.
 	suite.Assert().Less(
-		verifier.srcChangeStreamReader.getLag().MustGet(),
+		verifier.srcChangeReader.getLag().MustGet(),
 		10*time.Minute,
 		"verifier lag is as expected",
 	)
@@ -625,14 +625,14 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 
 		suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
-		startAtTs, hasStartAtTs := verifier.srcChangeStreamReader.getStartTimestamp().Get()
+		startAtTs, hasStartAtTs := verifier.srcChangeReader.getStartTimestamp().Get()
 		suite.Require().True(hasStartAtTs, "startAtTs should be set")
 
-		verifier.srcChangeStreamReader.setWritesOff(insertTs)
+		verifier.srcChangeReader.setWritesOff(insertTs)
 
-		<-verifier.srcChangeStreamReader.done()
+		<-verifier.srcChangeReader.done()
 
-		startAtTs2 := verifier.srcChangeStreamReader.getStartTimestamp().MustGet()
+		startAtTs2 := verifier.srcChangeReader.getStartTimestamp().MustGet()
 
 		suite.Require().False(
 			startAtTs2.Before(startAtTs),
@@ -657,7 +657,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	suite.Require().NotNil(origSessionTime)
 	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
-	startAtTs, hasStartAtTs := verifier.srcChangeStreamReader.getStartTimestamp().Get()
+	startAtTs, hasStartAtTs := verifier.srcChangeReader.getStartTimestamp().Get()
 	suite.Require().True(hasStartAtTs, "startAtTs should be set")
 
 	// srcStartAtTs derives from the change stream’s resume token, which can
@@ -687,10 +687,10 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 		"session time after events should exceed the original",
 	)
 
-	verifier.srcChangeStreamReader.setWritesOff(*postEventsSessionTime)
-	<-verifier.srcChangeStreamReader.done()
+	verifier.srcChangeReader.setWritesOff(*postEventsSessionTime)
+	<-verifier.srcChangeReader.done()
 
-	startAtTs, hasStartAtTs = verifier.srcChangeStreamReader.getStartTimestamp().Get()
+	startAtTs, hasStartAtTs = verifier.srcChangeReader.getStartTimestamp().Get()
 	suite.Require().True(hasStartAtTs, "startAtTs should be set")
 
 	suite.Assert().Equal(
@@ -713,7 +713,7 @@ func (suite *IntegrationTestSuite) TestNoStartAtTime() {
 	suite.Require().NotNil(origStartTs)
 	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
-	startAtTs, hasStartAtTs := verifier.srcChangeStreamReader.getStartTimestamp().Get()
+	startAtTs, hasStartAtTs := verifier.srcChangeReader.getStartTimestamp().Get()
 	suite.Require().True(hasStartAtTs, "startAtTs should be set")
 
 	suite.Require().NotNil(startAtTs)
@@ -1063,9 +1063,9 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	verifier.SetDstNamespaces([]string{dstDBName + ".dstColl1", dstDBName + ".dstColl2"})
 	verifier.SetNamespaceMap()
 
-	suite.Require().NoError(verifier.dstChangeStreamReader.StartChangeStream(ctx))
+	suite.Require().NoError(verifier.dstChangeReader.start(ctx))
 	go func() {
-		err := verifier.RunChangeEventHandler(ctx, verifier.dstChangeStreamReader)
+		err := verifier.RunChangeEventPersistor(ctx, verifier.dstChangeReader)
 		if errors.Is(err, context.Canceled) {
 			return
 		}

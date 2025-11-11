@@ -26,7 +26,7 @@ type changeReader interface {
 	getBufferSaturation() float64
 	setWritesOff(bson.Timestamp)
 	setPersistorError(error)
-	StartChangeStream(context.Context) error
+	start(context.Context) error
 	done() <-chan struct{}
 	persistChangeStreamResumeToken(context.Context, bson.Raw) error
 	isRunning() bool

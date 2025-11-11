@@ -50,7 +50,7 @@ func (verifier *Verifier) Check(ctx context.Context, filter bson.D) {
 	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
 }
 
-func (verifier *Verifier) waitForChangeStream(ctx context.Context, csr changeReader) error {
+func (verifier *Verifier) waitForChangeReader(ctx context.Context, csr changeReader) error {
 	select {
 	case <-ctx.Done():
 		return util.WrapCtxErrWithCause(ctx)
@@ -90,15 +90,15 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	cancelableCtx, canceler := contextplus.WithCancelCause(ctxIn)
 	eg, ctx := contextplus.ErrGroup(cancelableCtx)
 
-	// If the change stream fails, everything should stop.
+	// If the change reader fails, everything should stop.
 	eg.Go(func() error {
 		select {
-		case <-verifier.srcChangeStreamReader.getError().Ready():
-			err := verifier.srcChangeStreamReader.getError().Get()
-			return errors.Wrapf(err, "%s failed", verifier.srcChangeStreamReader)
-		case <-verifier.dstChangeStreamReader.getError().Ready():
-			err := verifier.dstChangeStreamReader.getError().Get()
-			return errors.Wrapf(err, "%s failed", verifier.dstChangeStreamReader)
+		case <-verifier.srcChangeReader.getError().Ready():
+			err := verifier.srcChangeReader.getError().Get()
+			return errors.Wrapf(err, "%s failed", verifier.srcChangeReader)
+		case <-verifier.dstChangeReader.getError().Ready():
+			err := verifier.dstChangeReader.getError().Get()
+			return errors.Wrapf(err, "%s failed", verifier.dstChangeReader)
 		case <-ctx.Done():
 			return nil
 		}
@@ -229,11 +229,11 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		}
 	}
 
-	verifier.logger.Info().Msg("Starting change streams.")
+	verifier.logger.Info().Msg("Starting change readers.")
 
 	// Now that we’ve initialized verifier.generation we can
 	// start the change stream readers.
-	verifier.initializeChangeStreamReaders()
+	verifier.initializeChangeReaders()
 	verifier.mux.Unlock()
 
 	err = retry.New().WithCallback(
@@ -270,18 +270,18 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	}()
 
 	ceHandlerGroup, groupCtx := contextplus.ErrGroup(ctx)
-	for _, csReader := range mslices.Of(verifier.srcChangeStreamReader, verifier.dstChangeStreamReader) {
-		if csReader.isRunning() {
-			verifier.logger.Debug().Msgf("Check: %s already running.", csReader)
+	for _, changeReader := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
+		if changeReader.isRunning() {
+			verifier.logger.Debug().Msgf("Check: %s already running.", changeReader)
 		} else {
-			verifier.logger.Debug().Msgf("%s not running; starting change stream", csReader)
+			verifier.logger.Debug().Msgf("%s not running; starting change reader", changeReader)
 
-			err = csReader.StartChangeStream(ctx)
+			err = changeReader.start(ctx)
 			if err != nil {
-				return errors.Wrapf(err, "failed to start %s", csReader)
+				return errors.Wrapf(err, "failed to start %s", changeReader)
 			}
 			ceHandlerGroup.Go(func() error {
-				return verifier.RunChangeEventHandler(groupCtx, csReader)
+				return verifier.RunChangeEventPersistor(groupCtx, changeReader)
 			})
 		}
 	}
@@ -364,14 +364,14 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// caught again on the next iteration.
 		if verifier.writesOff {
 			verifier.logger.Debug().
-				Msg("Waiting for change streams to end.")
+				Msg("Waiting for change readers to end.")
 
-			// It's necessary to wait for the change stream to finish before incrementing the
+			// It's necessary to wait for the change reader to finish before incrementing the
 			// generation number, or the last changes will not be checked.
 			verifier.mux.Unlock()
 
-			for _, csr := range mslices.Of(verifier.srcChangeStreamReader, verifier.dstChangeStreamReader) {
-				if err = verifier.waitForChangeStream(ctx, csr); err != nil {
+			for _, csr := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
+				if err = verifier.waitForChangeReader(ctx, csr); err != nil {
 					return errors.Wrapf(
 						err,
 						"an error interrupted the wait for closure of %s",

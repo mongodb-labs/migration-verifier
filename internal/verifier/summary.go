@@ -559,8 +559,8 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 		eventRecorder *EventRecorder
 		csReader      changeReader
 	}{
-		{"Source", verifier.srcEventRecorder, verifier.srcChangeStreamReader},
-		{"Destination", verifier.dstEventRecorder, verifier.dstChangeStreamReader},
+		{"Source", verifier.srcEventRecorder, verifier.srcChangeReader},
+		{"Destination", verifier.dstEventRecorder, verifier.dstChangeReader},
 	} {
 		nsStats := cluster.eventRecorder.Read()
 
@@ -619,13 +619,13 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 			}
 		}
 
-		if cluster.csReader == verifier.srcChangeStreamReader {
+		if cluster.csReader == verifier.srcChangeReader {
 			fmt.Fprint(builder, "\n")
 		}
 
 		// We only print event breakdowns for the source because we assume that
 		// events on the destination will largely mirror the source’s.
-		if totalEvents > 0 && cluster.csReader == verifier.srcChangeStreamReader {
+		if totalEvents > 0 && cluster.csReader == verifier.srcChangeReader {
 			reverseSortedNamespaces := maps.Keys(nsTotals)
 			sort.Slice(
 				reverseSortedNamespaces,
