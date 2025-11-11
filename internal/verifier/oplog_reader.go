@@ -3,16 +3,13 @@ package verifier
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/helpers"
-	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/oplog"
 	"github.com/10gen/migration-verifier/mmongo"
-	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -39,24 +36,16 @@ func (v *Verifier) newOplogReader(
 	client *mongo.Client,
 	clusterInfo util.ClusterInfo,
 ) *OplogReader {
-	return &OplogReader{
-		ChangeReaderCommon: ChangeReaderCommon{
-			namespaces:             namespaces,
-			clusterName:            cluster,
-			client:                 client,
-			clusterInfo:            clusterInfo,
-			logger:                 v.logger,
-			metaDB:                 v.metaClient.Database(v.metaDBName),
-			eventsChan:             make(chan changeEventBatch, batchChanBufferSize),
-			writesOffTS:            util.NewEventual[bson.Timestamp](),
-			readerError:            util.NewEventual[error](),
-			persistorError:         util.NewEventual[error](),
-			doneChan:               make(chan struct{}),
-			lag:                    msync.NewTypedAtomic(option.None[time.Duration]()),
-			batchSizeHistory:       history.New[int](time.Minute),
-			resumeTokenTSExtractor: oplog.GetRawResumeTokenTimestamp,
-		},
-	}
+	common := newChangeReaderCommon(cluster)
+	common.namespaces = namespaces
+	common.clusterName = cluster
+	common.client = client
+	common.clusterInfo = clusterInfo
+
+	common.logger = v.logger
+	common.metaDB = v.metaClient.Database(v.metaDBName)
+
+	return &OplogReader{ChangeReaderCommon: common}
 }
 
 func (o *OplogReader) start(ctx context.Context) error {
@@ -108,15 +97,9 @@ func (o *OplogReader) start(ctx context.Context) error {
 						getOplogDefaultNSExclusions("$$ROOT")...,
 					),
 
-					// applyOps ops combine multiple writes into a single op
-					agg.And{
-						agg.Eq("$op", "c"),
-						agg.Eq("$ns", "admin.$cmd"),
-						agg.Eq(agg.Type("$o.applyOps"), "array"),
-					},
-
-					// no-ops, to stay up-to-date if no events of note happen
-					agg.Eq("$op", "n"),
+					// op=c is for applyOps, and also to detect forbidden DDL.
+					// op=n is for no-ops, so we stay up-to-date.
+					agg.In("$op", "c", "n"),
 				}}},
 			}}},
 
@@ -154,7 +137,10 @@ func (o *OplogReader) start(ctx context.Context) error {
 					}},
 
 					{"ops", agg.Cond{
-						If: agg.Eq("$op", "c"),
+						If: agg.And{
+							agg.Eq("$op", "c"),
+							agg.Eq(agg.Type("$o.applyOps"), "array"),
+						},
 						Then: agg.Map{
 							Input: agg.Filter{
 								Input: "$o.applyOps",
@@ -216,7 +202,7 @@ CursorLoop:
 	for {
 		if lastTime, has := o.lastChangeTime.Get(); has {
 			if !lastTime.Before(writesOffTS) {
-				fmt.Printf("----------- %s reached writes off ts %#q", o, writesOffTS)
+				fmt.Printf("----------- %s reached writes off ts %v", o, writesOffTS)
 				break
 			}
 		}
@@ -286,7 +272,12 @@ func (o *OplogReader) readAndHandleOneBatch(
 		case "n":
 		case "c":
 			if op.CmdName != "applyOps" {
-				return fmt.Errorf("got forbidden oplog command %#q", op.CmdName)
+				if o.onDDLEvent == onDDLEventAllow {
+					o.logIgnoredDDL(rawDoc)
+					continue
+				}
+
+				return UnknownEventError{rawDoc}
 			}
 
 			events = append(

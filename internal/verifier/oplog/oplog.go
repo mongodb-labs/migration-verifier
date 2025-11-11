@@ -55,6 +55,8 @@ func (rt ResumeToken) MarshalToBSON() []byte {
 }
 
 func (o *Op) UnmarshalFromBSON(in []byte) error {
+	//fmt.Printf("---- unmarshaling: %+v\n\n", bson.Raw(in))
+
 	for el, err := range mbson.RawElements(bson.Raw(in)) {
 		if err != nil {
 			return errors.Wrap(err, "iterating BSON document")
@@ -84,7 +86,10 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 			o.DocID.Value = slices.Clone(o.DocID.Value)
 		case "ops":
 			var arr bson.RawArray
-			err = mbson.UnmarshalElementValue(el, &arr)
+			err = errors.Wrapf(
+				mbson.UnmarshalElementValue(el, &arr),
+				"parsing ops",
+			)
 
 			if err == nil {
 				vals, err := arr.Values()

@@ -7,6 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/oplog"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -69,6 +70,26 @@ type ChangeReaderCommon struct {
 	lag              *msync.TypedAtomic[option.Option[time.Duration]]
 	batchSizeHistory *history.History[int]
 	lastChangeTime   option.Option[bson.Timestamp]
+	onDDLEvent       ddlEventHandling
+}
+
+func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
+	return ChangeReaderCommon{
+		clusterName:            clusterName,
+		eventsChan:             make(chan changeEventBatch, batchChanBufferSize),
+		writesOffTS:            util.NewEventual[bson.Timestamp](),
+		readerError:            util.NewEventual[error](),
+		persistorError:         util.NewEventual[error](),
+		doneChan:               make(chan struct{}),
+		lag:                    msync.NewTypedAtomic(option.None[time.Duration]()),
+		batchSizeHistory:       history.New[int](time.Minute),
+		resumeTokenTSExtractor: oplog.GetRawResumeTokenTimestamp,
+		onDDLEvent: lo.Ternary(
+			clusterName == dst,
+			onDDLEventAllow,
+			"",
+		),
+	}
 }
 
 func (rc ChangeReaderCommon) getWhichCluster() whichCluster {
@@ -207,4 +228,11 @@ func (rc *ChangeReaderCommon) updateLag(sess *mongo.Session, token bson.Raw) {
 			Err(err).
 			Msgf("Failed to extract timestamp from %s's resume token to compute lag.", rc.clusterName)
 	}
+}
+
+func (rc *ChangeReaderCommon) logIgnoredDDL(rawEvent bson.Raw) {
+	rc.logger.Info().
+		Str("reader", string(rc.clusterName)).
+		Stringer("event", rawEvent).
+		Msg("Ignoring event with unrecognized type on destination. (It’s assumedly internal to the migration.)")
 }

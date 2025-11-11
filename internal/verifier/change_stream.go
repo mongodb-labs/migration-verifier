@@ -5,17 +5,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
-	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -64,65 +61,17 @@ func (v *Verifier) newChangeStreamReader(
 	client *mongo.Client,
 	clusterInfo util.ClusterInfo,
 ) *ChangeStreamReader {
-	return &ChangeStreamReader{
-		ChangeReaderCommon: ChangeReaderCommon{
-			namespaces:             namespaces,
-			clusterName:            cluster,
-			client:                 client,
-			clusterInfo:            clusterInfo,
-			logger:                 v.logger,
-			metaDB:                 v.metaClient.Database(v.metaDBName),
-			eventsChan:             make(chan changeEventBatch, batchChanBufferSize),
-			writesOffTS:            util.NewEventual[bson.Timestamp](),
-			readerError:            util.NewEventual[error](),
-			persistorError:         util.NewEventual[error](),
-			doneChan:               make(chan struct{}),
-			lag:                    msync.NewTypedAtomic(option.None[time.Duration]()),
-			batchSizeHistory:       history.New[int](time.Minute),
-			resumeTokenTSExtractor: extractTimestampFromResumeToken,
-		},
-		onDDLEvent: lo.Ternary(cluster == dst, onDDLEventAllow, ""),
-	}
+	common := newChangeReaderCommon(cluster)
+	common.namespaces = namespaces
+	common.clusterName = cluster
+	common.client = client
+	common.clusterInfo = clusterInfo
+
+	common.logger = v.logger
+	common.metaDB = v.metaClient.Database(v.metaDBName)
+
+	return &ChangeStreamReader{ChangeReaderCommon: common}
 }
-
-/*
-func (verifier *Verifier) initializeChangeStreamReaders() {
-	srcReader := &ChangeStreamReader{
-		ChangeReaderCommon: ChangeReaderCommon{
-			clusterName: src,
-			namespaces:  verifier.srcNamespaces,
-			client:      verifier.srcClient,
-			clusterInfo: *verifier.srcClusterInfo,
-		},
-	}
-	verifier.srcChangeReader = srcReader
-
-	dstReader := &ChangeStreamReader{
-		ChangeReaderCommon: ChangeReaderCommon{
-			clusterName: dst,
-			namespaces:  verifier.dstNamespaces,
-			client:      verifier.dstClient,
-			clusterInfo: *verifier.dstClusterInfo,
-		},
-
-		onDDLEvent: onDDLEventAllow,
-	}
-	verifier.dstChangeReader = dstReader
-
-	// Common elements in both readers:
-	for _, csr := range mslices.Of(srcReader, dstReader) {
-		csr.logger = verifier.logger
-		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
-		csr.eventsChan = make(chan changeEventBatch, batchChanBufferSize)
-		csr.writesOffTS = util.NewEventual[bson.Timestamp]()
-		csr.readerError = util.NewEventual[error]()
-		csr.persistorError = util.NewEventual[error]()
-		csr.doneChan = make(chan struct{})
-		csr.lag = msync.NewTypedAtomic(option.None[time.Duration]())
-		csr.batchSizeHistory = history.New[int](time.Minute)
-	}
-}
-*/
 
 // GetChangeStreamFilter returns an aggregation pipeline that filters
 // namespaces as per configuration.
@@ -254,10 +203,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			// indexes are created after initial sync.
 
 			if csr.onDDLEvent == onDDLEventAllow {
-				csr.logger.Info().
-					Stringer("changeStream", csr).
-					Stringer("event", cs.Current).
-					Msg("Ignoring event with unrecognized type on destination. (It’s assumedly internal to the migration.)")
+				csr.logIgnoredDDL(cs.Current)
 
 				// Discard this event, then keep reading.
 				changeEvents = changeEvents[:len(changeEvents)-1]

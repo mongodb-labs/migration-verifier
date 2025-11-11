@@ -912,7 +912,7 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
 
 	db := suite.srcMongoClient.Database(suite.DBNameForTest())
-	coll := db.Collection("mycoll")
+	coll := db.Collection(suite.T().Name())
 	suite.Require().NoError(
 		db.CreateCollection(ctx, coll.Name()),
 	)
@@ -928,7 +928,7 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 
 	eventErr := UnknownEventError{}
 	suite.Require().ErrorAs(err, &eventErr)
-	suite.Assert().Equal("create", eventErr.Event.Lookup("operationType").StringValue())
+	suite.Assert().Contains(string(eventErr.Event), "create", "should mention the event")
 }
 
 func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
