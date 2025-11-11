@@ -43,7 +43,7 @@ func (rt ResumeToken) MarshalToBSON() []byte {
 }
 
 func (o *Op) UnmarshalFromBSON(in []byte) error {
-	fmt.Printf("--- unmarshaling %+v\n", in)
+	fmt.Printf("--- unmarshaling %+v\n", bson.Raw(in))
 
 	for el, err := range mbson.RawElements(bson.Raw(in)) {
 		if err != nil {
