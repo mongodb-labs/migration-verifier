@@ -61,6 +61,13 @@ func (v *Verifier) newOplogReader(
 func (o *OplogReader) start(ctx context.Context) error {
 	// TODO: retryer
 
+	startOpTime, err := oplog.GetTailingStartTime(ctx, o.client)
+	if err != nil {
+		return errors.Wrapf(err, "getting start optime")
+	}
+
+	o.startAtTS = option.Some(startOpTime.TS)
+
 	sess, err := o.client.StartSession()
 	if err != nil {
 		return errors.Wrap(err, "creating session")
@@ -76,23 +83,28 @@ func (o *OplogReader) start(ctx context.Context) error {
 		).
 		Find(
 			sctx,
-			bson.D{{"$expr", agg.Or{
-				// plain ops: one write per op
-				append(
-					agg.And{agg.In("$op", "d", "i", "u")},
-					getOplogDefaultNSExclusions("$$ROOT")...,
-				),
+			bson.D{{"$and", []any{
+				bson.D{{"ts", bson.D{{"$gte", startOpTime}}}},
 
-				// applyOps ops combine multiple writes into a single op
-				agg.And{
-					agg.Eq("$op", "c"),
-					agg.Eq("$ns", "admin.$cmd"),
-					agg.Eq(agg.Type("$o.applyOps"), "array"),
-				},
+				bson.D{{"$expr", agg.Or{
+					// plain ops: one write per op
+					append(
+						agg.And{agg.In("$op", "d", "i", "u")},
+						getOplogDefaultNSExclusions("$$ROOT")...,
+					),
 
-				// no-ops, to stay up-to-date if no events of note happen
-				agg.Eq("$op", "n"),
+					// applyOps ops combine multiple writes into a single op
+					agg.And{
+						agg.Eq("$op", "c"),
+						agg.Eq("$ns", "admin.$cmd"),
+						agg.Eq(agg.Type("$o.applyOps"), "array"),
+					},
+
+					// no-ops, to stay up-to-date if no events of note happen
+					agg.Eq("$op", "n"),
+				}}},
 			}}},
+
 			options.Find().
 				SetCursorType(options.TailableAwait).
 				SetProjection(bson.D{

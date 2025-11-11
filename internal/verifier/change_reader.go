@@ -156,7 +156,7 @@ func (rc ChangeReaderCommon) persistChangeStreamResumeToken(ctx context.Context,
 				Msg("failed to extract resume token timestamp")
 		}
 
-		logEvent.Msgf("Persisted %s's resume token.", rc)
+		logEvent.Msgf("Persisted %s's resume token.", rc.clusterName)
 
 		return nil
 	}
