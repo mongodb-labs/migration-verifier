@@ -56,6 +56,8 @@ type ChangeReaderCommon struct {
 
 	metaDB *mongo.Database
 
+	resumeTokenTSExtractor func(bson.Raw) (bson.Timestamp, error)
+
 	running          bool
 	clusterName      whichCluster
 	doneChan         chan struct{}
@@ -145,7 +147,7 @@ func (rc ChangeReaderCommon) persistChangeStreamResumeToken(ctx context.Context,
 	)
 
 	if err == nil {
-		ts, err := extractTimestampFromResumeToken(token)
+		ts, err := rc.resumeTokenTSExtractor(token)
 
 		logEvent := rc.logger.Debug()
 

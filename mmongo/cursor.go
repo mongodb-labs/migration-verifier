@@ -2,10 +2,7 @@ package mmongo
 
 import (
 	"context"
-	"fmt"
-	"slices"
 
-	"github.com/10gen/migration-verifier/mcmp"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -19,22 +16,40 @@ func GetBatch(
 	docs []bson.Raw,
 	buffer []byte,
 ) ([]bson.Raw, []byte, error) {
-	batchLen := cursor.RemainingBatchLength()
+	for hasDocs := true; hasDocs; hasDocs = cursor.RemainingBatchLength() > 0 {
+		got := cursor.TryNext(ctx)
 
-	docs = slices.Grow(docs, batchLen)
+		if cursor.Err() != nil {
+			return nil, nil, errors.Wrap(cursor.Err(), "cursor iteration failed")
+		}
 
-	for range batchLen {
-		if !cursor.Next(ctx) {
-			return nil, nil, mcmp.Or(
-				errors.Wrap(cursor.Err(), "iterating cursor mid-batch"),
-				fmt.Errorf("expected %d docs from cursor but only saw %d", batchLen, len(docs)),
-			)
+		if !got {
+			break
 		}
 
 		docPos := len(buffer)
 		buffer = append(buffer, cursor.Current...)
 		docs = append(docs, buffer[docPos:])
 	}
+
+	/*
+		batchLen := cursor.RemainingBatchLength()
+
+		docs = slices.Grow(docs, batchLen)
+
+		for range batchLen {
+			if !cursor.Next(ctx) {
+				return nil, nil, mcmp.Or(
+					errors.Wrap(cursor.Err(), "iterating cursor mid-batch"),
+					fmt.Errorf("expected %d docs from cursor but only saw %d", batchLen, len(docs)),
+				)
+			}
+
+			docPos := len(buffer)
+			buffer = append(buffer, cursor.Current...)
+			docs = append(docs, buffer[docPos:])
+		}
+	*/
 
 	return docs, buffer, nil
 }

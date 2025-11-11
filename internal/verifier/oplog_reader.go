@@ -54,6 +54,14 @@ func (v *Verifier) newOplogReader(
 			doneChan:         make(chan struct{}),
 			lag:              msync.NewTypedAtomic(option.None[time.Duration]()),
 			batchSizeHistory: history.New[int](time.Minute),
+			resumeTokenTSExtractor: func(token bson.Raw) (bson.Timestamp, error) {
+				var rt oplog.ResumeToken
+				if err := bson.Unmarshal(token, &rt); err != nil {
+					return bson.Timestamp{}, err
+				}
+
+				return rt.TS, nil
+			},
 		},
 	}
 }
