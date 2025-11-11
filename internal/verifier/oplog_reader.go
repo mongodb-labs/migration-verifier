@@ -250,6 +250,8 @@ func (o *OplogReader) readAndHandleOneBatch(
 			return errors.Wrapf(err, "reading oplog entry")
 		}
 
+		fmt.Printf("===== unmarshaled: %+v\n", op)
+
 		latestTS = op.TS
 
 		switch op.Op {
