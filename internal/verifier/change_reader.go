@@ -82,7 +82,7 @@ func (rc ChangeReaderCommon) setWritesOff(ts bson.Timestamp) {
 }
 
 func (rc ChangeReaderCommon) isRunning() bool {
-	return rc.isRunning()
+	return rc.changeStreamRunning
 }
 
 func (rc ChangeReaderCommon) getReadChannel() <-chan changeEventBatch {

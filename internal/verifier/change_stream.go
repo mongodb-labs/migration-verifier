@@ -102,6 +102,7 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		csr.doneChan = make(chan struct{})
 		csr.lag = msync.NewTypedAtomic(option.None[time.Duration]())
 		csr.batchSizeHistory = history.New[int](time.Minute)
+		csr.resumeTokenTSExtractor = extractTimestampFromResumeToken
 	}
 }
 
@@ -407,10 +408,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			// indexes are created after initial sync.
 
 			if csr.onDDLEvent == onDDLEventAllow {
-				csr.logger.Info().
-					Stringer("changeStream", csr).
-					Stringer("event", cs.Current).
-					Msg("Ignoring event with unrecognized type on destination. (It’s assumedly internal to the migration.)")
+				csr.logIgnoredDDL(cs.Current)
 
 				// Discard this event, then keep reading.
 				changeEvents = changeEvents[:len(changeEvents)-1]
@@ -437,16 +435,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
-	var tokenTs bson.Timestamp
-	tokenTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
-	if err == nil {
-		lagSecs := int64(sess.OperationTime().T) - int64(tokenTs.T)
-		csr.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
-	} else {
-		csr.logger.Warn().
-			Err(err).
-			Msgf("Failed to extract timestamp from %s's resume token to compute change stream lag.", csr)
-	}
+	csr.updateLag(sess, cs.ResumeToken())
 
 	if eventsRead == 0 {
 		ri.NoteSuccess("received an empty change stream response")
@@ -535,7 +524,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			// (i.e., the `getMore` call returns empty)
 			for {
 				var curTs bson.Timestamp
-				curTs, err = extractTimestampFromResumeToken(cs.ResumeToken())
+				curTs, err = csr.resumeTokenTSExtractor(cs.ResumeToken())
 				if err != nil {
 					return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
 				}
@@ -608,18 +597,18 @@ func (csr *ChangeStreamReader) createChangeStream(
 		)
 	}
 
-	savedResumeToken, err := csr.loadChangeStreamResumeToken(ctx)
+	savedResumeToken, err := csr.loadResumeToken(ctx)
 	if err != nil {
 		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
 	}
 
 	csStartLogEvent := csr.logger.Info()
 
-	if savedResumeToken != nil {
+	if token, hasToken := savedResumeToken.Get(); hasToken {
 		logEvent := csStartLogEvent.
-			Stringer(csr.resumeTokenDocID(), savedResumeToken)
+			Stringer(csr.resumeTokenDocID(), token)
 
-		ts, err := extractTimestampFromResumeToken(savedResumeToken)
+		ts, err := csr.resumeTokenTSExtractor(token)
 		if err == nil {
 			logEvent = addTimestampToLogEvent(ts, logEvent)
 		} else {
@@ -630,7 +619,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 		logEvent.Msg("Starting change stream from persisted resume token.")
 
-		opts = opts.SetStartAfter(savedResumeToken)
+		opts = opts.SetStartAfter(token)
 	} else {
 		csStartLogEvent.Msgf("Starting change stream from current %s cluster time.", csr.readerType)
 	}
@@ -650,7 +639,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 		return nil, nil, bson.Timestamp{}, err
 	}
 
-	startTs, err := extractTimestampFromResumeToken(changeStream.ResumeToken())
+	startTs, err := csr.resumeTokenTSExtractor(changeStream.ResumeToken())
 	if err != nil {
 		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
 	}
@@ -825,46 +814,6 @@ func (csr *ChangeStreamReader) loadChangeStreamResumeToken(ctx context.Context) 
 
 func (csr *ChangeStreamReader) String() string {
 	return fmt.Sprintf("%s change stream reader", csr.readerType)
-}
-
-func (csr *ChangeStreamReader) resumeTokenDocID() string {
-	switch csr.readerType {
-	case src:
-		return "srcResumeToken"
-	case dst:
-		return "dstResumeToken"
-	default:
-		panic("unknown readerType: " + csr.readerType)
-	}
-}
-
-func (csr *ChangeStreamReader) persistChangeStreamResumeToken(ctx context.Context, token bson.Raw) error {
-	coll := csr.getChangeStreamMetadataCollection()
-	_, err := coll.ReplaceOne(
-		ctx,
-		bson.D{{"_id", csr.resumeTokenDocID()}},
-		token,
-		options.Replace().SetUpsert(true),
-	)
-
-	if err == nil {
-		ts, err := extractTimestampFromResumeToken(token)
-
-		logEvent := csr.logger.Debug()
-
-		if err == nil {
-			logEvent = addTimestampToLogEvent(ts, logEvent)
-		} else {
-			csr.logger.Warn().Err(err).
-				Msg("failed to extract resume token timestamp")
-		}
-
-		logEvent.Msgf("Persisted %s's resume token.", csr)
-
-		return nil
-	}
-
-	return errors.Wrapf(err, "failed to persist change stream resume token (%v)", token)
 }
 
 func extractTimestampFromResumeToken(resumeToken bson.Raw) (bson.Timestamp, error) {
