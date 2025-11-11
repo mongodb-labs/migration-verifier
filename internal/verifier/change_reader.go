@@ -61,50 +61,50 @@ type ChangeReaderCommon struct {
 	onDDLEvent ddlEventHandling
 }
 
-func (rc ChangeReaderCommon) getWhichCluster() whichCluster {
+func (rc *ChangeReaderCommon) getWhichCluster() whichCluster {
 	return rc.readerType
 }
 
-func (rc ChangeReaderCommon) setPersistorError(err error) {
+func (rc *ChangeReaderCommon) setPersistorError(err error) {
 	rc.handlerError.Set(err)
 }
 
-func (rc ChangeReaderCommon) getError() *util.Eventual[error] {
+func (rc *ChangeReaderCommon) getError() *util.Eventual[error] {
 	return rc.readerError
 }
 
-func (rc ChangeReaderCommon) getStartTimestamp() option.Option[bson.Timestamp] {
+func (rc *ChangeReaderCommon) getStartTimestamp() option.Option[bson.Timestamp] {
 	return option.FromPointer(rc.startAtTs)
 }
 
-func (rc ChangeReaderCommon) setWritesOff(ts bson.Timestamp) {
+func (rc *ChangeReaderCommon) setWritesOff(ts bson.Timestamp) {
 	rc.writesOffTs.Set(ts)
 }
 
-func (rc ChangeReaderCommon) isRunning() bool {
+func (rc *ChangeReaderCommon) isRunning() bool {
 	return rc.changeStreamRunning
 }
 
-func (rc ChangeReaderCommon) getReadChannel() <-chan changeEventBatch {
+func (rc *ChangeReaderCommon) getReadChannel() <-chan changeEventBatch {
 	return rc.changeEventBatchChan
 }
 
-func (rc ChangeReaderCommon) done() <-chan struct{} {
+func (rc *ChangeReaderCommon) done() <-chan struct{} {
 	return rc.doneChan
 }
 
-func (rc ChangeReaderCommon) getBufferSaturation() float64 {
+func (rc *ChangeReaderCommon) getBufferSaturation() float64 {
 	return util.DivideToF64(len(rc.changeEventBatchChan), cap(rc.changeEventBatchChan))
 }
 
-func (rc ChangeReaderCommon) getLag() option.Option[time.Duration] {
+func (rc *ChangeReaderCommon) getLag() option.Option[time.Duration] {
 	return rc.lag.Load()
 }
 
 // getEventsPerSecond returns the number of change events per second we’ve been
 // seeing “recently”. (See implementation for the actual period over which we
 // compile this metric.)
-func (rc ChangeReaderCommon) getEventsPerSecond() option.Option[float64] {
+func (rc *ChangeReaderCommon) getEventsPerSecond() option.Option[float64] {
 	logs := rc.batchSizeHistory.Get()
 	lastLog, hasLogs := lo.Last(logs)
 
@@ -127,7 +127,7 @@ func (rc ChangeReaderCommon) getEventsPerSecond() option.Option[float64] {
 	return option.None[float64]()
 }
 
-func (rc ChangeReaderCommon) persistChangeStreamResumeToken(ctx context.Context, token bson.Raw) error {
+func (rc *ChangeReaderCommon) persistChangeStreamResumeToken(ctx context.Context, token bson.Raw) error {
 	coll := rc.metaDB.Collection(metadataChangeStreamCollectionName)
 	_, err := coll.ReplaceOne(
 		ctx,
@@ -156,7 +156,7 @@ func (rc ChangeReaderCommon) persistChangeStreamResumeToken(ctx context.Context,
 	return errors.Wrapf(err, "failed to persist change stream resume token (%v)", token)
 }
 
-func (rc ChangeReaderCommon) resumeTokenDocID() string {
+func (rc *ChangeReaderCommon) resumeTokenDocID() string {
 	switch rc.readerType {
 	case src:
 		return "srcResumeToken"
@@ -167,11 +167,11 @@ func (rc ChangeReaderCommon) resumeTokenDocID() string {
 	}
 }
 
-func (rc ChangeReaderCommon) getMetadataCollection() *mongo.Collection {
+func (rc *ChangeReaderCommon) getMetadataCollection() *mongo.Collection {
 	return rc.metaDB.Collection(metadataChangeStreamCollectionName)
 }
 
-func (rc ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Option[bson.Raw], error) {
+func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Option[bson.Raw], error) {
 	coll := rc.getMetadataCollection()
 
 	token, err := coll.FindOne(
