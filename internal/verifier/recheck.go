@@ -20,6 +20,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -27,6 +28,15 @@ const (
 	recheckBatchCountLimit = 1000
 
 	recheckQueueCollectionNameBase = "recheckQueue"
+
+	maxTasksPerRequest = 500
+	maxInsertSize      = 256 << 10
+
+	// TODO: Try something beneath 256 KiB instead.
+	maxRecheckIDsBytes = 1024 * 1024 // 1 MiB
+
+	// The max # of docs that we want each recheck task’s cursor to return.
+	maxRecheckIDs = 10_000
 )
 
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
@@ -298,6 +308,12 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	}
 	defer cursor.Close(ctx)
 
+	var curTasks []bson.Raw
+	var curTasksBytes int
+
+	eg, egCtx := contextplus.ErrGroup(ctx)
+
+	var totalTasks, totalInserts int
 	persistBufferedRechecks := func() error {
 		if len(idAccum) == 0 {
 			return nil
@@ -305,8 +321,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		namespace := prevDBName + "." + prevCollName
 
-		task, err := verifier.InsertDocumentRecheckTask(
-			ctx,
+		task, err := verifier.createDocumentRecheckTask(
 			idAccum,
 			types.ByteCount(dataSizeAccum),
 			namespace,
@@ -318,6 +333,32 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 				len(idAccum),
 				namespace,
 			)
+		}
+		totalTasks++
+
+		taskRaw, err := bson.Marshal(task)
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"failed to marshal a %d-document recheck task for collection %#q",
+				len(idAccum),
+				namespace,
+			)
+		}
+
+		curTasks = append(curTasks, taskRaw)
+		curTasksBytes += len(taskRaw)
+		if len(curTasks) == maxTasksPerRequest || curTasksBytes >= maxInsertSize {
+			tasksClone := slices.Clone(curTasks)
+			curTasks = curTasks[:0]
+
+			eg.Go(
+				func() error {
+					return verifier.insertDocumentRecheckTasks(egCtx, tasksClone)
+				},
+			)
+
+			totalInserts++
 		}
 
 		verifier.logger.Debug().
@@ -393,11 +434,29 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	}
 
 	err = persistBufferedRechecks()
+	if err != nil {
+		return err
+	}
 
-	if err == nil && totalDocs > 0 {
+	if len(curTasks) > 0 {
+		eg.Go(
+			func() error {
+				return verifier.insertDocumentRecheckTasks(egCtx, curTasks)
+			},
+		)
+	}
+
+	err = eg.Wait()
+	if err != nil {
+		return errors.Wrapf(err, "persisting document recheck tasks")
+	}
+
+	if totalDocs > 0 {
 		verifier.logger.Info().
 			Int("generation", generation).
 			Int64("totalDocs", int64(totalDocs)).
+			Int("tasks", totalTasks).
+			Int("insertRequests", totalInserts).
 			Str("totalData", reportutils.FmtBytes(totalRecheckData)).
 			Stringer("timeElapsed", time.Since(startTime)).
 			Msg("Scheduled documents for recheck in the new generation.")

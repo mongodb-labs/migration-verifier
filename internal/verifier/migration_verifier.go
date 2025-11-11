@@ -627,11 +627,6 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 	return nil
 }
 
-const (
-	maxRecheckIDsBytes = 1024 * 1024 // 1 MiB
-	maxRecheckIDs      = 10_000
-)
-
 func (verifier *Verifier) logChunkInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) {
 	// Only log full chunk info in debug mode
 	debugMsg := verifier.logger.Debug()
