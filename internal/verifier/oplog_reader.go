@@ -356,11 +356,11 @@ func getOplogDocIDExpr(docroot string) any {
 			},
 			{
 				Case: agg.In(docroot+".op", "i", "d"),
-				Then: "$o._id",
+				Then: docroot + ".o._id",
 			},
 			{
 				Case: agg.In(docroot+".op", "u"),
-				Then: "$o2._id",
+				Then: docroot + ".o2._id",
 			},
 		},
 	}
