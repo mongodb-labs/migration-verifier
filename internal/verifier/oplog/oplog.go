@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	rtBSONLength = 4 + 1 + 2 + 1 + 8
+	rtBSONLength = 4 + 1 + 2 + 1 + 8 + 1
 )
 
 type Op struct {
@@ -34,6 +34,8 @@ func (rt ResumeToken) MarshalToBSON() []byte {
 	binary.LittleEndian.PutUint32(buf, uint32(cap(buf)))
 
 	buf = bsoncore.AppendTimestampElement(buf, "ts", rt.TS.T, rt.TS.I)
+
+	buf = append(buf, 0)
 
 	if len(buf) != rtBSONLength {
 		panic(fmt.Sprintf("bad resume token BSON length: %d", len(buf)))
