@@ -191,7 +191,6 @@ func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Optio
 }
 
 func (rc *ChangeReaderCommon) updateLag(sess *mongo.Session, token bson.Raw) {
-	var tokenTs bson.Timestamp
 	tokenTs, err := rc.resumeTokenTSExtractor(token)
 	if err == nil {
 		lagSecs := int64(sess.OperationTime().T) - int64(tokenTs.T)
