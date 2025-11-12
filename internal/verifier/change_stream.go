@@ -5,13 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
-	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
@@ -21,6 +18,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
 )
 
 var supportedEventOpTypes = mapset.NewSet(
@@ -48,43 +46,6 @@ type ChangeStreamReader struct {
 }
 
 var _ changeReader = &ChangeStreamReader{}
-
-func (verifier *Verifier) initializeChangeReaders() {
-	srcReader := &ChangeStreamReader{
-		ChangeReaderCommon: ChangeReaderCommon{
-			readerType:    src,
-			namespaces:    verifier.srcNamespaces,
-			watcherClient: verifier.srcClient,
-			clusterInfo:   *verifier.srcClusterInfo,
-		},
-	}
-	verifier.srcChangeReader = srcReader
-
-	dstReader := &ChangeStreamReader{
-		ChangeReaderCommon: ChangeReaderCommon{
-			readerType:    dst,
-			namespaces:    verifier.dstNamespaces,
-			watcherClient: verifier.dstClient,
-			clusterInfo:   *verifier.dstClusterInfo,
-			onDDLEvent:    onDDLEventAllow,
-		},
-	}
-	verifier.dstChangeReader = dstReader
-
-	// Common elements in both readers:
-	for _, csr := range mslices.Of(srcReader, dstReader) {
-		csr.logger = verifier.logger
-		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
-		csr.changeEventBatchChan = make(chan changeEventBatch, batchChanBufferSize)
-		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
-		csr.readerError = util.NewEventual[error]()
-		csr.persistorError = util.NewEventual[error]()
-		csr.doneChan = make(chan struct{})
-		csr.lag = msync.NewTypedAtomic(option.None[time.Duration]())
-		csr.batchSizeHistory = history.New[int](time.Minute)
-		csr.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
-	}
-}
 
 // GetChangeStreamFilter returns an aggregation pipeline that filters
 // namespaces as per configuration.
@@ -265,8 +226,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	select {
 	case <-ctx.Done():
 		return util.WrapCtxErrWithCause(ctx)
-	case <-csr.persistorError.Ready():
-		return csr.wrapPersistorErrorForReader()
 	case csr.changeEventBatchChan <- changeEventBatch{
 		events: changeEvents,
 
@@ -304,9 +263,6 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 				Msg("Stopping iteration.")
 
 			return err
-
-		case <-csr.persistorError.Ready():
-			return csr.wrapPersistorErrorForReader()
 
 		// If the ChangeStreamEnderChan has a message, the user has indicated that
 		// source writes are ended and the migration tool is finished / committed.
@@ -361,9 +317,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			if csr.lastChangeEventTime != nil {
 				csr.startAtTs = csr.lastChangeEventTime
 			}
-			// since we have started Recheck, we must signal that we have
-			// finished the change stream changes so that Recheck can continue.
-			close(csr.doneChan)
+
 			break
 		}
 	}
@@ -467,79 +421,82 @@ func (csr *ChangeStreamReader) createChangeStream(
 }
 
 // StartChangeStream starts the change stream.
-func (csr *ChangeStreamReader) start(ctx context.Context) error {
+func (csr *ChangeStreamReader) start(
+	ctx context.Context,
+	eg *errgroup.Group,
+) error {
 	// This channel holds the first change stream creation's result, whether
 	// success or failure. Rather than using a Result we could make separate
 	// Timestamp and error channels, but the single channel is cleaner since
 	// there's no chance of "nonsense" like both channels returning a payload.
 	initialCreateResultChan := make(chan mo.Result[bson.Timestamp])
 
-	go func() {
-		// Closing changeEventBatchChan at the end of change stream goroutine
-		// notifies the verifier's change event handler to exit.
-		defer func() {
-			csr.logger.Debug().
-				Stringer("changeStreamReader", csr).
-				Msg("Closing change event batch channel.")
+	eg.Go(
+		func() error {
+			// Closing changeEventBatchChan at the end of change stream goroutine
+			// notifies the verifier's change event handler to exit.
+			defer func() {
+				csr.logger.Debug().
+					Stringer("changeStreamReader", csr).
+					Msg("Closing change event batch channel.")
 
-			close(csr.changeEventBatchChan)
-		}()
+				close(csr.changeEventBatchChan)
+			}()
 
-		retryer := retry.New().WithErrorCodes(util.CursorKilledErrCode)
+			retryer := retry.New().WithErrorCodes(util.CursorKilledErrCode)
 
-		parentThreadWaiting := true
+			parentThreadWaiting := true
 
-		err := retryer.WithCallback(
-			func(ctx context.Context, ri *retry.FuncInfo) error {
-				changeStream, sess, startTs, err := csr.createChangeStream(ctx)
-				if err != nil {
-					logEvent := csr.logger.Debug().
-						Err(err).
-						Stringer("changeStreamReader", csr)
+			err := retryer.WithCallback(
+				func(ctx context.Context, ri *retry.FuncInfo) error {
+					changeStream, sess, startTs, err := csr.createChangeStream(ctx)
+					if err != nil {
+						logEvent := csr.logger.Debug().
+							Err(err).
+							Stringer("changeStreamReader", csr)
 
-					if parentThreadWaiting {
-						logEvent.Msg("First change stream open failed.")
+						if parentThreadWaiting {
+							logEvent.Msg("First change stream open failed.")
 
-						initialCreateResultChan <- mo.Err[bson.Timestamp](err)
-						return nil
+							initialCreateResultChan <- mo.Err[bson.Timestamp](err)
+							return nil
+						}
+
+						logEvent.Msg("Retried change stream open failed.")
+
+						return err
 					}
 
-					logEvent.Msg("Retried change stream open failed.")
+					defer changeStream.Close(ctx)
 
-					return err
-				}
+					logEvent := csr.logger.Debug().
+						Stringer("changeStreamReader", csr).
+						Any("startTimestamp", startTs)
 
-				defer changeStream.Close(ctx)
+					if parentThreadWaiting {
+						logEvent.Msg("First change stream open succeeded.")
 
-				logEvent := csr.logger.Debug().
-					Stringer("changeStreamReader", csr).
-					Any("startTimestamp", startTs)
+						initialCreateResultChan <- mo.Ok(startTs)
+						close(initialCreateResultChan)
+						parentThreadWaiting = false
+					} else {
+						logEvent.Msg("Retried change stream open succeeded.")
+					}
 
-				if parentThreadWaiting {
-					logEvent.Msg("First change stream open succeeded.")
+					return csr.iterateChangeStream(ctx, ri, changeStream, sess)
+				},
+				"running %s", csr,
+			).Run(ctx, csr.logger)
 
-					initialCreateResultChan <- mo.Ok(startTs)
-					close(initialCreateResultChan)
-					parentThreadWaiting = false
-				} else {
-					logEvent.Msg("Retried change stream open succeeded.")
-				}
-
-				return csr.iterateChangeStream(ctx, ri, changeStream, sess)
-			},
-			"running %s", csr,
-		).Run(ctx, csr.logger)
-
-		if err != nil {
-			csr.readerError.Set(err)
-		}
-	}()
+			return err
+		},
+	)
 
 	result := <-initialCreateResultChan
 
 	startTs, err := result.Get()
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "creating change stream")
 	}
 
 	csr.startAtTs = &startTs

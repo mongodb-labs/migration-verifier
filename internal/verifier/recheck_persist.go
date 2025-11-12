@@ -80,12 +80,6 @@ HandlerLoop:
 		}
 	}
 
-	// This will prevent the reader from hanging because the reader checks
-	// this along with checks for context expiry.
-	if err != nil {
-		reader.setPersistorError(err)
-	}
-
 	return err
 }
 

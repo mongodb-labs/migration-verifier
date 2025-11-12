@@ -6,10 +6,13 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/msync"
+	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goaux/timer"
 	"github.com/pkg/errors"
@@ -27,9 +30,11 @@ const (
 	findTaskTimeWarnThreshold = 5 * time.Second
 )
 
-var failedStatuses = mapset.NewSet(
-	verificationTaskFailed,
-	verificationTaskMetadataMismatch,
+var (
+	failedStatuses = mapset.NewSet(
+		verificationTaskFailed,
+		verificationTaskMetadataMismatch,
+	)
 )
 
 // Check is the asynchronous entry point to Check, should only be called by the web server. Use
@@ -48,24 +53,6 @@ func (verifier *Verifier) Check(ctx context.Context, filter bson.D) {
 		}
 	}()
 	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
-}
-
-func (verifier *Verifier) waitForChangeReader(ctx context.Context, csr changeReader) error {
-	select {
-	case <-ctx.Done():
-		return util.WrapCtxErrWithCause(ctx)
-	case <-csr.getError().Ready():
-		err := csr.getError().Get()
-		verifier.logger.Warn().Err(err).
-			Msgf("Received error from %s.", csr)
-		return err
-	case <-csr.done():
-		verifier.logger.Debug().
-			Msgf("Received completion signal from %s.", csr)
-		break
-	}
-
-	return nil
 }
 
 func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
@@ -93,12 +80,11 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	// If the change reader fails, everything should stop.
 	eg.Go(func() error {
 		select {
-		case <-verifier.srcChangeReader.getError().Ready():
-			err := verifier.srcChangeReader.getError().Get()
-			return errors.Wrapf(err, "%s failed", verifier.srcChangeReader)
-		case <-verifier.dstChangeReader.getError().Ready():
-			err := verifier.dstChangeReader.getError().Get()
-			return errors.Wrapf(err, "%s failed", verifier.dstChangeReader)
+		case <-verifier.changeHandlingErr.Ready():
+			return errors.Wrap(
+				verifier.changeHandlingErr.Get(),
+				verifier.dstChangeReader.String(),
+			)
 		case <-ctx.Done():
 			return nil
 		}
@@ -269,22 +255,27 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		verifier.phase = Idle
 	}()
 
-	ceHandlerGroup, groupCtx := contextplus.ErrGroup(ctx)
+	changeReaderGroup, groupCtx := contextplus.ErrGroup(ctx)
 	for _, changeReader := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
 		if changeReader.isRunning() {
 			verifier.logger.Debug().Msgf("Check: %s already running.", changeReader)
 		} else {
 			verifier.logger.Debug().Msgf("%s not running; starting change reader", changeReader)
 
-			err = changeReader.start(ctx)
+			err = changeReader.start(groupCtx, changeReaderGroup)
 			if err != nil {
 				return errors.Wrapf(err, "failed to start %s", changeReader)
 			}
-			ceHandlerGroup.Go(func() error {
+			changeReaderGroup.Go(func() error {
 				return verifier.RunChangeEventPersistor(groupCtx, changeReader)
 			})
 		}
 	}
+
+	changeHandlingErr := verifier.changeHandlingErr
+	go func() {
+		changeHandlingErr.Set(changeReaderGroup.Wait())
+	}()
 
 	// Log the verification status when initially booting up so it's easy to see the current state
 	verificationStatus, err := verifier.GetVerificationStatus(ctx)
@@ -370,23 +361,19 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 			// generation number, or the last changes will not be checked.
 			verifier.mux.Unlock()
 
-			for _, csr := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
-				if err = verifier.waitForChangeReader(ctx, csr); err != nil {
-					return errors.Wrapf(
-						err,
-						"an error interrupted the wait for closure of %s",
-						csr,
-					)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-verifier.changeHandlingErr.Ready():
+				err := verifier.changeHandlingErr.Get()
+				if err != nil {
+					return errors.Wrap(err, "handling change events")
 				}
 
 				verifier.logger.Debug().
-					Stringer("changeReader", csr).
-					Msg("Change reader finished.")
+					Msg("Change handling finished.")
 			}
 
-			if err = ceHandlerGroup.Wait(); err != nil {
-				return err
-			}
 			verifier.mux.Lock()
 			verifier.lastGeneration = true
 		}
@@ -610,5 +597,39 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 		default:
 			panic("Unknown verification task type: " + task.Type)
 		}
+	}
+}
+
+func (verifier *Verifier) initializeChangeReaders() {
+	srcReader := &ChangeStreamReader{
+		ChangeReaderCommon: ChangeReaderCommon{
+			readerType:    src,
+			namespaces:    verifier.srcNamespaces,
+			watcherClient: verifier.srcClient,
+			clusterInfo:   *verifier.srcClusterInfo,
+		},
+	}
+	verifier.srcChangeReader = srcReader
+
+	dstReader := &ChangeStreamReader{
+		ChangeReaderCommon: ChangeReaderCommon{
+			readerType:    dst,
+			namespaces:    verifier.dstNamespaces,
+			watcherClient: verifier.dstClient,
+			clusterInfo:   *verifier.dstClusterInfo,
+			onDDLEvent:    onDDLEventAllow,
+		},
+	}
+	verifier.dstChangeReader = dstReader
+
+	// Common elements in both readers:
+	for _, csr := range mslices.Of(srcReader, dstReader) {
+		csr.logger = verifier.logger
+		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
+		csr.changeEventBatchChan = make(chan changeEventBatch, batchChanBufferSize)
+		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
+		csr.lag = msync.NewTypedAtomic(option.None[time.Duration]())
+		csr.batchSizeHistory = history.New[int](time.Minute)
+		csr.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
 	}
 }

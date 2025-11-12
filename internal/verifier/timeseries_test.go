@@ -298,7 +298,8 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 	suite.Assert().Equal(
 		0,
 		verificationStatus.FailedTasks,
-		"should be no failed tasks",
+		"should be no failed tasks (status: %+v)",
+		verificationStatus,
 	)
 	suite.Assert().Equal(
 		3,

@@ -2,8 +2,6 @@ package util
 
 import (
 	"sync"
-
-	"github.com/10gen/migration-verifier/option"
 )
 
 // Eventual solves the “one writer, many readers” problem: a value gets
@@ -14,7 +12,7 @@ import (
 // generalized to any data type.
 type Eventual[T any] struct {
 	ready chan struct{}
-	val   option.Option[T]
+	val   T
 	mux   sync.RWMutex
 }
 
@@ -37,12 +35,14 @@ func (e *Eventual[T]) Get() T {
 	e.mux.RLock()
 	defer e.mux.RUnlock()
 
-	val, has := e.val.Get()
-	if has {
-		return val
+	// If the ready channel is still open then there’s no value yet,
+	// which means this method should not have been called.
+	select {
+	case <-e.ready:
+		return e.val
+	default:
+		panic("Eventual's Get() called before value was ready.")
 	}
-
-	panic("Eventual's Get() called before value was ready.")
 }
 
 // Set sets the Eventual’s value. It may be called only once;
@@ -51,13 +51,16 @@ func (e *Eventual[T]) Set(val T) {
 	e.mux.Lock()
 	defer e.mux.Unlock()
 
-	if e.val.IsSome() {
+	select {
+	case <-e.ready:
 		panic("Tried to set an eventual twice!")
+	default:
 	}
 
 	// NB: This *must* happen before the close(), or else a fast reader may
 	// not see this value.
-	e.val = option.Some(val)
+	e.val = val
 
+	// This allows Get() to work:
 	close(e.ready)
 }

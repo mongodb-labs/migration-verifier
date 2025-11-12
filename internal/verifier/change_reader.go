@@ -15,6 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"golang.org/x/sync/errgroup"
 )
 
 type ddlEventHandling string
@@ -33,15 +34,12 @@ const (
 type changeReader interface {
 	getWhichCluster() whichCluster
 	getReadChannel() <-chan changeEventBatch
-	getError() *util.Eventual[error]
 	getStartTimestamp() option.Option[bson.Timestamp]
 	getEventsPerSecond() option.Option[float64]
 	getLag() option.Option[time.Duration]
 	getBufferSaturation() float64
 	setWritesOff(bson.Timestamp)
-	setPersistorError(error)
-	start(context.Context) error
-	done() <-chan struct{}
+	start(context.Context, *errgroup.Group) error
 	persistResumeToken(context.Context, bson.Raw) error
 	isRunning() bool
 	String() string
@@ -63,9 +61,6 @@ type ChangeReaderCommon struct {
 	running              bool
 	changeEventBatchChan chan changeEventBatch
 	writesOffTs          *util.Eventual[bson.Timestamp]
-	readerError          *util.Eventual[error]
-	persistorError       *util.Eventual[error]
-	doneChan             chan struct{}
 
 	startAtTs *bson.Timestamp
 
@@ -77,14 +72,6 @@ type ChangeReaderCommon struct {
 
 func (rc *ChangeReaderCommon) getWhichCluster() whichCluster {
 	return rc.readerType
-}
-
-func (rc *ChangeReaderCommon) setPersistorError(err error) {
-	rc.persistorError.Set(err)
-}
-
-func (rc *ChangeReaderCommon) getError() *util.Eventual[error] {
-	return rc.readerError
 }
 
 func (rc *ChangeReaderCommon) getStartTimestamp() option.Option[bson.Timestamp] {
@@ -101,10 +88,6 @@ func (rc *ChangeReaderCommon) isRunning() bool {
 
 func (rc *ChangeReaderCommon) getReadChannel() <-chan changeEventBatch {
 	return rc.changeEventBatchChan
-}
-
-func (rc *ChangeReaderCommon) done() <-chan struct{} {
-	return rc.doneChan
 }
 
 // getBufferSaturation returns the reader’s internal buffer’s saturation level
@@ -222,13 +205,6 @@ func (rc *ChangeReaderCommon) logIgnoredDDL(rawEvent bson.Raw) {
 		Str("reader", string(rc.readerType)).
 		Stringer("event", rawEvent).
 		Msg("Ignoring event with unrecognized type on destination. (It’s assumedly internal to the migration.)")
-}
-
-func (rc *ChangeReaderCommon) wrapPersistorErrorForReader() error {
-	return errors.Wrap(
-		rc.persistorError.Get(),
-		"event persistor failed, so no more events can be processed",
-	)
 }
 
 func addTimestampToLogEvent(ts bson.Timestamp, event *zerolog.Event) *zerolog.Event {
