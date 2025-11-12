@@ -1,7 +1,6 @@
 package verifier
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"time"
@@ -80,10 +79,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 		select {
 		case <-verifier.changeReaderErr.Ready():
 			return errors.Wrap(
-				cmp.Or(
-					verifier.changeReaderErr.Get(),
-					fmt.Errorf("change handling stopped prematurely"),
-				),
+				verifier.changeReaderErr.Get(),
 				verifier.dstChangeReader.String(),
 			)
 		case <-ctx.Done():
