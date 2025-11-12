@@ -94,6 +94,8 @@ func getLatestVisibleOplogOpTime(
 	// all operations with earlier oplog times have been storage-committed.
 	result, err := coll.FindOne(ctx,
 		bson.M{"ts": bson.M{"$gte": latestOpTime.TS}},
+
+		//nolint SA1019
 		options.FindOne().SetOplogReplay(true),
 	).Raw()
 	if err != nil {
