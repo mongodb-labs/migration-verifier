@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"time"
@@ -27,9 +28,11 @@ const (
 	findTaskTimeWarnThreshold = 5 * time.Second
 )
 
-var failedStatuses = mapset.NewSet(
-	verificationTaskFailed,
-	verificationTaskMetadataMismatch,
+var (
+	failedStatuses = mapset.NewSet(
+		verificationTaskFailed,
+		verificationTaskMetadataMismatch,
+	)
 )
 
 // Check is the asynchronous entry point to Check, should only be called by the web server. Use
@@ -48,27 +51,6 @@ func (verifier *Verifier) Check(ctx context.Context, filter bson.D) {
 		}
 	}()
 	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
-}
-
-func (verifier *Verifier) waitForChangeReader(ctx context.Context, csr changeReader) error {
-	select {
-	case <-ctx.Done():
-		return util.WrapCtxErrWithCause(ctx)
-	case <-csr.getError().Ready():
-		err := csr.getError().Get()
-
-		if err != nil {
-			verifier.logger.Warn().Err(err).
-				Msgf("Received error from %s.", csr)
-		} else {
-			verifier.logger.Debug().
-				Msgf("Received completion signal from %s.", csr)
-		}
-
-		return err
-	}
-
-	return nil
 }
 
 func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
@@ -96,12 +78,14 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	// If the change reader fails, everything should stop.
 	eg.Go(func() error {
 		select {
-		case <-verifier.srcChangeReader.getError().Ready():
-			err := verifier.srcChangeReader.getError().Get()
-			return errors.Wrapf(err, "%s failed", verifier.srcChangeReader)
-		case <-verifier.dstChangeReader.getError().Ready():
-			err := verifier.dstChangeReader.getError().Get()
-			return errors.Wrapf(err, "%s failed", verifier.dstChangeReader)
+		case <-verifier.changeReaderErr.Ready():
+			return errors.Wrap(
+				cmp.Or(
+					verifier.changeReaderErr.Get(),
+					fmt.Errorf("change handling stopped prematurely"),
+				),
+				verifier.dstChangeReader.String(),
+			)
 		case <-ctx.Done():
 			return nil
 		}
@@ -272,22 +256,27 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		verifier.phase = Idle
 	}()
 
-	ceHandlerGroup, groupCtx := contextplus.ErrGroup(ctx)
+	changeReaderGroup, groupCtx := contextplus.ErrGroup(ctx)
 	for _, changeReader := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
 		if changeReader.isRunning() {
 			verifier.logger.Debug().Msgf("Check: %s already running.", changeReader)
 		} else {
 			verifier.logger.Debug().Msgf("%s not running; starting change reader", changeReader)
 
-			err = changeReader.start(groupCtx, ceHandlerGroup)
+			err = changeReader.start(groupCtx, changeReaderGroup)
 			if err != nil {
 				return errors.Wrapf(err, "failed to start %s", changeReader)
 			}
-			ceHandlerGroup.Go(func() error {
+			changeReaderGroup.Go(func() error {
 				return verifier.RunChangeEventPersistor(groupCtx, changeReader)
 			})
 		}
 	}
+
+	verifier.changeReaderErr = util.NewEventual[error]()
+	go func() {
+		verifier.changeReaderErr.Set(changeReaderGroup.Wait())
+	}()
 
 	// Log the verification status when initially booting up so it's easy to see the current state
 	verificationStatus, err := verifier.GetVerificationStatus(ctx)
@@ -373,23 +362,19 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 			// generation number, or the last changes will not be checked.
 			verifier.mux.Unlock()
 
-			for _, csr := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
-				if err = verifier.waitForChangeReader(ctx, csr); err != nil {
-					return errors.Wrapf(
-						err,
-						"an error interrupted the wait for closure of %s",
-						csr,
-					)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-verifier.changeReaderErr.Ready():
+				err := verifier.changeReaderErr.Get()
+				if err != nil {
+					return errors.Wrap(err, "handling change events")
 				}
 
 				verifier.logger.Debug().
-					Stringer("changeReader", csr).
-					Msg("Change reader finished.")
+					Msg("Change readers finished.")
 			}
 
-			if err = ceHandlerGroup.Wait(); err != nil {
-				return err
-			}
 			verifier.mux.Lock()
 			verifier.lastGeneration = true
 		}

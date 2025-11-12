@@ -103,6 +103,8 @@ type Verifier struct {
 	srcEventRecorder *EventRecorder
 	dstEventRecorder *EventRecorder
 
+	changeReaderErr *util.Eventual[error]
+
 	// Used only with generation 0 to defer the first
 	// progress report until after we’ve finished partitioning
 	// every collection.
@@ -272,20 +274,23 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	// This has to happen outside the lock because the change readers
 	// might be inserting docs into the recheck queue, which happens
 	// under the lock.
-	select {
-	case <-verifier.srcChangeReader.getError().Ready():
-		err := verifier.srcChangeReader.getError().Get()
-		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change reader already failed", verifier.srcChangeReader)
-	default:
-		verifier.srcChangeReader.setWritesOff(srcFinalTs)
-	}
-
-	select {
-	case <-verifier.dstChangeReader.getError().Ready():
-		err := verifier.dstChangeReader.getError().Get()
-		return errors.Wrapf(err, "tried to send writes-off timestamp to %s, but change reader already failed", verifier.dstChangeReader)
-	default:
-		verifier.dstChangeReader.setWritesOff(dstFinalTs)
+	for _, readerAndTS := range []struct {
+		reader changeReader
+		ts     bson.Timestamp
+	}{
+		{verifier.srcChangeReader, srcFinalTs},
+		{verifier.dstChangeReader, dstFinalTs},
+	} {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-verifier.changeReaderErr.Ready():
+			return errors.Wrapf(
+				verifier.changeReaderErr.Get(),
+				"tried to send writes-off timestamp to %s, but change handling already failed", readerAndTS.reader)
+		default:
+			readerAndTS.reader.setWritesOff(readerAndTS.ts)
+		}
 	}
 
 	return nil

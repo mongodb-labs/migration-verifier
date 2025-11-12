@@ -25,6 +25,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"golang.org/x/sync/errgroup"
 )
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
@@ -253,18 +254,21 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 	)
 }
 
-func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx context.Context, verifier *Verifier) {
+func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(
+	ctx context.Context,
+	verifier *Verifier,
+) *errgroup.Group {
 	eg, egCtx := contextplus.ErrGroup(ctx)
 
 	err := verifier.srcChangeReader.start(egCtx, eg)
 	suite.Require().NoError(err)
-	go func() {
-		err := verifier.RunChangeEventPersistor(ctx, verifier.srcChangeReader)
-		if errors.Is(err, context.Canceled) {
-			return
-		}
-		suite.Require().NoError(err)
-	}()
+	eg.Go(
+		func() error {
+			return verifier.RunChangeEventPersistor(egCtx, verifier.srcChangeReader)
+		},
+	)
+
+	return eg
 }
 
 func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
@@ -625,15 +629,14 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 		insertTs, err := util.GetClusterTimeFromSession(sess)
 		suite.Require().NoError(err, "should get cluster time")
 
-		suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
+		eg := suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
 		startAtTs, hasStartAtTs := verifier.srcChangeReader.getStartTimestamp().Get()
 		suite.Require().True(hasStartAtTs, "startAtTs should be set")
 
 		verifier.srcChangeReader.setWritesOff(insertTs)
 
-		<-verifier.srcChangeReader.getError().Ready()
-		suite.Require().NoError(verifier.srcChangeReader.getError().Get())
+		suite.Require().NoError(eg.Wait())
 
 		startAtTs2 := verifier.srcChangeReader.getStartTimestamp().MustGet()
 
@@ -658,7 +661,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 
 	origSessionTime := sess.OperationTime()
 	suite.Require().NotNil(origSessionTime)
-	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
+	eg := suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
 	startAtTs, hasStartAtTs := verifier.srcChangeReader.getStartTimestamp().Get()
 	suite.Require().True(hasStartAtTs, "startAtTs should be set")
@@ -691,8 +694,8 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	)
 
 	verifier.srcChangeReader.setWritesOff(*postEventsSessionTime)
-	<-verifier.srcChangeReader.getError().Ready()
-	suite.Require().NoError(verifier.srcChangeReader.getError().Get())
+
+	suite.Require().NoError(eg.Wait())
 
 	startAtTs, hasStartAtTs = verifier.srcChangeReader.getStartTimestamp().Get()
 	suite.Require().True(hasStartAtTs, "startAtTs should be set")

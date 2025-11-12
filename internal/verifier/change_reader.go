@@ -34,7 +34,6 @@ const (
 type changeReader interface {
 	getWhichCluster() whichCluster
 	getReadChannel() <-chan changeEventBatch
-	getError() *util.Eventual[error]
 	getStartTimestamp() option.Option[bson.Timestamp]
 	getEventsPerSecond() option.Option[float64]
 	getLag() option.Option[time.Duration]
@@ -62,7 +61,6 @@ type ChangeReaderCommon struct {
 	running              bool
 	changeEventBatchChan chan changeEventBatch
 	writesOffTs          *util.Eventual[bson.Timestamp]
-	readerError          *util.Eventual[error]
 
 	startAtTs *bson.Timestamp
 
@@ -74,10 +72,6 @@ type ChangeReaderCommon struct {
 
 func (rc *ChangeReaderCommon) getWhichCluster() whichCluster {
 	return rc.readerType
-}
-
-func (rc *ChangeReaderCommon) getError() *util.Eventual[error] {
-	return rc.readerError
 }
 
 func (rc *ChangeReaderCommon) getStartTimestamp() option.Option[bson.Timestamp] {

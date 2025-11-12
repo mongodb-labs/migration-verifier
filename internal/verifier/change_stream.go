@@ -78,7 +78,6 @@ func (verifier *Verifier) initializeChangeReaders() {
 		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
 		csr.changeEventBatchChan = make(chan changeEventBatch, batchChanBufferSize)
 		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
-		csr.readerError = util.NewEventual[error]()
 		csr.lag = msync.NewTypedAtomic(option.None[time.Duration]())
 		csr.batchSizeHistory = history.New[int](time.Minute)
 		csr.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
@@ -525,8 +524,6 @@ func (csr *ChangeStreamReader) start(
 				},
 				"running %s", csr,
 			).Run(ctx, csr.logger)
-
-			csr.readerError.Set(err)
 
 			return err
 		},
