@@ -371,7 +371,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				}
 
 				verifier.logger.Debug().
-					Msg("Change readers finished.")
+					Msg("Change handling finished.")
 			}
 
 			verifier.mux.Lock()
