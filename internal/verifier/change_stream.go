@@ -417,13 +417,15 @@ func (csr *ChangeStreamReader) createChangeStream(
 		return bson.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
 
-	err = csr.persistResumeToken(ctx, changeStream.ResumeToken())
+	resumeToken := changeStream.ResumeToken()
+
+	err = csr.persistResumeToken(ctx, resumeToken)
 	if err != nil {
 		changeStream.Close(sctx)
 		return bson.Timestamp{}, err
 	}
 
-	startTs, err := csr.resumeTokenTSExtractor(changeStream.ResumeToken())
+	startTs, err := csr.resumeTokenTSExtractor(resumeToken)
 	if err != nil {
 		changeStream.Close(sctx)
 		return bson.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")

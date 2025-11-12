@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/internal/verifier/oplog"
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -79,10 +80,22 @@ func (o *OplogReader) createCursor(
 			return bson.Timestamp{}, errors.Wrap(err, "parsing persisted resume token")
 		}
 
-		// TODO: Smarten this rather than assuming we’ve passed the original
-		// latest optime.
-		allowDDLBeforeTS = rt.TS
-		allowDDLBeforeTS.T--
+		ddlAllowanceResult := o.getMetadataCollection().FindOne(
+			ctx,
+			bson.D{
+				{"_id", o.ddlAllowanceDocID()},
+			},
+		)
+
+		allowanceRaw, err := ddlAllowanceResult.Raw()
+		if err != nil {
+			return bson.Timestamp{}, errors.Wrap(err, "fetching DDL allowance timestamp")
+		}
+
+		allowDDLBeforeTS, err = mbson.Lookup[bson.Timestamp](allowanceRaw, "ts")
+		if err != nil {
+			return bson.Timestamp{}, errors.Wrap(err, "parsing DDL allowance timestamp doc")
+		}
 
 		startTS = rt.TS
 	} else {
@@ -93,7 +106,26 @@ func (o *OplogReader) createCursor(
 
 		allowDDLBeforeTS = latestOpTime.TS
 
+		_, err = o.getMetadataCollection().ReplaceOne(
+			ctx,
+			bson.D{
+				{"_id", o.ddlAllowanceDocID()},
+			},
+			bson.D{
+				{"ts", allowDDLBeforeTS},
+			},
+			options.Replace().SetUpsert(true),
+		)
+		if err != nil {
+			return bson.Timestamp{}, errors.Wrapf(err, "persisting DDL-allowance timestamp")
+		}
+
 		startTS = startOpTime.TS
+
+		err = o.persistResumeToken(ctx, oplog.ResumeToken{startTS}.MarshalToBSON())
+		if err != nil {
+			return bson.Timestamp{}, errors.Wrap(err, "persisting resume token")
+		}
 	}
 
 	o.logger.Info().
@@ -188,13 +220,17 @@ func (o *OplogReader) createCursor(
 		)
 
 	if err != nil {
-		return bson.Timestamp{}, errors.Wrapf(err, "opening cursor to tail oplog")
+		return bson.Timestamp{}, errors.Wrapf(err, "opening cursor to tail %s’s oplog", o.readerType)
 	}
 
 	o.cursor = cursor
 	o.allowDDLBeforeTS = allowDDLBeforeTS
 
 	return startTS, nil
+}
+
+func (o *OplogReader) ddlAllowanceDocID() string {
+	return string(o.readerType) + "-ddlAllowanceTS"
 }
 
 func (o *OplogReader) iterateCursor(
