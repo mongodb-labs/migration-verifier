@@ -217,7 +217,7 @@ func (rc *ChangeReaderCommon) start(
 
 					return rc.iterateCb(ctx, ri, sess)
 				},
-				"running %s", rc,
+				"reading %s’s changes", rc.readerType,
 			).Run(ctx, rc.logger)
 
 			return err
