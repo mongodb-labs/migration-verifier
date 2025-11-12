@@ -19,16 +19,17 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 	"golang.org/x/exp/slices"
-	"golang.org/x/sync/errgroup"
 )
 
 // OplogReader reads change events via oplog tailing instead of a change stream.
 // This significantly lightens server load and allows verification of heavier
 // workloads than change streams allow. It only works with replica sets.
 type OplogReader struct {
+	*ChangeReaderCommon
+
 	curDocs []bson.Raw
 	scratch []byte
-	ChangeReaderCommon
+	cursor  *mongo.Cursor
 }
 
 var _ changeReader = &OplogReader{}
@@ -49,23 +50,31 @@ func (v *Verifier) newOplogReader(
 
 	common.resumeTokenTSExtractor = oplog.GetRawResumeTokenTimestamp
 
-	return &OplogReader{ChangeReaderCommon: common}
+	o := &OplogReader{ChangeReaderCommon: &common}
+
+	common.createIteratorCb = o.createCursor
+	common.iterateCb = o.iterateCb
+
+	return o
 }
 
-func (o *OplogReader) start(ctx context.Context, eg *errgroup.Group) error {
-	// TODO: retryer
-
+func (o *OplogReader) createCursor(
+	ctx context.Context,
+	sess *mongo.Session,
+) (bson.Timestamp, error) {
 	savedResumeToken, err := o.loadResumeToken(ctx)
 	if err != nil {
-		return errors.Wrap(err, "loading persisted resume token")
+		return bson.Timestamp{}, errors.Wrap(err, "loading persisted resume token")
 	}
 
 	var allowDDLBeforeTS bson.Timestamp
 
+	var startTS bson.Timestamp
+
 	if token, has := savedResumeToken.Get(); has {
 		var rt oplog.ResumeToken
 		if err := bson.Unmarshal(token, &rt); err != nil {
-			return errors.Wrap(err, "parsing persisted resume token")
+			return bson.Timestamp{}, errors.Wrap(err, "parsing persisted resume token")
 		}
 
 		// TODO: Smarten this rather than assuming we’ve passed the original
@@ -73,27 +82,22 @@ func (o *OplogReader) start(ctx context.Context, eg *errgroup.Group) error {
 		allowDDLBeforeTS = rt.TS
 		allowDDLBeforeTS.T--
 
-		o.startAtTs = &rt.TS
+		startTS = rt.TS
 	} else {
 		startOpTime, latestOpTime, err := oplog.GetTailingStartTimes(ctx, o.watcherClient)
 		if err != nil {
-			return errors.Wrapf(err, "getting start optime from %s", o.readerType)
+			return bson.Timestamp{}, errors.Wrapf(err, "getting start optime from %s", o.readerType)
 		}
 
 		allowDDLBeforeTS = latestOpTime.TS
 
-		o.startAtTs = &startOpTime.TS
+		startTS = startOpTime.TS
 	}
 
 	o.logger.Info().
 		Any("startReadTs", *o.startAtTs).
 		Any("currentOplogTs", allowDDLBeforeTS).
 		Msg("Tailing oplog.")
-
-	sess, err := o.watcherClient.StartSession()
-	if err != nil {
-		return errors.Wrap(err, "creating session")
-	}
 
 	sctx := mongo.NewSessionContext(ctx, sess)
 
@@ -182,19 +186,15 @@ func (o *OplogReader) start(ctx context.Context, eg *errgroup.Group) error {
 		)
 
 	if err != nil {
-		return errors.Wrapf(err, "opening cursor to tail oplog")
+		return bson.Timestamp{}, errors.Wrapf(err, "opening cursor to tail oplog")
 	}
 
-	eg.Go(
-		func() error {
-			return o.iterate(sctx, cursor, allowDDLBeforeTS)
-		},
-	)
+	o.cursor = cursor
 
-	return nil
+	return startTS, nil
 }
 
-func (o *OplogReader) iterate(
+func (o *OplogReader) iterateCursor(
 	sctx context.Context,
 	cursor *mongo.Cursor,
 	allowDDLBeforeTS bson.Timestamp,

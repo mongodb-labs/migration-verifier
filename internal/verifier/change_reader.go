@@ -6,12 +6,14 @@ import (
 
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
+	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -66,6 +68,9 @@ type ChangeReaderCommon struct {
 
 	lag              *msync.TypedAtomic[option.Option[time.Duration]]
 	batchSizeHistory *history.History[int]
+
+	createIteratorCb func(context.Context, *mongo.Session) (bson.Timestamp, error)
+	iterateCb        func(context.Context, *retry.FuncInfo, *mongo.Session) error
 
 	onDDLEvent ddlEventHandling
 }
@@ -142,6 +147,95 @@ func (rc *ChangeReaderCommon) getEventsPerSecond() option.Option[float64] {
 	}
 
 	return option.None[float64]()
+}
+
+// start starts the change reader
+func (rc *ChangeReaderCommon) start(
+	ctx context.Context,
+	eg *errgroup.Group,
+) error {
+	// This channel holds the first change stream creation's result, whether
+	// success or failure. Rather than using a Result we could make separate
+	// Timestamp and error channels, but the single channel is cleaner since
+	// there's no chance of "nonsense" like both channels returning a payload.
+	initialCreateResultChan := make(chan mo.Result[bson.Timestamp])
+
+	eg.Go(
+		func() error {
+			// Closing changeEventBatchChan at the end of change stream goroutine
+			// notifies the verifier's change event handler to exit.
+			defer func() {
+				rc.logger.Debug().
+					Str("reader", string(rc.readerType)).
+					Msg("Closing change event batch channel.")
+
+				close(rc.changeEventBatchChan)
+			}()
+
+			retryer := retry.New().WithErrorCodes(util.CursorKilledErrCode)
+
+			parentThreadWaiting := true
+
+			err := retryer.WithCallback(
+				func(ctx context.Context, ri *retry.FuncInfo) error {
+					sess, err := rc.watcherClient.StartSession()
+					if err != nil {
+						return errors.Wrap(err, "failed to start session")
+					}
+
+					startTs, err := rc.createIteratorCb(ctx, sess)
+					if err != nil {
+						logEvent := rc.logger.Debug().
+							Err(err).
+							Str("reader", string(rc.readerType))
+
+						if parentThreadWaiting {
+							logEvent.Msg("First change stream open failed.")
+
+							initialCreateResultChan <- mo.Err[bson.Timestamp](err)
+							return nil
+						}
+
+						logEvent.Msg("Retried change stream open failed.")
+
+						return err
+					}
+
+					logEvent := rc.logger.Debug().
+						Str("reader", string(rc.readerType)).
+						Any("startTimestamp", startTs)
+
+					if parentThreadWaiting {
+						logEvent.Msg("First change stream open succeeded.")
+
+						initialCreateResultChan <- mo.Ok(startTs)
+						close(initialCreateResultChan)
+						parentThreadWaiting = false
+					} else {
+						logEvent.Msg("Retried change stream open succeeded.")
+					}
+
+					return rc.iterateCb(ctx, ri, sess)
+				},
+				"running %s", rc,
+			).Run(ctx, rc.logger)
+
+			return err
+		},
+	)
+
+	result := <-initialCreateResultChan
+
+	startTs, err := result.Get()
+	if err != nil {
+		return errors.Wrapf(err, "creating change stream")
+	}
+
+	rc.startAtTs = &startTs
+
+	rc.running = true
+
+	return nil
 }
 
 func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson.Raw) error {

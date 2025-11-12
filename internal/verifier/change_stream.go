@@ -13,12 +13,10 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
 	"github.com/pkg/errors"
-	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/exp/slices"
-	"golang.org/x/sync/errgroup"
 )
 
 var supportedEventOpTypes = mapset.NewSet(
@@ -42,7 +40,8 @@ func (uee UnknownEventError) Error() string {
 }
 
 type ChangeStreamReader struct {
-	ChangeReaderCommon
+	changeStream *mongo.ChangeStream
+	*ChangeReaderCommon
 }
 
 var _ changeReader = &ChangeStreamReader{}
@@ -64,7 +63,12 @@ func (v *Verifier) newChangeStreamReader(
 
 	common.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
 
-	return &ChangeStreamReader{ChangeReaderCommon: common}
+	csr := &ChangeStreamReader{ChangeReaderCommon: &common}
+
+	common.createIteratorCb = csr.createChangeStream
+	common.iterateCb = csr.iterateChangeStream
+
+	return csr
 }
 
 // GetChangeStreamFilter returns an aggregation pipeline that filters
@@ -143,10 +147,9 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 // is unideal but shouldn’t impede correctness since post-writesOff events
 // shouldn’t really happen anyway by definition.
 func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
-	ctx context.Context,
+	sctx context.Context,
 	ri *retry.FuncInfo,
 	cs *mongo.ChangeStream,
-	sess *mongo.Session,
 ) error {
 	eventsRead := 0
 	var changeEvents []ParsedEvent
@@ -155,7 +158,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	var batchTotalBytes int
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
-		gotEvent := cs.TryNext(ctx)
+		gotEvent := cs.TryNext(sctx)
 
 		if cs.Err() != nil {
 			return errors.Wrap(cs.Err(), "change stream iteration failed")
@@ -224,6 +227,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
+	sess := mongo.SessionFromContext(sctx)
+
 	csr.updateLag(sess, cs.ResumeToken())
 
 	if eventsRead == 0 {
@@ -244,8 +249,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	ri.NoteSuccess("parsed %d-event batch", len(changeEvents))
 
 	select {
-	case <-ctx.Done():
-		return util.WrapCtxErrWithCause(ctx)
+	case <-sctx.Done():
+		return util.WrapCtxErrWithCause(sctx)
 	case csr.changeEventBatchChan <- changeEventBatch{
 		events: changeEvents,
 
@@ -264,9 +269,14 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 func (csr *ChangeStreamReader) iterateChangeStream(
 	ctx context.Context,
 	ri *retry.FuncInfo,
-	cs *mongo.ChangeStream,
 	sess *mongo.Session,
 ) error {
+	sctx := mongo.NewSessionContext(ctx, sess)
+
+	cs := csr.changeStream
+
+	defer cs.Close(sctx)
+
 	for {
 		var err error
 		var gotwritesOffTimestamp bool
@@ -317,7 +327,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 					break
 				}
 
-				err = csr.readAndHandleOneChangeEventBatch(ctx, ri, cs, sess)
+				err = csr.readAndHandleOneChangeEventBatch(sctx, ri, cs)
 
 				if err != nil {
 					return err
@@ -325,7 +335,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			}
 
 		default:
-			err = csr.readAndHandleOneChangeEventBatch(ctx, ri, cs, sess)
+			err = csr.readAndHandleOneChangeEventBatch(sctx, ri, cs)
 
 			if err != nil {
 				return err
@@ -358,7 +368,8 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 func (csr *ChangeStreamReader) createChangeStream(
 	ctx context.Context,
-) (*mongo.ChangeStream, *mongo.Session, bson.Timestamp, error) {
+	sess *mongo.Session,
+) (bson.Timestamp, error) {
 	pipeline := csr.GetChangeStreamFilter()
 	opts := options.ChangeStream().
 		SetMaxAwaitTime(maxChangeStreamAwaitTime)
@@ -374,7 +385,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 	savedResumeToken, err := csr.loadResumeToken(ctx)
 	if err != nil {
-		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
+		return bson.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
 	}
 
 	csStartLogEvent := csr.logger.Info()
@@ -399,24 +410,23 @@ func (csr *ChangeStreamReader) createChangeStream(
 		csStartLogEvent.Msgf("Starting change stream from current %s cluster time.", csr.readerType)
 	}
 
-	sess, err := csr.watcherClient.StartSession()
-	if err != nil {
-		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to start session")
-	}
 	sctx := mongo.NewSessionContext(ctx, sess)
+
 	changeStream, err := csr.watcherClient.Watch(sctx, pipeline, opts)
 	if err != nil {
-		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to open change stream")
+		return bson.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
 
 	err = csr.persistResumeToken(ctx, changeStream.ResumeToken())
 	if err != nil {
-		return nil, nil, bson.Timestamp{}, err
+		changeStream.Close(sctx)
+		return bson.Timestamp{}, err
 	}
 
 	startTs, err := csr.resumeTokenTSExtractor(changeStream.ResumeToken())
 	if err != nil {
-		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
+		changeStream.Close(sctx)
+		return bson.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
 	}
 
 	// With sharded clusters the resume token might lead the cluster time
@@ -424,7 +434,8 @@ func (csr *ChangeStreamReader) createChangeStream(
 	// otherwise we will get errors.
 	clusterTime, err := util.GetClusterTimeFromSession(sess)
 	if err != nil {
-		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to read cluster time from session")
+		changeStream.Close(sctx)
+		return bson.Timestamp{}, errors.Wrap(err, "failed to read cluster time from session")
 	}
 
 	csr.logger.Debug().
@@ -437,93 +448,9 @@ func (csr *ChangeStreamReader) createChangeStream(
 		startTs = clusterTime
 	}
 
-	return changeStream, sess, startTs, nil
-}
+	csr.changeStream = changeStream
 
-// StartChangeStream starts the change stream.
-func (csr *ChangeStreamReader) start(
-	ctx context.Context,
-	eg *errgroup.Group,
-) error {
-	// This channel holds the first change stream creation's result, whether
-	// success or failure. Rather than using a Result we could make separate
-	// Timestamp and error channels, but the single channel is cleaner since
-	// there's no chance of "nonsense" like both channels returning a payload.
-	initialCreateResultChan := make(chan mo.Result[bson.Timestamp])
-
-	eg.Go(
-		func() error {
-			// Closing changeEventBatchChan at the end of change stream goroutine
-			// notifies the verifier's change event handler to exit.
-			defer func() {
-				csr.logger.Debug().
-					Stringer("changeStreamReader", csr).
-					Msg("Closing change event batch channel.")
-
-				close(csr.changeEventBatchChan)
-			}()
-
-			retryer := retry.New().WithErrorCodes(util.CursorKilledErrCode)
-
-			parentThreadWaiting := true
-
-			err := retryer.WithCallback(
-				func(ctx context.Context, ri *retry.FuncInfo) error {
-					changeStream, sess, startTs, err := csr.createChangeStream(ctx)
-					if err != nil {
-						logEvent := csr.logger.Debug().
-							Err(err).
-							Stringer("changeStreamReader", csr)
-
-						if parentThreadWaiting {
-							logEvent.Msg("First change stream open failed.")
-
-							initialCreateResultChan <- mo.Err[bson.Timestamp](err)
-							return nil
-						}
-
-						logEvent.Msg("Retried change stream open failed.")
-
-						return err
-					}
-
-					defer changeStream.Close(ctx)
-
-					logEvent := csr.logger.Debug().
-						Stringer("changeStreamReader", csr).
-						Any("startTimestamp", startTs)
-
-					if parentThreadWaiting {
-						logEvent.Msg("First change stream open succeeded.")
-
-						initialCreateResultChan <- mo.Ok(startTs)
-						close(initialCreateResultChan)
-						parentThreadWaiting = false
-					} else {
-						logEvent.Msg("Retried change stream open succeeded.")
-					}
-
-					return csr.iterateChangeStream(ctx, ri, changeStream, sess)
-				},
-				"running %s", csr,
-			).Run(ctx, csr.logger)
-
-			return err
-		},
-	)
-
-	result := <-initialCreateResultChan
-
-	startTs, err := result.Get()
-	if err != nil {
-		return errors.Wrapf(err, "creating change stream")
-	}
-
-	csr.startAtTs = &startTs
-
-	csr.running = true
-
-	return nil
+	return startTs, nil
 }
 
 func (csr *ChangeStreamReader) String() string {
