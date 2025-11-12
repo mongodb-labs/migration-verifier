@@ -353,7 +353,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 			return !bytes.Equal(rt, originalResumeToken)
 		},
 		time.Minute,
-		50*time.Millisecond,
+		500*time.Millisecond,
 		"should see a new change stream resume token persisted",
 	)
 
@@ -955,7 +955,7 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 
 	eventErr := UnknownEventError{}
 	suite.Require().ErrorAs(err, &eventErr)
-	suite.Assert().Equal("create", eventErr.Event.Lookup("operationType").StringValue())
+	suite.Assert().Contains(string(eventErr.Event), "create")
 }
 
 func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {

@@ -97,7 +97,7 @@ func (o *OplogReader) createCursor(
 	}
 
 	o.logger.Info().
-		Any("startReadTs", *o.startAtTs).
+		Any("startReadTs", startTS).
 		Any("currentOplogTs", allowDDLBeforeTS).
 		Msg("Tailing oplog.")
 
@@ -112,7 +112,7 @@ func (o *OplogReader) createCursor(
 		Find(
 			sctx,
 			bson.D{{"$and", []any{
-				bson.D{{"ts", bson.D{{"$gte", o.startAtTs}}}},
+				bson.D{{"ts", bson.D{{"$gte", startTS}}}},
 
 				bson.D{{"$expr", agg.Or{
 					// plain ops: one write per op
