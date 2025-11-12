@@ -242,7 +242,7 @@ func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson
 	coll := rc.metaDB.Collection(changeReaderCollectionName)
 	_, err := coll.ReplaceOne(
 		ctx,
-		bson.D{{"_id", rc.resumeTokenDocID()}},
+		bson.D{{"_id", resumeTokenDocID(rc.getWhichCluster())}},
 		token,
 		options.Replace().SetUpsert(true),
 	)
@@ -267,14 +267,14 @@ func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson
 	return errors.Wrapf(err, "failed to persist %s resume token (%v)", rc.readerType, token)
 }
 
-func (rc *ChangeReaderCommon) resumeTokenDocID() string {
-	switch rc.readerType {
+func resumeTokenDocID(clusterType whichCluster) string {
+	switch clusterType {
 	case src:
 		return "srcResumeToken"
 	case dst:
 		return "dstResumeToken"
 	default:
-		panic("unknown readerType: " + rc.readerType)
+		panic("unknown readerType: " + clusterType)
 	}
 }
 
@@ -287,7 +287,7 @@ func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Optio
 
 	token, err := coll.FindOne(
 		ctx,
-		bson.D{{"_id", rc.resumeTokenDocID()}},
+		bson.D{{"_id", resumeTokenDocID(rc.getWhichCluster())}},
 	).Raw()
 
 	if errors.Is(err, mongo.ErrNoDocuments) {

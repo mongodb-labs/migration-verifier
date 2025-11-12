@@ -392,7 +392,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 	if token, hasToken := savedResumeToken.Get(); hasToken {
 		logEvent := csStartLogEvent.
-			Stringer(csr.resumeTokenDocID(), token)
+			Stringer(resumeTokenDocID(csr.readerType), token)
 
 		ts, err := csr.resumeTokenTSExtractor(token)
 		if err == nil {

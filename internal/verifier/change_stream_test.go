@@ -345,7 +345,12 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	assert.Eventually(
 		suite.T(),
 		func() bool {
-			rt, err := changeStreamMetaColl.FindOne(ctx, bson.D{}).Raw()
+			rt, err := changeStreamMetaColl.FindOne(
+				ctx,
+				bson.D{
+					{"_id", resumeTokenDocID(src)},
+				},
+			).Raw()
 			require.NoError(suite.T(), err)
 
 			suite.T().Logf("found rt: %v\n", rt)
