@@ -153,9 +153,17 @@ func (o *OplogReader) createCursor(
 						o.getDefaultNSExclusions("$$ROOT")...,
 					),
 
-					// op=c is for applyOps, and also to detect forbidden DDL.
 					// op=n is for no-ops, so we stay up-to-date.
-					agg.In("$op", "c", "n"),
+					agg.Eq("$op", "n"),
+
+					// op=c is for applyOps, and also to detect forbidden DDL.
+					agg.And{
+						agg.Eq("$op", "c"),
+						agg.Not{helpers.StringHasPrefix{
+							FieldRef: "$ns",
+							Prefix:   "config.",
+						}},
+					},
 				}}},
 			}}},
 
