@@ -557,10 +557,10 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 	for _, cluster := range []struct {
 		title         string
 		eventRecorder *EventRecorder
-		csReader      *ChangeStreamReader
+		csReader      changeReader
 	}{
-		{"Source", verifier.srcEventRecorder, verifier.srcChangeStreamReader},
-		{"Destination", verifier.dstEventRecorder, verifier.dstChangeStreamReader},
+		{"Source", verifier.srcEventRecorder, verifier.srcChangeReader},
+		{"Destination", verifier.dstEventRecorder, verifier.dstChangeReader},
 	} {
 		nsStats := cluster.eventRecorder.Read()
 
@@ -584,16 +584,16 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 
 		fmt.Fprintf(builder, "%s change events this generation: %s\n", cluster.title, eventsDescr)
 
-		if eventsPerSec, has := cluster.csReader.GetEventsPerSecond().Get(); has {
+		if eventsPerSec, has := cluster.csReader.getEventsPerSecond().Get(); has {
 			var lagNote string
 
-			lag, hasLag := cluster.csReader.GetLag().Get()
+			lag, hasLag := cluster.csReader.getLag().Get()
 
 			if hasLag {
 				lagNote = fmt.Sprintf("lag: %s; ", reportutils.DurationToHMS(lag))
 			}
 
-			saturation := cluster.csReader.GetSaturation()
+			saturation := cluster.csReader.getBufferSaturation()
 
 			fmt.Fprintf(
 				builder,
@@ -619,13 +619,13 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 			}
 		}
 
-		if cluster.csReader == verifier.srcChangeStreamReader {
+		if cluster.csReader == verifier.srcChangeReader {
 			fmt.Fprint(builder, "\n")
 		}
 
 		// We only print event breakdowns for the source because we assume that
 		// events on the destination will largely mirror the source’s.
-		if totalEvents > 0 && cluster.csReader == verifier.srcChangeStreamReader {
+		if totalEvents > 0 && cluster.csReader == verifier.srcChangeReader {
 			reverseSortedNamespaces := maps.Keys(nsTotals)
 			sort.Slice(
 				reverseSortedNamespaces,

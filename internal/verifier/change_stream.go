@@ -7,7 +7,6 @@ import (
 
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/keystring"
-	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
@@ -17,24 +16,11 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
 	"github.com/pkg/errors"
-	"github.com/rs/zerolog"
-	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/exp/slices"
-)
-
-type ddlEventHandling string
-
-const (
-	fauxDocSizeForDeleteEvents = 1024
-
-	// The number of batches we’ll hold in memory at once.
-	batchChanBufferSize = 100
-
-	onDDLEventAllow ddlEventHandling = "allow"
 )
 
 var supportedEventOpTypes = mapset.NewSet(
@@ -45,9 +31,8 @@ var supportedEventOpTypes = mapset.NewSet(
 )
 
 const (
-	minChangeStreamPersistInterval     = time.Second * 10
-	maxChangeStreamAwaitTime           = time.Second
-	metadataChangeStreamCollectionName = "changeStream"
+	minChangeStreamPersistInterval = time.Second * 10
+	maxChangeStreamAwaitTime       = time.Second
 )
 
 type UnknownEventError struct {
@@ -58,55 +43,33 @@ func (uee UnknownEventError) Error() string {
 	return fmt.Sprintf("received event with unknown optype: %+v", uee.Event)
 }
 
-type changeEventBatch struct {
-	events      []ParsedEvent
-	resumeToken bson.Raw
-	clusterTime bson.Timestamp
-}
-
 type ChangeStreamReader struct {
-	readerType whichCluster
-
-	lastChangeEventTime *bson.Timestamp
-	logger              *logger.Logger
-	namespaces          []string
-
-	metaDB        *mongo.Database
-	watcherClient *mongo.Client
-	clusterInfo   util.ClusterInfo
-
-	changeStreamRunning  bool
-	changeEventBatchChan chan changeEventBatch
-	writesOffTs          *util.Eventual[bson.Timestamp]
-	readerError          *util.Eventual[error]
-	handlerError         *util.Eventual[error]
-	doneChan             chan struct{}
-
-	startAtTs *bson.Timestamp
-
-	lag              *msync.TypedAtomic[option.Option[time.Duration]]
-	batchSizeHistory *history.History[int]
-
-	onDDLEvent ddlEventHandling
+	ChangeReaderCommon
 }
 
-func (verifier *Verifier) initializeChangeStreamReaders() {
+var _ changeReader = &ChangeStreamReader{}
+
+func (verifier *Verifier) initializeChangeReaders() {
 	srcReader := &ChangeStreamReader{
-		readerType:    src,
-		namespaces:    verifier.srcNamespaces,
-		watcherClient: verifier.srcClient,
-		clusterInfo:   *verifier.srcClusterInfo,
+		ChangeReaderCommon: ChangeReaderCommon{
+			readerType:    src,
+			namespaces:    verifier.srcNamespaces,
+			watcherClient: verifier.srcClient,
+			clusterInfo:   *verifier.srcClusterInfo,
+		},
 	}
-	verifier.srcChangeStreamReader = srcReader
+	verifier.srcChangeReader = srcReader
 
 	dstReader := &ChangeStreamReader{
-		readerType:    dst,
-		namespaces:    verifier.dstNamespaces,
-		watcherClient: verifier.dstClient,
-		clusterInfo:   *verifier.dstClusterInfo,
-		onDDLEvent:    onDDLEventAllow,
+		ChangeReaderCommon: ChangeReaderCommon{
+			readerType:    dst,
+			namespaces:    verifier.dstNamespaces,
+			watcherClient: verifier.dstClient,
+			clusterInfo:   *verifier.dstClusterInfo,
+			onDDLEvent:    onDDLEventAllow,
+		},
 	}
-	verifier.dstChangeStreamReader = dstReader
+	verifier.dstChangeReader = dstReader
 
 	// Common elements in both readers:
 	for _, csr := range mslices.Of(srcReader, dstReader) {
@@ -115,173 +78,12 @@ func (verifier *Verifier) initializeChangeStreamReaders() {
 		csr.changeEventBatchChan = make(chan changeEventBatch, batchChanBufferSize)
 		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
 		csr.readerError = util.NewEventual[error]()
-		csr.handlerError = util.NewEventual[error]()
+		csr.persistorError = util.NewEventual[error]()
 		csr.doneChan = make(chan struct{})
 		csr.lag = msync.NewTypedAtomic(option.None[time.Duration]())
 		csr.batchSizeHistory = history.New[int](time.Minute)
+		csr.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
 	}
-}
-
-// RunChangeEventHandler handles change event batches from the reader.
-// It needs to be started after the reader starts and should run in its own
-// goroutine.
-func (verifier *Verifier) RunChangeEventHandler(ctx context.Context, reader *ChangeStreamReader) error {
-	var err error
-
-	var lastPersistedTime time.Time
-	persistResumeTokenIfNeeded := func(ctx context.Context, token bson.Raw) {
-		if time.Since(lastPersistedTime) >= minChangeStreamPersistInterval {
-			persistErr := reader.persistChangeStreamResumeToken(ctx, token)
-			if persistErr != nil {
-				verifier.logger.Warn().
-					Stringer("changeReader", reader).
-					Err(persistErr).
-					Msg("Failed to persist resume token. Because of this, if the verifier restarts, it will have to re-process already-handled change events. This error may be transient, but if it recurs, investigate.")
-			} else {
-				lastPersistedTime = time.Now()
-			}
-		}
-	}
-
-HandlerLoop:
-	for err == nil {
-		select {
-		case <-ctx.Done():
-			err = util.WrapCtxErrWithCause(ctx)
-
-			verifier.logger.Debug().
-				Err(err).
-				Stringer("changeStreamReader", reader).
-				Msg("Change event handler failed.")
-		case batch, more := <-reader.changeEventBatchChan:
-			if !more {
-				verifier.logger.Debug().
-					Stringer("changeStreamReader", reader).
-					Msg("Change event batch channel has been closed.")
-
-				break HandlerLoop
-			}
-
-			verifier.logger.Trace().
-				Stringer("changeStreamReader", reader).
-				Int("batchSize", len(batch.events)).
-				Any("batch", batch).
-				Msg("Handling change event batch.")
-
-			err = errors.Wrap(
-				verifier.HandleChangeStreamEvents(ctx, batch, reader.readerType),
-				"failed to handle change stream events",
-			)
-
-			if err == nil && batch.resumeToken != nil {
-				persistResumeTokenIfNeeded(ctx, batch.resumeToken)
-			}
-		}
-	}
-
-	// This will prevent the reader from hanging because the reader checks
-	// this along with checks for context expiry.
-	if err != nil {
-		reader.handlerError.Set(err)
-	}
-
-	return err
-}
-
-// HandleChangeStreamEvents performs the necessary work for change stream events after receiving a batch.
-func (verifier *Verifier) HandleChangeStreamEvents(ctx context.Context, batch changeEventBatch, eventOrigin whichCluster) error {
-	if len(batch.events) == 0 {
-		return nil
-	}
-
-	dbNames := make([]string, len(batch.events))
-	collNames := make([]string, len(batch.events))
-	docIDs := make([]bson.RawValue, len(batch.events))
-	dataSizes := make([]int32, len(batch.events))
-
-	latestTimestamp := bson.Timestamp{}
-
-	for i, changeEvent := range batch.events {
-		if !supportedEventOpTypes.Contains(changeEvent.OpType) {
-			panic(fmt.Sprintf("Unsupported optype in event; should have failed already! event=%+v", changeEvent))
-		}
-
-		if changeEvent.ClusterTime == nil {
-			verifier.logger.Warn().
-				Any("event", changeEvent).
-				Msg("Change event unexpectedly lacks a clusterTime?!?")
-		} else if changeEvent.ClusterTime.After(latestTimestamp) {
-			latestTimestamp = *changeEvent.ClusterTime
-		}
-
-		var srcDBName, srcCollName string
-
-		var eventRecorder EventRecorder
-
-		// Recheck Docs are keyed by source namespaces.
-		// We need to retrieve the source namespaces if change events are from the destination.
-		switch eventOrigin {
-		case dst:
-			eventRecorder = *verifier.dstEventRecorder
-
-			if verifier.nsMap.Len() == 0 {
-				// Namespace is not remapped. Source namespace is the same as the destination.
-				srcDBName = changeEvent.Ns.DB
-				srcCollName = changeEvent.Ns.Coll
-			} else {
-				dstNs := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
-				srcNs, exist := verifier.nsMap.GetSrcNamespace(dstNs)
-				if !exist {
-					return errors.Errorf("no source namespace corresponding to the destination namepsace %s", dstNs)
-				}
-				srcDBName, srcCollName = SplitNamespace(srcNs)
-			}
-		case src:
-			eventRecorder = *verifier.srcEventRecorder
-
-			srcDBName = changeEvent.Ns.DB
-			srcCollName = changeEvent.Ns.Coll
-		default:
-			panic(fmt.Sprintf("unknown event origin: %s", eventOrigin))
-		}
-
-		dbNames[i] = srcDBName
-		collNames[i] = srcCollName
-		docIDs[i] = changeEvent.DocID
-
-		if changeEvent.FullDocLen.OrZero() > 0 {
-			dataSizes[i] = int32(changeEvent.FullDocLen.OrZero())
-		} else if changeEvent.FullDocument == nil {
-			// This happens for deletes and for some updates.
-			// The document is probably, but not necessarily, deleted.
-			dataSizes[i] = fauxDocSizeForDeleteEvents
-		} else {
-			// This happens for inserts, replaces, and most updates.
-			dataSizes[i] = int32(len(changeEvent.FullDocument))
-		}
-
-		if err := eventRecorder.AddEvent(&changeEvent); err != nil {
-			return errors.Wrapf(
-				err,
-				"failed to augment stats with %s change event (%+v)",
-				eventOrigin,
-				changeEvent,
-			)
-		}
-	}
-
-	latestTimestampTime := time.Unix(int64(latestTimestamp.T), 0)
-	lag := time.Unix(int64(batch.clusterTime.T), 0).Sub(latestTimestampTime)
-
-	verifier.logger.Trace().
-		Str("origin", string(eventOrigin)).
-		Int("count", len(docIDs)).
-		Any("latestTimestamp", latestTimestamp).
-		Time("latestTimestampTime", latestTimestampTime).
-		Stringer("lag", lag).
-		Msg("Persisting rechecks for change events.")
-
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes)
 }
 
 // GetChangeStreamFilter returns an aggregation pipeline that filters
@@ -336,7 +138,7 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 		},
 	)
 
-	if csr.hasBsonSize() {
+	if util.ClusterHasBSONSize([2]int(csr.clusterInfo.VersionArray)) {
 		pipeline = append(
 			pipeline,
 			bson.D{
@@ -349,16 +151,6 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 	}
 
 	return pipeline
-}
-
-func (csr *ChangeStreamReader) hasBsonSize() bool {
-	major := csr.clusterInfo.VersionArray[0]
-
-	if major == 4 {
-		return csr.clusterInfo.VersionArray[1] >= 4
-	}
-
-	return major > 4
 }
 
 // This function reads a single `getMore` response into a slice.
@@ -424,10 +216,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			// indexes are created after initial sync.
 
 			if csr.onDDLEvent == onDDLEventAllow {
-				csr.logger.Info().
-					Stringer("changeStream", csr).
-					Stringer("event", cs.Current).
-					Msg("Ignoring event with unrecognized type on destination. (It’s assumedly internal to the migration.)")
+				csr.logIgnoredDDL(cs.Current)
 
 				// Discard this event, then keep reading.
 				changeEvents = changeEvents[:len(changeEvents)-1]
@@ -454,16 +243,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
-	var tokenTs bson.Timestamp
-	tokenTs, err := extractTimestampFromResumeToken(cs.ResumeToken())
-	if err == nil {
-		lagSecs := int64(sess.OperationTime().T) - int64(tokenTs.T)
-		csr.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
-	} else {
-		csr.logger.Warn().
-			Err(err).
-			Msgf("Failed to extract timestamp from %s's resume token to compute change stream lag.", csr)
-	}
+	csr.updateLag(sess, cs.ResumeToken())
 
 	if eventsRead == 0 {
 		ri.NoteSuccess("received an empty change stream response")
@@ -485,8 +265,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	select {
 	case <-ctx.Done():
 		return util.WrapCtxErrWithCause(ctx)
-	case <-csr.handlerError.Ready():
-		return csr.wrapHandlerErrorForReader()
+	case <-csr.persistorError.Ready():
+		return csr.wrapPersistorErrorForReader()
 	case csr.changeEventBatchChan <- changeEventBatch{
 		events: changeEvents,
 
@@ -500,13 +280,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	ri.NoteSuccess("sent %d-event batch to handler", len(changeEvents))
 
 	return nil
-}
-
-func (csr *ChangeStreamReader) wrapHandlerErrorForReader() error {
-	return errors.Wrap(
-		csr.handlerError.Get(),
-		"event handler failed, so no more events can be processed",
-	)
 }
 
 func (csr *ChangeStreamReader) iterateChangeStream(
@@ -532,8 +305,8 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 			return err
 
-		case <-csr.handlerError.Ready():
-			return csr.wrapHandlerErrorForReader()
+		case <-csr.persistorError.Ready():
+			return csr.wrapPersistorErrorForReader()
 
 		// If the ChangeStreamEnderChan has a message, the user has indicated that
 		// source writes are ended and the migration tool is finished / committed.
@@ -552,7 +325,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			// (i.e., the `getMore` call returns empty)
 			for {
 				var curTs bson.Timestamp
-				curTs, err = extractTimestampFromResumeToken(cs.ResumeToken())
+				curTs, err = csr.resumeTokenTSExtractor(cs.ResumeToken())
 				if err != nil {
 					return errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
 				}
@@ -584,7 +357,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 		}
 
 		if gotwritesOffTimestamp {
-			csr.changeStreamRunning = false
+			csr.running = false
 			if csr.lastChangeEventTime != nil {
 				csr.startAtTs = csr.lastChangeEventTime
 			}
@@ -625,18 +398,18 @@ func (csr *ChangeStreamReader) createChangeStream(
 		)
 	}
 
-	savedResumeToken, err := csr.loadChangeStreamResumeToken(ctx)
+	savedResumeToken, err := csr.loadResumeToken(ctx)
 	if err != nil {
 		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
 	}
 
 	csStartLogEvent := csr.logger.Info()
 
-	if savedResumeToken != nil {
+	if token, hasToken := savedResumeToken.Get(); hasToken {
 		logEvent := csStartLogEvent.
-			Stringer(csr.resumeTokenDocID(), savedResumeToken)
+			Stringer(csr.resumeTokenDocID(), token)
 
-		ts, err := extractTimestampFromResumeToken(savedResumeToken)
+		ts, err := csr.resumeTokenTSExtractor(token)
 		if err == nil {
 			logEvent = addTimestampToLogEvent(ts, logEvent)
 		} else {
@@ -647,7 +420,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 		logEvent.Msg("Starting change stream from persisted resume token.")
 
-		opts = opts.SetStartAfter(savedResumeToken)
+		opts = opts.SetStartAfter(token)
 	} else {
 		csStartLogEvent.Msgf("Starting change stream from current %s cluster time.", csr.readerType)
 	}
@@ -662,12 +435,12 @@ func (csr *ChangeStreamReader) createChangeStream(
 		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to open change stream")
 	}
 
-	err = csr.persistChangeStreamResumeToken(ctx, changeStream.ResumeToken())
+	err = csr.persistResumeToken(ctx, changeStream.ResumeToken())
 	if err != nil {
 		return nil, nil, bson.Timestamp{}, err
 	}
 
-	startTs, err := extractTimestampFromResumeToken(changeStream.ResumeToken())
+	startTs, err := csr.resumeTokenTSExtractor(changeStream.ResumeToken())
 	if err != nil {
 		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to extract timestamp from change stream's resume token")
 	}
@@ -694,7 +467,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 }
 
 // StartChangeStream starts the change stream.
-func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
+func (csr *ChangeStreamReader) start(ctx context.Context) error {
 	// This channel holds the first change stream creation's result, whether
 	// success or failure. Rather than using a Result we could make separate
 	// Timestamp and error channels, but the single channel is cleaner since
@@ -771,120 +544,16 @@ func (csr *ChangeStreamReader) StartChangeStream(ctx context.Context) error {
 
 	csr.startAtTs = &startTs
 
-	csr.changeStreamRunning = true
+	csr.running = true
 
 	return nil
-}
-
-// GetLag returns the observed change stream lag (i.e., the delta between
-// cluster time and the most-recently-seen change event).
-func (csr *ChangeStreamReader) GetLag() option.Option[time.Duration] {
-	return csr.lag.Load()
-}
-
-// GetSaturation returns the reader’s internal buffer’s saturation level as
-// a fraction. If saturation rises, that means we’re reading events faster than
-// we can persist them.
-func (csr *ChangeStreamReader) GetSaturation() float64 {
-	return util.DivideToF64(len(csr.changeEventBatchChan), cap(csr.changeEventBatchChan))
-}
-
-// GetEventsPerSecond returns the number of change events per second we’ve been
-// seeing “recently”. (See implementation for the actual period over which we
-// compile this metric.)
-func (csr *ChangeStreamReader) GetEventsPerSecond() option.Option[float64] {
-	logs := csr.batchSizeHistory.Get()
-	lastLog, hasLogs := lo.Last(logs)
-
-	if hasLogs && lastLog.At != logs[0].At {
-		span := lastLog.At.Sub(logs[0].At)
-
-		// Each log contains a time and a # of events that happened since
-		// the prior log. Thus, each log’s Datum is a count of events that
-		// happened before the timestamp. Since we want the # of events that
-		// happened between the first & last times, we only want events *after*
-		// the first time. Thus, we skip the first log entry here.
-		totalEvents := 0
-		for _, log := range logs[1:] {
-			totalEvents += log.Datum
-		}
-
-		return option.Some(util.DivideToF64(totalEvents, span.Seconds()))
-	}
-
-	return option.None[float64]()
-}
-
-func addTimestampToLogEvent(ts bson.Timestamp, event *zerolog.Event) *zerolog.Event {
-	return event.
-		Any("timestamp", ts).
-		Time("time", time.Unix(int64(ts.T), int64(0)))
-}
-
-func (csr *ChangeStreamReader) getChangeStreamMetadataCollection() *mongo.Collection {
-	return csr.metaDB.Collection(metadataChangeStreamCollectionName)
-}
-
-func (csr *ChangeStreamReader) loadChangeStreamResumeToken(ctx context.Context) (bson.Raw, error) {
-	coll := csr.getChangeStreamMetadataCollection()
-
-	token, err := coll.FindOne(
-		ctx,
-		bson.D{{"_id", csr.resumeTokenDocID()}},
-	).Raw()
-
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
-	}
-
-	return token, err
 }
 
 func (csr *ChangeStreamReader) String() string {
 	return fmt.Sprintf("%s change stream reader", csr.readerType)
 }
 
-func (csr *ChangeStreamReader) resumeTokenDocID() string {
-	switch csr.readerType {
-	case src:
-		return "srcResumeToken"
-	case dst:
-		return "dstResumeToken"
-	default:
-		panic("unknown readerType: " + csr.readerType)
-	}
-}
-
-func (csr *ChangeStreamReader) persistChangeStreamResumeToken(ctx context.Context, token bson.Raw) error {
-	coll := csr.getChangeStreamMetadataCollection()
-	_, err := coll.ReplaceOne(
-		ctx,
-		bson.D{{"_id", csr.resumeTokenDocID()}},
-		token,
-		options.Replace().SetUpsert(true),
-	)
-
-	if err == nil {
-		ts, err := extractTimestampFromResumeToken(token)
-
-		logEvent := csr.logger.Debug()
-
-		if err == nil {
-			logEvent = addTimestampToLogEvent(ts, logEvent)
-		} else {
-			csr.logger.Warn().Err(err).
-				Msg("failed to extract resume token timestamp")
-		}
-
-		logEvent.Msgf("Persisted %s's resume token.", csr)
-
-		return nil
-	}
-
-	return errors.Wrapf(err, "failed to persist change stream resume token (%v)", token)
-}
-
-func extractTimestampFromResumeToken(resumeToken bson.Raw) (bson.Timestamp, error) {
+func extractTSFromChangeStreamResumeToken(resumeToken bson.Raw) (bson.Timestamp, error) {
 	// Change stream token is always a V1 keystring in the _data field
 	tokenDataRV, err := resumeToken.LookupErr("_data")
 
