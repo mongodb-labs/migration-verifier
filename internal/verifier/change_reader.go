@@ -70,6 +70,21 @@ type ChangeReaderCommon struct {
 	onDDLEvent ddlEventHandling
 }
 
+func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
+	return ChangeReaderCommon{
+		readerType:           clusterName,
+		changeEventBatchChan: make(chan changeEventBatch, batchChanBufferSize),
+		writesOffTs:          util.NewEventual[bson.Timestamp](),
+		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
+		batchSizeHistory:     history.New[int](time.Minute),
+		onDDLEvent: lo.Ternary(
+			clusterName == dst,
+			onDDLEventAllow,
+			"",
+		),
+	}
+}
+
 func (rc *ChangeReaderCommon) getWhichCluster() whichCluster {
 	return rc.readerType
 }

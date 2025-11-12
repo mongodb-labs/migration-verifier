@@ -47,6 +47,26 @@ type ChangeStreamReader struct {
 
 var _ changeReader = &ChangeStreamReader{}
 
+func (v *Verifier) newChangeStreamReader(
+	namespaces []string,
+	cluster whichCluster,
+	client *mongo.Client,
+	clusterInfo util.ClusterInfo,
+) *ChangeStreamReader {
+	common := newChangeReaderCommon(cluster)
+	common.namespaces = namespaces
+	common.readerType = cluster
+	common.watcherClient = client
+	common.clusterInfo = clusterInfo
+
+	common.logger = v.logger
+	common.metaDB = v.metaClient.Database(v.metaDBName)
+
+	common.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
+
+	return &ChangeStreamReader{ChangeReaderCommon: common}
+}
+
 // GetChangeStreamFilter returns an aggregation pipeline that filters
 // namespaces as per configuration.
 //
