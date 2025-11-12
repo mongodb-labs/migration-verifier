@@ -276,7 +276,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		} else {
 			verifier.logger.Debug().Msgf("%s not running; starting change reader", changeReader)
 
-			err = changeReader.start(ctx)
+			err = changeReader.start(groupCtx, ceHandlerGroup)
 			if err != nil {
 				return errors.Wrapf(err, "failed to start %s", changeReader)
 			}

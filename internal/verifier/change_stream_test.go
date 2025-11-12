@@ -254,7 +254,9 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 }
 
 func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(ctx context.Context, verifier *Verifier) {
-	err := verifier.srcChangeReader.start(ctx)
+	eg, egCtx := contextplus.ErrGroup(ctx)
+
+	err := verifier.srcChangeReader.start(egCtx, eg)
 	suite.Require().NoError(err)
 	go func() {
 		err := verifier.RunChangeEventPersistor(ctx, verifier.srcChangeReader)
@@ -1063,7 +1065,9 @@ func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
 	verifier.SetDstNamespaces([]string{dstDBName + ".dstColl1", dstDBName + ".dstColl2"})
 	verifier.SetNamespaceMap()
 
-	suite.Require().NoError(verifier.dstChangeReader.start(ctx))
+	eg, egCtx := contextplus.ErrGroup(ctx)
+
+	suite.Require().NoError(verifier.dstChangeReader.start(egCtx, eg))
 	go func() {
 		err := verifier.RunChangeEventPersistor(ctx, verifier.dstChangeReader)
 		if errors.Is(err, context.Canceled) {
