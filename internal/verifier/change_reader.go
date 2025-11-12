@@ -41,7 +41,6 @@ type changeReader interface {
 	getBufferSaturation() float64
 	setWritesOff(bson.Timestamp)
 	start(context.Context, *errgroup.Group) error
-	done() <-chan struct{}
 	persistResumeToken(context.Context, bson.Raw) error
 	isRunning() bool
 	String() string
@@ -64,7 +63,6 @@ type ChangeReaderCommon struct {
 	changeEventBatchChan chan changeEventBatch
 	writesOffTs          *util.Eventual[bson.Timestamp]
 	readerError          *util.Eventual[error]
-	doneChan             chan struct{}
 
 	startAtTs *bson.Timestamp
 
@@ -96,10 +94,6 @@ func (rc *ChangeReaderCommon) isRunning() bool {
 
 func (rc *ChangeReaderCommon) getReadChannel() <-chan changeEventBatch {
 	return rc.changeEventBatchChan
-}
-
-func (rc *ChangeReaderCommon) done() <-chan struct{} {
-	return rc.doneChan
 }
 
 // getBufferSaturation returns the reader’s internal buffer’s saturation level

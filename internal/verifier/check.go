@@ -56,13 +56,16 @@ func (verifier *Verifier) waitForChangeReader(ctx context.Context, csr changeRea
 		return util.WrapCtxErrWithCause(ctx)
 	case <-csr.getError().Ready():
 		err := csr.getError().Get()
-		verifier.logger.Warn().Err(err).
-			Msgf("Received error from %s.", csr)
+
+		if err != nil {
+			verifier.logger.Warn().Err(err).
+				Msgf("Received error from %s.", csr)
+		} else {
+			verifier.logger.Debug().
+				Msgf("Received completion signal from %s.", csr)
+		}
+
 		return err
-	case <-csr.done():
-		verifier.logger.Debug().
-			Msgf("Received completion signal from %s.", csr)
-		break
 	}
 
 	return nil

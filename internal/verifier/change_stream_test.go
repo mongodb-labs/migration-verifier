@@ -632,7 +632,8 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 
 		verifier.srcChangeReader.setWritesOff(insertTs)
 
-		<-verifier.srcChangeReader.done()
+		<-verifier.srcChangeReader.getError().Ready()
+		suite.Require().NoError(verifier.srcChangeReader.getError().Get())
 
 		startAtTs2 := verifier.srcChangeReader.getStartTimestamp().MustGet()
 
@@ -690,7 +691,8 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	)
 
 	verifier.srcChangeReader.setWritesOff(*postEventsSessionTime)
-	<-verifier.srcChangeReader.done()
+	<-verifier.srcChangeReader.getError().Ready()
+	suite.Require().NoError(verifier.srcChangeReader.getError().Get())
 
 	startAtTs, hasStartAtTs = verifier.srcChangeReader.getStartTimestamp().Get()
 	suite.Require().True(hasStartAtTs, "startAtTs should be set")
