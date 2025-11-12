@@ -6,6 +6,7 @@ import (
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/helpers"
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
@@ -27,9 +28,10 @@ import (
 type OplogReader struct {
 	*ChangeReaderCommon
 
-	curDocs []bson.Raw
-	scratch []byte
-	cursor  *mongo.Cursor
+	curDocs          []bson.Raw
+	scratch          []byte
+	cursor           *mongo.Cursor
+	allowDDLBeforeTS bson.Timestamp
 }
 
 var _ changeReader = &OplogReader{}
@@ -53,7 +55,7 @@ func (v *Verifier) newOplogReader(
 	o := &OplogReader{ChangeReaderCommon: &common}
 
 	common.createIteratorCb = o.createCursor
-	common.iterateCb = o.iterateCb
+	common.iterateCb = o.iterateCursor
 
 	return o
 }
@@ -190,15 +192,24 @@ func (o *OplogReader) createCursor(
 	}
 
 	o.cursor = cursor
+	o.allowDDLBeforeTS = allowDDLBeforeTS
 
 	return startTS, nil
 }
 
 func (o *OplogReader) iterateCursor(
-	sctx context.Context,
-	cursor *mongo.Cursor,
-	allowDDLBeforeTS bson.Timestamp,
+	ctx context.Context,
+	_ *retry.FuncInfo,
+	sess *mongo.Session,
+	/*
+		cursor *mongo.Cursor,
+		allowDDLBeforeTS bson.Timestamp,
+	*/
 ) error {
+	sctx := mongo.NewSessionContext(ctx, sess)
+	cursor := o.cursor
+	allowDDLBeforeTS := o.allowDDLBeforeTS
+
 CursorLoop:
 	for {
 		var err error
