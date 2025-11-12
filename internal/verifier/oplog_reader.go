@@ -326,6 +326,11 @@ func (o *OplogReader) readAndHandleOneBatch(
 		return errors.Wrap(err, "reading cursor")
 	}
 
+	if len(o.curDocs) == 0 {
+		// If there were no oplog events, then there’s nothing for us to do.
+		return nil
+	}
+
 	events := make([]ParsedEvent, 0, len(o.curDocs))
 
 	var latestTS bson.Timestamp
@@ -393,7 +398,12 @@ func (o *OplogReader) readAndHandleOneBatch(
 
 	o.updateLag(sess, resumeToken)
 
-	o.batchSizeHistory.Add(len(events))
+	// NB: events can legitimately be empty here because we might only have
+	// gotten op=n oplog entries, which we just use to advance the reader.
+	// (Similar to a change stream’s post-batch resume token.)
+	if len(events) > 0 {
+		o.batchSizeHistory.Add(len(events))
+	}
 
 	select {
 	case <-sctx.Done():
