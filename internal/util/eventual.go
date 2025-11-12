@@ -35,6 +35,8 @@ func (e *Eventual[T]) Get() T {
 	e.mux.RLock()
 	defer e.mux.RUnlock()
 
+	// If the ready channel is still open then there’s no value yet,
+	// which means this method should not have been called.
 	select {
 	case <-e.ready:
 		return e.val
@@ -59,5 +61,6 @@ func (e *Eventual[T]) Set(val T) {
 	// not see this value.
 	e.val = val
 
+	// This allows Get() to work:
 	close(e.ready)
 }

@@ -31,6 +31,12 @@ func (s *UnitTestSuite) TestEventual() {
 		eventual.Get(),
 		"Get() should return the value",
 	)
+
+	s.Assert().Equal(
+		123,
+		eventual.Get(),
+		"Get() should return the value a 2nd time",
+	)
 }
 
 func (s *UnitTestSuite) TestEventualNil() {
