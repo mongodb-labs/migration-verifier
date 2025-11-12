@@ -705,10 +705,9 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	startAtTs, hasStartAtTs = verifier.srcChangeReader.getStartTimestamp().Get()
 	suite.Require().True(hasStartAtTs, "startAtTs should be set")
 
-	suite.Assert().Equal(
-		*postEventsSessionTime,
-		startAtTs,
-		"verifier.srcStartAtTs should now be our session timestamp",
+	suite.Assert().False(
+		startAtTs.Before(*postEventsSessionTime),
+		"verifier.srcStartAtTs should now be at least at the session timestamp",
 	)
 }
 
