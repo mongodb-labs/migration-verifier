@@ -1685,19 +1685,21 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	ctx := suite.Context()
 
+	dbName := suite.DBNameForTest()
+
 	suite.Require().NoError(
 		suite.srcMongoClient.
-			Database("test").
+			Database(dbName).
 			Collection("coll").Drop(ctx),
 	)
 	suite.Require().NoError(
 		suite.dstMongoClient.
-			Database("test").
+			Database(dbName).
 			Collection("coll").Drop(ctx),
 	)
 
 	_, err := suite.srcMongoClient.
-		Database("test").
+		Database(dbName).
 		Collection("coll").
 		InsertMany(
 			ctx,
@@ -1716,7 +1718,7 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	// The first has a mismatched `foo` value,
 	// and the 2nd lacks `foo` entirely.
 	_, err = suite.dstMongoClient.
-		Database("test").
+		Database(dbName).
 		Collection("coll").
 		InsertMany(ctx, lo.ToAnySlice([]bson.D{
 			{{"_id", 100000}, {"foo", 1}},
@@ -1727,7 +1729,7 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	verifier := suite.BuildVerifier()
 	verifier.failureDisplaySize = 10
 
-	ns := "test.coll"
+	ns := dbName + ".coll"
 	verifier.SetSrcNamespaces([]string{ns})
 	verifier.SetDstNamespaces([]string{ns})
 	verifier.SetNamespaceMap()
