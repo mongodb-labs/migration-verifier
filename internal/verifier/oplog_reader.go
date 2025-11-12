@@ -268,7 +268,7 @@ CursorLoop:
 	for {
 		if o.lastChangeEventTime != nil {
 			if !o.lastChangeEventTime.Before(writesOffTS) {
-				fmt.Printf("----------- %s reached writes off ts %v", o, writesOffTS)
+				fmt.Printf("----------- %s reached writes off ts %v\n", o, writesOffTS)
 				break
 			}
 		}
@@ -292,7 +292,7 @@ CursorLoop:
 
 	infoLog.
 		Stringer("reader", o).
-		Msg("Change stream reader is done.")
+		Msg("Oplog reader is done.")
 
 	return nil
 }
@@ -393,7 +393,6 @@ func (o *OplogReader) readAndHandleOneBatch(
 	case o.changeEventBatchChan <- changeEventBatch{
 		events:      events,
 		resumeToken: resumeToken,
-		clusterTime: *sess.OperationTime(),
 	}:
 	}
 

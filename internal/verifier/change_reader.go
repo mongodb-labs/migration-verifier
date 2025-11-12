@@ -239,32 +239,34 @@ func (rc *ChangeReaderCommon) start(
 }
 
 func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson.Raw) error {
+	ts, err := rc.resumeTokenTSExtractor(token)
+	if err != nil {
+		return errors.Wrapf(err, "parsing resume token %#q", token)
+	}
+
+	if ts.IsZero() {
+		panic("empty ts in resume token is invalid!")
+	}
+
 	coll := rc.metaDB.Collection(changeReaderCollectionName)
-	_, err := coll.ReplaceOne(
+	_, err = coll.ReplaceOne(
 		ctx,
 		bson.D{{"_id", resumeTokenDocID(rc.getWhichCluster())}},
 		token,
 		options.Replace().SetUpsert(true),
 	)
 
-	if err == nil {
-		ts, err := rc.resumeTokenTSExtractor(token)
-
-		logEvent := rc.logger.Debug()
-
-		if err == nil {
-			logEvent = addTimestampToLogEvent(ts, logEvent)
-		} else {
-			rc.logger.Warn().Err(err).
-				Msg("failed to extract resume token timestamp")
-		}
-
-		logEvent.Msgf("Persisted %s's resume token.", rc.readerType)
-
-		return nil
+	if err != nil {
+		return errors.Wrapf(err, "persisting %s resume token (%v)", rc.readerType, token)
 	}
 
-	return errors.Wrapf(err, "failed to persist %s resume token (%v)", rc.readerType, token)
+	logEvent := rc.logger.Debug()
+
+	logEvent = addTimestampToLogEvent(ts, logEvent)
+
+	logEvent.Msgf("Persisted %s’s resume token.", rc.readerType)
+
+	return nil
 }
 
 func resumeTokenDocID(clusterType whichCluster) string {

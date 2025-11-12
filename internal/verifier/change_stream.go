@@ -252,12 +252,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	case <-sctx.Done():
 		return util.WrapCtxErrWithCause(sctx)
 	case csr.changeEventBatchChan <- changeEventBatch{
-		events: changeEvents,
-
+		events:      changeEvents,
 		resumeToken: cs.ResumeToken(),
-
-		// NB: We know by now that OperationTime is non-nil.
-		clusterTime: *sess.OperationTime(),
 	}:
 	}
 

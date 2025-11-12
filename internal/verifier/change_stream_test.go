@@ -353,7 +353,7 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 			).Raw()
 			require.NoError(suite.T(), err)
 
-			suite.T().Logf("found rt: %v\n", rt)
+			suite.T().Logf("found rt: %v", rt)
 
 			return !bytes.Equal(rt, originalResumeToken)
 		},
