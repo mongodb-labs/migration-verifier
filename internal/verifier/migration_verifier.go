@@ -103,7 +103,7 @@ type Verifier struct {
 	srcEventRecorder *EventRecorder
 	dstEventRecorder *EventRecorder
 
-	changeReaderErr *util.Eventual[error]
+	changeHandlingErr *util.Eventual[error]
 
 	// Used only with generation 0 to defer the first
 	// progress report until after we’ve finished partitioning
@@ -198,6 +198,8 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 
 		verificationStatusCheckInterval: 2 * time.Second,
 		nsMap:                           NewNSMap(),
+
+		changeHandlingErr: util.NewEventual[error](),
 	}
 }
 
@@ -284,9 +286,9 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-verifier.changeReaderErr.Ready():
+		case <-verifier.changeHandlingErr.Ready():
 			return errors.Wrapf(
-				verifier.changeReaderErr.Get(),
+				verifier.changeHandlingErr.Get(),
 				"tried to send writes-off timestamp to %s, but change handling already failed", readerAndTS.reader)
 		default:
 			readerAndTS.reader.setWritesOff(readerAndTS.ts)

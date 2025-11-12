@@ -8,7 +8,6 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
-	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goaux/timer"
@@ -77,9 +76,9 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	// If the change reader fails, everything should stop.
 	eg.Go(func() error {
 		select {
-		case <-verifier.changeReaderErr.Ready():
+		case <-verifier.changeHandlingErr.Ready():
 			return errors.Wrap(
-				verifier.changeReaderErr.Get(),
+				verifier.changeHandlingErr.Get(),
 				verifier.dstChangeReader.String(),
 			)
 		case <-ctx.Done():
@@ -269,9 +268,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		}
 	}
 
-	verifier.changeReaderErr = util.NewEventual[error]()
+	changeHandlingErr := verifier.changeHandlingErr
 	go func() {
-		verifier.changeReaderErr.Set(changeReaderGroup.Wait())
+		changeHandlingErr.Set(changeReaderGroup.Wait())
 	}()
 
 	// Log the verification status when initially booting up so it's easy to see the current state
@@ -361,8 +360,8 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-verifier.changeReaderErr.Ready():
-				err := verifier.changeReaderErr.Get()
+			case <-verifier.changeHandlingErr.Ready():
+				err := verifier.changeHandlingErr.Get()
 				if err != nil {
 					return errors.Wrap(err, "handling change events")
 				}
