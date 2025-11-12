@@ -148,7 +148,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeE
 		} else if changeEvent.FullDocument == nil {
 			// This happens for deletes and for some updates.
 			// The document is probably, but not necessarily, deleted.
-			dataSizes[i] = fauxDocSizeForDeleteEvents
+			dataSizes[i] = defaultUserDocumentSize
 		} else {
 			// This happens for inserts, replaces, and most updates.
 			dataSizes[i] = int32(len(changeEvent.FullDocument))

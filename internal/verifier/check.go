@@ -605,8 +605,6 @@ func (v *Verifier) initializeChangeReaders() {
 		whyCS = "ns filter"
 	case v.srcClusterInfo.Topology == util.TopologySharded:
 		whyCS = "sharded"
-	case !util.ClusterHasBSONSize([2]int(v.srcClusterInfo.VersionArray)):
-		whyCS = "no $bsonSize"
 	}
 
 	srcLogEvent := v.logger.Info()
@@ -638,8 +636,6 @@ func (v *Verifier) initializeChangeReaders() {
 		whyCS = "ns filter"
 	case v.dstClusterInfo.Topology == util.TopologySharded:
 		whyCS = "sharded"
-	case !util.ClusterHasBSONSize([2]int(v.dstClusterInfo.VersionArray)):
-		whyCS = "no $bsonSize"
 	}
 
 	dstLogEvent := v.logger.Info()

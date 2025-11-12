@@ -135,6 +135,8 @@ func (o *OplogReader) createCursor(
 
 	sctx := mongo.NewSessionContext(ctx, sess)
 
+	clientHasBSONSize := util.ClusterHasBSONSize([2]int(o.clusterInfo.VersionArray))
+
 	cursor, err := o.watcherClient.
 		Database("local").
 		Collection(
@@ -174,8 +176,7 @@ func (o *OplogReader) createCursor(
 					{"op", 1},
 					{"ns", 1},
 
-					// TODO: Adjust for 4.2.
-					{"docLen", getOplogDocLenExpr("$$ROOT")},
+					{"docLen", getOplogDocLenExpr("$$ROOT", clientHasBSONSize)},
 
 					{"docID", getOplogDocIDExpr("$$ROOT")},
 
@@ -219,7 +220,7 @@ func (o *OplogReader) createCursor(
 								{"op", "$$opEntry.op"},
 								{"ns", "$$opEntry.ns"},
 								{"docID", getOplogDocIDExpr("$$opEntry")},
-								{"docLen", getOplogDocLenExpr("$$opEntry")},
+								{"docLen", getOplogDocLenExpr("$$opEntry", clientHasBSONSize)},
 							},
 						},
 						Else: "$$REMOVE",
@@ -438,7 +439,7 @@ func (o *OplogReader) getDefaultNSExclusions(docroot string) agg.And {
 	))
 }
 
-func getOplogDocLenExpr(docroot string) any {
+func getOplogDocLenExpr(docroot string, useBSONSize bool) any {
 	return agg.Switch{
 		Branches: []agg.SwitchCase{
 			{
@@ -449,7 +450,11 @@ func getOplogDocLenExpr(docroot string) any {
 						agg.Not{agg.Eq("missing", docroot+".o._id")},
 					},
 				},
-				Then: agg.BSONSize(docroot + ".o"),
+				Then: lo.Ternary[any](
+					useBSONSize,
+					agg.BSONSize(docroot+".o"),
+					defaultUserDocumentSize,
+				),
 			},
 		},
 		Default: "$$REMOVE",
