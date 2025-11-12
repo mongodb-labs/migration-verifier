@@ -5,13 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
-	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
@@ -49,40 +46,6 @@ type ChangeStreamReader struct {
 }
 
 var _ changeReader = &ChangeStreamReader{}
-
-func (verifier *Verifier) initializeChangeReaders() {
-	srcReader := &ChangeStreamReader{
-		ChangeReaderCommon: ChangeReaderCommon{
-			readerType:    src,
-			namespaces:    verifier.srcNamespaces,
-			watcherClient: verifier.srcClient,
-			clusterInfo:   *verifier.srcClusterInfo,
-		},
-	}
-	verifier.srcChangeReader = srcReader
-
-	dstReader := &ChangeStreamReader{
-		ChangeReaderCommon: ChangeReaderCommon{
-			readerType:    dst,
-			namespaces:    verifier.dstNamespaces,
-			watcherClient: verifier.dstClient,
-			clusterInfo:   *verifier.dstClusterInfo,
-			onDDLEvent:    onDDLEventAllow,
-		},
-	}
-	verifier.dstChangeReader = dstReader
-
-	// Common elements in both readers:
-	for _, csr := range mslices.Of(srcReader, dstReader) {
-		csr.logger = verifier.logger
-		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
-		csr.changeEventBatchChan = make(chan changeEventBatch, batchChanBufferSize)
-		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
-		csr.lag = msync.NewTypedAtomic(option.None[time.Duration]())
-		csr.batchSizeHistory = history.New[int](time.Minute)
-		csr.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
-	}
-}
 
 // GetChangeStreamFilter returns an aggregation pipeline that filters
 // namespaces as per configuration.

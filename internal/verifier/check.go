@@ -6,9 +6,13 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/msync"
+	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goaux/timer"
 	"github.com/pkg/errors"
@@ -593,5 +597,39 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 		default:
 			panic("Unknown verification task type: " + task.Type)
 		}
+	}
+}
+
+func (verifier *Verifier) initializeChangeReaders() {
+	srcReader := &ChangeStreamReader{
+		ChangeReaderCommon: ChangeReaderCommon{
+			readerType:    src,
+			namespaces:    verifier.srcNamespaces,
+			watcherClient: verifier.srcClient,
+			clusterInfo:   *verifier.srcClusterInfo,
+		},
+	}
+	verifier.srcChangeReader = srcReader
+
+	dstReader := &ChangeStreamReader{
+		ChangeReaderCommon: ChangeReaderCommon{
+			readerType:    dst,
+			namespaces:    verifier.dstNamespaces,
+			watcherClient: verifier.dstClient,
+			clusterInfo:   *verifier.dstClusterInfo,
+			onDDLEvent:    onDDLEventAllow,
+		},
+	}
+	verifier.dstChangeReader = dstReader
+
+	// Common elements in both readers:
+	for _, csr := range mslices.Of(srcReader, dstReader) {
+		csr.logger = verifier.logger
+		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
+		csr.changeEventBatchChan = make(chan changeEventBatch, batchChanBufferSize)
+		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
+		csr.lag = msync.NewTypedAtomic(option.None[time.Duration]())
+		csr.batchSizeHistory = history.New[int](time.Minute)
+		csr.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
 	}
 }
