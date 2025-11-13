@@ -7,6 +7,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+    replsetSrcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
+    replsetDstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
+    shardedSrcConnStr: mongodb://localhost:27020
+    shardedDstConnStr: mongodb://localhost:27030
+
 jobs:
   basics:
     strategy:
@@ -17,10 +23,37 @@ jobs:
           # Testing fallback when `hello` isn’t implemented
           # (but appendOplogNote is).
           - mongodb_versions: [ '4.2.5', '6.0' ]
-            topology:
-              name: replset
-              srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
-              dstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
+            topology: replset
+
+          - mongodb_versions: [ '4.2', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '4.4', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '5.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '6.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '7.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '8.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
 
         exclude:
           - mongodb_versions: [ '4.2', '4.2' ]
@@ -63,27 +96,19 @@ jobs:
 
         toHashedIndexKey: [true, false]
 
+        srcChangeReader: changeStream
+        dstChangeReader: changeStream
+
         topology:
-          - name: replset
-            srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
-            dstConnStr: mongodb://localhost:27030,localhost:27031,localhost:27032
-
-          - name: replset-to-sharded
-            dstArgs: --sharded 2
-            srcConnStr: mongodb://localhost:27020,localhost:27021,localhost:27022
-            dstConnStr: mongodb://localhost:27030
-
-          - name: sharded
-            srcArgs: --sharded 2
-            dstArgs: --sharded 2
-            srcConnStr: mongodb://localhost:27020
-            dstConnStr: mongodb://localhost:27030
+          - replset
+          - replset-to-sharded
+          - sharded
 
     # Ubuntu 24 lacks OpenSSL 1.1.1’s libcrypto, which pre-v6 MongoDB
     # versions need.
     runs-on: ubuntu-22.04
 
-    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology.name }}${{ matrix.toHashedIndexKey && ', hashed doc compare' || '' }}
+    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology }}${{ matrix.toHashedIndexKey && ', hashed doc compare' || '' }}, srcChangeReader=${{ matrix.srcChangeReader }}, dstChangeReader=${{ matrix.dstChangeReader }}
 
     steps:
       - run: uname -a
@@ -118,8 +143,8 @@ jobs:
         run: |-
             {
                 echo ./build.sh
-                echo mlaunch init --binarypath $(cat .srcpath) --port 27020 --dir src --replicaset ${{ matrix.topology.srcArgs }}
-                echo mlaunch init --binarypath $(cat .dstpath) --port 27030 --dir dst --replicaset ${{ matrix.topology.dstArgs }}
+                echo mlaunch init --binarypath $(cat .srcpath) --port 27020 --dir src --replicaset ${{ (matrix.topology == "sharded") && "--sharded 2" || "" }}
+                echo mlaunch init --binarypath $(cat .dstpath) --port 27030 --dir dst --replicaset ${{ (matrix.topology == "sharded" || matrix.topology == "replset-to-sharded") && "--sharded 2" || "" }}
                 echo mlaunch init --binarypath $(cat .metapath) --port 27040 --dir meta --replicaset --nodes 1
             } | parallel
 
@@ -127,6 +152,11 @@ jobs:
         run: go test -v ./... -race
         env:
           MVTEST_DOC_COMPARE_METHOD: ${{matrix.toHashedIndexKey && 'toHashedIndexKey' || ''}}
-          MVTEST_SRC: ${{matrix.topology.srcConnStr}}
-          MVTEST_DST: ${{matrix.topology.dstConnStr}}
+
+          MVTEST_SRC_CHANGE_READER: ${{matrix.srcChangeReader}}
+          MVTEST_DST_CHANGE_READER: ${{matrix.dstChangeReader}}
+
+          MVTEST_SRC: ${{ (matrix.topology == "sharded") && env.shardedSrcConnStr || env.replsetSrcConnStr }}
+          MVTEST_DST: ${{ (matrix.topology == "sharded" || matrix.topology == "replset-to-sharded") && env.shardedDstConnStr || env.replsetDstConnStr }}
+
           MVTEST_META: mongodb://localhost:27040

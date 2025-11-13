@@ -191,11 +191,23 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		"should set metadata connection string",
 	)
 	verifier.SetMetaDBName(metaDBName)
+
+	envSrcChangeReader := os.Getenv("MVTEST_SRC_CHANGE_READER")
+	if envSrcChangeReader != "" {
+		verifier.SetSrcChangeReader(envSrcChangeReader)
+	}
+
+	envDstChangeReader := os.Getenv("MVTEST_DST_CHANGE_READER")
+	if envDstChangeReader != "" {
+		verifier.SetDstChangeReader(envDstChangeReader)
+	}
+
 	verifier.initializeChangeReaders()
 
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))
 	suite.Require().NoError(verifier.dstClientCollection(&task).Drop(ctx))
 	suite.Require().NoError(verifier.AddMetaIndexes(ctx))
+
 	return verifier
 }
 
