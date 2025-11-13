@@ -143,8 +143,8 @@ jobs:
         run: |-
             {
                 echo ./build.sh
-                echo mlaunch init --binarypath $(cat .srcpath) --port 27020 --dir src --replicaset ${{ (matrix.topology == "sharded") && "--sharded 2" || "" }}
-                echo mlaunch init --binarypath $(cat .dstpath) --port 27030 --dir dst --replicaset ${{ (matrix.topology == "sharded" || matrix.topology == "replset-to-sharded") && "--sharded 2" || "" }}
+                echo mlaunch init --binarypath $(cat .srcpath) --port 27020 --dir src --replicaset ${{ (matrix.topology == 'sharded') && '--sharded 2' || '' }}
+                echo mlaunch init --binarypath $(cat .dstpath) --port 27030 --dir dst --replicaset ${{ (matrix.topology == 'sharded' || matrix.topology == 'replset-to-sharded') && '--sharded 2' || "" }}
                 echo mlaunch init --binarypath $(cat .metapath) --port 27040 --dir meta --replicaset --nodes 1
             } | parallel
 
@@ -156,7 +156,7 @@ jobs:
           MVTEST_SRC_CHANGE_READER: ${{matrix.srcChangeReader}}
           MVTEST_DST_CHANGE_READER: ${{matrix.dstChangeReader}}
 
-          MVTEST_SRC: ${{ (matrix.topology == "sharded") && env.shardedSrcConnStr || env.replsetSrcConnStr }}
-          MVTEST_DST: ${{ (matrix.topology == "sharded" || matrix.topology == "replset-to-sharded") && env.shardedDstConnStr || env.replsetDstConnStr }}
+          MVTEST_SRC: ${{ (matrix.topology == 'sharded') && env.shardedSrcConnStr || env.replsetSrcConnStr }}
+          MVTEST_DST: ${{ (matrix.topology == 'sharded' || matrix.topology == 'replset-to-sharded') && env.shardedDstConnStr || env.replsetDstConnStr }}
 
           MVTEST_META: mongodb://localhost:27040
