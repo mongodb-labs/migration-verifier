@@ -440,29 +440,26 @@ func (o *OplogReader) getDefaultNSExclusions(docroot string) agg.And {
 }
 
 func getOplogDocLenExpr(docroot string, useBSONSize bool) any {
-	return agg.Switch{
-		Branches: []agg.SwitchCase{
-			{
-				Case: agg.Or{
-					agg.Eq(docroot+".op", "i"),
-					agg.And{
-						agg.Eq(docroot+".op", "u"),
-						agg.Not{agg.Eq("missing", docroot+".o._id")},
-					},
-				},
-				Then: lo.Ternary[any](
-					useBSONSize,
-					agg.BSONSize(docroot+".o"),
-					defaultUserDocumentSize,
-				),
+	return agg.Cond{
+		If: agg.Or{
+			agg.Eq(docroot+".op", "i"),
+			agg.And{
+				agg.Eq(docroot+".op", "u"),
+				agg.Not{agg.Eq("missing", docroot+".o._id")},
 			},
 		},
-		Default: "$$REMOVE",
+		Then: lo.Ternary[any](
+			useBSONSize,
+			agg.BSONSize(docroot+".o"),
+			defaultUserDocumentSize,
+		),
+		Else: "$$REMOVE",
 	}
 }
 
 func getOplogDocIDExpr(docroot string) any {
-	return agg.Switch{
+	// $switch was new in MongoDB 4.2, so use $cond instead.
+	return helpers.SwitchToCond(agg.Switch{
 		Branches: []agg.SwitchCase{
 			{
 				Case: agg.Eq(docroot+".op", "c"),
@@ -477,7 +474,7 @@ func getOplogDocIDExpr(docroot string) any {
 				Then: docroot + ".o2._id",
 			},
 		},
-	}
+	})
 }
 
 func (o *OplogReader) String() string {
