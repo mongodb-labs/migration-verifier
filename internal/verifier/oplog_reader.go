@@ -436,6 +436,8 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 			docLength = defaultUserDocumentSize
 		}
 
+		docID.Value = slices.Clone(docID.Value)
+
 		events = append(
 			events,
 			ParsedEvent{
