@@ -725,7 +725,6 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 		return nil, nil
 	}
 
-	// Beyond here we know there was a mismatch.
 	docID := getDocIdFromComparison(verifier.docCompareMethod, srcClientDoc)
 
 	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
@@ -751,7 +750,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 		// If we're respecting field order we have just done a binary compare so we have fields in different order.
 		return []VerificationResult{{
 			ID:        docID,
-			Details:   Mismatch + fmt.Sprintf(" : Document %s has fields in different order", srcClientDoc.Lookup("_id")),
+			Details:   Mismatch + " : only field order differs",
 			Cluster:   ClusterTarget,
 			NameSpace: namespace,
 			dataSize:  int32(dataSize),
