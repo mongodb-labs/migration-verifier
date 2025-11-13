@@ -96,8 +96,8 @@ jobs:
 
         toHashedIndexKey: [true, false]
 
-        srcChangeReader: changeStream
-        dstChangeReader: changeStream
+        srcChangeReader: [changeStream]
+        dstChangeReader: [changeStream]
 
         topology:
           - replset
