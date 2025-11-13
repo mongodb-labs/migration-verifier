@@ -458,7 +458,7 @@ func getOplogDocLenExpr(docroot string, useBSONSize bool) any {
 }
 
 func getOplogDocIDExpr(docroot string) any {
-	// $switch was new in MongoDB 4.2, so use $cond instead.
+	// $switch was new in MongoDB 4.4, so use $cond instead.
 	return helpers.SwitchToCond(agg.Switch{
 		Branches: []agg.SwitchCase{
 			{
