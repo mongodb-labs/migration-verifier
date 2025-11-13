@@ -459,7 +459,7 @@ func getOplogDocLenExpr(docroot string, useBSONSize bool) any {
 
 func getOplogDocIDExpr(docroot string) any {
 	// $switch was new in MongoDB 4.4, so use $cond instead.
-	return helpers.SwitchToCond(agg.Switch{
+	return agg.Switch{
 		Branches: []agg.SwitchCase{
 			{
 				Case: agg.Eq(docroot+".op", "c"),
@@ -474,7 +474,7 @@ func getOplogDocIDExpr(docroot string) any {
 				Then: docroot + ".o2._id",
 			},
 		},
-	})
+	}
 }
 
 func (o *OplogReader) String() string {
