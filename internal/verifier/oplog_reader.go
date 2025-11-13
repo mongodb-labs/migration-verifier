@@ -24,6 +24,10 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+const (
+	ChangeReaderOptOplog = "tailOplog"
+)
+
 // OplogReader reads change events via oplog tailing instead of a change stream.
 // This significantly lightens server load and allows verification of heavier
 // workloads than change streams allow. It only works with replica sets.

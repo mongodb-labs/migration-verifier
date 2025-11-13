@@ -15,6 +15,10 @@ type changeEventBatch struct {
 	resumeToken bson.Raw
 }
 
+const (
+	minResumeTokenPersistInterval = 10 * time.Second
+)
+
 // RunChangeEventPersistor persists rechecks from change event batches.
 // It needs to be started after the reader starts and should run in its own
 // goroutine.
@@ -30,7 +34,7 @@ func (verifier *Verifier) RunChangeEventPersistor(
 
 	var lastPersistedTime time.Time
 	persistResumeTokenIfNeeded := func(ctx context.Context, token bson.Raw) {
-		if time.Since(lastPersistedTime) >= minChangeStreamPersistInterval {
+		if time.Since(lastPersistedTime) >= minResumeTokenPersistInterval {
 			persistErr := persistCallback(ctx, token)
 			if persistErr != nil {
 				verifier.logger.Warn().

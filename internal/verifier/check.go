@@ -8,7 +8,6 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
-	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goaux/timer"
@@ -31,6 +30,11 @@ var (
 	failedStatuses = mapset.NewSet(
 		verificationTaskFailed,
 		verificationTaskMetadataMismatch,
+	)
+
+	ChangeReaderOpts = mslices.Of(
+		ChangeReaderOptChangeStream,
+		ChangeReaderOptOplog,
 	)
 )
 
@@ -216,8 +220,12 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 
 	// Now that we’ve initialized verifier.generation we can
 	// start the change readers.
-	verifier.initializeChangeReaders()
+	err = verifier.initializeChangeReaders()
 	verifier.mux.Unlock()
+
+	if err != nil {
+		return err
+	}
 
 	err = retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
@@ -597,68 +605,54 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 	}
 }
 
-func (v *Verifier) initializeChangeReaders() {
-	var whyCS string
-
-	switch {
-	case len(v.srcNamespaces) > 0:
-		whyCS = "ns filter"
-	case v.srcClusterInfo.Topology == util.TopologySharded:
-		whyCS = "sharded"
+func (v *Verifier) initializeChangeReaders() error {
+	warnAboutOplog := func(cluster whichCluster) {
+		v.logger.Warn().
+			Str("cluster", string(cluster)).
+			Msg("Reading writes via oplog tailing. This feature is experimental.")
 	}
 
-	srcLogEvent := v.logger.Info()
+	switch v.srcChangeReaderMethod {
+	case ChangeReaderOptOplog:
+		warnAboutOplog(src)
 
-	if whyCS == "" {
 		v.srcChangeReader = v.newOplogReader(
 			v.srcNamespaces,
 			src,
 			v.srcClient,
 			*v.srcClusterInfo,
 		)
-	} else {
-		srcLogEvent.Str("whyChangeStream", whyCS)
-
+	case ChangeReaderOptChangeStream:
 		v.srcChangeReader = v.newChangeStreamReader(
 			v.srcNamespaces,
 			src,
 			v.srcClient,
 			*v.srcClusterInfo,
 		)
+	default:
+		return fmt.Errorf("bad source change reader: %#q", v.srcChangeReaderMethod)
 	}
 
-	srcLogEvent.
-		Stringer("reader", v.srcChangeReader).
-		Msg("Listening for writes to source.")
+	switch v.dstChangeReaderMethod {
+	case ChangeReaderOptOplog:
+		warnAboutOplog(dst)
 
-	switch {
-	case len(v.dstNamespaces) > 0:
-		whyCS = "ns filter"
-	case v.dstClusterInfo.Topology == util.TopologySharded:
-		whyCS = "sharded"
-	}
-
-	dstLogEvent := v.logger.Info()
-
-	if whyCS == "" {
 		v.dstChangeReader = v.newOplogReader(
 			v.dstNamespaces,
 			dst,
 			v.dstClient,
 			*v.dstClusterInfo,
 		)
-	} else {
-		dstLogEvent.Str("whyChangeStream", whyCS)
-
+	case ChangeReaderOptChangeStream:
 		v.dstChangeReader = v.newChangeStreamReader(
 			v.dstNamespaces,
 			dst,
 			v.dstClient,
 			*v.dstClusterInfo,
 		)
+	default:
+		return fmt.Errorf("bad destination change reader: %#q", v.srcChangeReaderMethod)
 	}
 
-	dstLogEvent.
-		Stringer("reader", v.dstChangeReader).
-		Msg("Listening for writes to destination.")
+	return nil
 }

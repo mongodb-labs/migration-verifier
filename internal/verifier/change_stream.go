@@ -27,8 +27,9 @@ var supportedEventOpTypes = mapset.NewSet(
 )
 
 const (
-	minChangeStreamPersistInterval = time.Second * 10
-	maxChangeStreamAwaitTime       = time.Second
+	maxChangeStreamAwaitTime = time.Second
+
+	ChangeReaderOptChangeStream = "changeStream"
 )
 
 type UnknownEventError struct {

@@ -103,6 +103,9 @@ type Verifier struct {
 	srcEventRecorder *EventRecorder
 	dstEventRecorder *EventRecorder
 
+	srcChangeReaderMethod string
+	dstChangeReaderMethod string
+
 	changeHandlingErr *util.Eventual[error]
 
 	// Used only with generation 0 to defer the first
@@ -376,6 +379,53 @@ func (verifier *Verifier) SetMetaDBName(arg string) {
 
 func (verifier *Verifier) SetDocCompareMethod(method DocCompareMethod) {
 	verifier.docCompareMethod = method
+}
+
+func (verifier *Verifier) SetSrcChangeReader(method string) error {
+	err := validateChangeReaderOpt(method, verifier.srcNamespaces, *verifier.srcClusterInfo)
+	if err != nil {
+		return errors.Wrap(err, "setting source change reader method")
+	}
+
+	verifier.srcChangeReaderMethod = method
+
+	return nil
+}
+
+func (verifier *Verifier) SetDstChangeReader(method string) error {
+	err := validateChangeReaderOpt(method, verifier.dstNamespaces, *verifier.dstClusterInfo)
+	if err != nil {
+		return errors.Wrap(err, "setting source change reader method")
+	}
+
+	verifier.dstChangeReaderMethod = method
+
+	return nil
+}
+
+func validateChangeReaderOpt(
+	method string,
+	namespaces []string,
+	clusterInfo util.ClusterInfo,
+) error {
+	if method != ChangeReaderOptOplog {
+		return nil
+	}
+
+	var whyNoOplog string
+
+	switch {
+	case len(namespaces) > 0:
+		whyNoOplog = "ns filter"
+	case clusterInfo.Topology == util.TopologySharded:
+		whyNoOplog = "sharded"
+	}
+
+	if whyNoOplog != "" {
+		return fmt.Errorf("cannot read oplog (%s)", whyNoOplog)
+	}
+
+	return nil
 }
 
 func (verifier *Verifier) SetVerifyAll(arg bool) {
