@@ -721,13 +721,17 @@ func transformPipelineForToHashedIndexKey(
 func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
 	match := bytes.Equal(srcClientDoc, dstClientDoc)
 	if match {
+		// Happy path! The documents binary-match.
 		return nil, nil
 	}
+
+	// Beyond here we know there was a mismatch.
+	docID := getDocIdFromComparison(verifier.docCompareMethod, srcClientDoc)
 
 	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
 		// With hash comparison, mismatches are opaque.
 		return []VerificationResult{{
-			ID:        getDocIdFromComparison(verifier.docCompareMethod, srcClientDoc),
+			ID:        docID,
 			Details:   Mismatch,
 			Cluster:   ClusterTarget,
 			NameSpace: namespace,
@@ -746,13 +750,15 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 
 		// If we're respecting field order we have just done a binary compare so we have fields in different order.
 		return []VerificationResult{{
-			ID:        srcClientDoc.Lookup("_id"),
+			ID:        docID,
 			Details:   Mismatch + fmt.Sprintf(" : Document %s has fields in different order", srcClientDoc.Lookup("_id")),
 			Cluster:   ClusterTarget,
 			NameSpace: namespace,
 			dataSize:  int32(dataSize),
 		}}, nil
 	}
-	results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, srcClientDoc.Lookup("_id"), "" /* fieldPrefix */)
+
+	results := mismatchResultsToVerificationResults(mismatch, srcClientDoc, dstClientDoc, namespace, docID, "" /* fieldPrefix */)
+
 	return results, nil
 }

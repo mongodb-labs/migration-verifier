@@ -1739,6 +1739,14 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	_, _, err = verifier.reportDocumentMismatches(ctx, builder)
 	suite.Require().NoError(err)
 
+	for _, specimen := range mslices.Of("100000", "100001") {
+		suite.Assert().Contains(
+			builder.String(),
+			specimen,
+			"summary should show all mismatched-content doc IDs",
+		)
+	}
+
 	suite.Assert().Contains(
 		builder.String(),
 		"100009",
@@ -1749,6 +1757,12 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 		builder.String(),
 		" 10 ",
 		"summary should show the # of missing docs shown",
+	)
+
+	suite.Assert().Contains(
+		builder.String(),
+		" 2 ",
+		"summary should show the total # of content-mismatched documents",
 	)
 
 	suite.Assert().Contains(
