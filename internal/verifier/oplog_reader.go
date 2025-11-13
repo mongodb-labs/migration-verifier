@@ -382,6 +382,74 @@ func (o *OplogReader) readAndHandleOneBatch(
 func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Timestamp) ([]ParsedEvent, bson.Timestamp, error) {
 	var latestTS bson.Timestamp
 
+	parseOneDocumentOp := func(opName string, ts bson.Timestamp, rawDoc bson.Raw) error {
+		nsStr, err := mbson.Lookup[string](rawDoc, "ns")
+		if err != nil {
+			return err
+		}
+
+		var docID bson.RawValue
+		var docLength types.ByteCount
+		var docField string
+
+		switch opName {
+		case "i":
+			docField = "o"
+		case "d":
+			docID, err = rawDoc.LookupErr("o", "_id")
+			if err != nil {
+				return errors.Wrap(err, "extracting o._id from delete")
+			}
+		case "u":
+			_, err := rawDoc.LookupErr("o", "_id")
+			if err == nil {
+				// replace, so we have the full doc
+				docField = "o"
+			} else if errors.Is(err, bsoncore.ErrElementNotFound) {
+				docID, err = rawDoc.LookupErr("o2", "_id")
+				if err != nil {
+					return errors.Wrap(err, "extracting o2._id from update")
+				}
+			} else {
+				return errors.Wrap(err, "extracting o._id from update")
+			}
+		default:
+			panic(fmt.Sprintf("op=%#q unexpected (%v)", opName, rawDoc))
+		}
+
+		if docField != "" {
+			doc, err := mbson.Lookup[bson.Raw](rawDoc, docField)
+			if err != nil {
+				return errors.Wrap(err, "extracting doc from op")
+			}
+
+			docLength = types.ByteCount(len(doc))
+			docID, err = doc.LookupErr("_id")
+			if err != nil {
+				return errors.Wrap(err, "extracting doc ID from op")
+			}
+		} else {
+			if docID.IsZero() {
+				panic("zero doc ID!")
+			}
+
+			docLength = defaultUserDocumentSize
+		}
+
+		events = append(
+			events,
+			ParsedEvent{
+				OpType:      oplogOpToOperationType[opName],
+				Ns:          NewNamespace(SplitNamespace(nsStr)),
+				DocID:       docID,
+				FullDocLen:  option.Some(docLength),
+				ClusterTime: lo.ToPtr(ts),
+			},
+		)
+
+		return nil
+	}
+
 	for _, rawDoc := range o.curDocs {
 		opName, err := mbson.Lookup[string](rawDoc, "op")
 		if err != nil {
@@ -396,70 +464,73 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 		switch opName {
 		case "n":
 		case "c":
-		default:
-			nsStr, err := mbson.Lookup[string](rawDoc, "ns")
+			oDoc, err := mbson.Lookup[bson.Raw](rawDoc, "o")
 			if err != nil {
 				return nil, bson.Timestamp{}, err
 			}
 
-			var docID bson.RawValue
-			var docLength types.ByteCount
-			var docField string
-
-			switch opName {
-			case "i":
-				docField = "o"
-			case "d":
-				docID, err = rawDoc.LookupErr("o", "_id")
-				if err != nil {
-					return nil, bson.Timestamp{}, errors.Wrap(err, "extracting o._id from delete")
-				}
-			case "u":
-				_, err := rawDoc.LookupErr("o", "_id")
-				if err == nil {
-					// replace, so we have the full doc
-					docField = "o"
-				} else if errors.Is(err, bsoncore.ErrElementNotFound) {
-					docID, err = rawDoc.LookupErr("o2", "_id")
-					if err != nil {
-						return nil, bson.Timestamp{}, errors.Wrap(err, "extracting o2._id from update")
-					}
-				} else {
-					return nil, bson.Timestamp{}, errors.Wrap(err, "extracting o._id from update")
-				}
-			default:
-				panic(fmt.Sprintf("op=%#q unexpected (%v)", opName, rawDoc))
+			el, err := oDoc.IndexErr(0)
+			if err != nil {
+				return nil, bson.Timestamp{}, errors.Wrap(err, "getting first el of o doc")
 			}
 
-			if docField != "" {
-				doc, err := mbson.Lookup[bson.Raw](rawDoc, docField)
-				if err != nil {
-					return nil, bson.Timestamp{}, errors.Wrap(err, "extracting doc from op")
-				}
-
-				docLength = types.ByteCount(len(doc))
-				docID, err = doc.LookupErr("_id")
-				if err != nil {
-					return nil, bson.Timestamp{}, errors.Wrap(err, "extracting doc ID from op")
-				}
-			} else {
-				if docID.IsZero() {
-					panic("zero doc ID!")
-				}
-
-				docLength = defaultUserDocumentSize
+			cmdName, err := el.KeyErr()
+			if err != nil {
+				return nil, bson.Timestamp{}, errors.Wrap(err, "getting first field name of o doc")
 			}
 
-			events = append(
-				events,
-				ParsedEvent{
-					OpType:      oplogOpToOperationType[opName],
-					Ns:          NewNamespace(SplitNamespace(nsStr)),
-					DocID:       docID,
-					FullDocLen:  option.Some(docLength),
-					ClusterTime: lo.ToPtr(latestTS),
-				},
-			)
+			if cmdName != "applyOps" {
+				if o.onDDLEvent == onDDLEventAllow {
+					o.logIgnoredDDL(rawDoc)
+					continue
+				}
+
+				if !latestTS.After(allowDDLBeforeTS) {
+					o.logger.Info().
+						Stringer("event", rawDoc).
+						Msg("Ignoring unrecognized write from the past.")
+
+					continue
+				}
+
+				return nil, bson.Timestamp{}, UnknownEventError{rawDoc}
+			}
+
+			var opsArray bson.Raw
+			err = mbson.UnmarshalElementValue(el, &opsArray)
+			if err != nil {
+				return nil, bson.Timestamp{}, errors.Wrap(err, "parsing applyOps")
+			}
+
+			arrayVals, err := opsArray.Values()
+			if err != nil {
+				return nil, bson.Timestamp{}, errors.Wrap(err, "getting applyOps values")
+			}
+
+			// Might as well ...
+			events = slices.Grow(events, len(arrayVals))
+
+			for i, opRV := range arrayVals {
+				opRaw, err := mbson.CastRawValue[bson.Raw](opRV)
+				if err != nil {
+					return nil, bson.Timestamp{}, errors.Wrapf(err, "extracting applyOps[%d]", i)
+				}
+
+				opName, err := mbson.Lookup[string](opRaw, "op")
+				if err != nil {
+					return nil, bson.Timestamp{}, errors.Wrapf(err, "extracting applyOps[%d].op", i)
+				}
+
+				err = parseOneDocumentOp(opName, latestTS, opRaw)
+				if err != nil {
+					return nil, bson.Timestamp{}, errors.Wrapf(err, "processing applyOps[%d]", i)
+				}
+			}
+		default:
+			err := parseOneDocumentOp(opName, latestTS, rawDoc)
+			if err != nil {
+				return nil, bson.Timestamp{}, err
+			}
 		}
 	}
 
