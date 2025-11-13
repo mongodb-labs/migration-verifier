@@ -162,7 +162,7 @@ func (o *OplogReader) createCursor(
 					// plain ops: one write per op
 					append(
 						agg.And{agg.In("$op", "d", "i", "u")},
-						o.getDefaultNSExclusions("$$ROOT")...,
+						o.getNSExclusions("$$ROOT")...,
 					),
 
 					// op=n is for no-ops, so we stay up-to-date.
@@ -234,7 +234,7 @@ func (o *OplogReader) getExprProjection() bson.D {
 				Input: agg.Filter{
 					Input: "$o.applyOps",
 					As:    "opEntry",
-					Cond:  o.getDefaultNSExclusions("$$opEntry"),
+					Cond:  o.getNSExclusions("$$opEntry"),
 				},
 				As: "opEntry",
 				In: bson.D{
@@ -608,7 +608,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 	return events, latestTS, nil
 }
 
-func (o *OplogReader) getDefaultNSExclusions(docroot string) agg.And {
+func (o *OplogReader) getNSExclusions(docroot string) agg.And {
 	prefixes := append(
 		slices.Clone(namespaces.MongosyncMetaDBPrefixes),
 		o.metaDB.Name()+".",
@@ -616,7 +616,7 @@ func (o *OplogReader) getDefaultNSExclusions(docroot string) agg.And {
 		"admin.",
 	)
 
-	return agg.And(lo.Map(
+	filter := agg.And(lo.Map(
 		prefixes,
 		func(prefix string, _ int) any {
 			return agg.Not{helpers.StringHasPrefix{
@@ -625,6 +625,15 @@ func (o *OplogReader) getDefaultNSExclusions(docroot string) agg.And {
 			}}
 		},
 	))
+
+	if len(o.namespaces) > 0 {
+		filter = append(
+			filter,
+			agg.In(docroot+".ns", o.namespaces...),
+		)
+	}
+
+	return filter
 }
 
 func getOplogDocLenExpr(docroot string) any {

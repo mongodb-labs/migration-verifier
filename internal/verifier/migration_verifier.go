@@ -382,7 +382,7 @@ func (verifier *Verifier) SetDocCompareMethod(method DocCompareMethod) {
 }
 
 func (verifier *Verifier) SetSrcChangeReader(method string) error {
-	err := validateChangeReaderOpt(method, verifier.srcNamespaces, *verifier.srcClusterInfo)
+	err := validateChangeReaderOpt(method, *verifier.srcClusterInfo)
 	if err != nil {
 		return errors.Wrap(err, "setting source change reader method")
 	}
@@ -393,7 +393,7 @@ func (verifier *Verifier) SetSrcChangeReader(method string) error {
 }
 
 func (verifier *Verifier) SetDstChangeReader(method string) error {
-	err := validateChangeReaderOpt(method, verifier.dstNamespaces, *verifier.dstClusterInfo)
+	err := validateChangeReaderOpt(method, *verifier.dstClusterInfo)
 	if err != nil {
 		return errors.Wrap(err, "setting source change reader method")
 	}
@@ -405,7 +405,6 @@ func (verifier *Verifier) SetDstChangeReader(method string) error {
 
 func validateChangeReaderOpt(
 	method string,
-	namespaces []string,
 	clusterInfo util.ClusterInfo,
 ) error {
 	if method != ChangeReaderOptOplog {
@@ -415,8 +414,6 @@ func validateChangeReaderOpt(
 	var whyNoOplog string
 
 	switch {
-	case len(namespaces) > 0:
-		whyNoOplog = "ns filter"
 	case clusterInfo.Topology == util.TopologySharded:
 		whyNoOplog = "sharded"
 	}
