@@ -601,8 +601,6 @@ func (v *Verifier) initializeChangeReaders() {
 	var whyCS string
 
 	switch {
-	case !util.ClusterHasBSONSize([2]int(v.srcClusterInfo.VersionArray)):
-		whyCS = "no expr projection"
 	case len(v.srcNamespaces) > 0:
 		whyCS = "ns filter"
 	case v.srcClusterInfo.Topology == util.TopologySharded:
@@ -634,8 +632,6 @@ func (v *Verifier) initializeChangeReaders() {
 		Msg("Listening for writes to source.")
 
 	switch {
-	case !util.ClusterHasBSONSize([2]int(v.dstClusterInfo.VersionArray)):
-		whyCS = "no expr projection"
 	case len(v.dstNamespaces) > 0:
 		whyCS = "ns filter"
 	case v.dstClusterInfo.Topology == util.TopologySharded:

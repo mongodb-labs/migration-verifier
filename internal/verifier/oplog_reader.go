@@ -20,6 +20,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 	"golang.org/x/exp/slices"
 )
 
@@ -135,6 +136,13 @@ func (o *OplogReader) createCursor(
 
 	sctx := mongo.NewSessionContext(ctx, sess)
 
+	findOpts := options.Find().
+		SetCursorType(options.TailableAwait)
+
+	if util.ClusterHasBSONSize([2]int(o.clusterInfo.VersionArray)) {
+		findOpts.SetProjection(o.getExprProjection())
+	}
+
 	cursor, err := o.watcherClient.
 		Database("local").
 		Collection(
@@ -166,64 +174,7 @@ func (o *OplogReader) createCursor(
 					},
 				}}},
 			}}},
-
-			options.Find().
-				SetCursorType(options.TailableAwait).
-				SetProjection(bson.D{
-					{"ts", 1},
-					{"op", 1},
-					{"ns", 1},
-
-					{"docLen", getOplogDocLenExpr("$$ROOT")},
-
-					{"docID", getOplogDocIDExpr("$$ROOT")},
-
-					{"cmdName", agg.Cond{
-						If: agg.Eq("$op", "c"),
-						Then: agg.ArrayElemAt{
-							Array: agg.Map{
-								Input: bson.D{
-									{"$objectToArray", "$o"},
-								},
-								As: "field",
-								In: "$$field.k",
-							},
-							Index: 0,
-						},
-						Else: "$$REMOVE",
-					}},
-
-					{"o", agg.Cond{
-						If: agg.And{
-							agg.Eq("$op", "c"),
-							agg.Eq("missing", agg.Type("$o.applyOps")),
-						},
-						Then: "$o",
-						Else: "$$REMOVE",
-					}},
-
-					{"ops", agg.Cond{
-						If: agg.And{
-							agg.Eq("$op", "c"),
-							agg.Eq(agg.Type("$o.applyOps"), "array"),
-						},
-						Then: agg.Map{
-							Input: agg.Filter{
-								Input: "$o.applyOps",
-								As:    "opEntry",
-								Cond:  o.getDefaultNSExclusions("$$opEntry"),
-							},
-							As: "opEntry",
-							In: bson.D{
-								{"op", "$$opEntry.op"},
-								{"ns", "$$opEntry.ns"},
-								{"docID", getOplogDocIDExpr("$$opEntry")},
-								{"docLen", getOplogDocLenExpr("$$opEntry")},
-							},
-						},
-						Else: "$$REMOVE",
-					}},
-				}),
+			findOpts,
 		)
 
 	if err != nil {
@@ -234,6 +185,64 @@ func (o *OplogReader) createCursor(
 	o.allowDDLBeforeTS = allowDDLBeforeTS
 
 	return startTS, nil
+}
+
+func (o *OplogReader) getExprProjection() bson.D {
+	return bson.D{
+		{"ts", 1},
+		{"op", 1},
+		{"ns", 1},
+
+		{"docLen", getOplogDocLenExpr("$$ROOT")},
+
+		{"docID", getOplogDocIDExpr("$$ROOT")},
+
+		{"cmdName", agg.Cond{
+			If: agg.Eq("$op", "c"),
+			Then: agg.ArrayElemAt{
+				Array: agg.Map{
+					Input: bson.D{
+						{"$objectToArray", "$o"},
+					},
+					As: "field",
+					In: "$$field.k",
+				},
+				Index: 0,
+			},
+			Else: "$$REMOVE",
+		}},
+
+		{"o", agg.Cond{
+			If: agg.And{
+				agg.Eq("$op", "c"),
+				agg.Eq("missing", agg.Type("$o.applyOps")),
+			},
+			Then: "$o",
+			Else: "$$REMOVE",
+		}},
+
+		{"ops", agg.Cond{
+			If: agg.And{
+				agg.Eq("$op", "c"),
+				agg.Eq(agg.Type("$o.applyOps"), "array"),
+			},
+			Then: agg.Map{
+				Input: agg.Filter{
+					Input: "$o.applyOps",
+					As:    "opEntry",
+					Cond:  o.getDefaultNSExclusions("$$opEntry"),
+				},
+				As: "opEntry",
+				In: bson.D{
+					{"op", "$$opEntry.op"},
+					{"ns", "$$opEntry.ns"},
+					{"docID", getOplogDocIDExpr("$$opEntry")},
+					{"docLen", getOplogDocLenExpr("$$opEntry")},
+				},
+			},
+			Else: "$$REMOVE",
+		}},
+	}
 }
 
 func (o *OplogReader) ddlAllowanceDocID() string {
@@ -330,7 +339,134 @@ func (o *OplogReader) readAndHandleOneBatch(
 		return nil
 	}
 
+	var latestTS bson.Timestamp
+
 	events := make([]ParsedEvent, 0, len(o.curDocs))
+
+	if util.ClusterHasBSONSize([2]int(o.clusterInfo.VersionArray)) {
+		events, latestTS, err = o.parseExprProjectedOps(events, allowDDLBeforeTS)
+	} else {
+		events, latestTS, err = o.parseRawOps(events, allowDDLBeforeTS)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	sess := mongo.SessionFromContext(sctx)
+	resumeToken := oplog.ResumeToken{latestTS}.MarshalToBSON()
+
+	o.updateLag(sess, resumeToken)
+
+	// NB: events can legitimately be empty here because we might only have
+	// gotten op=n oplog entries, which we just use to advance the reader.
+	// (Similar to a change stream’s post-batch resume token.)
+	if len(events) > 0 {
+		o.batchSizeHistory.Add(len(events))
+	}
+
+	select {
+	case <-sctx.Done():
+		return err
+	case o.changeEventBatchChan <- changeEventBatch{
+		events:      events,
+		resumeToken: resumeToken,
+	}:
+	}
+
+	o.lastChangeEventTime = &latestTS
+
+	return nil
+}
+
+func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Timestamp) ([]ParsedEvent, bson.Timestamp, error) {
+	var latestTS bson.Timestamp
+
+	for _, rawDoc := range o.curDocs {
+		opName, err := mbson.Lookup[string](rawDoc, "op")
+		if err != nil {
+			return nil, bson.Timestamp{}, err
+		}
+
+		err = mbson.LookupTo(rawDoc, &latestTS, "ts")
+		if err != nil {
+			return nil, bson.Timestamp{}, err
+		}
+
+		switch opName {
+		case "n":
+		case "c":
+		default:
+			nsStr, err := mbson.Lookup[string](rawDoc, "ns")
+			if err != nil {
+				return nil, bson.Timestamp{}, err
+			}
+
+			var docID bson.RawValue
+			var docLength types.ByteCount
+			var docField string
+
+			switch opName {
+			case "i":
+				docField = "o"
+			case "d":
+				docID, err = rawDoc.LookupErr("o", "_id")
+				if err != nil {
+					return nil, bson.Timestamp{}, errors.Wrap(err, "extracting o._id from delete")
+				}
+			case "u":
+				_, err := rawDoc.LookupErr("o", "_id")
+				if err == nil {
+					// replace, so we have the full doc
+					docField = "o"
+				} else if errors.Is(err, bsoncore.ErrElementNotFound) {
+					docID, err = rawDoc.LookupErr("o2", "_id")
+					if err != nil {
+						return nil, bson.Timestamp{}, errors.Wrap(err, "extracting o2._id from update")
+					}
+				} else {
+					return nil, bson.Timestamp{}, errors.Wrap(err, "extracting o._id from update")
+				}
+			default:
+				panic(fmt.Sprintf("op=%#q unexpected (%v)", opName, rawDoc))
+			}
+
+			if docField != "" {
+				doc, err := mbson.Lookup[bson.Raw](rawDoc, docField)
+				if err != nil {
+					return nil, bson.Timestamp{}, errors.Wrap(err, "extracting doc from op")
+				}
+
+				docLength = types.ByteCount(len(doc))
+				docID, err = doc.LookupErr("_id")
+				if err != nil {
+					return nil, bson.Timestamp{}, errors.Wrap(err, "extracting doc ID from op")
+				}
+			} else {
+				if docID.IsZero() {
+					panic("zero doc ID!")
+				}
+
+				docLength = defaultUserDocumentSize
+			}
+
+			events = append(
+				events,
+				ParsedEvent{
+					OpType:      oplogOpToOperationType[opName],
+					Ns:          NewNamespace(SplitNamespace(nsStr)),
+					DocID:       docID,
+					FullDocLen:  option.Some(docLength),
+					ClusterTime: lo.ToPtr(latestTS),
+				},
+			)
+		}
+	}
+
+	return events, latestTS, nil
+}
+
+func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBeforeTS bson.Timestamp) ([]ParsedEvent, bson.Timestamp, error) {
 
 	var latestTS bson.Timestamp
 
@@ -338,7 +474,7 @@ func (o *OplogReader) readAndHandleOneBatch(
 		var op oplog.Op
 
 		if err := (&op).UnmarshalFromBSON(rawDoc); err != nil {
-			return errors.Wrapf(err, "reading oplog entry")
+			return nil, bson.Timestamp{}, errors.Wrapf(err, "reading oplog entry")
 		}
 
 		latestTS = op.TS
@@ -360,7 +496,7 @@ func (o *OplogReader) readAndHandleOneBatch(
 					continue
 				}
 
-				return UnknownEventError{rawDoc}
+				return nil, bson.Timestamp{}, UnknownEventError{rawDoc}
 			}
 
 			events = append(
@@ -392,30 +528,7 @@ func (o *OplogReader) readAndHandleOneBatch(
 		}
 	}
 
-	sess := mongo.SessionFromContext(sctx)
-	resumeToken := oplog.ResumeToken{latestTS}.MarshalToBSON()
-
-	o.updateLag(sess, resumeToken)
-
-	// NB: events can legitimately be empty here because we might only have
-	// gotten op=n oplog entries, which we just use to advance the reader.
-	// (Similar to a change stream’s post-batch resume token.)
-	if len(events) > 0 {
-		o.batchSizeHistory.Add(len(events))
-	}
-
-	select {
-	case <-sctx.Done():
-		return err
-	case o.changeEventBatchChan <- changeEventBatch{
-		events:      events,
-		resumeToken: resumeToken,
-	}:
-	}
-
-	o.lastChangeEventTime = &latestTS
-
-	return nil
+	return events, latestTS, nil
 }
 
 func (o *OplogReader) getDefaultNSExclusions(docroot string) agg.And {
