@@ -25,6 +25,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
@@ -1775,6 +1776,22 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 		builder.String(),
 		"100019",
 		"summary should NOT show a late mismatch",
+	)
+
+	rechecks := suite.fetchRecheckDocs(ctx, verifier)
+	recheckDocIDs := lo.Map(
+		rechecks,
+		func(r recheck.Doc, _ int) int {
+			num, err := mbson.CastRawValue[int32](r.PrimaryKey.DocumentID)
+			suite.Require().NoError(err)
+			return int(num)
+		},
+	)
+
+	suite.Assert().ElementsMatch(
+		lo.RangeFrom(100000, 20),
+		recheckDocIDs,
+		"all docs should be enqueued for recheck",
 	)
 }
 
