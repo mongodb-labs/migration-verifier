@@ -135,8 +135,6 @@ func (o *OplogReader) createCursor(
 
 	sctx := mongo.NewSessionContext(ctx, sess)
 
-	clientHasBSONSize := util.ClusterHasBSONSize([2]int(o.clusterInfo.VersionArray))
-
 	cursor, err := o.watcherClient.
 		Database("local").
 		Collection(
@@ -176,7 +174,7 @@ func (o *OplogReader) createCursor(
 					{"op", 1},
 					{"ns", 1},
 
-					{"docLen", getOplogDocLenExpr("$$ROOT", clientHasBSONSize)},
+					{"docLen", getOplogDocLenExpr("$$ROOT")},
 
 					{"docID", getOplogDocIDExpr("$$ROOT")},
 
@@ -220,7 +218,7 @@ func (o *OplogReader) createCursor(
 								{"op", "$$opEntry.op"},
 								{"ns", "$$opEntry.ns"},
 								{"docID", getOplogDocIDExpr("$$opEntry")},
-								{"docLen", getOplogDocLenExpr("$$opEntry", clientHasBSONSize)},
+								{"docLen", getOplogDocLenExpr("$$opEntry")},
 							},
 						},
 						Else: "$$REMOVE",
@@ -439,7 +437,7 @@ func (o *OplogReader) getDefaultNSExclusions(docroot string) agg.And {
 	))
 }
 
-func getOplogDocLenExpr(docroot string, useBSONSize bool) any {
+func getOplogDocLenExpr(docroot string) any {
 	return agg.Cond{
 		If: agg.Or{
 			agg.Eq(docroot+".op", "i"),
@@ -448,11 +446,7 @@ func getOplogDocLenExpr(docroot string, useBSONSize bool) any {
 				agg.Not{agg.Eq("missing", docroot+".o._id")},
 			},
 		},
-		Then: lo.Ternary[any](
-			useBSONSize,
-			agg.BSONSize(docroot+".o"),
-			defaultUserDocumentSize,
-		),
+		Then: agg.BSONSize(docroot + ".o"),
 		Else: "$$REMOVE",
 	}
 }
