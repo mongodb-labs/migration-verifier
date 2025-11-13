@@ -74,7 +74,7 @@ HandlerLoop:
 
 			err = errors.Wrap(
 				verifier.PersistChangeEvents(ctx, batch, clusterName),
-				"failed to handle change stream events",
+				"persisting rechecks for change events",
 			)
 
 			if err == nil && batch.resumeToken != nil {
@@ -92,14 +92,14 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeE
 		return nil
 	}
 
-	dbNames := make([]string, len(batch.events))
-	collNames := make([]string, len(batch.events))
-	docIDs := make([]bson.RawValue, len(batch.events))
-	dataSizes := make([]int32, len(batch.events))
+	dbNames := make([]string, 0, len(batch.events))
+	collNames := make([]string, 0, len(batch.events))
+	docIDs := make([]bson.RawValue, 0, len(batch.events))
+	dataSizes := make([]int32, 0, len(batch.events))
 
 	latestTimestamp := bson.Timestamp{}
 
-	for i, changeEvent := range batch.events {
+	for _, changeEvent := range batch.events {
 		if !supportedEventOpTypes.Contains(changeEvent.OpType) {
 			panic(fmt.Sprintf("Unsupported optype in event; should have failed already! event=%+v", changeEvent))
 		}
@@ -127,10 +127,14 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeE
 				srcDBName = changeEvent.Ns.DB
 				srcCollName = changeEvent.Ns.Coll
 			} else {
+				if changeEvent.Ns.DB == "VERIFIER_TEST_META" {
+					continue
+				}
+
 				dstNs := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
 				srcNs, exist := verifier.nsMap.GetSrcNamespace(dstNs)
 				if !exist {
-					return errors.Errorf("no source namespace corresponding to the destination namepsace %s", dstNs)
+					return errors.Errorf("no source namespace matches the destination namepsace %#q", dstNs)
 				}
 				srcDBName, srcCollName = SplitNamespace(srcNs)
 			}
@@ -143,20 +147,23 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeE
 			panic(fmt.Sprintf("unknown event origin: %s", eventOrigin))
 		}
 
-		dbNames[i] = srcDBName
-		collNames[i] = srcCollName
-		docIDs[i] = changeEvent.DocID
+		dbNames = append(dbNames, srcDBName)
+		collNames = append(collNames, srcCollName)
+		docIDs = append(docIDs, changeEvent.DocID)
 
+		var dataSize int32
 		if changeEvent.FullDocLen.OrZero() > 0 {
-			dataSizes[i] = int32(changeEvent.FullDocLen.OrZero())
+			dataSize = int32(changeEvent.FullDocLen.OrZero())
 		} else if changeEvent.FullDocument == nil {
 			// This happens for deletes and for some updates.
 			// The document is probably, but not necessarily, deleted.
-			dataSizes[i] = defaultUserDocumentSize
+			dataSize = defaultUserDocumentSize
 		} else {
 			// This happens for inserts, replaces, and most updates.
-			dataSizes[i] = int32(len(changeEvent.FullDocument))
+			dataSize = int32(len(changeEvent.FullDocument))
 		}
+
+		dataSizes = append(dataSizes, dataSize)
 
 		if err := eventRecorder.AddEvent(&changeEvent); err != nil {
 			return errors.Wrapf(

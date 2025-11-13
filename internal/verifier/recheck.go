@@ -86,6 +86,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	insertThreads := 0
 
 	sendRechecks := func(rechecks []bson.Raw) {
+		fmt.Printf("----- inserting rechecks: %+v\n\n", rechecks)
 		insertThreads++
 
 		eg.Go(func() error {

@@ -18,6 +18,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"golang.org/x/exp/slices"
 )
@@ -537,6 +538,8 @@ func iterateCursorToChannel(
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
 
+		fmt.Printf("----- received a document: %+v\n\n", cursor.Current)
+
 		clusterTime, err := util.GetClusterTimeFromSession(sess)
 		if err != nil {
 			return errors.Wrap(err, "reading cluster time from session")
@@ -590,6 +593,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 		case DocQueryFunctionFind:
 			findOptions = bson.D{
 				bson.E{"filter", filter},
+				bson.E{"readConcern", readconcern.Majority()},
 			}
 		case DocQueryFunctionAggregate:
 			aggOptions = bson.D{
@@ -674,22 +678,26 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
-	if !task.IsRecheck() {
-		if verifier.logger.Trace().Enabled() {
-			evt := verifier.logger.Trace().
-				Any("task", task.PrimaryKey)
+	/*
+		if !task.IsRecheck() {
+			if verifier.logger.Trace().Enabled() {
+	*/
+	evt := verifier.logger.Debug().
+		Any("task", task.PrimaryKey)
 
-			cmdStr, err := bson.MarshalExtJSON(cmd, true, false)
-			if err != nil {
-				cmdStr = fmt.Appendf(nil, "%s", cmd)
-			}
-
-			evt.
-				Str("cmd", string(cmdStr)).
-				Str("options", fmt.Sprintf("%v", *runCommandOptions)).
-				Msg("getDocuments command.")
-		}
+	cmdStr, err := bson.MarshalExtJSON(cmd, true, false)
+	if err != nil {
+		cmdStr = fmt.Appendf(nil, "%s", cmd)
 	}
+
+	evt.
+		Str("cmd", string(cmdStr)).
+		Str("options", fmt.Sprintf("%v", *runCommandOptions)).
+		Msg("getDocuments command.")
+		/*
+				}
+			}
+		*/
 
 	return collection.Database().RunCommandCursor(ctx, cmd, runCommandOptions)
 }

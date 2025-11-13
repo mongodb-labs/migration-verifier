@@ -64,18 +64,6 @@ func (o Or) MarshalBSON() ([]byte, error) {
 
 // ---------------------------------------------
 
-type SubstrBytes [3]any
-
-var _ bson.Marshaler = SubstrBytes{}
-
-func (s SubstrBytes) MarshalBSON() ([]byte, error) {
-	return bson.Marshal(bson.D{
-		{"$substr", []any(s[:])},
-	})
-}
-
-// ---------------------------------------------
-
 type MergeObjects []any
 
 var _ bson.Marshaler = MergeObjects{}

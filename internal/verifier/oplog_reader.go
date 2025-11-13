@@ -147,6 +147,32 @@ func (o *OplogReader) createCursor(
 		findOpts.SetProjection(o.getExprProjection())
 	}
 
+	oplogFilter := bson.D{{"$and", []any{
+		bson.D{{"ts", bson.D{{"$gte", startTS}}}},
+
+		bson.D{{"$expr", agg.Or{
+			// plain ops: one write per op
+			append(
+				agg.And{agg.In("$op", "d", "i", "u")},
+				o.getNSFilter("$$ROOT")...,
+			),
+
+			// op=n is for no-ops, so we stay up-to-date.
+			agg.Eq("$op", "n"),
+
+			// op=c is for applyOps, and also to detect forbidden DDL.
+			agg.And{
+				agg.Eq("$op", "c"),
+				agg.Not{helpers.StringHasPrefix{
+					FieldRef: "$ns",
+					Prefix:   "config.",
+				}},
+			},
+		}}},
+	}}}
+
+	fmt.Printf("------ oplogFilter: %v\n\n", oplogFilter)
+
 	cursor, err := o.watcherClient.
 		Database("local").
 		Collection(
@@ -155,29 +181,7 @@ func (o *OplogReader) createCursor(
 		).
 		Find(
 			sctx,
-			bson.D{{"$and", []any{
-				bson.D{{"ts", bson.D{{"$gte", startTS}}}},
-
-				bson.D{{"$expr", agg.Or{
-					// plain ops: one write per op
-					append(
-						agg.And{agg.In("$op", "d", "i", "u")},
-						o.getNSExclusions("$$ROOT")...,
-					),
-
-					// op=n is for no-ops, so we stay up-to-date.
-					agg.Eq("$op", "n"),
-
-					// op=c is for applyOps, and also to detect forbidden DDL.
-					agg.And{
-						agg.Eq("$op", "c"),
-						agg.Not{helpers.StringHasPrefix{
-							FieldRef: "$ns",
-							Prefix:   "config.",
-						}},
-					},
-				}}},
-			}}},
+			oplogFilter,
 			findOpts,
 		)
 
@@ -234,7 +238,7 @@ func (o *OplogReader) getExprProjection() bson.D {
 				Input: agg.Filter{
 					Input: "$o.applyOps",
 					As:    "opEntry",
-					Cond:  o.getNSExclusions("$$opEntry"),
+					Cond:  o.getNSFilter("$$opEntry"),
 				},
 				As: "opEntry",
 				In: bson.D{
@@ -257,10 +261,6 @@ func (o *OplogReader) iterateCursor(
 	ctx context.Context,
 	_ *retry.FuncInfo,
 	sess *mongo.Session,
-	/*
-		cursor *mongo.Cursor,
-		allowDDLBeforeTS bson.Timestamp,
-	*/
 ) error {
 	sctx := mongo.NewSessionContext(ctx, sess)
 	cursor := o.cursor
@@ -387,6 +387,8 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 	var latestTS bson.Timestamp
 
 	parseOneDocumentOp := func(opName string, ts bson.Timestamp, rawDoc bson.Raw) error {
+		fmt.Printf("---- got op: %+v\n\n", rawDoc)
+
 		nsStr, err := mbson.Lookup[string](rawDoc, "ns")
 		if err != nil {
 			return err
@@ -608,7 +610,9 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 	return events, latestTS, nil
 }
 
-func (o *OplogReader) getNSExclusions(docroot string) agg.And {
+func (o *OplogReader) getNSFilter(docroot string) agg.And {
+	return agg.And{}
+
 	prefixes := append(
 		slices.Clone(namespaces.MongosyncMetaDBPrefixes),
 		o.metaDB.Name()+".",
@@ -626,12 +630,14 @@ func (o *OplogReader) getNSExclusions(docroot string) agg.And {
 		},
 	))
 
-	if len(o.namespaces) > 0 {
-		filter = append(
-			filter,
-			agg.In(docroot+".ns", o.namespaces...),
-		)
-	}
+	/*
+		if len(o.namespaces) > 0 {
+			filter = append(
+				filter,
+				agg.In(docroot+".ns", o.namespaces...),
+			)
+		}
+	*/
 
 	return filter
 }

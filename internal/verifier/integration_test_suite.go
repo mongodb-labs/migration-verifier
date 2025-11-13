@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"cmp"
 	"context"
 	"os"
 	"strings"
@@ -192,15 +193,18 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	)
 	verifier.SetMetaDBName(metaDBName)
 
-	envSrcChangeReader := os.Getenv("MVTEST_SRC_CHANGE_READER")
-	if envSrcChangeReader != "" {
-		suite.Require().NoError(verifier.SetSrcChangeReader(envSrcChangeReader))
-	}
+	envSrcChangeReader := cmp.Or(
+		os.Getenv("MVTEST_SRC_CHANGE_READER"),
+		ChangeReaderOptChangeStream,
+	)
+	suite.Require().NoError(verifier.SetSrcChangeReader(envSrcChangeReader))
 
-	envDstChangeReader := os.Getenv("MVTEST_DST_CHANGE_READER")
-	if envDstChangeReader != "" {
-		suite.Require().NoError(verifier.SetDstChangeReader(envDstChangeReader))
-	}
+	envDstChangeReader := cmp.Or(
+		os.Getenv("MVTEST_DST_CHANGE_READER"),
+		ChangeReaderOptChangeStream,
+	)
+
+	suite.Require().NoError(verifier.SetDstChangeReader(envDstChangeReader))
 
 	suite.Require().NoError(verifier.initializeChangeReaders())
 

@@ -1,6 +1,8 @@
 package helpers
 
-import "go.mongodb.org/mongo-driver/v2/bson"
+import (
+	"go.mongodb.org/mongo-driver/v2/bson"
+)
 
 type StringHasPrefix struct {
 	FieldRef any
@@ -19,4 +21,15 @@ func (sp StringHasPrefix) MarshalBSON() ([]byte, error) {
 			}}},
 		}},
 	})
+
+	/*
+		return bson.Marshal(agg.Eq(
+			sp.Prefix,
+			agg.SubstrBytes{
+				sp.FieldRef,
+				0,
+				len(sp.Prefix),
+			},
+		))
+	*/
 }
