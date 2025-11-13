@@ -194,15 +194,15 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 
 	envSrcChangeReader := os.Getenv("MVTEST_SRC_CHANGE_READER")
 	if envSrcChangeReader != "" {
-		verifier.SetSrcChangeReader(envSrcChangeReader)
+		suite.Require().NoError(verifier.SetSrcChangeReader(envSrcChangeReader))
 	}
 
 	envDstChangeReader := os.Getenv("MVTEST_DST_CHANGE_READER")
 	if envDstChangeReader != "" {
-		verifier.SetDstChangeReader(envDstChangeReader)
+		suite.Require().NoError(verifier.SetDstChangeReader(envDstChangeReader))
 	}
 
-	verifier.initializeChangeReaders()
+	suite.Require().NoError(verifier.initializeChangeReaders())
 
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))
 	suite.Require().NoError(verifier.dstClientCollection(&task).Drop(ctx))
