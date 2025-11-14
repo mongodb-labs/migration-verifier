@@ -700,22 +700,20 @@ func transformPipelineForToHashedIndexKey(
 ) mongo.Pipeline {
 	return append(
 		slices.Clone(in),
-		bson.D{{"$replaceRoot", bson.D{
-			{"newRoot", bson.D{
-				// Single-letter field names minimize the document size.
-				{docKeyInHashedCompare, dockey.ExtractTrueDocKeyAgg(
-					task.QueryFilter.GetDocKeyFields(),
-					"$$ROOT",
-				)},
-				{"h", bson.D{
-					{"$toHashedIndexKey", bson.D{
-						{"$_internalKeyStringValue", bson.D{
-							{"input", "$$ROOT"},
-						}},
+		bson.D{{"$replaceWith", bson.D{
+			// Single-letter field names minimize the document size.
+			{docKeyInHashedCompare, dockey.ExtractTrueDocKeyAgg(
+				task.QueryFilter.GetDocKeyFields(),
+				"$$ROOT",
+			)},
+			{"h", bson.D{
+				{"$toHashedIndexKey", bson.D{
+					{"$_internalKeyStringValue", bson.D{
+						{"input", "$$ROOT"},
 					}},
 				}},
-				{"s", bson.D{{"$bsonSize", "$$ROOT"}}},
 			}},
+			{"s", bson.D{{"$bsonSize", "$$ROOT"}}},
 		}}},
 	)
 }
