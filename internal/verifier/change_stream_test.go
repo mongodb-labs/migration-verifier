@@ -803,6 +803,7 @@ func (suite *IntegrationTestSuite) TestWritesOffCursorKilledResilience() {
 				suite.Context(),
 				suite.T(),
 				suite.srcMongoClient,
+				verifier.srcClusterInfo.VersionArray,
 				clientAppName,
 			),
 		)
@@ -831,6 +832,7 @@ func (suite *IntegrationTestSuite) TestCursorKilledResilience() {
 			suite.Context(),
 			suite.T(),
 			suite.srcMongoClient,
+			verifier.srcClusterInfo.VersionArray,
 			clientAppName,
 		),
 	)

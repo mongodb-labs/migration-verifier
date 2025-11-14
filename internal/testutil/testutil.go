@@ -7,6 +7,7 @@ import (
 	"log"
 	"testing"
 
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -93,11 +94,12 @@ func KillApplicationChangeStreams(
 	ctx context.Context,
 	t *testing.T,
 	client *mongo.Client,
+	versionArray []int,
 	appName string,
 ) error {
 	currentOpArg := bson.D{}
 
-	if false {
+	if util.ClusterHasCurrentOpIdleCursors([2]int(versionArray)) {
 		currentOpArg = append(
 			currentOpArg,
 			bson.E{"idleCursors", true},

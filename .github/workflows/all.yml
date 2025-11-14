@@ -19,9 +19,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - mongodb_versions: [ '3.6', '8.0' ]
-            topology: replset
-
           - mongodb_versions: [ '4.0', '8.0' ]
             topology: replset
 

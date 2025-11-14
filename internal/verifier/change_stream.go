@@ -374,8 +374,11 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 		logEvent.Msg("Starting change stream from persisted resume token.")
 
-		//opts = opts.SetStartAfter(token)
-		opts = opts.SetResumeAfter(token)
+		if util.ClusterHasChangeStreamStartAfter([2]int(csr.clusterInfo.VersionArray)) {
+			opts = opts.SetStartAfter(token)
+		} else {
+			opts = opts.SetResumeAfter(token)
+		}
 	} else {
 		csStartLogEvent.Msgf("Starting change stream from current %s cluster time.", csr.readerType)
 	}
@@ -387,7 +390,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 	sctx := mongo.NewSessionContext(ctx, sess)
 	changeStream, err := csr.watcherClient.Watch(sctx, pipeline, opts)
 	if err != nil {
-		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to open change stream")
+		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "opening change stream")
 	}
 
 	err = csr.persistResumeToken(ctx, changeStream.ResumeToken())
