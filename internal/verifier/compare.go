@@ -670,18 +670,17 @@ func (verifier *Verifier) getDocumentsCursor(
 		)
 	}
 
+	sess := mongo.SessionFromContext(ctx)
+
+	if sess == nil {
+		panic("No session?!?")
+	}
+
 	runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
 	if ts, has := readConcernTS.Get(); has {
-		readConcern := bson.D{
-			{"afterClusterTime", ts},
+		if err := sess.AdvanceOperationTime(&ts); err != nil {
+			return nil, errors.Wrapf(err, "advancing session operation time to %v", ts)
 		}
-
-		// We never want to read before the change stream start time,
-		// or for the last generation, the change stream end time.
-		cmd = append(
-			cmd,
-			bson.E{"readConcern", readConcern},
-		)
 	}
 
 	// Suppress this log for recheck tasks because the list of IDs can be
