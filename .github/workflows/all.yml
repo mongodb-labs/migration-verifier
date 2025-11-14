@@ -92,11 +92,12 @@ jobs:
         with:
           go-version: stable
 
+      # Use an old pymongo so we can install MongoDB 4.0.
       - name: Install m and mtools
         run: |-
             {
                 echo npm install -g m
-                echo pipx install pymongo==4.3.2 'mtools[all]'
+                echo pipx install pymongo==4.13.2 'mtools[all]'
             } | parallel
 
       - name: Install MongoDB ${{ matrix.mongodb_versions[0] }} (source)
