@@ -348,10 +348,10 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	}
 
 	infoLog := csr.logger.Info()
-	if csr.lastChangeEventTime == nil {
-		infoLog = infoLog.Str("lastEventTime", "none")
+	if ts, has := csr.lastChangeEventTime.Load().Get(); has {
+		infoLog = infoLog.Any("lastEventTime", ts)
 	} else {
-		infoLog = infoLog.Any("lastEventTime", *csr.lastChangeEventTime)
+		infoLog = infoLog.Str("lastEventTime", "none")
 	}
 
 	infoLog.

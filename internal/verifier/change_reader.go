@@ -37,7 +37,7 @@ type changeReader interface {
 	getWhichCluster() whichCluster
 	getReadChannel() <-chan changeEventBatch
 	getStartTimestamp() option.Option[bson.Timestamp]
-	getLatestTimestamp() option.Option[bson.Timestamp]
+	getLastSeenClusterTime() option.Option[bson.Timestamp]
 	getEventsPerSecond() option.Option[float64]
 	getLag() option.Option[time.Duration]
 	getBufferSaturation() float64
@@ -113,7 +113,7 @@ func (rc *ChangeReaderCommon) getReadChannel() <-chan changeEventBatch {
 	return rc.changeEventBatchChan
 }
 
-func (rc *ChangeReaderCommon) getLatestTimestamp() option.Option[bson.Timestamp] {
+func (rc *ChangeReaderCommon) getLastSeenClusterTime() option.Option[bson.Timestamp] {
 	return rc.lastChangeEventTime.Load()
 }
 

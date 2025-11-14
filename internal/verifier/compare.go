@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"time"
@@ -466,7 +467,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.srcClientCollection(task),
 			verifier.srcClusterInfo,
-			verifier.srcChangeReader.getLatestTimestamp().ToPointer(),
+			cmp.Or(
+				verifier.srcChangeReader.getLastSeenClusterTime(),
+				verifier.srcChangeReader.getStartTimestamp(),
+			),
 			task,
 		)
 
@@ -499,7 +503,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.dstClientCollection(task),
 			verifier.dstClusterInfo,
-			verifier.dstChangeReader.getLatestTimestamp().ToPointer(),
+			cmp.Or(
+				verifier.dstChangeReader.getLastSeenClusterTime(),
+				verifier.dstChangeReader.getStartTimestamp(),
+			),
 			task,
 		)
 
@@ -574,8 +581,13 @@ func getMapKey(docKeyValues []bson.RawValue) string {
 	return keyBuffer.String()
 }
 
-func (verifier *Verifier) getDocumentsCursor(sctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
-	startAtTs *bson.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
+func (verifier *Verifier) getDocumentsCursor(
+	sctx context.Context,
+	collection *mongo.Collection,
+	clusterInfo *util.ClusterInfo,
+	readConcernTS option.Option[bson.Timestamp],
+	task *VerificationTask,
+) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
 	var andPredicates bson.A
@@ -659,11 +671,9 @@ func (verifier *Verifier) getDocumentsCursor(sctx context.Context, collection *m
 	}
 
 	runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
-
-	if startAtTs != nil {
+	if ts, has := readConcernTS.Get(); has {
 		readConcern := bson.D{
-			{"level", "majority"},
-			{"afterClusterTime", *startAtTs},
+			{"afterClusterTime", ts},
 		}
 
 		// We never want to read before the change stream start time,
@@ -676,44 +686,24 @@ func (verifier *Verifier) getDocumentsCursor(sctx context.Context, collection *m
 
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
-	/*
-		if !task.IsRecheck() {
-			if verifier.logger.Trace().Enabled() {
-	*/
-	evt := verifier.logger.Debug().
-		Any("task", task.PrimaryKey)
+	if !task.IsRecheck() {
+		if verifier.logger.Trace().Enabled() {
 
-	cmdStr, err := bson.MarshalExtJSON(cmd, true, false)
-	if err != nil {
-		cmdStr = fmt.Appendf(nil, "%s", cmd)
-	}
+			evt := verifier.logger.Debug().
+				Any("task", task.PrimaryKey)
 
-	evt.
-		Str("cmd", string(cmdStr)).
-		Str("options", fmt.Sprintf("%v", *runCommandOptions)).
-		Msg("getDocuments command.")
-		/*
-				}
+			cmdStr, err := bson.MarshalExtJSON(cmd, true, false)
+			if err != nil {
+				cmdStr = fmt.Appendf(nil, "%s", cmd)
 			}
-		*/
 
-		/*
-			sess := lo.Must(collection.Database().Client().StartSession())
-			defer sess.EndSession(ctx)
+			evt.
+				Str("cmd", string(cmdStr)).
+				Str("options", fmt.Sprintf("%v", *runCommandOptions)).
+				Msg("getDocuments command.")
 
-			sess.AdvanceOperationTime(startAtTs)
-		*/
-
-		/*
-			lo.Must0(mongo.SessionFromContext(sctx).AdvanceOperationTime(startAtTs))
-			lo.Must0(mongo.SessionFromContext(sctx).AdvanceClusterTime(lo.Must(bson.Marshal(
-				bson.D{
-					{"$clusterTime", bson.D{
-						{"clusterTime", *startAtTs},
-					}},
-				},
-			))))
-		*/
+		}
+	}
 
 	return collection.Database().RunCommandCursor(
 		mongo.NewSessionContext(sctx, nil),
