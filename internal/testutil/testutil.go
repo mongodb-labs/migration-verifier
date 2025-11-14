@@ -96,7 +96,10 @@ func KillTransactions(
 	t *testing.T,
 	client *mongo.Client,
 ) {
-	cursor, err := client.Database("admin").Aggregate(
+	cursor, err := client.Database(
+		"admin",
+		options.Database().SetReadConcern(readconcern.Local()),
+	).Aggregate(
 		ctx,
 		mongo.Pipeline{
 			{{"$currentOp", bson.D{}}},
