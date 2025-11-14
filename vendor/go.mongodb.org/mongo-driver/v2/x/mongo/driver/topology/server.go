@@ -807,18 +807,9 @@ func (s *Server) createConnection() *connection {
 	opts := copyConnectionOpts(s.cfg.connectionOpts)
 	opts = append(opts,
 		WithHandshaker(func(Handshaker) Handshaker {
-			handshaker := operation.NewHello().AppName(s.cfg.appname).Compressors(s.cfg.compressionOpts).
-				ServerAPI(s.cfg.serverAPI)
-
-			if s.cfg.driverInfo != nil {
-				driverInfo := s.cfg.driverInfo.Load()
-				if driverInfo != nil {
-					handshaker = handshaker.OuterLibraryName(driverInfo.Name).OuterLibraryVersion(driverInfo.Version).
-						OuterLibraryPlatform(driverInfo.Platform)
-				}
-			}
-
-			return handshaker
+			return operation.NewHello().AppName(s.cfg.appname).Compressors(s.cfg.compressionOpts).
+				ServerAPI(s.cfg.serverAPI).OuterLibraryName(s.cfg.outerLibraryName).
+				OuterLibraryVersion(s.cfg.outerLibraryVersion).OuterLibraryPlatform(s.cfg.outerLibraryPlatform)
 		}),
 		// Override any monitors specified in options with nil to avoid monitoring heartbeats.
 		WithMonitor(func(*event.CommandMonitor) *event.CommandMonitor { return nil }),
@@ -851,6 +842,7 @@ func (s *Server) setupHeartbeatConnection(ctx context.Context) error {
 func (s *Server) createBaseOperation(conn *mnet.Connection) *operation.Hello {
 	return operation.
 		NewHello().
+		ClusterClock(s.cfg.clock).
 		Deployment(driver.SingleConnectionDeployment{C: conn}).
 		ServerAPI(s.cfg.serverAPI)
 }
