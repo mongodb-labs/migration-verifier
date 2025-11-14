@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"time"
@@ -466,7 +467,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.srcClientCollection(task),
 			verifier.srcClusterInfo,
-			verifier.srcChangeReader.getLatestTimestamp(),
+			cmp.Or(
+				verifier.srcChangeReader.getLastSeenClusterTime(),
+				verifier.srcChangeReader.getStartTimestamp(),
+			),
 			task,
 		)
 
@@ -499,7 +503,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.dstClientCollection(task),
 			verifier.dstClusterInfo,
-			verifier.dstChangeReader.getLatestTimestamp(),
+			cmp.Or(
+				verifier.dstChangeReader.getLastSeenClusterTime(),
+				verifier.dstChangeReader.getStartTimestamp(),
+			),
 			task,
 		)
 
