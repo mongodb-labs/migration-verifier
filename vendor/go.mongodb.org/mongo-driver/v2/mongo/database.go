@@ -16,7 +16,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/internal/csfle"
 	"go.mongodb.org/mongo-driver/v2/internal/csot"
 	"go.mongodb.org/mongo-driver/v2/internal/mongoutil"
-	"go.mongodb.org/mongo-driver/v2/internal/optionsutil"
 	"go.mongodb.org/mongo-driver/v2/internal/serverselector"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
@@ -111,15 +110,13 @@ func (db *Database) Name() string {
 	return db.name
 }
 
-// Collection returns a handle for a collection with the given name and options.
-//
-// If the collection does not exist on the server, it will be created when a
-// write operation is performed.
+// Collection gets a handle for a collection with the given name configured with the given CollectionOptions.
 func (db *Database) Collection(name string, opts ...options.Lister[options.CollectionOptions]) *Collection {
 	return newCollection(db, name, opts...)
 }
 
-// Aggregate executes an aggregate command the database.
+// Aggregate executes an aggregate command the database. This requires MongoDB version >= 3.6 and driver version >=
+// 1.1.0.
 //
 // The pipeline parameter must be a slice of documents, each representing an aggregation stage. The pipeline
 // cannot be nil but can be empty. The stage documents must all be non-nil. For a pipeline of bson.D documents, the
@@ -132,7 +129,7 @@ func (db *Database) Collection(name string, opts ...options.Lister[options.Colle
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/aggregate/.
 func (db *Database) Aggregate(
 	ctx context.Context,
-	pipeline any,
+	pipeline interface{},
 	opts ...options.Lister[options.AggregateOptions],
 ) (*Cursor, error) {
 	a := aggregateParams{
@@ -154,7 +151,7 @@ func (db *Database) Aggregate(
 
 func (db *Database) processRunCommand(
 	ctx context.Context,
-	cmd any,
+	cmd interface{},
 	cursorCommand bool,
 	opts ...options.Lister[options.RunCmdOptions],
 ) (*operation.Command, *session.Client, error) {
@@ -237,7 +234,7 @@ func (db *Database) processRunCommand(
 // - maxTimeMS when Timeout is set on the Client
 func (db *Database) RunCommand(
 	ctx context.Context,
-	runCommand any,
+	runCommand interface{},
 	opts ...options.Lister[options.RunCmdOptions],
 ) *SingleResult {
 	if ctx == nil {
@@ -279,7 +276,7 @@ func (db *Database) RunCommand(
 // - maxTimeMS when Timeout is set on the Client
 func (db *Database) RunCommandCursor(
 	ctx context.Context,
-	runCommand any,
+	runCommand interface{},
 	opts ...options.Lister[options.RunCmdOptions],
 ) (*Cursor, error) {
 	if ctx == nil {
@@ -289,7 +286,7 @@ func (db *Database) RunCommandCursor(
 	op, sess, err := db.processRunCommand(ctx, runCommand, true, opts...)
 	if err != nil {
 		closeImplicitSession(sess)
-		return nil, wrapErrors(err)
+		return nil, replaceErrors(err)
 	}
 
 	if err = op.Execute(ctx); err != nil {
@@ -298,17 +295,16 @@ func (db *Database) RunCommandCursor(
 			return nil, errors.New(
 				"database response does not contain a cursor; try using RunCommand instead")
 		}
-		return nil, wrapErrors(err)
+		return nil, replaceErrors(err)
 	}
 
 	bc, err := op.ResultCursor()
 	if err != nil {
 		closeImplicitSession(sess)
-		return nil, wrapErrors(err)
+		return nil, replaceErrors(err)
 	}
-	cursor, err := newCursorWithSession(bc, db.bsonOpts, db.registry, sess,
-		withCursorOptionClientTimeout(db.client.timeout))
-	return cursor, wrapErrors(err)
+	cursor, err := newCursorWithSession(bc, db.bsonOpts, db.registry, sess)
+	return cursor, replaceErrors(err)
 }
 
 // Drop drops the database on the server. This method ignores "namespace not found" errors so it is safe to drop
@@ -347,9 +343,9 @@ func (db *Database) Drop(ctx context.Context) error {
 
 	err = op.Execute(ctx)
 
-	var driverErr driver.Error
-	if err != nil && (!errors.As(err, &driverErr) || !driverErr.NamespaceNotFound()) {
-		return wrapErrors(err)
+	driverErr, ok := err.(driver.Error)
+	if err != nil && (!ok || !driverErr.NamespaceNotFound()) {
+		return replaceErrors(err)
 	}
 	return nil
 }
@@ -367,7 +363,7 @@ func (db *Database) Drop(ctx context.Context) error {
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/listCollections/.
 func (db *Database) ListCollectionSpecifications(
 	ctx context.Context,
-	filter any,
+	filter interface{},
 	opts ...options.Lister[options.ListCollectionsOptions],
 ) ([]CollectionSpecification, error) {
 	cursor, err := db.ListCollections(ctx, filter, opts...)
@@ -430,7 +426,7 @@ func (db *Database) ListCollectionSpecifications(
 // MongoDB version 2.6.
 func (db *Database) ListCollections(
 	ctx context.Context,
-	filter any,
+	filter interface{},
 	opts ...options.Lister[options.ListCollectionsOptions],
 ) (*Cursor, error) {
 	if ctx == nil {
@@ -489,11 +485,6 @@ func (db *Database) ListCollections(
 	if args.AuthorizedCollections != nil {
 		op = op.AuthorizedCollections(*args.AuthorizedCollections)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 
 	retry := driver.RetryNone
 	if db.client.retryReads {
@@ -504,17 +495,16 @@ func (db *Database) ListCollections(
 	err = op.Execute(ctx)
 	if err != nil {
 		closeImplicitSession(sess)
-		return nil, wrapErrors(err)
+		return nil, replaceErrors(err)
 	}
 
 	bc, err := op.Result(cursorOpts)
 	if err != nil {
 		closeImplicitSession(sess)
-		return nil, wrapErrors(err)
+		return nil, replaceErrors(err)
 	}
-	cursor, err := newCursorWithSession(bc, db.bsonOpts, db.registry, sess,
-		withCursorOptionClientTimeout(db.client.timeout))
-	return cursor, wrapErrors(err)
+	cursor, err := newCursorWithSession(bc, db.bsonOpts, db.registry, sess)
+	return cursor, replaceErrors(err)
 }
 
 // ListCollectionNames executes a listCollections command and returns a slice containing the names of the collections
@@ -533,7 +523,7 @@ func (db *Database) ListCollections(
 // MongoDB version 2.6.
 func (db *Database) ListCollectionNames(
 	ctx context.Context,
-	filter any,
+	filter interface{},
 	opts ...options.Lister[options.ListCollectionsOptions],
 ) ([]string, error) {
 	opts = append(opts, options.ListCollections().SetNameOnly(true))
@@ -577,7 +567,7 @@ func (db *Database) ListCollectionNames(
 //
 // The opts parameter can be used to specify options for change stream creation (see the options.ChangeStreamOptions
 // documentation).
-func (db *Database) Watch(ctx context.Context, pipeline any,
+func (db *Database) Watch(ctx context.Context, pipeline interface{},
 	opts ...options.Lister[options.ChangeStreamOptions]) (*ChangeStream, error) {
 
 	csConfig := changeStreamConfig{
@@ -593,15 +583,14 @@ func (db *Database) Watch(ctx context.Context, pipeline any,
 	return newChangeStream(ctx, csConfig, pipeline, opts...)
 }
 
-// CreateCollection creates a new collection on the server with the specified
-// name and options.
+// CreateCollection executes a create command to explicitly create a new collection with the specified name on the
+// server. If the collection being created already exists, this method will return a mongo.CommandError. This method
+// requires driver version 1.4.0 or higher.
 //
-// MongoDB versions < 7.0 will return an error if the collection already exists.
-// MongoDB versions >= 7.0 will not return an error if an existing collection
-// created with the same name and options already exists.
+// The opts parameter can be used to specify options for the operation (see the options.CreateCollectionOptions
+// documentation).
 //
-// For more information about the command, see
-// https://www.mongodb.com/docs/manual/reference/command/create/.
+// For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/create/.
 func (db *Database) CreateCollection(ctx context.Context, name string, opts ...options.Lister[options.CreateCollectionOptions]) error {
 	args, err := mongoutil.NewOptions(opts...)
 	if err != nil {
@@ -624,7 +613,7 @@ func (db *Database) CreateCollection(ctx context.Context, name string, opts ...o
 
 // getEncryptedFieldsFromServer tries to get an "encryptedFields" document associated with collectionName by running the "listCollections" command.
 // Returns nil and no error if the listCollections command succeeds, but "encryptedFields" is not present.
-func (db *Database) getEncryptedFieldsFromServer(ctx context.Context, collectionName string) (any, error) {
+func (db *Database) getEncryptedFieldsFromServer(ctx context.Context, collectionName string) (interface{}, error) {
 	// Check if collection has an EncryptedFields configured server-side.
 	collSpecs, err := db.ListCollectionSpecifications(ctx, bson.D{{"name", collectionName}})
 	if err != nil {
@@ -654,7 +643,7 @@ func (db *Database) getEncryptedFieldsFromServer(ctx context.Context, collection
 
 // getEncryptedFieldsFromMap tries to get an "encryptedFields" document associated with collectionName by checking the client EncryptedFieldsMap.
 // Returns nil and no error if an EncryptedFieldsMap is not configured, or does not contain an entry for collectionName.
-func (db *Database) getEncryptedFieldsFromMap(collectionName string) any {
+func (db *Database) getEncryptedFieldsFromMap(collectionName string) interface{} {
 	// Check the EncryptedFieldsMap
 	efMap := db.client.encryptedFieldsMap
 	if efMap == nil {
@@ -674,7 +663,7 @@ func (db *Database) getEncryptedFieldsFromMap(collectionName string) any {
 func (db *Database) createCollectionWithEncryptedFields(
 	ctx context.Context,
 	name string,
-	ef any,
+	ef interface{},
 	opts ...options.Lister[options.CreateCollectionOptions],
 ) error {
 	efBSON, err := marshal(ef, db.bsonOpts, db.registry)
@@ -884,21 +873,20 @@ func (db *Database) createCollectionOperation(
 	return op, nil
 }
 
-// CreateView creates a view on the server.
+// CreateView executes a create command to explicitly create a view on the server. See
+// https://www.mongodb.com/docs/manual/core/views/ for more information about views. This method requires driver version >=
+// 1.4.0 and MongoDB version >= 3.4.
 //
-// The viewName parameter specifies the name of the view to create. The viewOn
-// parameter specifies the name of the collection or view on which this view
-// will be created. The pipeline parameter specifies an aggregation pipeline
-// that will be exececuted against the source collection or view to create this
-// view.
+// The viewName parameter specifies the name of the view to create.
 //
-// MongoDB versions < 7.0 will return an error if the view already exists.
-// MongoDB versions >= 7.0 will not return an error if an existing view created
-// with the same name and options already exists.
+// # The viewOn parameter specifies the name of the collection or view on which this view will be created
 //
-// See https://www.mongodb.com/docs/manual/core/views/ for more information
-// about views.
-func (db *Database) CreateView(ctx context.Context, viewName, viewOn string, pipeline any,
+// The pipeline parameter specifies an aggregation pipeline that will be exececuted against the source collection or
+// view to create this view.
+//
+// The opts parameter can be used to specify options for the operation (see the options.CreateViewOptions
+// documentation).
+func (db *Database) CreateView(ctx context.Context, viewName, viewOn string, pipeline interface{},
 	opts ...options.Lister[options.CreateViewOptions]) error {
 
 	pipelineArray, _, err := marshalAggregatePipeline(pipeline, db.bsonOpts, db.registry)
@@ -952,7 +940,7 @@ func (db *Database) executeCreateOperation(ctx context.Context, op *operation.Cr
 		Deployment(db.client.deployment).
 		Crypt(db.client.cryptFLE)
 
-	return wrapErrors(op.Execute(ctx))
+	return replaceErrors(op.Execute(ctx))
 }
 
 // GridFSBucket is used to construct a GridFS bucket which can be used as a

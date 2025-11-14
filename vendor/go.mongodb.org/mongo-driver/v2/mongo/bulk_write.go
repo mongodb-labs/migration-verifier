@@ -29,7 +29,7 @@ type bulkWriteBatch struct {
 
 // bulkWrite performs a bulkwrite operation
 type bulkWrite struct {
-	comment                  any
+	comment                  interface{}
 	ordered                  *bool
 	bypassDocumentValidation *bool
 	models                   []WriteModel
@@ -38,8 +38,7 @@ type bulkWrite struct {
 	selector                 description.ServerSelector
 	writeConcern             *writeconcern.WriteConcern
 	result                   BulkWriteResult
-	let                      any
-	rawData                  *bool
+	let                      interface{}
 }
 
 func (bw *bulkWrite) execute(ctx context.Context) error {
@@ -50,7 +49,7 @@ func (bw *bulkWrite) execute(ctx context.Context) error {
 
 	batches := createBatches(bw.models, ordered)
 	bw.result = BulkWriteResult{
-		UpsertedIDs: make(map[int64]any),
+		UpsertedIDs: make(map[int64]interface{}),
 	}
 
 	bwErr := BulkWriteException{
@@ -105,7 +104,7 @@ func (bw *bulkWrite) execute(ctx context.Context) error {
 
 func (bw *bulkWrite) runBatch(ctx context.Context, batch bulkWriteBatch) (BulkWriteResult, BulkWriteException, error) {
 	batchRes := BulkWriteResult{
-		UpsertedIDs: make(map[int64]any),
+		UpsertedIDs: make(map[int64]interface{}),
 	}
 	batchErr := BulkWriteException{}
 
@@ -210,10 +209,6 @@ func (bw *bulkWrite) runInsert(ctx context.Context, batch bulkWriteBatch) (opera
 	}
 	op = op.Retry(retry)
 
-	if bw.rawData != nil {
-		op.RawData(*bw.rawData)
-	}
-
 	err := op.Execute(ctx)
 
 	return op.Result(), err
@@ -287,19 +282,15 @@ func (bw *bulkWrite) runDelete(ctx context.Context, batch bulkWriteBatch) (opera
 	}
 	op = op.Retry(retry)
 
-	if bw.rawData != nil {
-		op.RawData(*bw.rawData)
-	}
-
 	err := op.Execute(ctx)
 
 	return op.Result(), err
 }
 
 func createDeleteDoc(
-	filter any,
+	filter interface{},
 	collation *options.Collation,
-	hint any,
+	hint interface{},
 	deleteOne bool,
 	bsonOpts *options.BSONOptions,
 	registry *bson.Registry,
@@ -424,21 +415,17 @@ func (bw *bulkWrite) runUpdate(ctx context.Context, batch bulkWriteBatch) (opera
 	}
 	op = op.Retry(retry)
 
-	if bw.rawData != nil {
-		op.RawData(*bw.rawData)
-	}
-
 	err := op.Execute(ctx)
 
 	return op.Result(), err
 }
 
 type updateDoc struct {
-	filter         any
-	update         any
-	hint           any
-	sort           any
-	arrayFilters   []any
+	filter         interface{}
+	update         interface{}
+	hint           interface{}
+	sort           interface{}
+	arrayFilters   []interface{}
 	collation      *options.Collation
 	upsert         *bool
 	multi          bool

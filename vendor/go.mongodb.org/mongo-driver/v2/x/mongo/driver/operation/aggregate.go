@@ -50,7 +50,6 @@ type Aggregate struct {
 	customOptions            map[string]bsoncore.Value
 	timeout                  *time.Duration
 	omitMaxTimeMS            bool
-	rawData                  *bool
 
 	result driver.CursorResponse
 }
@@ -160,10 +159,6 @@ func (a *Aggregate) command(dst []byte, desc description.SelectedServer) ([]byte
 	if a.let != nil {
 		dst = bsoncore.AppendDocumentElement(dst, "let", a.let)
 	}
-	// Set rawData for 8.2+ servers.
-	if a.rawData != nil && desc.WireVersion != nil && driverutil.VersionRangeIncludes(*desc.WireVersion, 27) {
-		dst = bsoncore.AppendBooleanElement(dst, "rawData", *a.rawData)
-	}
 	for optionName, optionValue := range a.customOptions {
 		dst = bsoncore.AppendValueElement(dst, optionName, optionValue)
 	}
@@ -203,7 +198,7 @@ func (a *Aggregate) BypassDocumentValidation(bypassDocumentValidation bool) *Agg
 	return a
 }
 
-// Collation specifies a collation.
+// Collation specifies a collation. This option is only valid for server versions 3.4 and above.
 func (a *Aggregate) Collation(collation bsoncore.Document) *Aggregate {
 	if a == nil {
 		a = new(Aggregate)
@@ -434,15 +429,5 @@ func (a *Aggregate) OmitMaxTimeMS(omit bool) *Aggregate {
 	}
 
 	a.omitMaxTimeMS = omit
-	return a
-}
-
-// RawData sets the rawData to access timeseries data in the compressed format.
-func (a *Aggregate) RawData(rawData bool) *Aggregate {
-	if a == nil {
-		a = new(Aggregate)
-	}
-
-	a.rawData = &rawData
 	return a
 }

@@ -9,7 +9,6 @@ package options
 import (
 	"crypto/tls"
 	"net/http"
-	"time"
 
 	"go.mongodb.org/mongo-driver/v2/internal/httputil"
 )
@@ -33,15 +32,14 @@ import (
 type AutoEncryptionOptions struct {
 	KeyVaultClientOptions *ClientOptions
 	KeyVaultNamespace     string
-	KmsProviders          map[string]map[string]any
-	SchemaMap             map[string]any
+	KmsProviders          map[string]map[string]interface{}
+	SchemaMap             map[string]interface{}
 	BypassAutoEncryption  *bool
-	ExtraOptions          map[string]any
+	ExtraOptions          map[string]interface{}
 	TLSConfig             map[string]*tls.Config
 	HTTPClient            *http.Client
-	EncryptedFieldsMap    map[string]any
+	EncryptedFieldsMap    map[string]interface{}
 	BypassQueryAnalysis   *bool
-	KeyExpiration         *time.Duration
 }
 
 // AutoEncryption creates a new AutoEncryptionOptions configured with default values.
@@ -74,7 +72,7 @@ func (a *AutoEncryptionOptions) SetKeyVaultNamespace(ns string) *AutoEncryptionO
 }
 
 // SetKmsProviders specifies options for KMS providers. This is required.
-func (a *AutoEncryptionOptions) SetKmsProviders(providers map[string]map[string]any) *AutoEncryptionOptions {
+func (a *AutoEncryptionOptions) SetKmsProviders(providers map[string]map[string]interface{}) *AutoEncryptionOptions {
 	a.KmsProviders = providers
 
 	return a
@@ -87,7 +85,7 @@ func (a *AutoEncryptionOptions) SetKmsProviders(providers map[string]map[string]
 // Supplying a schemaMap provides more security than relying on JSON Schemas obtained from the server. It protects
 // against a malicious server advertising a false JSON Schema, which could trick the client into sending unencrypted
 // data that should be encrypted.
-func (a *AutoEncryptionOptions) SetSchemaMap(schemaMap map[string]any) *AutoEncryptionOptions {
+func (a *AutoEncryptionOptions) SetSchemaMap(schemaMap map[string]interface{}) *AutoEncryptionOptions {
 	a.SchemaMap = schemaMap
 
 	return a
@@ -136,7 +134,7 @@ func (a *AutoEncryptionOptions) SetBypassAutoEncryption(bypass bool) *AutoEncryp
 // absolute path to the directory containing the linked libmongocrypt library. Setting an override
 // path disables the default system library search path. If an override path is specified but the
 // crypt_shared library cannot be loaded, Client creation will return an error. Must be a string.
-func (a *AutoEncryptionOptions) SetExtraOptions(extraOpts map[string]any) *AutoEncryptionOptions {
+func (a *AutoEncryptionOptions) SetExtraOptions(extraOpts map[string]interface{}) *AutoEncryptionOptions {
 	a.ExtraOptions = extraOpts
 
 	return a
@@ -153,7 +151,7 @@ func (a *AutoEncryptionOptions) SetTLSConfig(cfg map[string]*tls.Config) *AutoEn
 
 // SetEncryptedFieldsMap specifies a map from namespace to local EncryptedFieldsMap document.
 // EncryptedFieldsMap is used for Queryable Encryption.
-func (a *AutoEncryptionOptions) SetEncryptedFieldsMap(ef map[string]any) *AutoEncryptionOptions {
+func (a *AutoEncryptionOptions) SetEncryptedFieldsMap(ef map[string]interface{}) *AutoEncryptionOptions {
 	a.EncryptedFieldsMap = ef
 
 	return a
@@ -163,14 +161,6 @@ func (a *AutoEncryptionOptions) SetEncryptedFieldsMap(ef map[string]any) *AutoEn
 // Use this option when using explicit encryption with Queryable Encryption.
 func (a *AutoEncryptionOptions) SetBypassQueryAnalysis(bypass bool) *AutoEncryptionOptions {
 	a.BypassQueryAnalysis = &bypass
-
-	return a
-}
-
-// SetKeyExpiration specifies duration for the key expiration. 0 or negative value means "never expire".
-// The granularity is in milliseconds. Any sub-millisecond fraction will be rounded up.
-func (a *AutoEncryptionOptions) SetKeyExpiration(expiration time.Duration) *AutoEncryptionOptions {
-	a.KeyExpiration = &expiration
 
 	return a
 }

@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"reflect"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -25,35 +24,17 @@ import (
 // ErrClientDisconnected is returned when disconnected Client is used to run an operation.
 var ErrClientDisconnected = errors.New("client is disconnected")
 
-// InvalidArgumentError wraps an invalid argument error.
-type InvalidArgumentError struct {
-	wrapped error
-}
-
-// Error implements the error interface.
-func (e InvalidArgumentError) Error() string {
-	return e.wrapped.Error()
-}
-
-// Unwrap returns the underlying error.
-func (e InvalidArgumentError) Unwrap() error {
-	return e.wrapped
-}
-
-// ErrMultipleIndexDrop is returned if multiple indexes would be dropped from a call to IndexView.DropOne.
-var ErrMultipleIndexDrop error = InvalidArgumentError{errors.New("multiple indexes would be dropped")}
-
 // ErrNilDocument is returned when a nil document is passed to a CRUD method.
-var ErrNilDocument error = InvalidArgumentError{errors.New("document is nil")}
+var ErrNilDocument = errors.New("document is nil")
 
 // ErrNilValue is returned when a nil value is passed to a CRUD method.
-var ErrNilValue error = InvalidArgumentError{errors.New("value is nil")}
+var ErrNilValue = errors.New("value is nil")
 
 // ErrEmptySlice is returned when an empty slice is passed to a CRUD method that requires a non-empty slice.
-var ErrEmptySlice error = InvalidArgumentError{errors.New("must provide at least one element in input slice")}
+var ErrEmptySlice = errors.New("must provide at least one element in input slice")
 
 // ErrNotSlice is returned when a type other than slice is passed to InsertMany.
-var ErrNotSlice error = InvalidArgumentError{errors.New("must provide a non-empty slice")}
+var ErrNotSlice = errors.New("must provide a non-empty slice")
 
 // ErrMapForOrderedArgument is returned when a map with multiple keys is passed to a CRUD method for an ordered parameter
 type ErrMapForOrderedArgument struct {
@@ -65,11 +46,7 @@ func (e ErrMapForOrderedArgument) Error() string {
 	return fmt.Sprintf("multi-key map passed in for ordered parameter %v", e.ParamName)
 }
 
-// wrapErrors wraps error types and values that are defined in "internal" and
-// "x" packages with error types and values that are defined in this package.
-// That allows users to inspect the errors using errors.Is/errors.As without
-// relying on "internal" or "x" packages.
-func wrapErrors(err error) error {
+func replaceErrors(err error) error {
 	// Return nil when err is nil to avoid costly reflection logic below.
 	if err == nil {
 		return nil
@@ -80,45 +57,29 @@ func wrapErrors(err error) error {
 	// ignored. For non-DDL write commands (insert, update, etc), acknowledgement
 	// should be be propagated at the result-level: e.g.,
 	// SingleResult.Acknowledged.
-	if errors.Is(err, driver.ErrUnacknowledgedWrite) {
+	if err == driver.ErrUnacknowledgedWrite {
 		return nil
 	}
+
 	if errors.Is(err, topology.ErrTopologyClosed) {
 		return ErrClientDisconnected
 	}
-
-	var de driver.Error
-	if errors.As(err, &de) {
+	if de, ok := err.(driver.Error); ok {
 		return CommandError{
 			Code:    de.Code,
 			Message: de.Message,
 			Labels:  de.Labels,
 			Name:    de.Name,
-			Wrapped: err,
+			Wrapped: de.Wrapped,
 			Raw:     bson.Raw(de.Raw),
-
-			// Set wrappedMsgOnly=true here so that the Code and Message are not
-			// repeated multiple times in the error string. We expect that the
-			// wrapped driver.Error already contains that info in the error
-			// string.
-			wrappedMsgOnly: true,
 		}
 	}
-
-	var qe driver.QueryFailureError
-	if errors.As(err, &qe) {
+	if qe, ok := err.(driver.QueryFailureError); ok {
 		// qe.Message is "command failure"
 		ce := CommandError{
 			Name:    qe.Message,
-			Wrapped: err,
+			Wrapped: qe.Wrapped,
 			Raw:     bson.Raw(qe.Response),
-
-			// Don't set wrappedMsgOnly=true here because the code below adds
-			// additional error context that is not provided by the
-			// driver.QueryFailureError. Additionally, driver.QueryFailureError
-			// is only returned when parsing OP_QUERY replies (OP_REPLY), so
-			// it's unlikely this block will ever be run now that MongoDB 3.6 is
-			// no longer supported.
 		}
 
 		dollarErr, err := qe.Response.LookupErr("$err")
@@ -132,37 +93,18 @@ func wrapErrors(err error) error {
 
 		return ce
 	}
-
-	var me mongocrypt.Error
-	if errors.As(err, &me) {
-		return MongocryptError{
-			Code:    me.Code,
-			Message: me.Message,
-			wrapped: err,
-
-			// Set wrappedMsgOnly=true here so that the Code and Message are not
-			// repeated multiple times in the error string. We expect that the
-			// wrapped mongocrypt.Error already contains that info in the error
-			// string.
-			wrappedMsgOnly: true,
-		}
+	if me, ok := err.(mongocrypt.Error); ok {
+		return MongocryptError{Code: me.Code, Message: me.Message}
 	}
 
 	if errors.Is(err, codecutil.ErrNilValue) {
 		return ErrNilValue
 	}
 
-	var marshalErr codecutil.MarshalError
-	if errors.As(err, &marshalErr) {
+	if marshalErr, ok := err.(codecutil.MarshalError); ok {
 		return MarshalError{
 			Value: marshalErr.Value,
-			Err:   err,
-
-			// Set wrappedMsgOnly=true here so that the Value is not repeated
-			// multiple times in the error string. We expect that the wrapped
-			// codecutil.MarshalError already contains that info in the error
-			// string.
-			wrappedMsgOnly: true,
+			Err:   marshalErr.Err,
 		}
 	}
 
@@ -235,66 +177,16 @@ func IsNetworkError(err error) bool {
 	return errorHasLabel(err, "NetworkError")
 }
 
-// MarshalError is returned when attempting to marshal a value into a document
-// results in an error.
-type MarshalError struct {
-	Value any
-	Err   error
-
-	// If wrappedMsgOnly is true, Error() only returns the error message from
-	// the "Err" error.
-	//
-	// This is typically only set by the wrapErrors function, which uses
-	// MarshalError to wrap codecutil.MarshalError, allowing users to access the
-	// "Value" from the underlying error but preventing duplication in the error
-	// string.
-	wrappedMsgOnly bool
-}
-
-// Error implements the error interface.
-func (me MarshalError) Error() string {
-	// If the MarshalError was created with wrappedMsgOnly=true, only return the
-	// error from the wrapped error. See the MarshalError.wrappedMsgOnly docs
-	// for more info.
-	if me.wrappedMsgOnly {
-		return me.Err.Error()
-	}
-
-	return fmt.Sprintf("cannot marshal type %s to a BSON Document: %v", reflect.TypeOf(me.Value), me.Err)
-}
-
-func (me MarshalError) Unwrap() error { return me.Err }
-
 // MongocryptError represents an libmongocrypt error during in-use encryption.
 type MongocryptError struct {
 	Code    int32
 	Message string
-	wrapped error
-
-	// If wrappedMsgOnly is true, Error() only returns the error message from
-	// the "wrapped" error.
-	//
-	// This is typically only set by the wrapErrors function, which uses
-	// MarshalError to wrap mongocrypt.Error, allowing users to access the
-	// "Code" and "Message" from the underlying error but preventing duplication
-	// in the error string.
-	wrappedMsgOnly bool
 }
 
 // Error implements the error interface.
 func (m MongocryptError) Error() string {
-	// If the MongocryptError was created with wrappedMsgOnly=true, only return
-	// the error from the wrapped error. See the MongocryptError.wrappedMsgOnly
-	// docs for more info.
-	if m.wrappedMsgOnly {
-		return m.wrapped.Error()
-	}
-
 	return fmt.Sprintf("mongocrypt error %d: %v", m.Code, m.Message)
 }
-
-// Unwrap returns the underlying error.
-func (m MongocryptError) Unwrap() error { return m.wrapped }
 
 // EncryptionKeyVaultError represents an error while communicating with the key vault collection during in-use
 // encryption.
@@ -379,38 +271,14 @@ type CommandError struct {
 	Name    string   // A human-readable name corresponding to the error code
 	Wrapped error    // The underlying error, if one exists.
 	Raw     bson.Raw // The original server response containing the error.
-
-	// If wrappedMsgOnly is true, Error() only returns the error message from
-	// the "Wrapped" error.
-	//
-	// This is typically only set by the wrapErrors function, which uses
-	// CommandError to wrap driver.Error, allowing users to access the "Code",
-	// "Message", "Labels", "Name", and "Raw" from the underlying error but
-	// preventing duplication in the error string.
-	wrappedMsgOnly bool
 }
 
 // Error implements the error interface.
 func (e CommandError) Error() string {
-	// If the CommandError was created with wrappedMsgOnly=true, only return the
-	// error from the wrapped error. See the CommandError.wrappedMsgOnly docs
-	// for more info.
-	if e.wrappedMsgOnly {
-		return e.Wrapped.Error()
-	}
-
-	var msg string
 	if e.Name != "" {
-		msg += fmt.Sprintf("(%v)", e.Name)
+		return fmt.Sprintf("(%v) %v", e.Name, e.Message)
 	}
-	if e.Message != "" {
-		msg += " " + e.Message
-	}
-	if e.Wrapped != nil {
-		msg += ": " + e.Wrapped.Error()
-	}
-
-	return msg
+	return e.Message
 }
 
 // Unwrap returns the underlying error.
@@ -853,13 +721,13 @@ func processWriteError(err error) (returnResult, error) {
 	// ignored. For non-DDL write commands (insert, update, etc), acknowledgement
 	// should be be propagated at the result-level: e.g.,
 	// SingleResult.Acknowledged.
-	if errors.Is(err, driver.ErrUnacknowledgedWrite) {
+	if err == driver.ErrUnacknowledgedWrite {
 		return rrAllUnacknowledged, nil
 	}
 
-	var wce driver.WriteCommandError
-	if !errors.As(err, &wce) {
-		return rrNone, wrapErrors(err)
+	wce, ok := err.(driver.WriteCommandError)
+	if !ok {
+		return rrNone, replaceErrors(err)
 	}
 
 	return rrMany, WriteException{

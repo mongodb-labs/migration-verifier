@@ -36,12 +36,12 @@ func NewIOSink(out io.Writer) *IOSink {
 }
 
 // Info will write a JSON-encoded message to the io.Writer.
-func (sink *IOSink) Info(_ int, msg string, keysAndValues ...any) {
+func (sink *IOSink) Info(_ int, msg string, keysAndValues ...interface{}) {
 	mapSize := len(keysAndValues) / 2
 	if math.MaxInt-mapSize >= 2 {
 		mapSize += 2
 	}
-	kvMap := make(map[string]any, mapSize)
+	kvMap := make(map[string]interface{}, mapSize)
 
 	kvMap[KeyTimestamp] = time.Now().UnixNano()
 	kvMap[KeyMessage] = msg
@@ -57,7 +57,7 @@ func (sink *IOSink) Info(_ int, msg string, keysAndValues ...any) {
 }
 
 // Error will write a JSON-encoded error message to the io.Writer.
-func (sink *IOSink) Error(err error, msg string, kv ...any) {
+func (sink *IOSink) Error(err error, msg string, kv ...interface{}) {
 	kv = append(kv, KeyError, err.Error())
 	sink.Info(0, msg, kv...)
 }

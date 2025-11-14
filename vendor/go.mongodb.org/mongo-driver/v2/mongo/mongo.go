@@ -31,6 +31,18 @@ type Dialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
 
+// MarshalError is returned when attempting to marshal a value into a document
+// results in an error.
+type MarshalError struct {
+	Value interface{}
+	Err   error
+}
+
+// Error implements the error interface.
+func (me MarshalError) Error() string {
+	return fmt.Sprintf("cannot marshal type %s to a BSON Document: %v", reflect.TypeOf(me.Value), me.Err)
+}
+
 // Pipeline is a type that makes creating aggregation pipelines easier. It is a
 // helper and is intended for serializing to BSON.
 //
@@ -71,9 +83,6 @@ func getEncoder(
 		if opts.OmitZeroStruct {
 			enc.OmitZeroStruct()
 		}
-		if opts.OmitEmpty {
-			enc.OmitEmpty()
-		}
 		if opts.StringifyMapKeysWithFmt {
 			enc.StringifyMapKeysWithFmt()
 		}
@@ -103,7 +112,7 @@ func newEncoderFn(opts *options.BSONOptions, registry *bson.Registry) codecutil.
 // If bsonOpts and registry are specified, the encoder is configured with the requested behaviors.
 // If they are nil, the default behaviors are used.
 func marshal(
-	val any,
+	val interface{},
 	bsonOpts *options.BSONOptions,
 	registry *bson.Registry,
 ) (bsoncore.Document, error) {
@@ -140,17 +149,17 @@ func ensureID(
 	oid bson.ObjectID,
 	bsonOpts *options.BSONOptions,
 	reg *bson.Registry,
-) (bsoncore.Document, any, error) {
+) (bsoncore.Document, interface{}, error) {
 	if reg == nil {
 		reg = defaultRegistry
 	}
 
 	// Try to find the "_id" element. If it exists, try to unmarshal just the
-	// "_id" field as an any and return it along with the unmodified
+	// "_id" field as an interface{} and return it along with the unmodified
 	// BSON document.
 	if _, err := doc.LookupErr("_id"); err == nil {
 		var id struct {
-			ID any `bson:"_id"`
+			ID interface{} `bson:"_id"`
 		}
 		dec := getDecoder(doc, bsonOpts, reg)
 		err = dec.Decode(&id)
@@ -205,7 +214,7 @@ func ensureNoDollarKey(doc bsoncore.Document) error {
 }
 
 func marshalAggregatePipeline(
-	pipeline any,
+	pipeline interface{},
 	bsonOpts *options.BSONOptions,
 	registry *bson.Registry,
 ) (bsoncore.Document, bool, error) {
@@ -293,7 +302,7 @@ func marshalAggregatePipeline(
 }
 
 func marshalUpdateValue(
-	update any,
+	update interface{},
 	bsonOpts *options.BSONOptions,
 	registry *bson.Registry,
 	dollarKeysAllowed bool,
@@ -383,7 +392,7 @@ func marshalUpdateValue(
 }
 
 func marshalValue(
-	val any,
+	val interface{},
 	bsonOpts *options.BSONOptions,
 	registry *bson.Registry,
 ) (bsoncore.Value, error) {
@@ -392,7 +401,7 @@ func marshalValue(
 
 // Build the aggregation pipeline for the CountDocument command.
 func countDocumentsAggregatePipeline(
-	filter any,
+	filter interface{},
 	encOpts *options.BSONOptions,
 	registry *bson.Registry,
 	args *options.CountOptions,

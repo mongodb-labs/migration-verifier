@@ -10,7 +10,7 @@ import (
 	"reflect"
 )
 
-// emptyInterfaceCodec is the Codec used for any values.
+// emptyInterfaceCodec is the Codec used for interface{} values.
 type emptyInterfaceCodec struct {
 	// decodeBinaryAsSlice causes DecodeValue to unmarshal BSON binary field values that are the
 	// "Generic" or "Old" BSON binary subtype as a Go byte slice instead of a Binary.
@@ -22,7 +22,7 @@ type emptyInterfaceCodec struct {
 // collection.
 var _ typeDecoder = &emptyInterfaceCodec{}
 
-// EncodeValue is the ValueEncoderFunc for any.
+// EncodeValue is the ValueEncoderFunc for interface{}.
 func (eic *emptyInterfaceCodec) EncodeValue(ec EncodeContext, vw ValueWriter, val reflect.Value) error {
 	if !val.IsValid() || val.Type() != tEmpty {
 		return ValueEncoderError{Name: "EmptyInterfaceEncodeValue", Types: []reflect.Type{tEmpty}, Received: val}
@@ -111,7 +111,7 @@ func (eic *emptyInterfaceCodec) decodeType(dc DecodeContext, vr ValueReader, t r
 	return elem, nil
 }
 
-// DecodeValue is the ValueDecoderFunc for any.
+// DecodeValue is the ValueDecoderFunc for interface{}.
 func (eic *emptyInterfaceCodec) DecodeValue(dc DecodeContext, vr ValueReader, val reflect.Value) error {
 	if !val.CanSet() || val.Type() != tEmpty {
 		return ValueDecoderError{Name: "EmptyInterfaceDecodeValue", Types: []reflect.Type{tEmpty}, Received: val}

@@ -16,7 +16,7 @@ import (
 //
 // See corresponding setter methods for documentation.
 type DefaultIndexOptions struct {
-	StorageEngine any
+	StorageEngine interface{}
 }
 
 // DefaultIndexOptionsBuilder contains options to configure default index
@@ -39,7 +39,7 @@ func (d *DefaultIndexOptionsBuilder) List() []func(*DefaultIndexOptions) error {
 // SetStorageEngine sets the value for the StorageEngine field. Specifies the storage engine to use for
 // the index. The value must be a document in the form {<storage engine name>: <options>}. The default
 // value is nil, which means that the default storage engine will be used.
-func (d *DefaultIndexOptionsBuilder) SetStorageEngine(storageEngine any) *DefaultIndexOptionsBuilder {
+func (d *DefaultIndexOptionsBuilder) SetStorageEngine(storageEngine interface{}) *DefaultIndexOptionsBuilder {
 	d.Opts = append(d.Opts, func(opts *DefaultIndexOptions) error {
 		opts.StorageEngine = storageEngine
 
@@ -149,18 +149,18 @@ func (tso *TimeSeriesOptionsBuilder) SetBucketRounding(dur time.Duration) *TimeS
 type CreateCollectionOptions struct {
 	Capped                       *bool
 	Collation                    *Collation
-	ChangeStreamPreAndPostImages any
+	ChangeStreamPreAndPostImages interface{}
 	DefaultIndexOptions          *DefaultIndexOptionsBuilder
 	MaxDocuments                 *int64
 	SizeInBytes                  *int64
-	StorageEngine                any
+	StorageEngine                interface{}
 	ValidationAction             *string
 	ValidationLevel              *string
-	Validator                    any
+	Validator                    interface{}
 	ExpireAfterSeconds           *int64
 	TimeSeriesOptions            *TimeSeriesOptionsBuilder
-	EncryptedFields              any
-	ClusteredIndex               any
+	EncryptedFields              interface{}
+	ClusteredIndex               interface{}
 }
 
 // CreateCollectionOptionsBuilder contains options to configure a new
@@ -193,8 +193,9 @@ func (c *CreateCollectionOptionsBuilder) SetCapped(capped bool) *CreateCollectio
 	return c
 }
 
-// SetCollation sets the value for the Collation field. Specifies the default
-// collation for the new collection. The default value is nil.
+// SetCollation sets the value for the Collation field. Specifies the default collation for the new
+// collection. This option is only valid for MongoDB versions >= 3.4. For previous server versions,
+// the driver will return an error if this option is used. The default value is nil.
 func (c *CreateCollectionOptionsBuilder) SetCollation(collation *Collation) *CreateCollectionOptionsBuilder {
 	c.Opts = append(c.Opts, func(opts *CreateCollectionOptions) error {
 		opts.Collation = collation
@@ -211,7 +212,7 @@ func (c *CreateCollectionOptionsBuilder) SetCollation(collation *Collation) *Cre
 // option is only valid for MongoDB versions >= 6.0. The default value is nil, which means that
 // change streams opened against the collection will not return pre- and post-images of updated
 // documents in any way.
-func (c *CreateCollectionOptionsBuilder) SetChangeStreamPreAndPostImages(csppi any) *CreateCollectionOptionsBuilder {
+func (c *CreateCollectionOptionsBuilder) SetChangeStreamPreAndPostImages(csppi interface{}) *CreateCollectionOptionsBuilder {
 	c.Opts = append(c.Opts, func(opts *CreateCollectionOptions) error {
 		opts.ChangeStreamPreAndPostImages = &csppi
 
@@ -221,9 +222,9 @@ func (c *CreateCollectionOptionsBuilder) SetChangeStreamPreAndPostImages(csppi a
 	return c
 }
 
-// SetDefaultIndexOptions sets the value for the DefaultIndexOptions field.
-// Specifies a default configuration for indexes on the collection. The default
-// value is nil, meaning indexes will be configured using server defaults.
+// SetDefaultIndexOptions sets the value for the DefaultIndexOptions field. Specifies a default
+// configuration for indexes on the collection. This option is only valid for MongoDB versions
+// >= 3.4. The default value is nil, meaning indexes will be configured using server defaults.
 func (c *CreateCollectionOptionsBuilder) SetDefaultIndexOptions(iopts *DefaultIndexOptionsBuilder) *CreateCollectionOptionsBuilder {
 	c.Opts = append(c.Opts, func(opts *CreateCollectionOptions) error {
 		opts.DefaultIndexOptions = iopts
@@ -264,7 +265,7 @@ func (c *CreateCollectionOptionsBuilder) SetSizeInBytes(size int64) *CreateColle
 // SetStorageEngine sets the value for the StorageEngine field. Specifies the storage engine to use for
 // the index. The value must be a document in the form {<storage engine name>: <options>}. The default
 // value is nil, which means that the default storage engine will be used.
-func (c *CreateCollectionOptionsBuilder) SetStorageEngine(storageEngine any) *CreateCollectionOptionsBuilder {
+func (c *CreateCollectionOptionsBuilder) SetStorageEngine(storageEngine interface{}) *CreateCollectionOptionsBuilder {
 	c.Opts = append(c.Opts, func(opts *CreateCollectionOptions) error {
 		opts.StorageEngine = &storageEngine
 
@@ -277,7 +278,7 @@ func (c *CreateCollectionOptionsBuilder) SetStorageEngine(storageEngine any) *Cr
 // SetValidationAction sets the value for the ValidationAction field. Specifies what should happen if a
 // document being inserted does not pass validation. Valid values are "error" and "warn". See
 // https://www.mongodb.com/docs/manual/core/schema-validation/#accept-or-reject-invalid-documents for more
-// information. The default value is "error".
+// information. This option is only valid for MongoDB versions >= 3.2. The default value is "error".
 func (c *CreateCollectionOptionsBuilder) SetValidationAction(action string) *CreateCollectionOptionsBuilder {
 	c.Opts = append(c.Opts, func(opts *CreateCollectionOptions) error {
 		opts.ValidationAction = &action
@@ -291,7 +292,7 @@ func (c *CreateCollectionOptionsBuilder) SetValidationAction(action string) *Cre
 // SetValidationLevel sets the value for the ValidationLevel field. Specifies how strictly the server applies
 // validation rules to existing documents in the collection during update operations. Valid values are "off",
 // "strict", and "moderate". See https://www.mongodb.com/docs/manual/core/schema-validation/#existing-documents
-// for more information. The default value is "strict".
+// for more information. This option is only valid for MongoDB versions >= 3.2. The default value is "strict".
 func (c *CreateCollectionOptionsBuilder) SetValidationLevel(level string) *CreateCollectionOptionsBuilder {
 	c.Opts = append(c.Opts, func(opts *CreateCollectionOptions) error {
 		opts.ValidationLevel = &level
@@ -304,8 +305,9 @@ func (c *CreateCollectionOptionsBuilder) SetValidationLevel(level string) *Creat
 
 // SetValidator sets the value for the Validator field. Sets a document specifying validation rules for the
 // collection. See https://www.mongodb.com/docs/manual/core/schema-validation/ for more information about
-// schema validation. The default value is nil, meaning no validator will be used for the collection.
-func (c *CreateCollectionOptionsBuilder) SetValidator(validator any) *CreateCollectionOptionsBuilder {
+// schema validation. This option is only valid for MongoDB versions >= 3.2. The default value is nil,
+// meaning no validator will be used for the collection.
+func (c *CreateCollectionOptionsBuilder) SetValidator(validator interface{}) *CreateCollectionOptionsBuilder {
 	c.Opts = append(c.Opts, func(opts *CreateCollectionOptions) error {
 		opts.Validator = validator
 
@@ -351,7 +353,7 @@ func (c *CreateCollectionOptionsBuilder) SetTimeSeriesOptions(timeSeriesOpts *Ti
 // SetEncryptedFields sets the encrypted fields for encrypted collections.
 //
 // This option is only valid for MongoDB versions >= 6.0
-func (c *CreateCollectionOptionsBuilder) SetEncryptedFields(encryptedFields any) *CreateCollectionOptionsBuilder {
+func (c *CreateCollectionOptionsBuilder) SetEncryptedFields(encryptedFields interface{}) *CreateCollectionOptionsBuilder {
 	c.Opts = append(c.Opts, func(opts *CreateCollectionOptions) error {
 		opts.EncryptedFields = encryptedFields
 
@@ -365,7 +367,7 @@ func (c *CreateCollectionOptionsBuilder) SetEncryptedFields(encryptedFields any)
 // to create a collection with a clustered index.
 //
 // This option is only valid for MongoDB versions >= 5.3
-func (c *CreateCollectionOptionsBuilder) SetClusteredIndex(clusteredIndex any) *CreateCollectionOptionsBuilder {
+func (c *CreateCollectionOptionsBuilder) SetClusteredIndex(clusteredIndex interface{}) *CreateCollectionOptionsBuilder {
 	c.Opts = append(c.Opts, func(opts *CreateCollectionOptions) error {
 		opts.ClusteredIndex = clusteredIndex
 
@@ -400,8 +402,9 @@ func (c *CreateViewOptionsBuilder) List() []func(*CreateViewOptions) error {
 	return c.Opts
 }
 
-// SetCollation sets the value for the Collation field. Specifies the default
-// collation for the new collection. The default value is nil.
+// SetCollation sets the value for the Collation field. Specifies the default collation for the new
+// collection. This option is only valid for MongoDB versions >= 3.4. For previous server versions,
+// the driver will return an error if this option is used. The default value is nil.
 func (c *CreateViewOptionsBuilder) SetCollation(collation *Collation) *CreateViewOptionsBuilder {
 	c.Opts = append(c.Opts, func(opts *CreateViewOptions) error {
 		opts.Collation = collation

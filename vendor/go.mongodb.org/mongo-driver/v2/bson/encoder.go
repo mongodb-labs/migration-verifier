@@ -15,7 +15,7 @@ import (
 // methods and is not consumable from outside of this package. The Encoders retrieved from this pool
 // must have both Reset and SetRegistry called on them.
 var encPool = sync.Pool{
-	New: func() any {
+	New: func() interface{} {
 		return new(Encoder)
 	},
 }
@@ -38,7 +38,7 @@ func NewEncoder(vw ValueWriter) *Encoder {
 // Encode writes the BSON encoding of val to the stream.
 //
 // See [Marshal] for details about BSON marshaling behavior.
-func (e *Encoder) Encode(val any) error {
+func (e *Encoder) Encode(val interface{}) error {
 	if marshaler, ok := val.(Marshaler); ok {
 		// TODO(skriptble): Should we have a MarshalAppender interface so that we can have []byte reuse?
 		buf, err := marshaler.MarshalBSON()
@@ -108,19 +108,12 @@ func (e *Encoder) NilByteSliceAsEmpty() {
 // TODO struct fields once the logic is updated to also inspect private struct fields.
 
 // OmitZeroStruct causes the Encoder to consider the zero value for a struct (e.g. MyStruct{})
-// as empty and omit it from the marshaled BSON when the "omitempty" struct tag option is set
-// or the OmitEmpty() method is called.
+// as empty and omit it from the marshaled BSON when the "omitempty" struct tag option is set.
 //
 // Note that the Encoder only examines exported struct fields when determining if a struct is the
 // zero value. It considers pointers to a zero struct value (e.g. &MyStruct{}) not empty.
 func (e *Encoder) OmitZeroStruct() {
 	e.ec.omitZeroStruct = true
-}
-
-// OmitEmpty causes the Encoder to omit empty values from the marshaled BSON as the "omitempty"
-// struct tag option is set.
-func (e *Encoder) OmitEmpty() {
-	e.ec.omitEmpty = true
 }
 
 // UseJSONStructTags causes the Encoder to fall back to using the "json" struct tag if a "bson"

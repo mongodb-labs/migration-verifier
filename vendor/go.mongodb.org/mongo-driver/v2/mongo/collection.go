@@ -17,7 +17,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/internal/csfle"
 	"go.mongodb.org/mongo-driver/v2/internal/mongoutil"
-	"go.mongodb.org/mongo-driver/v2/internal/optionsutil"
 	"go.mongodb.org/mongo-driver/v2/internal/serverselector"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
@@ -47,7 +46,7 @@ type Collection struct {
 // aggregateParams is used to store information to configure an Aggregate operation.
 type aggregateParams struct {
 	ctx            context.Context
-	pipeline       any
+	pipeline       interface{}
 	client         *Client
 	bsonOpts       *options.BSONOptions
 	registry       *bson.Registry
@@ -194,7 +193,7 @@ func (coll *Collection) BulkWrite(ctx context.Context, models []WriteModel,
 	opts ...options.Lister[options.BulkWriteOptions]) (*BulkWriteResult, error) {
 
 	if len(models) == 0 {
-		return nil, fmt.Errorf("invalid models: %w", ErrEmptySlice)
+		return nil, ErrEmptySlice
 	}
 
 	if ctx == nil {
@@ -222,9 +221,9 @@ func (coll *Collection) BulkWrite(ctx context.Context, models []WriteModel,
 
 	selector := makePinnedSelector(sess, coll.writeSelector)
 
-	for i, model := range models {
+	for _, model := range models {
 		if model == nil {
-			return nil, fmt.Errorf("invalid model at index %d: %w", i, ErrNilDocument)
+			return nil, ErrNilDocument
 		}
 	}
 
@@ -246,28 +245,23 @@ func (coll *Collection) BulkWrite(ctx context.Context, models []WriteModel,
 		writeConcern:             wc,
 		let:                      args.Let,
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op.rawData = &rawData
-		}
-	}
 
 	err = op.execute(ctx)
 
-	return &op.result, wrapErrors(err)
+	return &op.result, replaceErrors(err)
 }
 
 func (coll *Collection) insert(
 	ctx context.Context,
-	documents []any,
+	documents []interface{},
 	opts ...options.Lister[options.InsertManyOptions],
-) ([]any, error) {
+) ([]interface{}, error) {
 
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	result := make([]any, len(documents))
+	result := make([]interface{}, len(documents))
 	docs := make([]bsoncore.Document, len(documents))
 
 	for i, doc := range documents {
@@ -330,11 +324,6 @@ func (coll *Collection) insert(
 	if args.Ordered != nil {
 		op = op.Ordered(*args.Ordered)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 	retry := driver.RetryNone
 	if coll.client.retryWrites {
 		retry = driver.RetryOncePerCommand
@@ -371,7 +360,7 @@ func (coll *Collection) insert(
 // The opts parameter can be used to specify options for the operation (see the options.InsertOneOptions documentation.)
 //
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/insert/.
-func (coll *Collection) InsertOne(ctx context.Context, document any,
+func (coll *Collection) InsertOne(ctx context.Context, document interface{},
 	opts ...options.Lister[options.InsertOneOptions]) (*InsertOneResult, error) {
 
 	args, err := mongoutil.NewOptions(opts...)
@@ -386,14 +375,7 @@ func (coll *Collection) InsertOne(ctx context.Context, document any,
 	if args.Comment != nil {
 		imOpts.SetComment(args.Comment)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		imOpts.Opts = append(imOpts.Opts, func(opts *options.InsertManyOptions) error {
-			optionsutil.WithValue(opts.Internal, "rawData", rawDataOpt)
-
-			return nil
-		})
-	}
-	res, err := coll.insert(ctx, []any{document}, imOpts)
+	res, err := coll.insert(ctx, []interface{}{document}, imOpts)
 
 	rr, err := processWriteError(err)
 	if rr&rrOne == 0 && rr.isAcknowledged() {
@@ -419,19 +401,19 @@ func (coll *Collection) InsertOne(ctx context.Context, document any,
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/insert/.
 func (coll *Collection) InsertMany(
 	ctx context.Context,
-	documents any,
+	documents interface{},
 	opts ...options.Lister[options.InsertManyOptions],
 ) (*InsertManyResult, error) {
 
 	dv := reflect.ValueOf(documents)
 	if dv.Kind() != reflect.Slice {
-		return nil, fmt.Errorf("invalid documents: %w", ErrNotSlice)
+		return nil, ErrNotSlice
 	}
 	if dv.Len() == 0 {
-		return nil, fmt.Errorf("invalid documents: %w", ErrEmptySlice)
+		return nil, ErrEmptySlice
 	}
 
-	docSlice := make([]any, 0, dv.Len())
+	docSlice := make([]interface{}, 0, dv.Len())
 	for i := 0; i < dv.Len(); i++ {
 		docSlice = append(docSlice, dv.Index(i).Interface())
 	}
@@ -469,7 +451,7 @@ func (coll *Collection) InsertMany(
 
 func (coll *Collection) delete(
 	ctx context.Context,
-	filter any,
+	filter interface{},
 	deleteOne bool,
 	expectedRr returnResult,
 	args *options.DeleteManyOptions,
@@ -552,11 +534,6 @@ func (coll *Collection) delete(
 		}
 		op = op.Let(let)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 
 	// deleteMany cannot be retried
 	retryMode := driver.RetryNone
@@ -586,7 +563,7 @@ func (coll *Collection) delete(
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/delete/.
 func (coll *Collection) DeleteOne(
 	ctx context.Context,
-	filter any,
+	filter interface{},
 	opts ...options.Lister[options.DeleteOneOptions],
 ) (*DeleteResult, error) {
 	args, err := mongoutil.NewOptions[options.DeleteOneOptions](opts...)
@@ -598,7 +575,6 @@ func (coll *Collection) DeleteOne(
 		Comment:   args.Comment,
 		Hint:      args.Hint,
 		Let:       args.Let,
-		Internal:  args.Internal,
 	}
 
 	return coll.delete(ctx, filter, true, rrOne, deleteOptions)
@@ -616,7 +592,7 @@ func (coll *Collection) DeleteOne(
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/delete/.
 func (coll *Collection) DeleteMany(
 	ctx context.Context,
-	filter any,
+	filter interface{},
 	opts ...options.Lister[options.DeleteManyOptions],
 ) (*DeleteResult, error) {
 	args, err := mongoutil.NewOptions[options.DeleteManyOptions](opts...)
@@ -630,11 +606,11 @@ func (coll *Collection) DeleteMany(
 func (coll *Collection) updateOrReplace(
 	ctx context.Context,
 	filter bsoncore.Document,
-	update any,
+	update interface{},
 	multi bool,
 	expectedRr returnResult,
 	checkDollarKey bool,
-	sort any,
+	sort interface{},
 	args *options.UpdateManyOptions,
 ) (*UpdateResult, error) {
 
@@ -705,11 +681,6 @@ func (coll *Collection) updateOrReplace(
 		}
 		op = op.Comment(comment)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 	retry := driver.RetryNone
 	// retryable writes are only enabled updateOne/replaceOne operations
 	if !multi && coll.client.retryWrites {
@@ -753,12 +724,12 @@ func (coll *Collection) updateOrReplace(
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/update/.
 func (coll *Collection) UpdateByID(
 	ctx context.Context,
-	id any,
-	update any,
+	id interface{},
+	update interface{},
 	opts ...options.Lister[options.UpdateOneOptions],
 ) (*UpdateResult, error) {
 	if id == nil {
-		return nil, fmt.Errorf("invalid id: %w", ErrNilValue)
+		return nil, ErrNilValue
 	}
 	return coll.UpdateOne(ctx, bson.D{{"_id", id}}, update, opts...)
 }
@@ -779,8 +750,8 @@ func (coll *Collection) UpdateByID(
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/update/.
 func (coll *Collection) UpdateOne(
 	ctx context.Context,
-	filter any,
-	update any,
+	filter interface{},
+	update interface{},
 	opts ...options.Lister[options.UpdateOneOptions],
 ) (*UpdateResult, error) {
 	if ctx == nil {
@@ -804,7 +775,6 @@ func (coll *Collection) UpdateOne(
 		Hint:                     args.Hint,
 		Upsert:                   args.Upsert,
 		Let:                      args.Let,
-		Internal:                 args.Internal,
 	}
 
 	return coll.updateOrReplace(ctx, f, update, false, rrOne, true, args.Sort, updateOptions)
@@ -825,8 +795,8 @@ func (coll *Collection) UpdateOne(
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/update/.
 func (coll *Collection) UpdateMany(
 	ctx context.Context,
-	filter any,
-	update any,
+	filter interface{},
+	update interface{},
 	opts ...options.Lister[options.UpdateManyOptions],
 ) (*UpdateResult, error) {
 	if ctx == nil {
@@ -861,8 +831,8 @@ func (coll *Collection) UpdateMany(
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/update/.
 func (coll *Collection) ReplaceOne(
 	ctx context.Context,
-	filter any,
-	replacement any,
+	filter interface{},
+	replacement interface{},
 	opts ...options.Lister[options.ReplaceOptions],
 ) (*UpdateResult, error) {
 	if ctx == nil {
@@ -895,7 +865,6 @@ func (coll *Collection) ReplaceOne(
 		Hint:                     args.Hint,
 		Let:                      args.Let,
 		Comment:                  args.Comment,
-		Internal:                 args.Internal,
 	}
 
 	return coll.updateOrReplace(ctx, f, r, false, rrOne, false, args.Sort, updateOptions)
@@ -914,7 +883,7 @@ func (coll *Collection) ReplaceOne(
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/aggregate/.
 func (coll *Collection) Aggregate(
 	ctx context.Context,
-	pipeline any,
+	pipeline interface{},
 	opts ...options.Lister[options.AggregateOptions],
 ) (*Cursor, error) {
 	a := aggregateParams{
@@ -1067,11 +1036,6 @@ func aggregate(a aggregateParams, opts ...options.Lister[options.AggregateOption
 		}
 		op.CustomOptions(customOptions)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 
 	retry := driver.RetryNone
 	if a.retryRead && !hasOutputStage {
@@ -1081,25 +1045,18 @@ func aggregate(a aggregateParams, opts ...options.Lister[options.AggregateOption
 
 	err = op.Execute(a.ctx)
 	if err != nil {
-		var wce driver.WriteCommandError
-		if errors.As(err, &wce) && wce.WriteConcernError != nil {
+		if wce, ok := err.(driver.WriteCommandError); ok && wce.WriteConcernError != nil {
 			return nil, *convertDriverWriteConcernError(wce.WriteConcernError)
 		}
-		return nil, wrapErrors(err)
+		return nil, replaceErrors(err)
 	}
 
 	bc, err := op.Result(cursorOpts)
 	if err != nil {
-		return nil, wrapErrors(err)
+		return nil, replaceErrors(err)
 	}
-	cursor, err := newCursorWithSession(bc, a.client.bsonOpts, a.registry, sess,
-
-		// The only way the server will return a tailable/awaitData cursor for an
-		// aggregate operation is for the first stage in the pipeline to
-		// be $changeStream, this is the only time maxAwaitTimeMS should be applied.
-		// For this reason, we pass the client timeout to the cursor.
-		withCursorOptionClientTimeout(a.client.timeout))
-	return cursor, wrapErrors(err)
+	cursor, err := newCursorWithSession(bc, a.client.bsonOpts, a.registry, sess)
+	return cursor, replaceErrors(err)
 }
 
 // CountDocuments returns the number of documents in the collection. For a fast count of the documents in the
@@ -1110,7 +1067,7 @@ func aggregate(a aggregateParams, opts ...options.Lister[options.AggregateOption
 // result in a full collection scan.
 //
 // The opts parameter can be used to specify options for the operation (see the options.CountOptions documentation).
-func (coll *Collection) CountDocuments(ctx context.Context, filter any,
+func (coll *Collection) CountDocuments(ctx context.Context, filter interface{},
 	opts ...options.Lister[options.CountOptions]) (int64, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -1166,11 +1123,6 @@ func (coll *Collection) CountDocuments(ctx context.Context, filter any,
 		}
 		op.Hint(hintVal)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 	retry := driver.RetryNone
 	if coll.client.retryReads {
 		retry = driver.RetryOncePerCommand
@@ -1179,7 +1131,7 @@ func (coll *Collection) CountDocuments(ctx context.Context, filter any,
 
 	err = op.Execute(ctx)
 	if err != nil {
-		return 0, wrapErrors(err)
+		return 0, replaceErrors(err)
 	}
 
 	batch := op.ResultCursorResponse().FirstBatch
@@ -1252,11 +1204,6 @@ func (coll *Collection) EstimatedDocumentCount(
 		}
 		op = op.Comment(comment)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 
 	retry := driver.RetryNone
 	if coll.client.retryReads {
@@ -1265,7 +1212,7 @@ func (coll *Collection) EstimatedDocumentCount(
 	op.Retry(retry)
 
 	err = op.Execute(ctx)
-	return op.Result().N, wrapErrors(err)
+	return op.Result().N, replaceErrors(err)
 }
 
 // Distinct executes a distinct command to find the unique values for a specified field in the collection.
@@ -1281,7 +1228,7 @@ func (coll *Collection) EstimatedDocumentCount(
 func (coll *Collection) Distinct(
 	ctx context.Context,
 	fieldName string,
-	filter any,
+	filter interface{},
 	opts ...options.Lister[options.DistinctOptions],
 ) *DistinctResult {
 	if ctx == nil {
@@ -1346,11 +1293,6 @@ func (coll *Collection) Distinct(
 		}
 		op.Hint(hint)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 	retry := driver.RetryNone
 	if coll.client.retryReads {
 		retry = driver.RetryOncePerCommand
@@ -1359,7 +1301,7 @@ func (coll *Collection) Distinct(
 
 	err = op.Execute(ctx)
 	if err != nil {
-		return &DistinctResult{err: wrapErrors(err)}
+		return &DistinctResult{err: replaceErrors(err)}
 	}
 
 	arr, ok := op.Result().Values.ArrayOK()
@@ -1384,7 +1326,7 @@ func (coll *Collection) Distinct(
 // The opts parameter can be used to specify options for the operation (see the options.FindOptions documentation).
 //
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/find/.
-func (coll *Collection) Find(ctx context.Context, filter any,
+func (coll *Collection) Find(ctx context.Context, filter interface{},
 	opts ...options.Lister[options.FindOptions]) (*Cursor, error) {
 	args, err := mongoutil.NewOptions(opts...)
 	if err != nil {
@@ -1400,7 +1342,7 @@ func (coll *Collection) Find(ctx context.Context, filter any,
 
 func (coll *Collection) find(
 	ctx context.Context,
-	filter any,
+	filter interface{},
 	omitMaxTimeMS bool,
 	args *options.FindOptions,
 ) (cur *Cursor, err error) {
@@ -1554,11 +1496,6 @@ func (coll *Collection) find(
 		}
 		op.Sort(sort)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 	retry := driver.RetryNone
 	if coll.client.retryReads {
 		retry = driver.RetryOncePerCommand
@@ -1566,16 +1503,14 @@ func (coll *Collection) find(
 	op = op.Retry(retry)
 
 	if err = op.Execute(ctx); err != nil {
-		return nil, wrapErrors(err)
+		return nil, replaceErrors(err)
 	}
 
 	bc, err := op.Result(cursorOpts)
 	if err != nil {
-		return nil, wrapErrors(err)
+		return nil, replaceErrors(err)
 	}
-
-	return newCursorWithSession(bc, coll.bsonOpts, coll.registry, sess,
-		withCursorOptionClientTimeout(coll.client.timeout))
+	return newCursorWithSession(bc, coll.bsonOpts, coll.registry, sess)
 }
 
 func newFindArgsFromFindOneArgs(args *options.FindOneOptions) *options.FindOptions {
@@ -1594,7 +1529,6 @@ func newFindArgsFromFindOneArgs(args *options.FindOneOptions) *options.FindOptio
 		v.ShowRecordID = args.ShowRecordID
 		v.Skip = args.Skip
 		v.Sort = args.Sort
-		v.Internal = args.Internal
 	}
 	return v
 }
@@ -1608,7 +1542,7 @@ func newFindArgsFromFindOneArgs(args *options.FindOneOptions) *options.FindOptio
 // The opts parameter can be used to specify options for this operation (see the options.FindOneOptions documentation).
 //
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/find/.
-func (coll *Collection) FindOne(ctx context.Context, filter any,
+func (coll *Collection) FindOne(ctx context.Context, filter interface{},
 	opts ...options.Lister[options.FindOneOptions]) *SingleResult {
 
 	if ctx == nil {
@@ -1625,7 +1559,7 @@ func (coll *Collection) FindOne(ctx context.Context, filter any,
 		cur:      cursor,
 		bsonOpts: coll.bsonOpts,
 		reg:      coll.registry,
-		err:      wrapErrors(err),
+		err:      replaceErrors(err),
 	}
 }
 
@@ -1699,7 +1633,7 @@ func (coll *Collection) findAndModify(ctx context.Context, op *operation.FindAnd
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/findAndModify/.
 func (coll *Collection) FindOneAndDelete(
 	ctx context.Context,
-	filter any,
+	filter interface{},
 	opts ...options.Lister[options.FindOneAndDeleteOptions]) *SingleResult {
 
 	f, err := marshal(filter, coll.bsonOpts, coll.registry)
@@ -1757,11 +1691,6 @@ func (coll *Collection) FindOneAndDelete(
 		}
 		op = op.Let(let)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 
 	return coll.findAndModify(ctx, op)
 }
@@ -1782,8 +1711,8 @@ func (coll *Collection) FindOneAndDelete(
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/findAndModify/.
 func (coll *Collection) FindOneAndReplace(
 	ctx context.Context,
-	filter any,
-	replacement any,
+	filter interface{},
+	replacement interface{},
 	opts ...options.Lister[options.FindOneAndReplaceOptions],
 ) *SingleResult {
 
@@ -1859,11 +1788,6 @@ func (coll *Collection) FindOneAndReplace(
 		}
 		op = op.Let(let)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 
 	return coll.findAndModify(ctx, op)
 }
@@ -1885,8 +1809,8 @@ func (coll *Collection) FindOneAndReplace(
 // For more information about the command, see https://www.mongodb.com/docs/manual/reference/command/findAndModify/.
 func (coll *Collection) FindOneAndUpdate(
 	ctx context.Context,
-	filter any,
-	update any,
+	filter interface{},
+	update interface{},
 	opts ...options.Lister[options.FindOneAndUpdateOptions]) *SingleResult {
 
 	if ctx == nil {
@@ -1973,11 +1897,6 @@ func (coll *Collection) FindOneAndUpdate(
 		}
 		op = op.Let(let)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 
 	return coll.findAndModify(ctx, op)
 }
@@ -1995,7 +1914,7 @@ func (coll *Collection) FindOneAndUpdate(
 //
 // The opts parameter can be used to specify options for change stream creation (see the options.ChangeStreamOptions
 // documentation).
-func (coll *Collection) Watch(ctx context.Context, pipeline any,
+func (coll *Collection) Watch(ctx context.Context, pipeline interface{},
 	opts ...options.Lister[options.ChangeStreamOptions]) (*ChangeStream, error) {
 
 	csConfig := changeStreamConfig{
@@ -2056,7 +1975,7 @@ func (coll *Collection) Drop(ctx context.Context, opts ...options.Lister[options
 }
 
 // dropEncryptedCollection drops a collection with EncryptedFields.
-func (coll *Collection) dropEncryptedCollection(ctx context.Context, ef any) error {
+func (coll *Collection) dropEncryptedCollection(ctx context.Context, ef interface{}) error {
 	efBSON, err := marshal(ef, coll.bsonOpts, coll.registry)
 	if err != nil {
 		return fmt.Errorf("error transforming document: %w", err)
@@ -2122,9 +2041,9 @@ func (coll *Collection) drop(ctx context.Context) error {
 	err = op.Execute(ctx)
 
 	// ignore namespace not found errors
-	var driverErr driver.Error
-	if !errors.As(err, &driverErr) || !driverErr.NamespaceNotFound() {
-		return wrapErrors(err)
+	driverErr, ok := err.(driver.Error)
+	if !ok || (ok && !driverErr.NamespaceNotFound()) {
+		return replaceErrors(err)
 	}
 	return nil
 }
@@ -2249,7 +2168,7 @@ func makeOutputAggregateSelector(
 // isUnorderedMap returns true if val is a map with more than 1 element. It is typically used to
 // check for unordered Go values that are used in nested command documents where different field
 // orders mean different things. Examples are the "sort" and "hint" fields.
-func isUnorderedMap(val any) bool {
+func isUnorderedMap(val interface{}) bool {
 	refValue := reflect.ValueOf(val)
 	return refValue.Kind() == reflect.Map && refValue.Len() > 1
 }

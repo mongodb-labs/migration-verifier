@@ -151,7 +151,7 @@ func (c *Create) Capped(capped bool) *Create {
 	return c
 }
 
-// Collation specifies a collation.
+// Collation specifies a collation. This option is only valid for server versions 3.4 and above.
 func (c *Create) Collation(collation bsoncore.Document) *Create {
 	if c == nil {
 		c = new(Create)

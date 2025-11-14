@@ -143,7 +143,7 @@ func mustLogPoolMessage(pool *pool) bool {
 		logger.LevelDebug, logger.ComponentConnection)
 }
 
-func logPoolMessage(pool *pool, msg string, keysAndValues ...any) {
+func logPoolMessage(pool *pool, msg string, keysAndValues ...interface{}) {
 	host, port, err := net.SplitHostPort(pool.address.String())
 	if err != nil {
 		host = pool.address.String()
@@ -169,9 +169,11 @@ type reason struct {
 // connectionPerished checks if a given connection is perished and should be removed from the pool.
 func connectionPerished(conn *connection) (reason, bool) {
 	switch {
-	case conn.closed():
+	case conn.closed() || !conn.isAlive():
 		// A connection would only be closed if it encountered a network error
-		// during an operation and closed itself.
+		// during an operation and closed itself. If a connection is not alive
+		// (e.g. the connection was closed by the server-side), it's also
+		// considered a network error.
 		return reason{
 			loggerConn: logger.ReasonConnClosedError,
 			event:      event.ReasonError,
@@ -503,19 +505,7 @@ func (p *pool) checkOut(ctx context.Context) (conn *connection, err error) {
 		}
 		return nil, ErrPoolClosed
 	case poolPaused:
-		// Wrap poolCleared in a driver.Error so we can add the
-		// "TransientTransactionError" label. This will add
-		// "TransientTransactionError" to all poolClearedError instances, not
-		// just those that happened during transactions. While that behavior is
-		// different than other places we add "TransientTransactionError", it is
-		// consistent with the Transactions specification and simplifies the
-		// code.
-		pcErr := poolClearedError{err: p.lastClearErr, address: p.address}
-		err := driver.Error{
-			Message: pcErr.Error(),
-			Labels:  []string{driver.TransientTransactionError},
-			Wrapped: pcErr,
-		}
+		err := poolClearedError{err: p.lastClearErr, address: p.address}
 		p.stateMu.RUnlock()
 
 		duration := time.Since(start)

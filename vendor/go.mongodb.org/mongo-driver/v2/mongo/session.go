@@ -126,9 +126,9 @@ func (s *Session) EndSession(ctx context.Context) {
 // see the Client.StartSession method documentation.
 func (s *Session) WithTransaction(
 	ctx context.Context,
-	fn func(ctx context.Context) (any, error),
+	fn func(ctx context.Context) (interface{}, error),
 	opts ...options.Lister[options.TransactionOptions],
-) (any, error) {
+) (interface{}, error) {
 	timeout := time.NewTimer(withTransactionTimeout)
 	defer timeout.Stop()
 	var err error
@@ -193,8 +193,7 @@ func (s *Session) WithTransaction(
 			default:
 			}
 
-			var cerr CommandError
-			if errors.As(err, &cerr) {
+			if cerr, ok := err.(CommandError); ok {
 				if cerr.HasErrorLabel(driver.UnknownTransactionCommitResult) && !cerr.IsMaxTimeMSExpiredError() {
 					continue
 				}
@@ -292,7 +291,7 @@ func (s *Session) CommitTransaction(ctx context.Context) error {
 	// Return error without updating transaction state if it is a timeout, as the transaction has not
 	// actually been committed.
 	if IsTimeout(err) {
-		return wrapErrors(err)
+		return replaceErrors(err)
 	}
 	s.clientSession.Committing = false
 	commitErr := s.clientSession.CommitTransaction()
@@ -301,7 +300,7 @@ func (s *Session) CommitTransaction(ctx context.Context) error {
 	s.clientSession.UpdateCommitTransactionWriteConcern()
 
 	if err != nil {
-		return wrapErrors(err)
+		return replaceErrors(err)
 	}
 	return commitErr
 }

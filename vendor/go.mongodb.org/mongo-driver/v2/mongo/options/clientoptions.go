@@ -26,7 +26,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/event"
 	"go.mongodb.org/mongo-driver/v2/internal/httputil"
-	"go.mongodb.org/mongo-driver/v2/internal/optionsutil"
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"go.mongodb.org/mongo-driver/v2/mongo/writeconcern"
@@ -68,7 +67,7 @@ type ContextDialer interface {
 // Credential can be used to provide authentication options when configuring a Client.
 //
 // AuthMechanism: the mechanism to use for authentication. Supported values include "SCRAM-SHA-256", "SCRAM-SHA-1",
-// "PLAIN", "GSSAPI", "MONGODB-X509", and "MONGODB-AWS". This can also be set through the "authMechanism"
+// "MONGODB-CR", "PLAIN", "GSSAPI", "MONGODB-X509", and "MONGODB-AWS". This can also be set through the "authMechanism"
 // URI option. (e.g. "authMechanism=PLAIN"). For more information, see
 // https://www.mongodb.com/docs/manual/core/authentication-mechanisms/.
 //
@@ -183,11 +182,8 @@ type BSONOptions struct {
 
 	// OmitZeroStruct causes the driver to consider the zero value for a struct
 	// (e.g. MyStruct{}) as empty and omit it from the marshaled BSON when the
-	// "omitempty" struct tag option or the "OmitEmpty" field is set.
+	// "omitempty" struct tag option is set.
 	OmitZeroStruct bool
-
-	// OmitEmpty causes the driver to omit empty values from the marshaled BSON.
-	OmitEmpty bool
 
 	// StringifyMapKeysWithFmt causes the driver to convert Go map keys to BSON
 	// document field name strings using fmt.Sprint instead of the default
@@ -207,7 +203,7 @@ type BSONOptions struct {
 
 	// DefaultDocumentM causes the driver to always unmarshal documents into the
 	// bson.M type. This behavior is restricted to data typed as
-	// "any" or "map[string]any".
+	// "interface{}" or "map[string]interface{}".
 	DefaultDocumentM bool
 
 	// ObjectIDAsHexString causes the Decoder to decode object IDs to their hex
@@ -287,22 +283,14 @@ type ClientOptions struct {
 	// encryption.
 	//
 	// Deprecated: This option is for internal use only and should not be set (see GODRIVER-2149). It may be
-	// changed in any release. This option will be removed in 3.0 and replaced with the Custom options.Options
-	// pattern: SetInternalClientOptions(clientOptions, "crypt", myCrypt)
+	// changed or removed in any release.
 	Crypt driver.Crypt
 
 	// Deployment specifies a custom deployment to use for the new Client.
 	//
-	// Deprecated: This option is for internal use only and should not be set. It may be changed in any release.
-	// This option will be removed in 3.0 and replaced with the Custom options.Options pattern:
-	// SetInternalClientOptions(clientOptions, "deployment", myDeployment)
-	Deployment driver.Deployment
-
-	// Custom specifies internal options for the new Client.
-	//
 	// Deprecated: This option is for internal use only and should not be set. It may be changed or removed in any
 	// release.
-	Custom optionsutil.Options
+	Deployment driver.Deployment
 
 	connString *connstring.ConnString
 	err        error
@@ -311,7 +299,7 @@ type ClientOptions struct {
 // Client creates a new ClientOptions instance.
 func Client() *ClientOptions {
 	opts := &ClientOptions{}
-	opts = opts.SetHTTPClient(httputil.NewHTTPClient())
+	opts = opts.SetHTTPClient(httputil.DefaultHTTPClient)
 
 	return opts
 }
@@ -605,45 +593,24 @@ func (c *ClientOptions) Validate() error {
 			return fmt.Errorf("cannot set both OIDCMachineCallback and OIDCHumanCallback, only one may be specified")
 		}
 		if c.Auth.OIDCHumanCallback == nil && c.Auth.AuthMechanismProperties[auth.AllowedHostsProp] != "" {
-			return fmt.Errorf("cannot specify ALLOWED_HOSTS without an OIDCHumanCallback")
+			return fmt.Errorf("Cannot specify ALLOWED_HOSTS without an OIDCHumanCallback")
 		}
-		if c.Auth.OIDCMachineCallback == nil && c.Auth.OIDCHumanCallback == nil && c.Auth.AuthMechanismProperties[auth.EnvironmentProp] == "" {
-			return errors.New("must specify at least one of OIDCMachineCallback, OIDCHumanCallback, or ENVIRONMENT authMechanismProperty")
-		}
-
-		// Return an error if an unsupported authMechanismProperty is specified
-		// for MONGODB-OIDC.
-		for prop := range c.Auth.AuthMechanismProperties {
-			switch prop {
-			case auth.AllowedHostsProp, auth.EnvironmentProp, auth.ResourceProp:
-			default:
-				return fmt.Errorf("auth mechanism property %q is not valid for MONGODB-OIDC", prop)
-			}
-		}
-
 		if env, ok := c.Auth.AuthMechanismProperties[auth.EnvironmentProp]; ok {
 			switch env {
 			case auth.GCPEnvironmentValue, auth.AzureEnvironmentValue:
-				if c.Auth.AuthMechanismProperties[auth.ResourceProp] == "" {
-					return fmt.Errorf("%q must be set for the %s %q", auth.ResourceProp, env, auth.EnvironmentProp)
-				}
-				fallthrough
-			case auth.K8SEnvironmentValue:
 				if c.Auth.OIDCMachineCallback != nil {
 					return fmt.Errorf("OIDCMachineCallback cannot be specified with the %s %q", env, auth.EnvironmentProp)
 				}
 				if c.Auth.OIDCHumanCallback != nil {
 					return fmt.Errorf("OIDCHumanCallback cannot be specified with the %s %q", env, auth.EnvironmentProp)
 				}
-			case auth.TestEnvironmentValue:
+				if c.Auth.AuthMechanismProperties[auth.ResourceProp] == "" {
+					return fmt.Errorf("%q must be set for the %s %q", auth.ResourceProp, env, auth.EnvironmentProp)
+				}
+			default:
 				if c.Auth.AuthMechanismProperties[auth.ResourceProp] != "" {
 					return fmt.Errorf("%q must not be set for the %s %q", auth.ResourceProp, env, auth.EnvironmentProp)
 				}
-				if c.Auth.Username != "" {
-					return fmt.Errorf("must not specify username for %s %q", env, auth.EnvironmentProp)
-				}
-			default:
-				return fmt.Errorf("the %s %q is not supported for MONGODB-OIDC", env, auth.EnvironmentProp)
 			}
 		}
 	}
@@ -695,9 +662,9 @@ func (c *ClientOptions) SetAuth(auth Credential) *ClientOptions {
 
 // SetCompressors sets the compressors that can be used when communicating with a server. Valid values are:
 //
-// 1. "snappy"
+// 1. "snappy" - requires server version >= 3.4
 //
-// 2. "zlib"
+// 2. "zlib" - requires server version >= 3.6
 //
 // 3. "zstd" - requires server version >= 4.2, and driver version >= 1.2.0 with cgo support enabled or driver
 // version >= 1.3.0 without cgo.
@@ -929,8 +896,9 @@ func (c *ClientOptions) SetReplicaSet(s string) *ClientOptions {
 // DeleteManyModel instances to be considered retryable. Unacknowledged writes will not be retried, even if this option
 // is set to true.
 //
-// This option only works on a replica set or sharded cluster and will be ignored for any other cluster type.
-// This can also be set through the "retryWrites" URI option (e.g. "retryWrites=true"). The default is true.
+// This option requires server version >= 3.6 and a replica set or sharded cluster and will be ignored for any other
+// cluster type. This can also be set through the "retryWrites" URI option (e.g. "retryWrites=true"). The default is
+// true.
 func (c *ClientOptions) SetRetryWrites(b bool) *ClientOptions {
 	c.RetryWrites = &b
 
@@ -944,7 +912,7 @@ func (c *ClientOptions) SetRetryWrites(b bool) *ClientOptions {
 // EstimatedDocumentCount, Watch (for Client, Database, and Collection), ListCollections, and ListDatabases. Note that
 // operations run through RunCommand are not retried.
 //
-// The default is true.
+// This option requires server version >= 3.6 and driver version >= 1.1.0. The default is true.
 func (c *ClientOptions) SetRetryReads(b bool) *ClientOptions {
 	c.RetryReads = &b
 

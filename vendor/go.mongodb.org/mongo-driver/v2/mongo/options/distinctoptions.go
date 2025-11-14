@@ -6,20 +6,14 @@
 
 package options
 
-import "go.mongodb.org/mongo-driver/v2/internal/optionsutil"
-
 // DistinctOptions represents arguments that can be used to configure a Distinct
 // operation.
 //
 // See corresponding setter methods for documentation.
 type DistinctOptions struct {
 	Collation *Collation
-	Comment   any
-	Hint      any
-
-	// Deprecated: This option is for internal use only and should not be set. It may be changed or removed in any
-	// release.
-	Internal optionsutil.Options
+	Comment   interface{}
+	Hint      interface{}
 }
 
 // DistinctOptionsBuilder contains options to configure distinct operations. Each
@@ -39,9 +33,11 @@ func (do *DistinctOptionsBuilder) List() []func(*DistinctOptions) error {
 	return do.Opts
 }
 
-// SetCollation sets the value for the Collation field. Specifies a collation to
-// use for string comparisons during the operation. The default value is nil,
-// which means the default collation of the collection will be used.
+// SetCollation sets the value for the Collation field. Specifies a collation to use
+// for string comparisons during the operation. This option is only valid for MongoDB
+// versions >= 3.4. For previous server versions, the driver will return an error if
+// this option is used. The default value is nil, which means the default collation
+// of the collection will be used.
 func (do *DistinctOptionsBuilder) SetCollation(c *Collation) *DistinctOptionsBuilder {
 	do.Opts = append(do.Opts, func(opts *DistinctOptions) error {
 		opts.Collation = c
@@ -56,7 +52,7 @@ func (do *DistinctOptionsBuilder) SetCollation(c *Collation) *DistinctOptionsBui
 // will be included in server logs, profiling logs, and currentOp queries to help trace
 // the operation. The default value is nil, which means that no comment will be included
 // in the logs.
-func (do *DistinctOptionsBuilder) SetComment(comment any) *DistinctOptionsBuilder {
+func (do *DistinctOptionsBuilder) SetComment(comment interface{}) *DistinctOptionsBuilder {
 	do.Opts = append(do.Opts, func(opts *DistinctOptions) error {
 		opts.Comment = comment
 
@@ -74,7 +70,7 @@ func (do *DistinctOptionsBuilder) SetComment(comment any) *DistinctOptionsBuilde
 // means that no index hint will be sent.
 //
 // SetHint sets the Hint field.
-func (do *DistinctOptionsBuilder) SetHint(hint any) *DistinctOptionsBuilder {
+func (do *DistinctOptionsBuilder) SetHint(hint interface{}) *DistinctOptionsBuilder {
 	do.Opts = append(do.Opts, func(opts *DistinctOptions) error {
 		opts.Hint = hint
 

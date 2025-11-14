@@ -53,7 +53,7 @@ type GridFSDownloadStream struct {
 type GridFSFile struct {
 	// ID is the file's ID. This will match the file ID specified when uploading the file. If an upload helper that
 	// does not require a file ID was used, this field will be a bson.ObjectID.
-	ID any
+	ID interface{}
 
 	// Length is the length of this file in bytes.
 	Length int64
@@ -73,18 +73,16 @@ type GridFSFile struct {
 	Metadata bson.Raw
 }
 
-var _ bson.Unmarshaler = &GridFSFile{}
-
 // findFileResponse is a temporary type used to unmarshal documents from the
 // files collection and can be transformed into a File instance. This type
 // exists to avoid adding BSON struct tags to the exported File type.
 type findFileResponse struct {
-	ID         any       `bson:"_id"`
-	Length     int64     `bson:"length"`
-	ChunkSize  int32     `bson:"chunkSize"`
-	UploadDate time.Time `bson:"uploadDate"`
-	Name       string    `bson:"filename"`
-	Metadata   bson.Raw  `bson:"metadata"`
+	ID         interface{} `bson:"_id"`
+	Length     int64       `bson:"length"`
+	ChunkSize  int32       `bson:"chunkSize"`
+	UploadDate time.Time   `bson:"uploadDate"`
+	Name       string      `bson:"filename"`
+	Metadata   bson.Raw    `bson:"metadata"`
 }
 
 func newFileFromResponse(resp findFileResponse) *GridFSFile {
@@ -96,23 +94,6 @@ func newFileFromResponse(resp findFileResponse) *GridFSFile {
 		Name:       resp.Name,
 		Metadata:   resp.Metadata,
 	}
-}
-
-// UnmarshalBSON implements the bson.Unmarshaler interface.
-func (f *GridFSFile) UnmarshalBSON(data []byte) error {
-	var temp findFileResponse
-	if err := bson.Unmarshal(data, &temp); err != nil {
-		return err
-	}
-
-	f.ID = temp.ID
-	f.Length = temp.Length
-	f.ChunkSize = temp.ChunkSize
-	f.UploadDate = temp.UploadDate
-	f.Name = temp.Name
-	f.Metadata = temp.Metadata
-
-	return nil
 }
 
 func newGridFSDownloadStream(

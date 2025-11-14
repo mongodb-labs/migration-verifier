@@ -43,7 +43,6 @@ type Distinct struct {
 	result         DistinctResult
 	serverAPI      *driver.ServerAPIOptions
 	timeout        *time.Duration
-	rawData        *bool
 }
 
 // DistinctResult represents a distinct result returned by the server.
@@ -130,10 +129,6 @@ func (d *Distinct) command(dst []byte, desc description.SelectedServer) ([]byte,
 	}
 	if d.query != nil {
 		dst = bsoncore.AppendDocumentElement(dst, "query", d.query)
-	}
-	// Set rawData for 8.2+ servers.
-	if d.rawData != nil && desc.WireVersion != nil && driverutil.VersionRangeIncludes(*desc.WireVersion, 27) {
-		dst = bsoncore.AppendBooleanElement(dst, "rawData", *d.rawData)
 	}
 	return dst, nil
 }
@@ -326,15 +321,5 @@ func (d *Distinct) Authenticator(authenticator driver.Authenticator) *Distinct {
 	}
 
 	d.authenticator = authenticator
-	return d
-}
-
-// RawData sets the rawData to access timeseries data in the compressed format.
-func (d *Distinct) RawData(rawData bool) *Distinct {
-	if d == nil {
-		d = new(Distinct)
-	}
-
-	d.rawData = &rawData
 	return d
 }

@@ -8,7 +8,6 @@ package mongo
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 
@@ -37,7 +36,7 @@ type SearchIndexView struct {
 type SearchIndexModel struct {
 	// A document describing the definition for the search index. It cannot be nil.
 	// See https://www.mongodb.com/docs/atlas/atlas-search/create-index/ for reference.
-	Definition any
+	Definition interface{}
 
 	// The search index options.
 	Options *options.SearchIndexesOptionsBuilder
@@ -230,8 +229,7 @@ func (siv SearchIndexView) DropOne(
 		Timeout(siv.coll.client.timeout).Authenticator(siv.coll.client.authenticator)
 
 	err = op.Execute(ctx)
-	var de driver.Error
-	if errors.As(err, &de) && de.NamespaceNotFound() {
+	if de, ok := err.(driver.Error); ok && de.NamespaceNotFound() {
 		return nil
 	}
 	return err
@@ -250,7 +248,7 @@ func (siv SearchIndexView) DropOne(
 func (siv SearchIndexView) UpdateOne(
 	ctx context.Context,
 	name string,
-	definition any,
+	definition interface{},
 	_ ...options.Lister[options.UpdateSearchIndexOptions],
 ) error {
 	if definition == nil {

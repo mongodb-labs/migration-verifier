@@ -6,8 +6,6 @@
 
 package options
 
-import "go.mongodb.org/mongo-driver/v2/internal/optionsutil"
-
 // ListCollectionsOptions represents arguments that can be used to configure a
 // ListCollections operation.
 //
@@ -16,10 +14,6 @@ type ListCollectionsOptions struct {
 	NameOnly              *bool
 	BatchSize             *int32
 	AuthorizedCollections *bool
-
-	// Deprecated: This option is for internal use only and should not be set. It may be changed or removed in any
-	// release.
-	Internal optionsutil.Options
 }
 
 // ListCollectionsOptionsBuilder contains options to configure list collection

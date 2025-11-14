@@ -9,9 +9,7 @@ package bsoncore
 import (
 	"bytes"
 	"fmt"
-	"strings"
-
-	"go.mongodb.org/mongo-driver/v2/internal/bsoncoreutil"
+	"math"
 )
 
 // MalformedElementError represents a class of errors that RawElement methods return.
@@ -117,80 +115,35 @@ func (e Element) ValueErr() (Value, error) {
 
 // String implements the fmt.String interface. The output will be in extended JSON format.
 func (e Element) String() string {
-	str, _ := e.StringN(-1)
-	return str
+	return e.StringN(math.MaxInt)
 }
 
-// StringN will return values in extended JSON format that will stringify an element upto N bytes.
-// If N is non-negative, it will truncate the string to N bytes. Otherwise, it will return the full
-// string representation. The second return value indicates whether the string was truncated or not.
-// If the element is not valid, this returns an empty string
-func (e Element) StringN(n int) (string, bool) {
+// StringN implements the fmt.String interface for upto N bytes. The output will be in extended JSON format.
+func (e Element) StringN(n int) string {
 	if len(e) == 0 {
-		return "", false
+		return ""
 	}
-	if n == 0 {
-		return "", true
-	}
-	if n == 1 {
-		return `"`, true
-	}
-
 	t := Type(e[0])
 	idx := bytes.IndexByte(e[1:], 0x00)
-	if idx <= 0 {
-		return "", false
+	if idx == -1 {
+		return ""
 	}
-	key := e[1 : idx+1]
-
-	var buf strings.Builder
-	buf.WriteByte('"')
-	const suffix = `": `
-	switch {
-	case n < 0 || idx <= n-buf.Len()-len(suffix):
-		buf.Write(key)
-		buf.WriteString(suffix)
-	case idx < n:
-		buf.Write(key)
-		buf.WriteString(suffix[:n-idx-1])
-		return buf.String(), true
-	default:
-		buf.WriteString(bsoncoreutil.Truncate(string(key), n-1))
-		return buf.String(), true
-	}
-
-	needStrLen := -1
-	// Set needStrLen if n is positive, meaning we want to limit the string length.
-	if n > 0 {
-		// Stop stringifying if we reach the limit, that also ensures needStrLen is
-		// greater than 0 if we need to limit the length.
-		if buf.Len() >= n {
-			return buf.String(), true
-		}
-		needStrLen = n - buf.Len()
-	}
-
-	val, _, valid := ReadValue(e[idx+2:], t)
+	key, valBytes := []byte(e[1:idx+1]), []byte(e[idx+2:])
+	val, _, valid := ReadValue(valBytes, t)
 	if !valid {
-		return "", false
+		return ""
 	}
 
 	var str string
-	var truncated bool
 	if _, ok := val.StringValueOK(); ok {
-		str, truncated = val.StringN(needStrLen)
+		str = val.StringN(n)
 	} else if arr, ok := val.ArrayOK(); ok {
-		str, truncated = arr.StringN(needStrLen)
+		str = arr.StringN(n)
 	} else {
 		str = val.String()
-		if needStrLen > 0 && len(str) > needStrLen {
-			truncated = true
-			str = bsoncoreutil.Truncate(str, needStrLen)
-		}
 	}
 
-	buf.WriteString(str)
-	return buf.String(), truncated
+	return "\"" + string(key) + "\": " + str
 }
 
 // DebugString outputs a human readable version of RawElement. It will attempt to stringify the

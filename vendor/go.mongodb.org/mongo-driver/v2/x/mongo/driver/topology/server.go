@@ -228,7 +228,7 @@ func mustLogServerMessage(srv *Server) bool {
 		logger.LevelDebug, logger.ComponentTopology)
 }
 
-func logServerMessage(srv *Server, msg string, keysAndValues ...any) {
+func logServerMessage(srv *Server, msg string, keysAndValues ...interface{}) {
 	serverHost, serverPort, err := net.SplitHostPort(srv.address.String())
 	if err != nil {
 		serverHost = srv.address.String()

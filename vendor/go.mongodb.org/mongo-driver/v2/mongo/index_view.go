@@ -14,7 +14,6 @@ import (
 	"strconv"
 
 	"go.mongodb.org/mongo-driver/v2/internal/mongoutil"
-	"go.mongodb.org/mongo-driver/v2/internal/optionsutil"
 	"go.mongodb.org/mongo-driver/v2/internal/serverselector"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
@@ -30,9 +29,10 @@ import (
 var ErrInvalidIndexValue = errors.New("invalid index value")
 
 // ErrNonStringIndexName is returned if an index is created with a name that is not a string.
-//
-// Deprecated: it will be removed in the next major release
 var ErrNonStringIndexName = errors.New("index name must be a string")
+
+// ErrMultipleIndexDrop is returned if multiple indexes would be dropped from a call to IndexView.DropOne.
+var ErrMultipleIndexDrop = errors.New("multiple indexes would be dropped")
 
 // IndexView is a type that can be used to create, drop, and list indexes on a collection. An IndexView for a collection
 // can be created by a call to Collection.Indexes().
@@ -45,10 +45,17 @@ type IndexModel struct {
 	// A document describing which keys should be used for the index. It cannot be nil. This must be an order-preserving
 	// type such as bson.D. Map types such as bson.M are not valid. See https://www.mongodb.com/docs/manual/indexes/#indexes
 	// for examples of valid documents.
-	Keys any
+	Keys interface{}
 
 	// The options to use to create the index.
 	Options *options.IndexOptionsBuilder
+}
+
+func isNamespaceNotFoundError(err error) bool {
+	if de, ok := err.(driver.Error); ok {
+		return de.Code == 26
+	}
+	return false
 }
 
 // List executes a listIndexes command and returns a cursor over the indexes in the collection.
@@ -102,11 +109,6 @@ func (iv IndexView) List(ctx context.Context, opts ...options.Lister[options.Lis
 		op = op.BatchSize(*args.BatchSize)
 		cursorOpts.BatchSize = *args.BatchSize
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 
 	retry := driver.RetryNone
 	if iv.coll.client.retryReads {
@@ -118,26 +120,20 @@ func (iv IndexView) List(ctx context.Context, opts ...options.Lister[options.Lis
 	if err != nil {
 		// for namespaceNotFound errors, return an empty cursor and do not throw an error
 		closeImplicitSession(sess)
-		var de driver.Error
-		if errors.As(err, &de) && de.NamespaceNotFound() {
+		if isNamespaceNotFoundError(err) {
 			return newEmptyCursor(), nil
 		}
 
-		return nil, wrapErrors(err)
+		return nil, replaceErrors(err)
 	}
 
 	bc, err := op.Result(cursorOpts)
 	if err != nil {
 		closeImplicitSession(sess)
-		return nil, wrapErrors(err)
+		return nil, replaceErrors(err)
 	}
-	cursor, err := newCursorWithSession(bc, iv.coll.bsonOpts, iv.coll.registry, sess,
-
-		// This value is included for completeness, but a server will never return
-		// a tailable awaitData cursor from a listIndexes operation.
-		withCursorOptionClientTimeout(iv.coll.client.timeout))
-
-	return cursor, wrapErrors(err)
+	cursor, err := newCursorWithSession(bc, iv.coll.bsonOpts, iv.coll.registry, sess)
+	return cursor, replaceErrors(err)
 }
 
 // ListSpecifications executes a List command and returns a slice of returned IndexSpecifications
@@ -290,11 +286,6 @@ func (iv IndexView) CreateMany(
 
 		op.CommitQuorum(commitQuorum)
 	}
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
 
 	_, err = processWriteError(op.Execute(ctx))
 	if err != nil {
@@ -392,12 +383,7 @@ func (iv IndexView) createOptionsDoc(opts options.Lister[options.IndexOptions]) 
 	return optsDoc, nil
 }
 
-func (iv IndexView) drop(ctx context.Context, index any, opts ...options.Lister[options.DropIndexesOptions]) error {
-	args, err := mongoutil.NewOptions[options.DropIndexesOptions](opts...)
-	if err != nil {
-		return fmt.Errorf("failed to construct options from builder: %w", err)
-	}
-
+func (iv IndexView) drop(ctx context.Context, index any, _ ...options.Lister[options.DropIndexesOptions]) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -408,7 +394,7 @@ func (iv IndexView) drop(ctx context.Context, index any, opts ...options.Lister[
 		defer sess.EndSession()
 	}
 
-	err = iv.coll.client.validSession(sess)
+	err := iv.coll.client.validSession(sess)
 	if err != nil {
 		return err
 	}
@@ -429,15 +415,9 @@ func (iv IndexView) drop(ctx context.Context, index any, opts ...options.Lister[
 		Deployment(iv.coll.client.deployment).ServerAPI(iv.coll.client.serverAPI).
 		Timeout(iv.coll.client.timeout).Crypt(iv.coll.client.cryptFLE).Authenticator(iv.coll.client.authenticator)
 
-	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
-		if rawData, ok := rawDataOpt.(bool); ok {
-			op = op.RawData(rawData)
-		}
-	}
-
 	err = op.Execute(ctx)
 	if err != nil {
-		return wrapErrors(err)
+		return replaceErrors(err)
 	}
 
 	return nil
@@ -470,7 +450,7 @@ func (iv IndexView) DropOne(
 // DropWithKey drops a collection index by key using the dropIndexes operation.
 //
 // This function is useful to drop an index using its key specification instead of its name.
-func (iv IndexView) DropWithKey(ctx context.Context, keySpecDocument any, opts ...options.Lister[options.DropIndexesOptions]) error {
+func (iv IndexView) DropWithKey(ctx context.Context, keySpecDocument interface{}, opts ...options.Lister[options.DropIndexesOptions]) error {
 	doc, err := marshal(keySpecDocument, iv.coll.bsonOpts, iv.coll.registry)
 	if err != nil {
 		return err

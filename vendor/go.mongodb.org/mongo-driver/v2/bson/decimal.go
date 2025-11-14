@@ -145,7 +145,7 @@ func (d *Decimal128) UnmarshalJSON(b []byte) error {
 		return nil
 	}
 
-	var res any
+	var res interface{}
 	err := json.Unmarshal(b, &res)
 	if err != nil {
 		return err
@@ -154,7 +154,7 @@ func (d *Decimal128) UnmarshalJSON(b []byte) error {
 
 	// Extended JSON
 	if !ok {
-		m, ok := res.(map[string]any)
+		m, ok := res.(map[string]interface{})
 		if !ok {
 			return errors.New("not an extended JSON Decimal128: expected document")
 		}

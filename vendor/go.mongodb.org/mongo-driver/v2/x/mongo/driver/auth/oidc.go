@@ -13,7 +13,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -28,44 +27,33 @@ import (
 // MongoDBOIDC is the string constant for the MONGODB-OIDC authentication mechanism.
 const MongoDBOIDC = "MONGODB-OIDC"
 
-// Valid authMechanismProperties keys for MONGODB-OIDC.
-const (
-	// EnvironmentProp is the property key name that specifies the environment for the OIDC authenticator.
-	EnvironmentProp = "ENVIRONMENT"
+// EnvironmentProp is the property key name that specifies the environment for the OIDC authenticator.
+const EnvironmentProp = "ENVIRONMENT"
 
-	// ResourceProp is the property key name that specifies the token resource for GCP and AZURE OIDC auth.
-	ResourceProp = "TOKEN_RESOURCE"
+// ResourceProp is the property key name that specifies the token resource for GCP and AZURE OIDC auth.
+const ResourceProp = "TOKEN_RESOURCE"
 
-	// AllowedHostsProp is the property key name that specifies the allowed hosts for the OIDC authenticator.
-	AllowedHostsProp = "ALLOWED_HOSTS"
-)
+// AllowedHostsProp is the property key name that specifies the allowed hosts for the OIDC authenticator.
+const AllowedHostsProp = "ALLOWED_HOSTS"
 
-// Valid ENVIRONMENT authMechismProperty values for MONGODB-OIDC.
-const (
-	// AzureEnvironmentValue is the value for the Azure environment.
-	AzureEnvironmentValue = "azure"
+// AzureEnvironmentValue is the value for the Azure environment.
+const AzureEnvironmentValue = "azure"
 
-	// GCPEnvironmentValue is the value for the GCP environment.
-	GCPEnvironmentValue = "gcp"
+// GCPEnvironmentValue is the value for the GCP environment.
+const GCPEnvironmentValue = "gcp"
 
-	// K8SEnvironmentValue is the value for Kubernetes environments.
-	K8SEnvironmentValue = "k8s"
+// TestEnvironmentValue is the value for the test environment.
+const TestEnvironmentValue = "test"
 
-	// TestEnvironmentValue is the value for the test environment.
-	TestEnvironmentValue = "test"
-)
+const apiVersion = 1
+const invalidateSleepTimeout = 100 * time.Millisecond
 
-const (
-	apiVersion             = 1
-	invalidateSleepTimeout = 100 * time.Millisecond
-
-	// The CSOT specification says to apply a 1-minute timeout if "CSOT is not applied". That's
-	// ambiguous for the v1.x Go Driver because it could mean either "no timeout provided" or "CSOT not
-	// enabled". Always use a maximum timeout duration of 1 minute, allowing us to ignore the ambiguity.
-	// Contexts with a shorter timeout are unaffected.
-	machineCallbackTimeout = time.Minute
-	humanCallbackTimeout   = 5 * time.Minute
-)
+// The CSOT specification says to apply a 1-minute timeout if "CSOT is not applied". That's
+// ambiguous for the v1.x Go Driver because it could mean either "no timeout provided" or "CSOT not
+// enabled". Always use a maximum timeout duration of 1 minute, allowing us to ignore the ambiguity.
+// Contexts with a shorter timeout are unaffected.
+const machineCallbackTimeout = time.Minute
+const humanCallbackTimeout = 5 * time.Minute
 
 var defaultAllowedHosts = []*regexp.Regexp{
 	regexp.MustCompile(`^.*[.]mongodb[.]net(:\d+)?$`),
@@ -131,12 +119,14 @@ func newOIDCAuthenticator(cred *Cred, httpClient *http.Client) (Authenticator, e
 	if cred.Props != nil {
 		if env, ok := cred.Props[EnvironmentProp]; ok {
 			switch strings.ToLower(env) {
-			case AzureEnvironmentValue, GCPEnvironmentValue:
+			case AzureEnvironmentValue:
+				fallthrough
+			case GCPEnvironmentValue:
 				if _, ok := cred.Props[ResourceProp]; !ok {
 					return nil, fmt.Errorf("%q must be specified for %q %q", ResourceProp, env, EnvironmentProp)
 				}
 				fallthrough
-			case K8SEnvironmentValue, TestEnvironmentValue:
+			case TestEnvironmentValue:
 				if cred.OIDCMachineCallback != nil || cred.OIDCHumanCallback != nil {
 					return nil, fmt.Errorf("OIDC callbacks are not allowed for %q %q", env, EnvironmentProp)
 				}
@@ -291,8 +281,6 @@ func (oa *OIDCAuthenticator) providerCallback() (OIDCCallback, error) {
 			return nil, newAuthError(fmt.Sprintf("%q must be specified for GCP OIDC", ResourceProp), nil)
 		}
 		return getGCPOIDCCallback(resource, oa.httpClient), nil
-	case K8SEnvironmentValue:
-		return k8sOIDCCallback, nil
 	}
 
 	return nil, fmt.Errorf("%q %q not supported for MONGODB-OIDC", EnvironmentProp, env)
@@ -370,29 +358,6 @@ func getGCPOIDCCallback(resource string, httpClient *http.Client) OIDCCallback {
 			ExpiresAt:   nil,
 		}, nil
 	}
-}
-
-// k8sOIDCCallbackfunc is the callback for the Kubernetes token provider.
-func k8sOIDCCallback(context.Context, *OIDCArgs) (*OIDCCredential, error) {
-	// Check for the presence of the Azure and AWS token file path environment
-	// variables. If neither are set, use the GKE default token file path.
-	var path string
-	if p := os.Getenv("AZURE_FEDERATED_TOKEN_FILE"); p != "" {
-		path = p
-	} else if p := os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE"); p != "" {
-		path = p
-	} else {
-		path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-	}
-
-	token, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("error reading OIDC token from %q: %w", path, err)
-	}
-
-	return &OIDCCredential{
-		AccessToken: string(token),
-	}, nil
 }
 
 func (oa *OIDCAuthenticator) getAccessToken(

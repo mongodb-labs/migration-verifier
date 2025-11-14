@@ -167,7 +167,7 @@ func mustLogTopologyMessage(topo *Topology, level logger.Level) bool {
 		level, logger.ComponentTopology)
 }
 
-func logTopologyMessage(topo *Topology, level logger.Level, msg string, keysAndValues ...any) {
+func logTopologyMessage(topo *Topology, level logger.Level, msg string, keysAndValues ...interface{}) {
 	topo.cfg.logger.Print(level,
 		logger.ComponentTopology,
 		msg,
@@ -218,7 +218,7 @@ func logServerSelection(
 	level logger.Level,
 	msg string,
 	srvSelector description.ServerSelector,
-	keysAndValues ...any,
+	keysAndValues ...interface{},
 ) {
 	var srvSelectorString string
 
@@ -405,10 +405,7 @@ func (t *Topology) Disconnect(ctx context.Context) error {
 		t.pollingwg.Wait()
 	}
 
-	oldDesc := t.fsm.Topology
-	t.fsm = newFSM()
-	t.desc.Store(t.fsm.Topology)
-	t.publishTopologyDescriptionChangedEvent(oldDesc, t.fsm.Topology)
+	t.desc.Store(description.Topology{})
 
 	atomic.StoreInt64(&t.state, topologyDisconnected)
 	t.publishTopologyClosedEvent()
@@ -694,6 +691,7 @@ func (t *Topology) selectServerFromSubscription(
 		case <-ctx.Done():
 			return nil, ServerSelectionError{Wrapped: ctx.Err(), Desc: current}
 		case current = <-subscriptionCh:
+		default:
 		}
 
 		suitable, err := t.selectServerFromDescription(current, srvSelector)

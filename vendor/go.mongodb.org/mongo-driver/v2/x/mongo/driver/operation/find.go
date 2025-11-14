@@ -61,7 +61,6 @@ type Find struct {
 	result              driver.CursorResponse
 	serverAPI           *driver.ServerAPIOptions
 	timeout             *time.Duration
-	rawData             *bool
 	logger              *logger.Logger
 	omitMaxTimeMS       bool
 }
@@ -191,10 +190,6 @@ func (f *Find) command(dst []byte, desc description.SelectedServer) ([]byte, err
 	}
 	if f.tailable != nil {
 		dst = bsoncore.AppendBooleanElement(dst, "tailable", *f.tailable)
-	}
-	// Set rawData for 8.2+ servers.
-	if f.rawData != nil && desc.WireVersion != nil && driverutil.VersionRangeIncludes(*desc.WireVersion, 27) {
-		dst = bsoncore.AppendBooleanElement(dst, "rawData", *f.rawData)
 	}
 	return dst, nil
 }
@@ -567,16 +562,6 @@ func (f *Find) Authenticator(authenticator driver.Authenticator) *Find {
 	}
 
 	f.authenticator = authenticator
-	return f
-}
-
-// RawData sets the rawData to access timeseries data in the compressed format.
-func (f *Find) RawData(rawData bool) *Find {
-	if f == nil {
-		f = new(Find)
-	}
-
-	f.rawData = &rawData
 	return f
 }
 

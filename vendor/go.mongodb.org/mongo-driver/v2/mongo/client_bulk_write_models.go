@@ -24,7 +24,7 @@ type ClientWriteModel interface {
 //
 // See corresponding setter methods for documentation.
 type ClientInsertOneModel struct {
-	Document any
+	Document interface{}
 }
 
 // NewClientInsertOneModel creates a new ClientInsertOneModel.
@@ -37,7 +37,7 @@ func (*ClientInsertOneModel) clientWriteModel() {}
 // SetDocument specifies the document to be inserted. The document cannot be nil. If it does not have an _id field when
 // transformed into BSON, one will be added automatically to the marshalled document. The original document will not be
 // modified.
-func (iom *ClientInsertOneModel) SetDocument(doc any) *ClientInsertOneModel {
+func (iom *ClientInsertOneModel) SetDocument(doc interface{}) *ClientInsertOneModel {
 	iom.Document = doc
 	return iom
 }
@@ -48,11 +48,11 @@ func (iom *ClientInsertOneModel) SetDocument(doc any) *ClientInsertOneModel {
 type ClientUpdateOneModel struct {
 	Collation    *options.Collation
 	Upsert       *bool
-	Filter       any
-	Update       any
-	ArrayFilters []any
-	Hint         any
-	Sort         any
+	Filter       interface{}
+	Update       interface{}
+	ArrayFilters []interface{}
+	Hint         interface{}
+	Sort         interface{}
 }
 
 // NewClientUpdateOneModel creates a new ClientUpdateOneModel.
@@ -64,7 +64,7 @@ func (*ClientUpdateOneModel) clientWriteModel() {}
 
 // SetHint specifies the index to use for the operation. This should either be the index name as a string or the index
 // specification as a document. The default value is nil, which means that no hint will be sent.
-func (uom *ClientUpdateOneModel) SetHint(hint any) *ClientUpdateOneModel {
+func (uom *ClientUpdateOneModel) SetHint(hint interface{}) *ClientUpdateOneModel {
 	uom.Hint = hint
 	return uom
 }
@@ -72,21 +72,21 @@ func (uom *ClientUpdateOneModel) SetHint(hint any) *ClientUpdateOneModel {
 // SetFilter specifies a filter to use to select the document to update. The filter must be a document containing query
 // operators. It cannot be nil. If the filter matches multiple documents, one will be selected from the matching
 // documents.
-func (uom *ClientUpdateOneModel) SetFilter(filter any) *ClientUpdateOneModel {
+func (uom *ClientUpdateOneModel) SetFilter(filter interface{}) *ClientUpdateOneModel {
 	uom.Filter = filter
 	return uom
 }
 
 // SetUpdate specifies the modifications to be made to the selected document. The value must be a document containing
 // update operators (https://www.mongodb.com/docs/manual/reference/operator/update/). It cannot be nil or empty.
-func (uom *ClientUpdateOneModel) SetUpdate(update any) *ClientUpdateOneModel {
+func (uom *ClientUpdateOneModel) SetUpdate(update interface{}) *ClientUpdateOneModel {
 	uom.Update = update
 	return uom
 }
 
 // SetArrayFilters specifies a set of filters to determine which elements should be modified when updating an array
 // field.
-func (uom *ClientUpdateOneModel) SetArrayFilters(filters []any) *ClientUpdateOneModel {
+func (uom *ClientUpdateOneModel) SetArrayFilters(filters []interface{}) *ClientUpdateOneModel {
 	uom.ArrayFilters = filters
 	return uom
 }
@@ -110,7 +110,7 @@ func (uom *ClientUpdateOneModel) SetUpsert(upsert bool) *ClientUpdateOneModel {
 // matched by the sort order will be updated. This option is only valid for MongoDB versions >= 8.0. The sort parameter
 // is evaluated sequentially, so the driver will return an error if it is a multi-key map (which is unordeded). The
 // default value is nil.
-func (uom *ClientUpdateOneModel) SetSort(sort any) *ClientUpdateOneModel {
+func (uom *ClientUpdateOneModel) SetSort(sort interface{}) *ClientUpdateOneModel {
 	uom.Sort = sort
 	return uom
 }
@@ -121,10 +121,10 @@ func (uom *ClientUpdateOneModel) SetSort(sort any) *ClientUpdateOneModel {
 type ClientUpdateManyModel struct {
 	Collation    *options.Collation
 	Upsert       *bool
-	Filter       any
-	Update       any
-	ArrayFilters []any
-	Hint         any
+	Filter       interface{}
+	Update       interface{}
+	ArrayFilters []interface{}
+	Hint         interface{}
 }
 
 // NewClientUpdateManyModel creates a new ClientUpdateManyModel.
@@ -136,28 +136,28 @@ func (*ClientUpdateManyModel) clientWriteModel() {}
 
 // SetHint specifies the index to use for the operation. This should either be the index name as a string or the index
 // specification as a document. The default value is nil, which means that no hint will be sent.
-func (umm *ClientUpdateManyModel) SetHint(hint any) *ClientUpdateManyModel {
+func (umm *ClientUpdateManyModel) SetHint(hint interface{}) *ClientUpdateManyModel {
 	umm.Hint = hint
 	return umm
 }
 
 // SetFilter specifies a filter to use to select documents to update. The filter must be a document containing query
 // operators. It cannot be nil.
-func (umm *ClientUpdateManyModel) SetFilter(filter any) *ClientUpdateManyModel {
+func (umm *ClientUpdateManyModel) SetFilter(filter interface{}) *ClientUpdateManyModel {
 	umm.Filter = filter
 	return umm
 }
 
 // SetUpdate specifies the modifications to be made to the selected documents. The value must be a document containing
 // update operators (https://www.mongodb.com/docs/manual/reference/operator/update/). It cannot be nil or empty.
-func (umm *ClientUpdateManyModel) SetUpdate(update any) *ClientUpdateManyModel {
+func (umm *ClientUpdateManyModel) SetUpdate(update interface{}) *ClientUpdateManyModel {
 	umm.Update = update
 	return umm
 }
 
 // SetArrayFilters specifies a set of filters to determine which elements should be modified when updating an array
 // field.
-func (umm *ClientUpdateManyModel) SetArrayFilters(filters []any) *ClientUpdateManyModel {
+func (umm *ClientUpdateManyModel) SetArrayFilters(filters []interface{}) *ClientUpdateManyModel {
 	umm.ArrayFilters = filters
 	return umm
 }
@@ -183,10 +183,10 @@ func (umm *ClientUpdateManyModel) SetUpsert(upsert bool) *ClientUpdateManyModel 
 type ClientReplaceOneModel struct {
 	Collation   *options.Collation
 	Upsert      *bool
-	Filter      any
-	Replacement any
-	Hint        any
-	Sort        any
+	Filter      interface{}
+	Replacement interface{}
+	Hint        interface{}
+	Sort        interface{}
 }
 
 // NewClientReplaceOneModel creates a new ClientReplaceOneModel.
@@ -198,7 +198,7 @@ func (*ClientReplaceOneModel) clientWriteModel() {}
 
 // SetHint specifies the index to use for the operation. This should either be the index name as a string or the index
 // specification as a document. The default value is nil, which means that no hint will be sent.
-func (rom *ClientReplaceOneModel) SetHint(hint any) *ClientReplaceOneModel {
+func (rom *ClientReplaceOneModel) SetHint(hint interface{}) *ClientReplaceOneModel {
 	rom.Hint = hint
 	return rom
 }
@@ -206,14 +206,14 @@ func (rom *ClientReplaceOneModel) SetHint(hint any) *ClientReplaceOneModel {
 // SetFilter specifies a filter to use to select the document to replace. The filter must be a document containing query
 // operators. It cannot be nil. If the filter matches multiple documents, one will be selected from the matching
 // documents.
-func (rom *ClientReplaceOneModel) SetFilter(filter any) *ClientReplaceOneModel {
+func (rom *ClientReplaceOneModel) SetFilter(filter interface{}) *ClientReplaceOneModel {
 	rom.Filter = filter
 	return rom
 }
 
 // SetReplacement specifies a document that will be used to replace the selected document. It cannot be nil and cannot
 // contain any update operators (https://www.mongodb.com/docs/manual/reference/operator/update/).
-func (rom *ClientReplaceOneModel) SetReplacement(rep any) *ClientReplaceOneModel {
+func (rom *ClientReplaceOneModel) SetReplacement(rep interface{}) *ClientReplaceOneModel {
 	rom.Replacement = rep
 	return rom
 }
@@ -237,7 +237,7 @@ func (rom *ClientReplaceOneModel) SetUpsert(upsert bool) *ClientReplaceOneModel 
 // matched by the sort order will be replaced. This option is only valid for MongoDB versions >= 8.0. The sort parameter
 // is evaluated sequentially, so the driver will return an error if it is a multi-key map (which is unordeded). The
 // default value is nil.
-func (rom *ClientReplaceOneModel) SetSort(sort any) *ClientReplaceOneModel {
+func (rom *ClientReplaceOneModel) SetSort(sort interface{}) *ClientReplaceOneModel {
 	rom.Sort = sort
 	return rom
 }
@@ -246,9 +246,9 @@ func (rom *ClientReplaceOneModel) SetSort(sort any) *ClientReplaceOneModel {
 //
 // See corresponding setter methods for documentation.
 type ClientDeleteOneModel struct {
-	Filter    any
+	Filter    interface{}
 	Collation *options.Collation
-	Hint      any
+	Hint      interface{}
 }
 
 // NewClientDeleteOneModel creates a new ClientDeleteOneModel.
@@ -261,7 +261,7 @@ func (*ClientDeleteOneModel) clientWriteModel() {}
 // SetFilter specifies a filter to use to select the document to delete. The filter must be a document containing query
 // operators. It cannot be nil. If the filter matches multiple documents, one will be selected from the matching
 // documents.
-func (dom *ClientDeleteOneModel) SetFilter(filter any) *ClientDeleteOneModel {
+func (dom *ClientDeleteOneModel) SetFilter(filter interface{}) *ClientDeleteOneModel {
 	dom.Filter = filter
 	return dom
 }
@@ -275,7 +275,7 @@ func (dom *ClientDeleteOneModel) SetCollation(collation *options.Collation) *Cli
 
 // SetHint specifies the index to use for the operation. This should either be the index name as a string or the index
 // specification as a document. The default value is nil, which means that no hint will be sent.
-func (dom *ClientDeleteOneModel) SetHint(hint any) *ClientDeleteOneModel {
+func (dom *ClientDeleteOneModel) SetHint(hint interface{}) *ClientDeleteOneModel {
 	dom.Hint = hint
 	return dom
 }
@@ -284,9 +284,9 @@ func (dom *ClientDeleteOneModel) SetHint(hint any) *ClientDeleteOneModel {
 //
 // See corresponding setter methods for documentation.
 type ClientDeleteManyModel struct {
-	Filter    any
+	Filter    interface{}
 	Collation *options.Collation
-	Hint      any
+	Hint      interface{}
 }
 
 // NewClientDeleteManyModel creates a new ClientDeleteManyModel.
@@ -298,7 +298,7 @@ func (*ClientDeleteManyModel) clientWriteModel() {}
 
 // SetFilter specifies a filter to use to select documents to delete. The filter must be a document containing query
 // operators. It cannot be nil.
-func (dmm *ClientDeleteManyModel) SetFilter(filter any) *ClientDeleteManyModel {
+func (dmm *ClientDeleteManyModel) SetFilter(filter interface{}) *ClientDeleteManyModel {
 	dmm.Filter = filter
 	return dmm
 }
@@ -312,7 +312,7 @@ func (dmm *ClientDeleteManyModel) SetCollation(collation *options.Collation) *Cl
 
 // SetHint specifies the index to use for the operation. This should either be the index name as a string or the index
 // specification as a document. The default value is nil, which means that no hint will be sent.
-func (dmm *ClientDeleteManyModel) SetHint(hint any) *ClientDeleteManyModel {
+func (dmm *ClientDeleteManyModel) SetHint(hint interface{}) *ClientDeleteManyModel {
 	dmm.Hint = hint
 	return dmm
 }

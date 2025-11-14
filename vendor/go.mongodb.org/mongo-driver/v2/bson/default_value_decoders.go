@@ -32,8 +32,8 @@ func (d decodeBinaryError) Error() string {
 // registerDefaultDecoders will register the decoder methods attached to DefaultValueDecoders with
 // the provided RegistryBuilder.
 //
-// There is no support for decoding map[string]any because there is no decoder for
-// any, so users must either register this decoder themselves or use the
+// There is no support for decoding map[string]interface{} because there is no decoder for
+// interface{}, so users must either register this decoder themselves or use the
 // EmptyInterfaceDecoder available in the bson package.
 func registerDefaultDecoders(reg *Registry) {
 	intDecoder := decodeAdapter{intDecodeValue, intDecodeType}
@@ -150,7 +150,7 @@ func dDecodeValue(dc DecodeContext, vr ValueReader, val reflect.Value) error {
 			return err
 		}
 
-		var v any
+		var v interface{}
 		err = decoder.DecodeValue(dc, elemVr, reflect.ValueOf(&v).Elem())
 		if err != nil {
 			return err
@@ -1332,12 +1332,8 @@ func decodeDefault(dc DecodeContext, vr ValueReader, val reflect.Value) ([]refle
 
 	eType := val.Type().Elem()
 
-	isInterfaceSlice := eType.Kind() == reflect.Interface && val.Len() > 0
-
-	// If this is not an interface slice with pre-populated elements, we can look up
-	// the decoder for eType once.
 	var vDecoder ValueDecoder
-	if !isInterfaceSlice {
+	if !(eType.Kind() == reflect.Interface && val.Len() > 0) {
 		vDecoder, err = dc.LookupDecoder(eType)
 		if err != nil {
 			return nil, err
@@ -1355,9 +1351,7 @@ func decodeDefault(dc DecodeContext, vr ValueReader, val reflect.Value) ([]refle
 		}
 
 		var elem reflect.Value
-		if isInterfaceSlice && idx < val.Len() {
-			// Decode into an existing any slot.
-
+		if vDecoder == nil {
 			elem = val.Index(idx).Elem()
 			switch {
 			case elem.Kind() != reflect.Ptr || elem.IsNil():
@@ -1365,12 +1359,6 @@ func decodeDefault(dc DecodeContext, vr ValueReader, val reflect.Value) ([]refle
 				if err != nil {
 					return nil, err
 				}
-
-				// If an element is allocated and unsettable, it must be overwritten.
-				if !elem.CanSet() {
-					elem = reflect.New(elem.Type()).Elem()
-				}
-
 				err = valueDecoder.DecodeValue(dc, vr, elem)
 				if err != nil {
 					return nil, newDecodeError(strconv.Itoa(idx), err)
@@ -1392,15 +1380,6 @@ func decodeDefault(dc DecodeContext, vr ValueReader, val reflect.Value) ([]refle
 				}
 			}
 		} else {
-			// For non-interface slices, or if we've exhausted the pre-populated
-			// slots, we create a fresh value.
-
-			if vDecoder == nil {
-				vDecoder, err = dc.LookupDecoder(eType)
-				if err != nil {
-					return nil, err
-				}
-			}
 			elem, err = decodeTypeOrValueWithInfo(vDecoder, dc, vr, eType)
 			if err != nil {
 				return nil, newDecodeError(strconv.Itoa(idx), err)

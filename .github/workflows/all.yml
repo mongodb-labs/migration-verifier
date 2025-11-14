@@ -19,6 +19,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - mongodb_versions: [ '3.6', '8.0' ]
+            topology: replset
+
           - mongodb_versions: [ '4.0', '8.0' ]
             topology: replset
 
@@ -97,7 +100,7 @@ jobs:
         run: |-
             {
                 echo npm install -g m
-                echo pip install pymongo==4.13.2 'mtools[all]'
+                echo pip install pymongo==4.10.1 'mtools[all]'
             } | parallel
 
       - name: Install MongoDB ${{ matrix.mongodb_versions[0] }} (source)

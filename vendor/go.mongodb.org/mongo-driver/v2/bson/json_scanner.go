@@ -37,7 +37,7 @@ const (
 
 type jsonToken struct {
 	t jsonTokenType
-	v any
+	v interface{}
 	p int
 }
 

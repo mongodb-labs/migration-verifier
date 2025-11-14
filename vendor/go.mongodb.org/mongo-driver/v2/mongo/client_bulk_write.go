@@ -30,7 +30,7 @@ const (
 
 type clientBulkWritePair struct {
 	namespace string
-	model     any
+	model     interface{}
 }
 
 type clientBulkWrite struct {
@@ -38,24 +38,23 @@ type clientBulkWrite struct {
 	errorsOnly               bool
 	ordered                  *bool
 	bypassDocumentValidation *bool
-	comment                  any
-	let                      any
+	comment                  interface{}
+	let                      interface{}
 	session                  *session.Client
 	client                   *Client
 	selector                 description.ServerSelector
 	writeConcern             *writeconcern.WriteConcern
-	rawData                  *bool
 
 	result ClientBulkWriteResult
 }
 
 func (bw *clientBulkWrite) execute(ctx context.Context) error {
 	if len(bw.writePairs) == 0 {
-		return fmt.Errorf("invalid writes: %w", ErrEmptySlice)
+		return ErrEmptySlice
 	}
-	for i, m := range bw.writePairs {
+	for _, m := range bw.writePairs {
 		if m.model == nil {
-			return fmt.Errorf("error from model at index %d: %w", i, ErrNilDocument)
+			return ErrNilDocument
 		}
 	}
 	batches := &modelBatches{
@@ -144,10 +143,6 @@ func (bw *clientBulkWrite) newCommand() func([]byte, description.SelectedServer)
 			}
 			dst = bsoncore.AppendDocumentElement(dst, "let", let)
 		}
-		// Set rawData for 8.2+ servers.
-		if bw.rawData != nil && desc.WireVersion != nil && driverutil.VersionRangeIncludes(*desc.WireVersion, 27) {
-			dst = bsoncore.AppendBooleanElement(dst, "rawData", *bw.rawData)
-		}
 		return dst, nil
 	}
 }
@@ -161,7 +156,7 @@ type cursorInfo struct {
 	N         int32
 	NModified *int32
 	Upserted  *struct {
-		ID any `bson:"_id"`
+		ID interface{} `bson:"_id"`
 	}
 }
 
@@ -193,7 +188,7 @@ type modelBatches struct {
 
 	retryMode      driver.RetryMode // RetryNone by default
 	cursorHandlers []func(*cursorInfo, bson.Raw) bool
-	newIDMap       map[int]any
+	newIDMap       map[int]interface{}
 
 	result             *ClientBulkWriteResult
 	writeConcernErrors []WriteConcernError
@@ -266,7 +261,7 @@ func (mb *modelBatches) appendBatches(fn functionSet, dst []byte, maxCount, tota
 	}
 
 	mb.cursorHandlers = mb.cursorHandlers[:0]
-	mb.newIDMap = make(map[int]any)
+	mb.newIDMap = make(map[int]interface{})
 
 	nsMap := make(map[string]int)
 	getNsIndex := func(namespace string) (int, bool) {
@@ -301,7 +296,7 @@ func (mb *modelBatches) appendBatches(fn functionSet, dst []byte, maxCount, tota
 		switch model := mb.writePairs[i].model.(type) {
 		case *ClientInsertOneModel:
 			mb.cursorHandlers = append(mb.cursorHandlers, mb.appendInsertResult)
-			var id any
+			var id interface{}
 			id, doc, err = (&clientInsertDoc{
 				namespace: nsIdx,
 				document:  model.Document,
@@ -476,11 +471,7 @@ func (mb *modelBatches) processResponse(ctx context.Context, resp bsoncore.Docum
 		return err
 	}
 	var cursor *Cursor
-	cursor, err = newCursor(bCursor, mb.client.bsonOpts, mb.client.registry,
-
-		// This op doesn't return a cursor to the user, so setting the client
-		// timeout should be a no-op.
-		withCursorOptionClientTimeout(mb.client.timeout))
+	cursor, err = newCursor(bCursor, mb.client.bsonOpts, mb.client.registry)
 	if err != nil {
 		return err
 	}
@@ -586,10 +577,10 @@ func (mb *modelBatches) appendUpdateResult(cur *cursorInfo, raw bson.Raw) bool {
 
 type clientInsertDoc struct {
 	namespace int
-	document  any
+	document  interface{}
 }
 
-func (d *clientInsertDoc) marshal(bsonOpts *options.BSONOptions, registry *bson.Registry) (any, bsoncore.Document, error) {
+func (d *clientInsertDoc) marshal(bsonOpts *options.BSONOptions, registry *bson.Registry) (interface{}, bsoncore.Document, error) {
 	uidx, doc := bsoncore.AppendDocumentStart(nil)
 
 	doc = bsoncore.AppendInt32Element(doc, "insert", int32(d.namespace))
@@ -597,7 +588,7 @@ func (d *clientInsertDoc) marshal(bsonOpts *options.BSONOptions, registry *bson.
 	if err != nil {
 		return nil, nil, err
 	}
-	var id any
+	var id interface{}
 	f, id, err = ensureID(f, bson.NilObjectID, bsonOpts, registry)
 	if err != nil {
 		return nil, nil, err
@@ -609,12 +600,12 @@ func (d *clientInsertDoc) marshal(bsonOpts *options.BSONOptions, registry *bson.
 
 type clientUpdateDoc struct {
 	namespace      int
-	filter         any
-	update         any
-	hint           any
-	arrayFilters   []any
+	filter         interface{}
+	update         interface{}
+	hint           interface{}
+	arrayFilters   []interface{}
 	collation      *options.Collation
-	sort           any
+	sort           interface{}
 	upsert         *bool
 	multi          bool
 	checkDollarKey bool
@@ -685,9 +676,9 @@ func (d *clientUpdateDoc) marshal(bsonOpts *options.BSONOptions, registry *bson.
 
 type clientDeleteDoc struct {
 	namespace int
-	filter    any
+	filter    interface{}
 	collation *options.Collation
-	hint      any
+	hint      interface{}
 	multi     bool
 }
 

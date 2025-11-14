@@ -36,7 +36,7 @@ type WriteConcern struct {
 	//
 	// For more information about the "w" option, see
 	// https://www.mongodb.com/docs/manual/reference/write-concern/#w-option
-	W any
+	W interface{}
 
 	// Journal requests acknowledgment from MongoDB that the write operation has
 	// been written to the on-disk journal. It sets the "j" option in a MongoDB

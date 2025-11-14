@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/internal/mongoutil"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver"
@@ -31,41 +30,22 @@ type Cursor struct {
 	// to Next or TryNext. If continued access is required, a copy must be made.
 	Current bson.Raw
 
-	bc               batchCursor
-	batch            *bsoncore.Iterator
-	batchLength      int
-	bsonOpts         *options.BSONOptions
-	registry         *bson.Registry
-	clientSession    *session.Client
-	clientTimeout    time.Duration
-	hasClientTimeout bool
+	bc            batchCursor
+	batch         *bsoncore.Iterator
+	batchLength   int
+	bsonOpts      *options.BSONOptions
+	registry      *bson.Registry
+	clientSession *session.Client
 
 	err error
-}
-
-type cursorOptions struct {
-	clientTimeout    time.Duration
-	hasClientTimeout bool
-}
-
-type cursorOption func(*cursorOptions)
-
-func withCursorOptionClientTimeout(dur *time.Duration) cursorOption {
-	return func(opts *cursorOptions) {
-		if dur != nil && *dur > 0 {
-			opts.clientTimeout = *dur
-			opts.hasClientTimeout = true
-		}
-	}
 }
 
 func newCursor(
 	bc batchCursor,
 	bsonOpts *options.BSONOptions,
 	registry *bson.Registry,
-	opts ...cursorOption,
 ) (*Cursor, error) {
-	return newCursorWithSession(bc, bsonOpts, registry, nil, opts...)
+	return newCursorWithSession(bc, bsonOpts, registry, nil)
 }
 
 func newCursorWithSession(
@@ -73,7 +53,6 @@ func newCursorWithSession(
 	bsonOpts *options.BSONOptions,
 	registry *bson.Registry,
 	clientSession *session.Client,
-	opts ...cursorOption,
 ) (*Cursor, error) {
 	if registry == nil {
 		registry = defaultRegistry
@@ -81,19 +60,11 @@ func newCursorWithSession(
 	if bc == nil {
 		return nil, errors.New("batch cursor must not be nil")
 	}
-
-	cursorOpts := &cursorOptions{}
-	for _, opt := range opts {
-		opt(cursorOpts)
-	}
-
 	c := &Cursor{
-		bc:               bc,
-		bsonOpts:         bsonOpts,
-		registry:         registry,
-		clientSession:    clientSession,
-		clientTimeout:    cursorOpts.clientTimeout,
-		hasClientTimeout: cursorOpts.hasClientTimeout,
+		bc:            bc,
+		bsonOpts:      bsonOpts,
+		registry:      registry,
+		clientSession: clientSession,
 	}
 	if bc.ID() == 0 {
 		c.closeImplicitSession()
@@ -114,7 +85,7 @@ func newEmptyCursor() *Cursor {
 // bson.NewRegistry() will be used.
 //
 // The documents parameter must be a slice of documents. The slice may be nil or empty, but all elements must be non-nil.
-func NewCursorFromDocuments(documents []any, preloadedErr error, registry *bson.Registry) (*Cursor, error) {
+func NewCursorFromDocuments(documents []interface{}, preloadedErr error, registry *bson.Registry) (*Cursor, error) {
 	if registry == nil {
 		registry = defaultRegistry
 	}
@@ -126,7 +97,7 @@ func NewCursorFromDocuments(documents []any, preloadedErr error, registry *bson.
 	for i, doc := range documents {
 		switch t := doc.(type) {
 		case nil:
-			return nil, fmt.Errorf("invalid document at index %d: %w", i, ErrNilDocument)
+			return nil, ErrNilDocument
 		case []byte:
 			// Slight optimization so we'll just use MarshalBSON and not go through the codec machinery.
 			doc = bson.Raw(t)
@@ -168,17 +139,11 @@ func NewCursorFromDocuments(documents []any, preloadedErr error, registry *bson.
 // ID returns the ID of this cursor, or 0 if the cursor has been closed or exhausted.
 func (c *Cursor) ID() int64 { return c.bc.ID() }
 
-// Next gets the next document for this cursor. It returns true if there were no
-// errors and the cursor has not been exhausted.
+// Next gets the next document for this cursor. It returns true if there were no errors and the cursor has not been
+// exhausted.
 //
-// Next blocks until a document is available or an error occurs. If the context
-// expires, the cursor's error will be set to ctx.Err(). In case of an error,
-// Next will return false.
-//
-// If MaxAwaitTime is set, the operation will be bound by the Context's
-// deadline. If the context does not have a deadline, the operation will be
-// bound by the client-level timeout, if one is set. If MaxAwaitTime is greater
-// than the user-provided timeout, Next will return false.
+// Next blocks until a document is available or an error occurs. If the context expires, the cursor's error will
+// be set to ctx.Err(). In case of an error, Next will return false.
 //
 // If Next returns false, subsequent calls will also return false.
 func (c *Cursor) Next(ctx context.Context) bool {
@@ -210,41 +175,6 @@ func (c *Cursor) next(ctx context.Context, nonBlocking bool) bool {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
-	// If the context does not have a deadline we defer to a client-level timeout,
-	// if one is set.
-	if _, ok := ctx.Deadline(); !ok && c.hasClientTimeout {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.clientTimeout)
-
-		defer cancel()
-	}
-
-	// To avoid unnecessary socket timeouts, we attempt to short-circuit tailable
-	// awaitData "getMore" operations by ensuring that the maxAwaitTimeMS is less
-	// than the operation timeout.
-	//
-	// The specifications assume that drivers iteratively apply the timeout
-	// provided at the constructor level (e.g., (*collection).Find) for tailable
-	// awaitData cursors:
-	//
-	//   If set, drivers MUST apply the timeoutMS option to the initial aggregate
-	//   operation. Drivers MUST also apply the original timeoutMS value to each
-	//   next call on the change stream but MUST NOT use it to derive a maxTimeMS
-	//   field for getMore commands.
-	//
-	// The Go Driver might decide to support the above behavior with DRIVERS-2722.
-	// The principal concern is that it would be unexpected for users to apply an
-	// operation-level timeout via contexts to a constructor and then that timeout
-	// later be applied while working with a resulting cursor. Instead, it is more
-	// idiomatic to apply the timeout to the context passed to Next or TryNext.
-	maxAwaitTime := c.bc.MaxAwaitTime() //
-	if maxAwaitTime != nil && !nonBlocking && !mongoutil.TimeoutWithinContext(ctx, *maxAwaitTime) {
-		c.err = fmt.Errorf("MaxAwaitTime must be less than the operation timeout")
-
-		return false
-	}
-
 	val, err := c.batch.Next()
 	switch {
 	case err == nil:
@@ -264,7 +194,7 @@ func (c *Cursor) next(ctx context.Context, nonBlocking bool) bool {
 		// If we don't have a next batch
 		if !c.bc.Next(ctx) {
 			// Do we have an error? If so we return false.
-			c.err = wrapErrors(c.bc.Err())
+			c.err = replaceErrors(c.bc.Err())
 			if c.err != nil {
 				return false
 			}
@@ -346,7 +276,7 @@ func getDecoder(
 
 // Decode will unmarshal the current document into val and return any errors from the unmarshalling process without any
 // modification. If val is nil or is a typed nil, an error will be returned.
-func (c *Cursor) Decode(val any) error {
+func (c *Cursor) Decode(val interface{}) error {
 	dec := getDecoder(c.Current, c.bsonOpts, c.registry)
 
 	return dec.Decode(val)
@@ -359,7 +289,7 @@ func (c *Cursor) Err() error { return c.err }
 // the first call, any subsequent calls will not change the state.
 func (c *Cursor) Close(ctx context.Context) error {
 	defer c.closeImplicitSession()
-	return wrapErrors(c.bc.Close(ctx))
+	return replaceErrors(c.bc.Close(ctx))
 }
 
 // All iterates the cursor and decodes each document into results. The results parameter must be a pointer to a slice.
@@ -368,7 +298,7 @@ func (c *Cursor) Close(ctx context.Context) error {
 // cursor has been iterated, any previously iterated documents will not be included in results.
 //
 // This method requires driver version >= 1.1.0.
-func (c *Cursor) All(ctx context.Context, results any) error {
+func (c *Cursor) All(ctx context.Context, results interface{}) error {
 	resultsVal := reflect.ValueOf(results)
 	if resultsVal.Kind() != reflect.Ptr {
 		return fmt.Errorf("results argument must be a pointer to a slice, but was a %s", resultsVal.Kind())
@@ -406,7 +336,7 @@ func (c *Cursor) All(ctx context.Context, results any) error {
 		batch = c.bc.Batch()
 	}
 
-	if err = wrapErrors(c.bc.Err()); err != nil {
+	if err = replaceErrors(c.bc.Err()); err != nil {
 		return err
 	}
 
@@ -477,7 +407,7 @@ func (c *Cursor) SetMaxAwaitTime(dur time.Duration) {
 
 // SetComment will set a user-configurable comment that can be used to identify
 // the operation in server logs.
-func (c *Cursor) SetComment(comment any) {
+func (c *Cursor) SetComment(comment interface{}) {
 	c.bc.SetComment(comment)
 }
 
