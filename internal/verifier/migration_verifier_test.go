@@ -2231,21 +2231,14 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
+	ctx := suite.Context()
+
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
 	dbname1 := suite.DBNameForTest("1")
 	dbname2 := suite.DBNameForTest("2")
 
 	filter := bson.D{{"inFilter", bson.M{"$ne": false}}}
-	verifier := suite.BuildVerifier()
-	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
-	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})
-	verifier.SetNamespaceMap()
-	verifier.SetDocCompareMethod(DocCompareIgnoreOrder)
-	// Set this value low to test the verifier with multiple partitions.
-	verifier.partitionSizeInBytes = 50
-
-	ctx := suite.Context()
 
 	srcColl := suite.srcMongoClient.Database(dbname1).Collection("testColl1")
 	dstColl := suite.dstMongoClient.Database(dbname2).Collection("testColl3")
@@ -2267,6 +2260,14 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	}
 	_, err = srcColl.InsertMany(ctx, docs)
 	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
+	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})
+	verifier.SetNamespaceMap()
+	verifier.SetDocCompareMethod(DocCompareIgnoreOrder)
+	// Set this value low to test the verifier with multiple partitions.
+	verifier.partitionSizeInBytes = 50
 
 	checkDoneChan := make(chan struct{})
 	checkContinueChan := make(chan struct{})
@@ -2297,10 +2298,21 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	<-checkDoneChan
 	status := waitForTasks()
 
-	fmt.Printf("----- finished generation %d\n", verifier.generation)
 	suite.Require().Greater(status.CompletedTasks, 1)
 	suite.Require().Greater(status.TotalTasks, 1)
 	suite.Require().Zero(status.FailedTasks, "there should be no failed tasks")
+
+	/*
+		// When reading the oplog, verifier often sees the “near past”
+		suite.Require().Eventually(
+			func() bool {
+
+			},
+			time.Minute,
+			time.Millisecond,
+			"verifier must reach stasis before continuing",
+		)
+	*/
 
 	// Insert another document that is not in the filter.
 	// This should trigger a recheck despite being outside the filter.
