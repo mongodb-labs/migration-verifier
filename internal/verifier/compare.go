@@ -18,7 +18,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"golang.org/x/exp/slices"
 )
 
@@ -467,7 +466,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.srcClientCollection(task),
 			verifier.srcClusterInfo,
-			verifier.srcChangeReader.getStartTimestamp().ToPointer(),
+			verifier.srcChangeReader.getLatestTimestamp(),
 			task,
 		)
 
@@ -500,7 +499,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.dstClientCollection(task),
 			verifier.dstClusterInfo,
-			verifier.dstChangeReader.getStartTimestamp().ToPointer(),
+			verifier.dstChangeReader.getLatestTimestamp(),
 			task,
 		)
 
@@ -573,8 +572,13 @@ func getMapKey(docKeyValues []bson.RawValue) string {
 	return keyBuffer.String()
 }
 
-func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
-	startAtTs *bson.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
+func (verifier *Verifier) getDocumentsCursor(
+	ctx context.Context,
+	collection *mongo.Collection,
+	clusterInfo *util.ClusterInfo,
+	readConcernTS option.Option[bson.Timestamp],
+	task *VerificationTask,
+) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
 	var andPredicates bson.A
@@ -656,20 +660,18 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 		)
 	}
 
-	if verifier.readPreference.Mode() != readpref.PrimaryMode {
-		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
-		if startAtTs != nil {
-			readConcern := bson.D{
-				{"afterClusterTime", *startAtTs},
-			}
-
-			// We never want to read before the change stream start time,
-			// or for the last generation, the change stream end time.
-			cmd = append(
-				cmd,
-				bson.E{"readConcern", readConcern},
-			)
+	runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
+	if ts, has := readConcernTS.Get(); has {
+		readConcern := bson.D{
+			{"afterClusterTime", ts},
 		}
+
+		// We never want to read before the change stream start time,
+		// or for the last generation, the change stream end time.
+		cmd = append(
+			cmd,
+			bson.E{"readConcern", readConcern},
+		)
 	}
 
 	// Suppress this log for recheck tasks because the list of IDs can be

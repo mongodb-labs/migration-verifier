@@ -13,7 +13,6 @@ import (
 type changeEventBatch struct {
 	events      []ParsedEvent
 	resumeToken bson.Raw
-	clusterTime bson.Timestamp
 }
 
 // RunChangeEventPersistor persists rechecks from change event batches.
@@ -166,14 +165,12 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeE
 	}
 
 	latestTimestampTime := time.Unix(int64(latestTimestamp.T), 0)
-	lag := time.Unix(int64(batch.clusterTime.T), 0).Sub(latestTimestampTime)
 
 	verifier.logger.Trace().
 		Str("origin", string(eventOrigin)).
 		Int("count", len(docIDs)).
 		Any("latestTimestamp", latestTimestamp).
 		Time("latestTimestampTime", latestTimestampTime).
-		Stringer("lag", lag).
 		Msg("Persisting rechecks for change events.")
 
 	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes)

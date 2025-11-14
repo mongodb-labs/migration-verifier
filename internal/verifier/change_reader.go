@@ -35,6 +35,7 @@ type changeReader interface {
 	getWhichCluster() whichCluster
 	getReadChannel() <-chan changeEventBatch
 	getStartTimestamp() option.Option[bson.Timestamp]
+	getLatestTimestamp() option.Option[bson.Timestamp]
 	getEventsPerSecond() option.Option[float64]
 	getLag() option.Option[time.Duration]
 	getBufferSaturation() float64
@@ -48,9 +49,8 @@ type changeReader interface {
 type ChangeReaderCommon struct {
 	readerType whichCluster
 
-	lastChangeEventTime *bson.Timestamp
-	logger              *logger.Logger
-	namespaces          []string
+	logger     *logger.Logger
+	namespaces []string
 
 	metaDB        *mongo.Database
 	watcherClient *mongo.Client
@@ -62,12 +62,30 @@ type ChangeReaderCommon struct {
 	changeEventBatchChan chan changeEventBatch
 	writesOffTs          *util.Eventual[bson.Timestamp]
 
+	lastChangeEventTime *msync.TypedAtomic[option.Option[bson.Timestamp]]
+
 	startAtTs *bson.Timestamp
 
 	lag              *msync.TypedAtomic[option.Option[time.Duration]]
 	batchSizeHistory *history.History[int]
 
 	onDDLEvent ddlEventHandling
+}
+
+func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
+	return ChangeReaderCommon{
+		readerType:           clusterName,
+		changeEventBatchChan: make(chan changeEventBatch, batchChanBufferSize),
+		writesOffTs:          util.NewEventual[bson.Timestamp](),
+		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
+		lastChangeEventTime:  msync.NewTypedAtomic(option.None[bson.Timestamp]()),
+		batchSizeHistory:     history.New[int](time.Minute),
+		onDDLEvent: lo.Ternary(
+			clusterName == dst,
+			onDDLEventAllow,
+			"",
+		),
+	}
 }
 
 func (rc *ChangeReaderCommon) getWhichCluster() whichCluster {
@@ -88,6 +106,10 @@ func (rc *ChangeReaderCommon) isRunning() bool {
 
 func (rc *ChangeReaderCommon) getReadChannel() <-chan changeEventBatch {
 	return rc.changeEventBatchChan
+}
+
+func (rc *ChangeReaderCommon) getLatestTimestamp() option.Option[bson.Timestamp] {
+	return rc.lastChangeEventTime.Load()
 }
 
 // getBufferSaturation returns the reader’s internal buffer’s saturation level
