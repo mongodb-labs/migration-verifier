@@ -20,7 +20,9 @@ require (
 	github.com/samber/mo v1.13.0
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli v1.22.9
-	go.mongodb.org/mongo-driver/v2 v2.3.1  # NB: Pinned pre-2.4 to support 4.0.
+
+	// NB: This is the last driver version that supported 4.0.
+	go.mongodb.org/mongo-driver/v2 v2.3.1
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
 	golang.org/x/sync v0.13.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
