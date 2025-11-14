@@ -15,11 +15,9 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 	"golang.org/x/exp/slices"
 )
 
@@ -533,27 +531,29 @@ func iterateCursorToChannel(
 ) error {
 	defer close(writer)
 
-	sess := mongo.SessionFromContext(sctx)
+	//sess := mongo.SessionFromContext(sctx)
 
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
 
 		fmt.Printf("----- received a document: %+v\n\n", cursor.Current)
 
-		clusterTime, err := util.GetClusterTimeFromSession(sess)
-		if err != nil {
-			return errors.Wrap(err, "reading cluster time from session")
-		}
+		/*
+			clusterTime, err := util.GetClusterTimeFromSession(sess)
+			if err != nil {
+				return errors.Wrap(err, "reading cluster time from session")
+			}
+		*/
 
 		buf := pool.Get(len(cursor.Current))
 		copy(buf, cursor.Current)
 
-		err = chanutil.WriteWithDoneCheck(
+		err := chanutil.WriteWithDoneCheck(
 			sctx,
 			writer,
 			docWithTs{
 				doc: buf,
-				ts:  clusterTime,
+				//ts:  clusterTime,
 			},
 		)
 
@@ -593,7 +593,7 @@ func (verifier *Verifier) getDocumentsCursor(sctx context.Context, collection *m
 		case DocQueryFunctionFind:
 			findOptions = bson.D{
 				bson.E{"filter", filter},
-				bson.E{"readConcern", readconcern.Majority()},
+				//bson.E{"readConcern", readconcern.Majority()},
 			}
 		case DocQueryFunctionAggregate:
 			aggOptions = bson.D{
@@ -661,20 +661,20 @@ func (verifier *Verifier) getDocumentsCursor(sctx context.Context, collection *m
 	}
 
 	runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
-	/*
-		if startAtTs != nil {
-			readConcern := bson.D{
-				{"afterClusterTime", *startAtTs},
-			}
 
-			// We never want to read before the change stream start time,
-			// or for the last generation, the change stream end time.
-			cmd = append(
-				cmd,
-				bson.E{"readConcern", readConcern},
-			)
+	if startAtTs != nil {
+		readConcern := bson.D{
+			{"level", "snapshot"},
+			{"afterClusterTime", *startAtTs},
 		}
-	*/
+
+		// We never want to read before the change stream start time,
+		// or for the last generation, the change stream end time.
+		cmd = append(
+			cmd,
+			bson.E{"readConcern", readConcern},
+		)
+	}
 
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
@@ -706,17 +706,19 @@ func (verifier *Verifier) getDocumentsCursor(sctx context.Context, collection *m
 			sess.AdvanceOperationTime(startAtTs)
 		*/
 
-	lo.Must0(mongo.SessionFromContext(sctx).AdvanceOperationTime(startAtTs))
-	lo.Must0(mongo.SessionFromContext(sctx).AdvanceClusterTime(lo.Must(bson.Marshal(
-		bson.D{
-			{"$clusterTime", bson.D{
-				{"clusterTime", *startAtTs},
-			}},
-		},
-	))))
+		/*
+			lo.Must0(mongo.SessionFromContext(sctx).AdvanceOperationTime(startAtTs))
+			lo.Must0(mongo.SessionFromContext(sctx).AdvanceClusterTime(lo.Must(bson.Marshal(
+				bson.D{
+					{"$clusterTime", bson.D{
+						{"clusterTime", *startAtTs},
+					}},
+				},
+			))))
+		*/
 
 	return collection.Database().RunCommandCursor(
-		sctx,
+		mongo.NewSessionContext(sctx, nil),
 		cmd,
 		runCommandOptions,
 	)
