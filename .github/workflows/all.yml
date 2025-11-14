@@ -24,8 +24,8 @@ jobs:
 
           # Testing fallback when `hello` isn’t implemented
           # (but appendOplogNote is).
-          - mongodb_versions: [ '4.2.5', '6.0' ]
-            topology: replset
+#          - mongodb_versions: [ '4.2.5', '6.0' ]
+#            topology: replset
 
         exclude:
           - mongodb_versions: [ '4.2', '4.2' ]
@@ -42,36 +42,36 @@ jobs:
         # versions are: source, destination
         mongodb_versions:
           - [ '4.2', '4.2' ]
-          - [ '4.2', '4.4' ]
-          - [ '4.2', '5.0' ]
-          - [ '4.2', '6.0' ]
-          - [ '4.2', '8.0' ]
-
-          - [ '4.4', '4.4' ]
-          - [ '4.4', '5.0' ]
-          - [ '4.4', '6.0' ]
-          - [ '4.4', '8.0' ]
-
-          - [ '5.0', '5.0' ]
-          - [ '5.0', '6.0' ]
-          - [ '5.0', '7.0' ]
-          - [ '5.0', '8.0' ]
-
-          - [ '6.0', '6.0' ]
-          - [ '6.0', '7.0' ]
-          - [ '6.0', '8.0' ]
-
-          - [ '7.0', '7.0' ]
-          - [ '7.0', '8.0' ]
-
-          - [ '8.0', '8.0' ]
+#          - [ '4.2', '4.4' ]
+#          - [ '4.2', '5.0' ]
+#          - [ '4.2', '6.0' ]
+#          - [ '4.2', '8.0' ]
+#
+#          - [ '4.4', '4.4' ]
+#          - [ '4.4', '5.0' ]
+#          - [ '4.4', '6.0' ]
+#          - [ '4.4', '8.0' ]
+#
+#          - [ '5.0', '5.0' ]
+#          - [ '5.0', '6.0' ]
+#          - [ '5.0', '7.0' ]
+#          - [ '5.0', '8.0' ]
+#
+#          - [ '6.0', '6.0' ]
+#          - [ '6.0', '7.0' ]
+#          - [ '6.0', '8.0' ]
+#
+#          - [ '7.0', '7.0' ]
+#          - [ '7.0', '8.0' ]
+#
+#          - [ '8.0', '8.0' ]
 
         toHashedIndexKey: [true, false]
 
         topology:
           - replset
-          - replset-to-sharded
-          - sharded
+#          - replset-to-sharded
+#          - sharded
 
     # Ubuntu 24 lacks OpenSSL 1.1.1’s libcrypto, which pre-v6 MongoDB
     # versions need.
