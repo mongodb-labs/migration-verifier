@@ -2060,13 +2060,6 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	srcColl := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("coll")
 	dstColl := suite.dstMongoClient.Database(suite.DBNameForTest()).Collection("coll")
 
-	verifier := suite.BuildVerifier()
-
-	ns := srcColl.Database().Name() + "." + srcColl.Name()
-	verifier.SetSrcNamespaces([]string{ns})
-	verifier.SetDstNamespaces([]string{ns})
-	verifier.SetNamespaceMap()
-
 	for _, coll := range mslices.Of(srcColl, dstColl) {
 		_, err := coll.InsertOne(ctx, bson.M{"_id": 1, "x": 42})
 		suite.Require().NoError(err)
@@ -2079,6 +2072,13 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 		},
 	)
 	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+
+	ns := srcColl.Database().Name() + "." + srcColl.Name()
+	verifier.SetSrcNamespaces([]string{ns})
+	verifier.SetDstNamespaces([]string{ns})
+	verifier.SetNamespaceMap()
 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
@@ -2108,23 +2108,37 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	suite.Require().Equal(verificationTaskVerifyCollection, tasks[1].Type)
 	suite.Require().Equal(verificationTaskMetadataMismatch, tasks[1].Status)
 
-	suite.Require().NoError(runner.StartNextGeneration())
-	suite.Require().NoError(runner.AwaitGenerationEnd())
+	// When tailing the oplog sometimes the verifier starts up “in the past”,
+	// which can cause extra rechecks that we wouldn’t normally expect. This
+	// waits for any of those to clear out.
+	suite.Assert().Eventually(
+		func() bool {
+			suite.Require().NoError(runner.StartNextGeneration())
+			suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	cursor, err = verifier.verificationTaskCollection().Aggregate(
-		ctx,
-		append(
-			mongo.Pipeline{
-				bson.D{{"$match", bson.D{{"generation", 1}}}},
-			},
-			testutil.SortByListAgg("type", sortedTaskTypes)...,
-		),
+			cursor, err = verifier.verificationTaskCollection().Aggregate(
+				ctx,
+				append(
+					mongo.Pipeline{
+						bson.D{{"$match", bson.D{{"generation", 1}}}},
+					},
+					testutil.SortByListAgg("type", sortedTaskTypes)...,
+				),
+			)
+			suite.Require().NoError(err)
+
+			suite.Require().NoError(cursor.All(ctx, &tasks))
+
+			suite.Require().GreaterOrEqual(len(tasks), 1, "we always expect >=1 task")
+
+			return len(tasks) == 1
+		},
+		time.Minute,
+		time.Millisecond,
+		"wait until verifier has caught up with itself",
 	)
-	suite.Require().NoError(err)
 
-	suite.Require().NoError(cursor.All(ctx, &tasks))
-
-	suite.Require().Len(tasks, 1, "generation 1 should only have done 1 task")
+	suite.Require().Len(tasks, 1, "generation 1 should only have done 1 task; tasks=%+v", tasks)
 	suite.Require().Equal(verificationTaskVerifyCollection, tasks[0].Type)
 	suite.Require().Equal(verificationTaskMetadataMismatch, tasks[0].Status)
 }
