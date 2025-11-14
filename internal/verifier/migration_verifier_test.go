@@ -2111,7 +2111,7 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	// When tailing the oplog sometimes the verifier starts up “in the past”,
 	// which can cause extra rechecks that we wouldn’t normally expect. This
 	// waits for any of those to clear out.
-	suite.Assert().Eventually(
+	suite.Require().Eventually(
 		func() bool {
 			suite.Require().NoError(runner.StartNextGeneration())
 			suite.Require().NoError(runner.AwaitGenerationEnd())
@@ -2120,7 +2120,7 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 				ctx,
 				append(
 					mongo.Pipeline{
-						bson.D{{"$match", bson.D{{"generation", 1}}}},
+						bson.D{{"$match", bson.D{{"generation", verifier.generation}}}},
 					},
 					testutil.SortByListAgg("type", sortedTaskTypes)...,
 				),
