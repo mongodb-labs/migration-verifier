@@ -407,19 +407,11 @@ func validateChangeReaderOpt(
 	method string,
 	clusterInfo util.ClusterInfo,
 ) error {
-	if method != ChangeReaderOptOplog {
-		return nil
-	}
-
-	var whyNoOplog string
-
-	switch {
-	case clusterInfo.Topology == util.TopologySharded:
-		whyNoOplog = "sharded"
-	}
-
-	if whyNoOplog != "" {
-		return fmt.Errorf("cannot read oplog (%s)", whyNoOplog)
+	switch method {
+	case ChangeReaderOptOplog:
+		if clusterInfo.Topology == util.TopologySharded {
+			return fmt.Errorf("cannot read oplog from sharded cluster")
+		}
 	}
 
 	return nil
