@@ -15,9 +15,11 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 	"golang.org/x/exp/slices"
 )
 
@@ -574,7 +576,7 @@ func getMapKey(docKeyValues []bson.RawValue) string {
 	return keyBuffer.String()
 }
 
-func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
+func (verifier *Verifier) getDocumentsCursor(sctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
 	startAtTs *bson.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	runCommandOptions := options.RunCmd()
@@ -591,6 +593,7 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 		case DocQueryFunctionFind:
 			findOptions = bson.D{
 				bson.E{"filter", filter},
+				bson.E{"readConcern", readconcern.Majority()},
 			}
 		case DocQueryFunctionAggregate:
 			aggOptions = bson.D{
@@ -658,18 +661,20 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 	}
 
 	runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
-	if startAtTs != nil {
-		readConcern := bson.D{
-			{"afterClusterTime", *startAtTs},
-		}
+	/*
+		if startAtTs != nil {
+			readConcern := bson.D{
+				{"afterClusterTime", *startAtTs},
+			}
 
-		// We never want to read before the change stream start time,
-		// or for the last generation, the change stream end time.
-		cmd = append(
-			cmd,
-			bson.E{"readConcern", readConcern},
-		)
-	}
+			// We never want to read before the change stream start time,
+			// or for the last generation, the change stream end time.
+			cmd = append(
+				cmd,
+				bson.E{"readConcern", readConcern},
+			)
+		}
+	*/
 
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
@@ -694,7 +699,27 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 			}
 		*/
 
-	return collection.Database().RunCommandCursor(ctx, cmd, runCommandOptions)
+		/*
+			sess := lo.Must(collection.Database().Client().StartSession())
+			defer sess.EndSession(ctx)
+
+			sess.AdvanceOperationTime(startAtTs)
+		*/
+
+	lo.Must0(mongo.SessionFromContext(sctx).AdvanceOperationTime(startAtTs))
+	lo.Must0(mongo.SessionFromContext(sctx).AdvanceClusterTime(lo.Must(bson.Marshal(
+		bson.D{
+			{"$clusterTime", bson.D{
+				{"clusterTime", *startAtTs},
+			}},
+		},
+	))))
+
+	return collection.Database().RunCommandCursor(
+		sctx,
+		cmd,
+		runCommandOptions,
+	)
 }
 
 func transformPipelineForToHashedIndexKey(
