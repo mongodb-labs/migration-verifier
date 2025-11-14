@@ -2302,17 +2302,23 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	suite.Require().Greater(status.TotalTasks, 1)
 	suite.Require().Zero(status.FailedTasks, "there should be no failed tasks")
 
-	/*
-		// When reading the oplog, verifier often sees the “near past”
-		suite.Require().Eventually(
-			func() bool {
+	// When reading the oplog, verifier often sees the “near past”.
+	// Wait for it to do initial checks before continuing.
+	suite.Require().Eventually(
+		func() bool {
+			suite.T().Logf("Checking whether verifier has caught up to itself …")
 
-			},
-			time.Minute,
-			time.Millisecond,
-			"verifier must reach stasis before continuing",
-		)
-	*/
+			checkContinueChan <- struct{}{}
+			<-checkDoneChan
+			status, err = verifier.GetVerificationStatus(ctx)
+			suite.Require().NoError(err)
+
+			return status.TotalTasks == 0
+		},
+		time.Minute,
+		time.Millisecond,
+		"verifier must reach stasis before continuing",
+	)
 
 	// Insert another document that is not in the filter.
 	// This should trigger a recheck despite being outside the filter.
