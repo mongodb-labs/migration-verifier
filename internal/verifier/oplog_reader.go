@@ -387,7 +387,6 @@ func (o *OplogReader) readAndHandleOneBatch(
 }
 
 func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Timestamp) ([]ParsedEvent, bson.Timestamp, error) {
-	fmt.Printf("--------------- parseRawOps\n\n\n")
 	var latestTS bson.Timestamp
 
 	parseOneDocumentOp := func(opName string, ts bson.Timestamp, rawDoc bson.Raw) error {

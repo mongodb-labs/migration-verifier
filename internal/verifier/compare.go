@@ -536,8 +536,6 @@ func iterateCursorToChannel(
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
 
-		fmt.Printf("----- received a document: %+v\n\n", cursor.Current)
-
 		/*
 			clusterTime, err := util.GetClusterTimeFromSession(sess)
 			if err != nil {
