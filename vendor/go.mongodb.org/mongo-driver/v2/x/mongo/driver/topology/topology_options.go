@@ -11,7 +11,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
-	"sync/atomic"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/event"
@@ -140,56 +139,14 @@ func NewConfig(opts *options.ClientOptions, clock *session.ClusterClock) (*Confi
 			return nil, fmt.Errorf("error creating authenticator: %w", err)
 		}
 	}
-	return NewAuthenticatorConfig(authenticator,
-		WithAuthConfigClock(clock),
-		WithAuthConfigClientOptions(opts),
-	)
+	return NewConfigFromOptionsWithAuthenticator(opts, clock, authenticator)
 }
 
-type authConfigOptions struct {
-	clock      *session.ClusterClock
-	opts       *options.ClientOptions
-	driverInfo *atomic.Pointer[options.DriverInfo]
-}
-
-// AuthConfigOption is a function that configures authConfigOptions.
-type AuthConfigOption func(*authConfigOptions)
-
-// WithAuthConfigClock sets the cluster clock in authConfigOptions.
-func WithAuthConfigClock(clock *session.ClusterClock) AuthConfigOption {
-	return func(co *authConfigOptions) {
-		co.clock = clock
-	}
-}
-
-// WithAuthConfigClientOptions sets the client options in authConfigOptions.
-func WithAuthConfigClientOptions(opts *options.ClientOptions) AuthConfigOption {
-	return func(co *authConfigOptions) {
-		co.opts = opts
-	}
-}
-
-// WithAuthConfigDriverInfo sets the driver info in authConfigOptions.
-func WithAuthConfigDriverInfo(driverInfo *atomic.Pointer[options.DriverInfo]) AuthConfigOption {
-	return func(co *authConfigOptions) {
-		co.driverInfo = driverInfo
-	}
-}
-
-// NewAuthenticatorConfig will translate data from client options into a
+// NewConfigFromOptionsWithAuthenticator will translate data from client options into a
 // topology config for building non-default deployments. Server and topology
 // options are not honored if a custom deployment is used. It uses a passed in
 // authenticator to authenticate the connection.
-func NewAuthenticatorConfig(authenticator driver.Authenticator, clientOpts ...AuthConfigOption) (*Config, error) {
-	settings := authConfigOptions{}
-	for _, apply := range clientOpts {
-		apply(&settings)
-	}
-
-	opts := settings.opts
-	clock := settings.clock
-	driverInfo := settings.driverInfo
-
+func NewConfigFromOptionsWithAuthenticator(opts *options.ClientOptions, clock *session.ClusterClock, authenticator driver.Authenticator) (*Config, error) {
 	var serverAPI *driver.ServerAPIOptions
 
 	if err := opts.Validate(); err != nil {
@@ -243,8 +200,23 @@ func NewAuthenticatorConfig(authenticator driver.Authenticator, clientOpts ...Au
 		}))
 	}
 
-	if driverInfo != nil {
-		serverOpts = append(serverOpts, WithDriverInfo(driverInfo))
+	var outerLibraryName, outerLibraryVersion, outerLibraryPlatform string
+	if opts.DriverInfo != nil {
+		outerLibraryName = opts.DriverInfo.Name
+		outerLibraryVersion = opts.DriverInfo.Version
+		outerLibraryPlatform = opts.DriverInfo.Platform
+
+		serverOpts = append(serverOpts, WithOuterLibraryName(func(string) string {
+			return outerLibraryName
+		}))
+
+		serverOpts = append(serverOpts, WithOuterLibraryVersion(func(string) string {
+			return outerLibraryVersion
+		}))
+
+		serverOpts = append(serverOpts, WithOuterLibraryPlatform(func(string) string {
+			return outerLibraryPlatform
+		}))
 	}
 
 	// Compressors & ZlibLevel
@@ -284,57 +256,46 @@ func NewAuthenticatorConfig(authenticator driver.Authenticator, clientOpts ...Au
 	// Handshaker
 	var handshaker func(driver.Handshaker) driver.Handshaker
 	if authenticator != nil {
-		handshaker = func(driver.Handshaker) driver.Handshaker {
-			handshakeOpts := &auth.HandshakeOptions{
-				AppName:       appName,
-				Authenticator: authenticator,
-				Compressors:   comps,
-				ServerAPI:     serverAPI,
-				LoadBalanced:  loadBalanced,
-				ClusterClock:  clock,
-			}
+		handshakeOpts := &auth.HandshakeOptions{
+			AppName:              appName,
+			Authenticator:        authenticator,
+			Compressors:          comps,
+			ServerAPI:            serverAPI,
+			LoadBalanced:         loadBalanced,
+			ClusterClock:         clock,
+			OuterLibraryName:     outerLibraryName,
+			OuterLibraryVersion:  outerLibraryVersion,
+			OuterLibraryPlatform: outerLibraryPlatform,
+		}
 
-			if opts.Auth.AuthMechanism == "" {
-				// Required for SASL mechanism negotiation during handshake
-				handshakeOpts.DBUser = opts.Auth.AuthSource + "." + opts.Auth.Username
-			}
-
-			if auth, ok := optionsutil.Value(opts.Custom, "authenticateToAnything").(bool); ok && auth {
+		if opts.Auth.AuthMechanism == "" {
+			// Required for SASL mechanism negotiation during handshake
+			handshakeOpts.DBUser = opts.Auth.AuthSource + "." + opts.Auth.Username
+		}
+		if a := optionsutil.Value(opts.Custom, "authenticateToAnything"); a != nil {
+			if v, ok := a.(bool); ok && v {
 				// Authenticate arbiters
 				handshakeOpts.PerformAuthentication = func(_ description.Server) bool {
 					return true
 				}
 			}
+		}
 
-			if driverInfo != nil {
-				if di := driverInfo.Load(); di != nil {
-					handshakeOpts.OuterLibraryName = di.Name
-					handshakeOpts.OuterLibraryVersion = di.Version
-					handshakeOpts.OuterLibraryPlatform = di.Platform
-				}
-			}
-
+		handshaker = func(driver.Handshaker) driver.Handshaker {
 			return auth.Handshaker(nil, handshakeOpts)
 		}
 
 	} else {
 		handshaker = func(driver.Handshaker) driver.Handshaker {
-			op := operation.NewHello().
+			return operation.NewHello().
 				AppName(appName).
 				Compressors(comps).
 				ClusterClock(clock).
 				ServerAPI(serverAPI).
-				LoadBalanced(loadBalanced)
-
-			if driverInfo != nil {
-				if di := driverInfo.Load(); di != nil {
-					op = op.OuterLibraryName(di.Name).
-						OuterLibraryVersion(di.Version).
-						OuterLibraryPlatform(di.Platform)
-				}
-			}
-
-			return op
+				LoadBalanced(loadBalanced).
+				OuterLibraryName(outerLibraryName).
+				OuterLibraryVersion(outerLibraryVersion).
+				OuterLibraryPlatform(outerLibraryPlatform)
 		}
 	}
 

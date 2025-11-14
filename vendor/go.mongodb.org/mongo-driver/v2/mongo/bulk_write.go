@@ -40,7 +40,6 @@ type bulkWrite struct {
 	result                   BulkWriteResult
 	let                      any
 	rawData                  *bool
-	additionalCmd            bson.D
 }
 
 func (bw *bulkWrite) execute(ctx context.Context) error {
@@ -213,9 +212,6 @@ func (bw *bulkWrite) runInsert(ctx context.Context, batch bulkWriteBatch) (opera
 
 	if bw.rawData != nil {
 		op.RawData(*bw.rawData)
-	}
-	if len(bw.additionalCmd) > 0 {
-		op.AdditionalCmd(bw.additionalCmd)
 	}
 
 	err := op.Execute(ctx)
@@ -430,9 +426,6 @@ func (bw *bulkWrite) runUpdate(ctx context.Context, batch bulkWriteBatch) (opera
 
 	if bw.rawData != nil {
 		op.RawData(*bw.rawData)
-	}
-	if len(bw.additionalCmd) > 0 {
-		op.AdditionalCmd(bw.additionalCmd)
 	}
 
 	err := op.Execute(ctx)
