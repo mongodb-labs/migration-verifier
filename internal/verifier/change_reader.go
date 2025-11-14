@@ -174,7 +174,7 @@ func (rc *ChangeReaderCommon) start(
 			defer func() {
 				rc.logger.Debug().
 					Str("reader", string(rc.readerType)).
-					Msg("Closing change event batch channel.")
+					Msg("Finished.")
 
 				close(rc.changeEventBatchChan)
 			}()

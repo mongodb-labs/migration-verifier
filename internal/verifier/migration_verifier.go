@@ -248,7 +248,7 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 		}
 		verifier.writesOff = true
 
-		verifier.logger.Debug().Msg("Signalling that writes are done.")
+		verifier.logger.Debug().Msg("Signaling that writes are done.")
 
 		srcFinalTs, err = GetNewClusterTime(
 			ctx,

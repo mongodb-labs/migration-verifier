@@ -274,6 +274,11 @@ CursorLoop:
 		case <-sctx.Done():
 			return sctx.Err()
 		case <-o.writesOffTs.Ready():
+			o.logger.Debug().
+				Stringer("reader", o).
+				Any("timestamp", o.writesOffTs.Get()).
+				Msg("Received writes-off timestamp.")
+
 			break CursorLoop
 		default:
 			err = o.readAndHandleOneBatch(sctx, cursor, allowDDLBeforeTS)
@@ -286,7 +291,7 @@ CursorLoop:
 	writesOffTS := o.writesOffTs.Get()
 
 	for {
-		if o.lastChangeEventTime.Load().OrZero().Before(writesOffTS) {
+		if !o.lastChangeEventTime.Load().OrZero().Before(writesOffTS) {
 			fmt.Printf("----------- %s reached writes off ts %v\n", o, writesOffTS)
 			break
 		}
@@ -386,7 +391,7 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 	var latestTS bson.Timestamp
 
 	parseOneDocumentOp := func(opName string, ts bson.Timestamp, rawDoc bson.Raw) error {
-		fmt.Printf("---- got op: %+v\n\n", rawDoc)
+		//fmt.Printf("---- got op: %+v\n\n", rawDoc)
 
 		nsStr, err := mbson.Lookup[string](rawDoc, "ns")
 		if err != nil {
@@ -549,7 +554,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 	var latestTS bson.Timestamp
 
 	for _, rawDoc := range o.curDocs {
-		fmt.Printf("----- %s got op: %+v\n\n", o, rawDoc)
+		//fmt.Printf("----- %s got op: %+v\n\n", o, rawDoc)
 		var op oplog.Op
 
 		if err := (&op).UnmarshalFromBSON(rawDoc); err != nil {
@@ -628,14 +633,12 @@ func (o *OplogReader) getNSFilter(docroot string) agg.And {
 		},
 	))
 
-	/*
-		if len(o.namespaces) > 0 {
-			filter = append(
-				filter,
-				agg.In(docroot+".ns", o.namespaces...),
-			)
-		}
-	*/
+	if len(o.namespaces) > 0 {
+		filter = append(
+			filter,
+			agg.In(docroot+".ns", o.namespaces...),
+		)
+	}
 
 	return filter
 }

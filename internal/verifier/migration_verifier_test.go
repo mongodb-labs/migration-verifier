@@ -2320,15 +2320,23 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 201, "x": 201, "inFilter": true})
 	suite.Require().NoError(err)
 
-	// Tell check to start the next generation.
-	checkContinueChan <- struct{}{}
+	suite.Require().Eventually(
+		func() bool {
+			suite.T().Log("checking to see if a failure was found yet")
 
-	// Wait for one generation to finish.
-	<-checkDoneChan
-	status = waitForTasks()
+			// Tell check to start the next generation.
+			checkContinueChan <- struct{}{}
 
-	// There should be a failure from the src insert of a document in the filter.
-	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+			// Wait for one generation to finish.
+			<-checkDoneChan
+			status = waitForTasks()
+
+			return *status == VerificationStatus{TotalTasks: 1, FailedTasks: 1}
+		},
+		time.Minute,
+		time.Second,
+		"we should see a failure from the src insert of a document in the filter.",
+	)
 
 	// Now patch up the destination.
 	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 201, "x": 201, "inFilter": true})
@@ -2343,6 +2351,8 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 
 	// There should be no failures now, since they are equivalent at this point in time.
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+
+	suite.T().Log("Finalizing test")
 
 	// Turn writes off.
 	suite.Require().NoError(verifier.WritesOff(ctx))

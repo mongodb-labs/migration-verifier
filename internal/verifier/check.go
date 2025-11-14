@@ -272,6 +272,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				return errors.Wrapf(err, "failed to start %s", changeReader)
 			}
 			changeReaderGroup.Go(func() error {
+				defer fmt.Printf("----- %s persistor finished\n", changeReader.String())
 				return verifier.RunChangeEventPersistor(groupCtx, changeReader)
 			})
 		}
@@ -360,7 +361,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// caught again on the next iteration.
 		if verifier.writesOff {
 			verifier.logger.Debug().
-				Msg("Waiting for change readers to end.")
+				Msg("Waiting for change handling to finish.")
 
 			// It's necessary to wait for the change reader to finish before incrementing the
 			// generation number, or the last changes will not be checked.
