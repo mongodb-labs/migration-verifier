@@ -662,7 +662,6 @@ func (verifier *Verifier) getDocumentsCursor(sctx context.Context, collection *m
 
 	if startAtTs != nil {
 		readConcern := bson.D{
-			{"level", "snapshot"},
 			{"afterClusterTime", *startAtTs},
 		}
 
