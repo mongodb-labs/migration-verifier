@@ -489,8 +489,10 @@ func (db *Database) ListCollections(
 	if args.AuthorizedCollections != nil {
 		op = op.AuthorizedCollections(*args.AuthorizedCollections)
 	}
-	if rawData, ok := optionsutil.Value(args.Internal, "rawData").(bool); ok {
-		op = op.RawData(rawData)
+	if rawDataOpt := optionsutil.Value(args.Internal, "rawData"); rawDataOpt != nil {
+		if rawData, ok := rawDataOpt.(bool); ok {
+			op = op.RawData(rawData)
+		}
 	}
 
 	retry := driver.RetryNone
