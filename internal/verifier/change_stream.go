@@ -217,11 +217,9 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			return errors.Errorf("Change event lacks a namespace: %+v", changeEvents[eventsRead])
 		}
 
-		if changeEvents[eventsRead].ClusterTime != nil &&
-			(csr.lastChangeEventTime == nil ||
-				csr.lastChangeEventTime.Before(*changeEvents[eventsRead].ClusterTime)) {
-
-			csr.lastChangeEventTime = changeEvents[eventsRead].ClusterTime
+		eventTime := changeEvents[eventsRead].ClusterTime
+		if eventTime != nil && csr.lastChangeEventTime.Load().OrZero().Before(*eventTime) {
+			csr.lastChangeEventTime.Store(option.Some(*eventTime))
 			latestEvent = option.Some(changeEvents[eventsRead])
 		}
 
@@ -341,8 +339,8 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 		if gotwritesOffTimestamp {
 			csr.running = false
-			if csr.lastChangeEventTime != nil {
-				csr.startAtTs = csr.lastChangeEventTime
+			if ts, has := csr.lastChangeEventTime.Load().Get(); has {
+				csr.startAtTs = &ts
 			}
 
 			break

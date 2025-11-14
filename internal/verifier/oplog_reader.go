@@ -286,11 +286,9 @@ CursorLoop:
 	writesOffTS := o.writesOffTs.Get()
 
 	for {
-		if o.lastChangeEventTime != nil {
-			if !o.lastChangeEventTime.Before(writesOffTS) {
-				fmt.Printf("----------- %s reached writes off ts %v\n", o, writesOffTS)
-				break
-			}
+		if o.lastChangeEventTime.Load().OrZero().Before(writesOffTS) {
+			fmt.Printf("----------- %s reached writes off ts %v\n", o, writesOffTS)
+			break
 		}
 
 		err := o.readAndHandleOneBatch(sctx, cursor, allowDDLBeforeTS)
@@ -303,9 +301,9 @@ CursorLoop:
 	o.running = false
 
 	infoLog := o.logger.Info()
-	if o.lastChangeEventTime != nil {
-		infoLog = infoLog.Any("lastEventTime", o.lastChangeEventTime)
-		o.startAtTs = lo.ToPtr(*o.lastChangeEventTime)
+	if ts, has := o.lastChangeEventTime.Load().Get(); has {
+		infoLog = infoLog.Any("lastEventTime", ts)
+		o.startAtTs = lo.ToPtr(ts)
 	} else {
 		infoLog = infoLog.Str("lastEventTime", "none")
 	}
@@ -378,12 +376,13 @@ func (o *OplogReader) readAndHandleOneBatch(
 	}:
 	}
 
-	o.lastChangeEventTime = &latestTS
+	o.lastChangeEventTime.Store(option.Some(latestTS))
 
 	return nil
 }
 
 func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Timestamp) ([]ParsedEvent, bson.Timestamp, error) {
+	fmt.Printf("--------------- parseRawOps\n\n\n")
 	var latestTS bson.Timestamp
 
 	parseOneDocumentOp := func(opName string, ts bson.Timestamp, rawDoc bson.Raw) error {
@@ -550,6 +549,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 	var latestTS bson.Timestamp
 
 	for _, rawDoc := range o.curDocs {
+		fmt.Printf("----- %s got op: %+v\n\n", o, rawDoc)
 		var op oplog.Op
 
 		if err := (&op).UnmarshalFromBSON(rawDoc); err != nil {
@@ -611,8 +611,6 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 }
 
 func (o *OplogReader) getNSFilter(docroot string) agg.And {
-	return agg.And{}
-
 	prefixes := append(
 		slices.Clone(namespaces.MongosyncMetaDBPrefixes),
 		o.metaDB.Name()+".",
