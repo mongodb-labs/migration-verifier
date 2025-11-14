@@ -670,7 +670,7 @@ func (verifier *Verifier) getDocumentsCursor(
 		)
 	}
 
-	sess := mongo.SessionFromContext(ctx)
+	sess := mongo.SessionFromContext(sctx)
 
 	if sess == nil {
 		panic("No session?!?")
