@@ -13,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/oplog"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -153,16 +154,16 @@ func (o *OplogReader) createCursor(
 		bson.D{{"$expr", agg.Or{
 			// plain ops: one write per op
 			append(
-				agg.And{agg.In("$op", "d", "i", "u")},
+				agg.And{agg.In("$op", mslices.Of("d", "i", "u"))},
 				o.getNSFilter("$$ROOT")...,
 			),
 
 			// op=n is for no-ops, so we stay up-to-date.
-			agg.Eq("$op", "n"),
+			agg.Eq{"$op", "n"},
 
 			// op=c is for applyOps, and also to detect forbidden DDL.
 			agg.And{
-				agg.Eq("$op", "c"),
+				agg.Eq{"$op", "c"},
 				agg.Not{helpers.StringHasPrefix{
 					FieldRef: "$ns",
 					Prefix:   "config.",
@@ -206,7 +207,7 @@ func (o *OplogReader) getExprProjection() bson.D {
 		{"docID", getOplogDocIDExpr("$$ROOT")},
 
 		{"cmdName", agg.Cond{
-			If: agg.Eq("$op", "c"),
+			If: agg.Eq{"$op", "c"},
 			Then: agg.ArrayElemAt{
 				Array: agg.Map{
 					Input: bson.D{
@@ -222,8 +223,8 @@ func (o *OplogReader) getExprProjection() bson.D {
 
 		{"o", agg.Cond{
 			If: agg.And{
-				agg.Eq("$op", "c"),
-				agg.Eq("missing", agg.Type("$o.applyOps")),
+				agg.Eq{"$op", "c"},
+				agg.Eq{"missing", agg.Type{"$o.applyOps"}},
 			},
 			Then: "$o",
 			Else: "$$REMOVE",
@@ -231,8 +232,8 @@ func (o *OplogReader) getExprProjection() bson.D {
 
 		{"ops", agg.Cond{
 			If: agg.And{
-				agg.Eq("$op", "c"),
-				agg.Eq(agg.Type("$o.applyOps"), "array"),
+				agg.Eq{"$op", "c"},
+				agg.Eq{agg.Type{"$o.applyOps"}, "array"},
 			},
 			Then: agg.Map{
 				Input: agg.Filter{
@@ -635,7 +636,7 @@ func (o *OplogReader) getNSFilter(docroot string) agg.And {
 	if len(o.namespaces) > 0 {
 		filter = append(
 			filter,
-			agg.In(docroot+".ns", o.namespaces...),
+			agg.In(docroot+".ns", o.namespaces),
 		)
 	}
 
@@ -645,13 +646,13 @@ func (o *OplogReader) getNSFilter(docroot string) agg.And {
 func getOplogDocLenExpr(docroot string) any {
 	return agg.Cond{
 		If: agg.Or{
-			agg.Eq(docroot+".op", "i"),
+			agg.Eq{docroot + ".op", "i"},
 			agg.And{
-				agg.Eq(docroot+".op", "u"),
-				agg.Not{agg.Eq("missing", docroot+".o._id")},
+				agg.Eq{docroot + ".op", "u"},
+				agg.Not(agg.Eq{"missing", docroot + ".o._id"}),
 			},
 		},
-		Then: agg.BSONSize(docroot + ".o"),
+		Then: agg.BSONSize{docroot + ".o"},
 		Else: "$$REMOVE",
 	}
 }
@@ -661,15 +662,15 @@ func getOplogDocIDExpr(docroot string) any {
 	return agg.Switch{
 		Branches: []agg.SwitchCase{
 			{
-				Case: agg.Eq(docroot+".op", "c"),
+				Case: agg.Eq{docroot + ".op", "c"},
 				Then: "$$REMOVE",
 			},
 			{
-				Case: agg.In(docroot+".op", "i", "d"),
+				Case: agg.In(docroot+".op", mslices.Of("i", "d")),
 				Then: docroot + ".o._id",
 			},
 			{
-				Case: agg.In(docroot+".op", "u"),
+				Case: agg.Eq{docroot + ".op", "u"},
 				Then: docroot + ".o2._id",
 			},
 		},

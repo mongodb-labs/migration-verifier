@@ -4,38 +4,48 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-func Eq(comparands ...any) bson.D {
-	return bson.D{{"$eq", comparands}}
-}
+type Eq []any
 
-func In[T any](needle any, haystack ...T) bson.D {
-	return bson.D{{"$in", bson.A{needle, haystack}}}
-}
+var _ bson.Marshaler = Eq{}
 
-func BSONSize(ref any) bson.D {
-	return bson.D{{"$bsonSize", ref}}
-}
-
-func Type(ref any) bson.D {
-	return bson.D{{"$type", ref}}
-}
-
-func Concat(refs ...any) bson.D {
-	return bson.D{{"$concat", refs}}
+func (e Eq) MarshalBSON() ([]byte, error) {
+	return bson.Marshal(bson.D{{"$eq", e}})
 }
 
 // ---------------------------------------------
 
-type Not struct {
-	Ref any
+func In[T any](needle any, haystack []T) bson.D {
+	return bson.D{{"$in", bson.A{needle, haystack}}}
 }
 
-var _ bson.Marshaler = Not{}
+// ---------------------------------------------
+
+type BSONSize [1]any
+
+var _ bson.Marshaler = BSONSize{}
+
+func (b BSONSize) MarshalBSON() ([]byte, error) {
+	return bson.Marshal(bson.D{{"$bsonSize", b[0]}})
+}
+
+// ---------------------------------------------
+
+type Type [1]any
+
+var _ bson.Marshaler = Type{}
+
+func (t Type) MarshalBSON() ([]byte, error) {
+	return bson.Marshal(bson.D{{"$type", t[0]}})
+}
+
+// ---------------------------------------------
+
+type Not [1]any
+
+var _ bson.Marshaler = Type{}
 
 func (n Not) MarshalBSON() ([]byte, error) {
-	return bson.Marshal(bson.D{
-		{"$not", n.Ref},
-	})
+	return bson.Marshal(bson.D{{"$not", n[0]}})
 }
 
 // ---------------------------------------------
@@ -103,6 +113,8 @@ type Switch struct {
 	Default  any
 }
 
+var _ bson.Marshaler = Switch{}
+
 type SwitchCase struct {
 	Case any
 	Then any
@@ -125,6 +137,8 @@ type ArrayElemAt struct {
 	Array any
 	Index int
 }
+
+var _ bson.Marshaler = ArrayElemAt{}
 
 func (a ArrayElemAt) D() bson.D {
 	return bson.D{{"$arrayElemAt", bson.A{
