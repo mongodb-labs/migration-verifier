@@ -9,7 +9,7 @@ type Eq []any
 var _ bson.Marshaler = Eq{}
 
 func (e Eq) MarshalBSON() ([]byte, error) {
-	return bson.Marshal(bson.D{{"$eq", e}})
+	return bson.Marshal(bson.D{{"$eq", []any(e)}})
 }
 
 // ---------------------------------------------
