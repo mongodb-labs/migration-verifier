@@ -2296,6 +2296,8 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	// Wait for one generation to finish.
 	<-checkDoneChan
 	status := waitForTasks()
+
+	fmt.Printf("----- finished generation %d\n", verifier.generation)
 	suite.Require().Greater(status.CompletedTasks, 1)
 	suite.Require().Greater(status.TotalTasks, 1)
 	suite.Require().Zero(status.FailedTasks, "there should be no failed tasks")
