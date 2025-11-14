@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -88,6 +89,59 @@ func convertDocsToAnys(docs []bson.D) []any {
 	}
 
 	return anys
+}
+
+func KillTransactions(
+	ctx context.Context,
+	t *testing.T,
+	client *mongo.Client,
+) {
+	cursor, err := client.Database("admin").Aggregate(
+		ctx,
+		mongo.Pipeline{
+			{{"$currentOp", bson.D{}}},
+			{{"$match", bson.D{
+				{"transaction.parameters.txnNumber", bson.D{
+					{"$exists", true},
+				}},
+			}}},
+		},
+	)
+	require.NoError(t, err)
+
+	type txn struct {
+		LSID struct {
+			ID bson.Binary
+		}
+	}
+
+	var txns []txn
+	require.NoError(t, cursor.All(ctx, &txns))
+
+	if len(txns) == 0 {
+		return
+	}
+
+	t.Logf("Killing %d transaction(s) via killSessions …", len(txns))
+
+	sessionsToKill := lo.Map(
+		txns,
+		func(t txn, _ int) bson.D {
+			return bson.D{{"id", t.LSID.ID}}
+		},
+	)
+
+	require.NoError(
+		t,
+		client.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"killSessions", sessionsToKill},
+			},
+		).Err(),
+	)
+
+	return
 }
 
 func KillApplicationChangeStreams(

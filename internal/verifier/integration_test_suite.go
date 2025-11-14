@@ -9,6 +9,7 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
@@ -118,6 +119,9 @@ func (suite *IntegrationTestSuite) SetupTest() {
 			suite.initialDbNames.Add(dbName)
 		}
 	}
+
+	testutil.KillTransactions(ctx, suite.T(), suite.srcMongoClient)
+	testutil.KillTransactions(ctx, suite.T(), suite.dstMongoClient)
 }
 
 func (suite *IntegrationTestSuite) TearDownTest() {
