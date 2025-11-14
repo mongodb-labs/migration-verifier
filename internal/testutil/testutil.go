@@ -95,6 +95,15 @@ func KillApplicationChangeStreams(
 	client *mongo.Client,
 	appName string,
 ) error {
+	currentOpArg := bson.D{}
+
+	if false {
+		currentOpArg = append(
+			currentOpArg,
+			bson.E{"idleCursors", true},
+		)
+	}
+
 	// Kill verifier’s change stream.
 	cursor, err := client.Database(
 		"admin",
@@ -103,9 +112,7 @@ func KillApplicationChangeStreams(
 		ctx,
 		mongo.Pipeline{
 			{
-				{"$currentOp", bson.D{
-					{"idleCursors", true},
-				}},
+				{"$currentOp", currentOpArg},
 			},
 			{
 				{"$match", bson.D{
