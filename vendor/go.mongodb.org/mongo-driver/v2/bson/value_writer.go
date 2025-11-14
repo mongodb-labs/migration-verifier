@@ -21,7 +21,7 @@ import (
 var _ ValueWriter = &valueWriter{}
 
 var vwPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return new(valueWriter)
 	},
 }
@@ -30,6 +30,29 @@ func putValueWriter(vw *valueWriter) {
 	if vw != nil {
 		vw.w = nil // don't leak the writer
 		vwPool.Put(vw)
+	}
+}
+
+var documentWriterPool = sync.Pool{
+	New: func() any {
+		return newDocumentWriter(nil)
+	},
+}
+
+func getDocumentWriter(w io.Writer) *valueWriter {
+	vw := documentWriterPool.Get().(*valueWriter)
+
+	vw.reset(vw.buf)
+	vw.buf = vw.buf[:0]
+	vw.w = w
+
+	return vw
+}
+
+func putDocumentWriter(vw *valueWriter) {
+	if vw != nil {
+		vw.w = nil // don't leak the writer
+		documentWriterPool.Put(vw)
 	}
 }
 

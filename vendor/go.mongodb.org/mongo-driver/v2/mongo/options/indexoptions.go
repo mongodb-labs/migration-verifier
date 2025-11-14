@@ -6,12 +6,18 @@
 
 package options
 
+import "go.mongodb.org/mongo-driver/v2/internal/optionsutil"
+
 // CreateIndexesOptions represents arguments that can be used to configure
 // IndexView.CreateOne and IndexView.CreateMany operations.
 //
 // See corresponding setter methods for documentation.
 type CreateIndexesOptions struct {
-	CommitQuorum interface{}
+	CommitQuorum any
+
+	// Deprecated: This option is for internal use only and should not be set. It may be changed or removed in any
+	// release.
+	Internal optionsutil.Options
 }
 
 // CreateIndexesOptionsBuilder contains options to create indexes. Each option
@@ -121,7 +127,11 @@ func (c *CreateIndexesOptionsBuilder) SetCommitQuorumVotingMembers() *CreateInde
 
 // DropIndexesOptions represents arguments that can be used to configure
 // IndexView.DropOne and IndexView.DropAll operations.
-type DropIndexesOptions struct{}
+type DropIndexesOptions struct {
+	// Deprecated: This option is for internal use only and should not be set. It may be changed or removed in any
+	// release.
+	Internal optionsutil.Options
+}
 
 // DropIndexesOptionsBuilder contains options to configure dropping indexes.
 // Each option can be set through setter functions. See documentation for each
@@ -146,6 +156,10 @@ func (d *DropIndexesOptionsBuilder) List() []func(*DropIndexesOptions) error {
 // See corresponding setter methods for documentation.
 type ListIndexesOptions struct {
 	BatchSize *int32
+
+	// Deprecated: This option is for internal use only and should not be set. It may be changed or removed in any
+	// release.
+	Internal optionsutil.Options
 }
 
 // ListIndexesOptionsBuilder contains options to configure count operations. Each
@@ -185,21 +199,21 @@ type IndexOptions struct {
 	ExpireAfterSeconds      *int32
 	Name                    *string
 	Sparse                  *bool
-	StorageEngine           interface{}
+	StorageEngine           any
 	Unique                  *bool
 	Version                 *int32
 	DefaultLanguage         *string
 	LanguageOverride        *string
 	TextVersion             *int32
-	Weights                 interface{}
+	Weights                 any
 	SphereVersion           *int32
 	Bits                    *int32
 	Max                     *float64
 	Min                     *float64
 	BucketSize              *int32
-	PartialFilterExpression interface{}
+	PartialFilterExpression any
 	Collation               *Collation
-	WildcardProjection      interface{}
+	WildcardProjection      any
 	Hidden                  *bool
 }
 
@@ -262,9 +276,8 @@ func (i *IndexOptionsBuilder) SetSparse(sparse bool) *IndexOptionsBuilder {
 // SetStorageEngine sets the value for the StorageEngine field. Specifies the
 // storage engine to use for the index. The value must be a document in the form
 // {<storage engine name>: <options>}. The default value is nil, which means that
-// the default storage engine will be used. This option is only applicable for
-// MongoDB versions >= 3.0 and is ignored for previous server versions.
-func (i *IndexOptionsBuilder) SetStorageEngine(engine interface{}) *IndexOptionsBuilder {
+// the default storage engine will be used.
+func (i *IndexOptionsBuilder) SetStorageEngine(engine any) *IndexOptionsBuilder {
 	i.Opts = append(i.Opts, func(opts *IndexOptions) error {
 		opts.StorageEngine = engine
 
@@ -346,7 +359,7 @@ func (i *IndexOptionsBuilder) SetTextVersion(version int32) *IndexOptionsBuilder
 // terms of the score. This option is only applicable for text indexes and is ignored
 // for other index types. The default value is nil, which means that every field will
 // have a weight of 1.
-func (i *IndexOptionsBuilder) SetWeights(weights interface{}) *IndexOptionsBuilder {
+func (i *IndexOptionsBuilder) SetWeights(weights any) *IndexOptionsBuilder {
 	i.Opts = append(i.Opts, func(opts *IndexOptions) error {
 		opts.Weights = weights
 
@@ -424,9 +437,8 @@ func (i *IndexOptionsBuilder) SetBucketSize(bucketSize int32) *IndexOptionsBuild
 }
 
 // SetPartialFilterExpression sets the value for the PartialFilterExpression field. Sets
-// a document that defines which collection documents the index should reference. This
-// option is only valid for MongoDB versions >= 3.2 and is ignored for previous server versions.
-func (i *IndexOptionsBuilder) SetPartialFilterExpression(expression interface{}) *IndexOptionsBuilder {
+// a document that defines which collection documents the index should reference.
+func (i *IndexOptionsBuilder) SetPartialFilterExpression(expression any) *IndexOptionsBuilder {
 	i.Opts = append(i.Opts, func(opts *IndexOptions) error {
 		opts.PartialFilterExpression = expression
 
@@ -437,8 +449,7 @@ func (i *IndexOptionsBuilder) SetPartialFilterExpression(expression interface{})
 }
 
 // SetCollation sets the value for the Collation field. Specifies the collation to use for
-// string comparisons for the index. This option is only valid for MongoDB versions >= 3.4.
-// For previous server versions, the driver will return an error if this option is used.
+// string comparisons for the index.
 func (i *IndexOptionsBuilder) SetCollation(collation *Collation) *IndexOptionsBuilder {
 	i.Opts = append(i.Opts, func(opts *IndexOptions) error {
 		opts.Collation = collation
@@ -451,7 +462,7 @@ func (i *IndexOptionsBuilder) SetCollation(collation *Collation) *IndexOptionsBu
 
 // SetWildcardProjection sets the value for the WildcardProjection field. Sets a document
 // that defines the wildcard projection for the index.
-func (i *IndexOptionsBuilder) SetWildcardProjection(wildcardProjection interface{}) *IndexOptionsBuilder {
+func (i *IndexOptionsBuilder) SetWildcardProjection(wildcardProjection any) *IndexOptionsBuilder {
 	i.Opts = append(i.Opts, func(opts *IndexOptions) error {
 		opts.WildcardProjection = wildcardProjection
 

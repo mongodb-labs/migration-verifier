@@ -158,13 +158,43 @@ type ResponseInfo struct {
 }
 
 func redactStartedInformationCmd(info startedInformation) bson.Raw {
+	intLen := func(n int) int {
+		if n == 0 {
+			return 1 // Special case: 0 has one digit
+		}
+		count := 0
+		for n > 0 {
+			n /= 10
+			count++
+		}
+		return count
+	}
+
 	var cmdCopy bson.Raw
 
 	// Make a copy of the command. Redact if the command is security
 	// sensitive and cannot be monitored. If there was a type 1 payload for
 	// the current batch, convert it to a BSON array
 	if !info.redacted {
-		cmdCopy = make([]byte, 0, len(info.cmd))
+		cmdLen := len(info.cmd)
+		for _, seq := range info.documentSequences {
+			cmdLen += 7 // 2 (header) + 4 (array length) + 1 (array end)
+			cmdLen += len(seq.identifier)
+			data := seq.data
+			i := 0
+			for {
+				doc, rest, ok := bsoncore.ReadDocument(data)
+				if !ok {
+					break
+				}
+				data = rest
+				cmdLen += len(doc)
+				cmdLen += intLen(i)
+				i++
+			}
+		}
+
+		cmdCopy = make([]byte, 0, cmdLen)
 		cmdCopy = append(cmdCopy, info.cmd...)
 
 		if len(info.documentSequences) > 0 {
@@ -504,7 +534,7 @@ func (op Operation) Validate() error {
 }
 
 var memoryPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		// Start with 1kb buffers.
 		b := make([]byte, 1024)
 		// Return a pointer as the static analysis tool suggests.
@@ -1724,32 +1754,14 @@ func (op Operation) calculateMaxTimeMS(ctx context.Context, rttMin time.Duration
 		return 0, nil
 	}
 
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		return 0, nil
-	}
-
-	remainingTimeout := time.Until(deadline)
-
-	// Always round up to the next millisecond value so we never truncate the calculated
-	// maxTimeMS value (e.g. 400 microseconds evaluates to 1ms, not 0ms).
-	maxTimeMS := int64((remainingTimeout - rttMin + time.Millisecond - 1) / time.Millisecond)
-	if maxTimeMS <= 0 {
+	// Calculate maxTimeMS value to potentially be appended to the wire message.
+	maxTimeMS, ok := driverutil.CalculateMaxTimeMS(ctx, rttMin)
+	if !ok && maxTimeMS <= 0 {
 		return 0, fmt.Errorf(
-			"remaining time %v until context deadline is less than or equal to min network round-trip time %v (%v): %w",
-			remainingTimeout,
-			rttMin,
+			"calculated server-side timeout (%v ms) is less than or equal to 0 (%v): %w",
+			maxTimeMS,
 			rttStats,
 			ErrDeadlineWouldBeExceeded)
-	}
-
-	// The server will return a "BadValue" error if maxTimeMS is greater
-	// than the maximum positive int32 value (about 24.9 days). If the
-	// user specified a timeout value greater than that,  omit maxTimeMS
-	// and let the client-side timeout handle cancelling the op if the
-	// timeout is ever reached.
-	if maxTimeMS > math.MaxInt32 {
-		return 0, nil
 	}
 
 	return maxTimeMS, nil
@@ -1826,7 +1838,6 @@ func (op Operation) createReadPref(desc description.SelectedServer, isOpQuery bo
 	// TODO if supplied readPreference was "overwritten" with primary in description.selectForReplicaSet.
 	if desc.Server.Kind == description.ServerKindStandalone || (isOpQuery &&
 		desc.Server.Kind != description.ServerKindMongos) ||
-
 		op.Type == Write || (op.IsOutputAggregate && desc.Server.WireVersion.Max < 13) {
 		// Don't send read preference for:
 		// 1. all standalones

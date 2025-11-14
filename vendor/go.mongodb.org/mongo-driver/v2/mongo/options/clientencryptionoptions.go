@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/internal/httputil"
 )
@@ -19,9 +20,10 @@ import (
 // See corresponding setter methods for documentation.
 type ClientEncryptionOptions struct {
 	KeyVaultNamespace string
-	KmsProviders      map[string]map[string]interface{}
+	KmsProviders      map[string]map[string]any
 	TLSConfig         map[string]*tls.Config
 	HTTPClient        *http.Client
+	KeyExpiration     *time.Duration
 }
 
 // ClientEncryptionOptionsBuilder contains options to configure client
@@ -58,7 +60,7 @@ func (c *ClientEncryptionOptionsBuilder) SetKeyVaultNamespace(ns string) *Client
 }
 
 // SetKmsProviders specifies options for KMS providers. This is required.
-func (c *ClientEncryptionOptionsBuilder) SetKmsProviders(providers map[string]map[string]interface{}) *ClientEncryptionOptionsBuilder {
+func (c *ClientEncryptionOptionsBuilder) SetKmsProviders(providers map[string]map[string]any) *ClientEncryptionOptionsBuilder {
 	c.Opts = append(c.Opts, func(opts *ClientEncryptionOptions) error {
 		opts.KmsProviders = providers
 		return nil
@@ -73,6 +75,18 @@ func (c *ClientEncryptionOptionsBuilder) SetKmsProviders(providers map[string]ma
 func (c *ClientEncryptionOptionsBuilder) SetTLSConfig(cfg map[string]*tls.Config) *ClientEncryptionOptionsBuilder {
 	c.Opts = append(c.Opts, func(opts *ClientEncryptionOptions) error {
 		opts.TLSConfig = cfg
+
+		return nil
+	})
+
+	return c
+}
+
+// SetKeyExpiration specifies duration for the key expiration. 0 or negative value means "never expire".
+// The granularity is in milliseconds. Any sub-millisecond fraction will be rounded up.
+func (c *ClientEncryptionOptionsBuilder) SetKeyExpiration(expiration time.Duration) *ClientEncryptionOptionsBuilder {
+	c.Opts = append(c.Opts, func(opts *ClientEncryptionOptions) error {
+		opts.KeyExpiration = &expiration
 
 		return nil
 	})
@@ -103,7 +117,7 @@ func (c *ClientEncryptionOptionsBuilder) SetTLSConfig(cfg map[string]*tls.Config
 // to be considered trusted when making a TLS connection (e.g. "tlsCaFile=/path/to/caFile").
 //
 // This should only be used to set custom TLS options. By default, the connection will use an empty tls.Config{} with MinVersion set to tls.VersionTLS12.
-func BuildTLSConfig(tlsOpts map[string]interface{}) (*tls.Config, error) {
+func BuildTLSConfig(tlsOpts map[string]any) (*tls.Config, error) {
 	// use TLS min version 1.2 to enforce more secure hash algorithms and advanced cipher suites
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 

@@ -69,6 +69,9 @@ func (vde ValueDecoderError) Error() string {
 	if vde.Received.IsValid() {
 		received = vde.Received.Type().String()
 	}
+	if !vde.Received.CanSet() {
+		received = "unsettable " + received
+	}
 	return fmt.Sprintf("%s can only decode valid and settable %s, but got %s", vde.Name, strings.Join(typeKinds, ", "), received)
 }
 
@@ -88,6 +91,7 @@ type EncodeContext struct {
 	nilSliceAsEmpty         bool
 	nilByteSliceAsEmpty     bool
 	omitZeroStruct          bool
+	omitEmpty               bool
 	useJSONStructTags       bool
 }
 
@@ -103,7 +107,7 @@ type DecodeContext struct {
 	truncate bool
 
 	// defaultDocumentType specifies the Go type to decode top-level and nested BSON documents into. In particular, the
-	// usage for this field is restricted to data typed as "interface{}" or "map[string]interface{}". If DocumentType is
+	// usage for this field is restricted to data typed as "any" or "map[string]any". If DocumentType is
 	// set to a type that a BSON document cannot be unmarshaled into (e.g. "string"), unmarshalling will result in an
 	// error.
 	defaultDocumentType reflect.Type
