@@ -2138,7 +2138,7 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 		"wait until verifier has caught up with itself",
 	)
 
-	suite.Require().Len(tasks, 1, "generation 1 should only have done 1 task; tasks=%+v", tasks)
+	suite.Require().Len(tasks, 1, "should eventually only have 1 task; tasks=%+v", tasks)
 	suite.Require().Equal(verificationTaskVerifyCollection, tasks[0].Type)
 	suite.Require().Equal(verificationTaskMetadataMismatch, tasks[0].Status)
 }
