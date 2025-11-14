@@ -97,7 +97,7 @@ jobs:
         run: |-
             {
                 echo npm install -g m
-                echo pipx install pymongo==4.13.2 'mtools[all]'
+                echo pip install pymongo==4.13.2 'mtools[all]'
             } | parallel
 
       - name: Install MongoDB ${{ matrix.mongodb_versions[0] }} (source)
