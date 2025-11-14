@@ -66,7 +66,7 @@ func (suite *IntegrationTestSuite) testExtractTrueDocKeyAgg(reverseYN bool) {
 	cursor, err := coll.Aggregate(
 		ctx,
 		mongo.Pipeline{
-			{{"$replaceWith", computedDocKeyAgg}},
+			{{"$replaceRoot", bson.D{{"newRoot", computedDocKeyAgg}}}},
 		},
 	)
 	require.NoError(err, "should open cursor to agg")
