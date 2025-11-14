@@ -143,8 +143,6 @@ func KillTransactions(
 			},
 		).Err(),
 	)
-
-	return
 }
 
 func KillApplicationChangeStreams(
