@@ -332,15 +332,15 @@ func getShardIds(t *testing.T, client *mongo.Client) []string {
 }
 
 func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
-	verifier := suite.BuildVerifier()
+
 	ctx := suite.Context()
 	t := suite.T()
 
 	dbName := suite.DBNameForTest()
 	collName := "coll"
 
-	srcColl := verifier.srcClient.Database(dbName).Collection(collName)
-	dstColl := verifier.dstClient.Database(dbName).Collection(collName)
+	srcColl := suite.srcMongoClient.Database(dbName).Collection(collName)
+	dstColl := suite.dstMongoClient.Database(dbName).Collection(collName)
 
 	id1 := bson.NewObjectID()
 	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", id1}})
@@ -363,6 +363,9 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 			To:        namespace,
 		},
 	}
+
+	verifier := suite.BuildVerifier()
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
 
 	verifier.globalFilter = bson.D{{"_id", id1}}
 
