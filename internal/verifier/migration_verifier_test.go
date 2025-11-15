@@ -384,6 +384,10 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	ctx := suite.Context()
 
+	verifier := suite.BuildVerifier()
+
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
+
 	task := &VerificationTask{
 		PrimaryKey: bson.NewObjectID(),
 		QueryFilter: QueryFilter{
@@ -411,10 +415,6 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 		bson.D{{"_id", "oh yeah"}},
 	})
 	suite.Require().NoError(err)
-
-	verifier := suite.BuildVerifier()
-
-	suite.Require().NoError(verifier.startChangeHandling(ctx))
 
 	cases := []struct {
 		label                 string
