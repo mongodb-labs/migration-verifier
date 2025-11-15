@@ -251,27 +251,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		verifier.phase = Idle
 	}()
 
-	changeReaderGroup, groupCtx := contextplus.ErrGroup(ctx)
-	for _, changeReader := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
-		if changeReader.isRunning() {
-			verifier.logger.Debug().Msgf("Check: %s already running.", changeReader)
-		} else {
-			verifier.logger.Debug().Msgf("%s not running; starting change reader", changeReader)
-
-			err = changeReader.start(groupCtx, changeReaderGroup)
-			if err != nil {
-				return errors.Wrapf(err, "failed to start %s", changeReader)
-			}
-			changeReaderGroup.Go(func() error {
-				return verifier.RunChangeEventPersistor(groupCtx, changeReader)
-			})
-		}
+	if err := verifier.startChangeHandling(ctx); err != nil {
+		return err
 	}
-
-	changeHandlingErr := verifier.changeHandlingErr
-	go func() {
-		changeHandlingErr.Set(changeReaderGroup.Wait())
-	}()
 
 	// Log the verification status when initially booting up so it's easy to see the current state
 	verificationStatus, err := verifier.GetVerificationStatus(ctx)
@@ -403,6 +385,32 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
 		}
 	}
+}
+
+func (verifier *Verifier) startChangeHandling(ctx context.Context) error {
+	changeReaderGroup, groupCtx := contextplus.ErrGroup(ctx)
+	for _, changeReader := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
+		if changeReader.isRunning() {
+			verifier.logger.Debug().Msgf("Check: %s already running.", changeReader)
+		} else {
+			verifier.logger.Debug().Msgf("%s not running; starting change reader", changeReader)
+
+			err := changeReader.start(groupCtx, changeReaderGroup)
+			if err != nil {
+				return errors.Wrapf(err, "failed to start %s", changeReader)
+			}
+			changeReaderGroup.Go(func() error {
+				return verifier.RunChangeEventPersistor(groupCtx, changeReader)
+			})
+		}
+	}
+
+	changeHandlingErr := verifier.changeHandlingErr
+	go func() {
+		changeHandlingErr.Set(changeReaderGroup.Wait())
+	}()
+
+	return nil
 }
 
 func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {
