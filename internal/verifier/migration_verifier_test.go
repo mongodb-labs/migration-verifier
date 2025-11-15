@@ -493,8 +493,11 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
-
 	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
+
 	drop := func() {
 		err := suite.srcMongoClient.Database("keyhole").Drop(ctx)
 		suite.Require().NoError(err)
@@ -530,9 +533,6 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 		Ids:         []any{id, id + 1},
 		QueryFilter: basicQueryFilter("keyhole.dealers"),
 	}
-
-	verifier := suite.BuildVerifier()
-	suite.Require().NoError(verifier.startChangeHandling(ctx))
 
 	// Test fetchDocuments without global filter.
 	verifier.globalFilter = nil
