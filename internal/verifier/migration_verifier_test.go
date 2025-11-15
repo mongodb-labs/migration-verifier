@@ -304,6 +304,7 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 	}
 
 	verifier := suite.BuildVerifier()
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
 	results, docCount, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
 	require.NoError(err, "should fetch & compare")
 	assert.EqualValues(suite.T(), len(docs), docCount, "expected # of docs")
