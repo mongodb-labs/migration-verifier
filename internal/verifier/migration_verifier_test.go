@@ -379,6 +379,7 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 }
 
 func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
+	ctx := suite.Context()
 
 	task := &VerificationTask{
 		PrimaryKey: bson.NewObjectID(),
