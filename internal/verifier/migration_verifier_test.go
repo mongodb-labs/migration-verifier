@@ -379,8 +379,6 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 }
 
 func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
-	verifier := suite.BuildVerifier()
-	ctx := suite.Context()
 
 	task := &VerificationTask{
 		PrimaryKey: bson.NewObjectID(),
@@ -396,19 +394,24 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 		},
 	}
 
-	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
+	_, err := suite.srcMongoClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", nil}},
 		bson.D{{"_id", int32(123)}},
 		bson.D{{"_id", bson.Symbol("oh yeah")}},
 	})
 	suite.Require().NoError(err)
 
-	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
+	_, err = suite.dstMongoClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", nil}},
 		bson.D{{"_id", int32(123)}},
 		bson.D{{"_id", "oh yeah"}},
 	})
 	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	ctx := suite.Context()
+
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
 
 	cases := []struct {
 		label                 string
