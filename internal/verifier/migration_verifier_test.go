@@ -410,7 +410,6 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	suite.Require().NoError(err)
 
 	verifier := suite.BuildVerifier()
-	ctx := suite.Context()
 
 	suite.Require().NoError(verifier.startChangeHandling(ctx))
 
