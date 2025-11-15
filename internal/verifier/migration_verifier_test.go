@@ -490,12 +490,12 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
-	verifier := suite.BuildVerifier()
+
 	ctx := suite.Context()
 	drop := func() {
-		err := verifier.srcClient.Database("keyhole").Drop(ctx)
+		err := suite.srcMongoClient.Database("keyhole").Drop(ctx)
 		suite.Require().NoError(err)
-		err = verifier.dstClient.Database("keyhole").Drop(ctx)
+		err = suite.dstMongoClient.Database("keyhole").Drop(ctx)
 		suite.Require().NoError(err)
 	}
 	drop()
@@ -511,12 +511,12 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	}
 
 	id := rand.Intn(1000)
-	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
+	_, err := suite.srcMongoClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", id}, {"num", 99}, {"name", "srcTest"}},
 		bson.D{{"_id", id + 1}, {"num", 101}, {"name", "srcTest"}},
 	})
 	suite.Require().NoError(err)
-	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
+	_, err = suite.dstMongoClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", id}, {"num", 99}, {"name", "dstTest"}},
 		bson.D{{"_id", id + 1}, {"num", 101}, {"name", "dstTest"}},
 	})
@@ -527,6 +527,9 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 		Ids:         []any{id, id + 1},
 		QueryFilter: basicQueryFilter("keyhole.dealers"),
 	}
+
+	verifier := suite.BuildVerifier()
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
 
 	// Test fetchDocuments without global filter.
 	verifier.globalFilter = nil
