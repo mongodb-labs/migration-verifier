@@ -126,6 +126,8 @@ func (suite *IntegrationTestSuite) TestProcessVerifyTask_Failure() {
 	ctx := suite.Context()
 	t := suite.T()
 
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
+
 	dbName := suite.DBNameForTest()
 	collName := "coll"
 
