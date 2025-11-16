@@ -387,6 +387,12 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	}
 }
 
+// startChangeHandling starts the goroutines that read changes
+// from the source & destination and that persist those changes
+// to the metadata.
+//
+// As part of this, it sets the change readers’ start timestamps.
+// (It blocks until those are set.)
 func (verifier *Verifier) startChangeHandling(ctx context.Context) error {
 	changeReaderGroup, groupCtx := contextplus.ErrGroup(ctx)
 	for _, changeReader := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
