@@ -28,46 +28,40 @@ jobs:
           - mongodb_versions: [ '4.2.5', '6.0' ]
             topology: replset
 
-          - mongodb_versions: [ '3.6', '8.0' ]
+          - mongodb_versions: [ '4.0', '8.0' ]
             topology: replset
             srcChangeReader: tailOplog
             dstChangeReader: tailOplog
-            toHashedIndexKey: false
 
-#          - mongodb_versions: [ '4.0', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
-#
-#          - mongodb_versions: [ '4.2', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
-#
-#          - mongodb_versions: [ '4.4', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
-#
-#          - mongodb_versions: [ '5.0', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
-#
-#          - mongodb_versions: [ '6.0', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
-#
-#          - mongodb_versions: [ '7.0', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
-#
-#          - mongodb_versions: [ '8.0', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
+          - mongodb_versions: [ '4.2', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '4.4', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '5.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '6.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '7.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '8.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
 
         exclude:
           - mongodb_versions: [ '4.2', '4.2' ]
@@ -84,29 +78,29 @@ jobs:
         # versions are: source, destination
         mongodb_versions:
           - [ '4.2', '4.2' ]
-#          - [ '4.2', '4.4' ]
-#          - [ '4.2', '5.0' ]
-#          - [ '4.2', '6.0' ]
-#          - [ '4.2', '8.0' ]
-#
-#          - [ '4.4', '4.4' ]
-#          - [ '4.4', '5.0' ]
-#          - [ '4.4', '6.0' ]
-#          - [ '4.4', '8.0' ]
-#
-#          - [ '5.0', '5.0' ]
-#          - [ '5.0', '6.0' ]
-#          - [ '5.0', '7.0' ]
-#          - [ '5.0', '8.0' ]
-#
-#          - [ '6.0', '6.0' ]
-#          - [ '6.0', '7.0' ]
-#          - [ '6.0', '8.0' ]
-#
-#          - [ '7.0', '7.0' ]
-#          - [ '7.0', '8.0' ]
-#
-#          - [ '8.0', '8.0' ]
+          - [ '4.2', '4.4' ]
+          - [ '4.2', '5.0' ]
+          - [ '4.2', '6.0' ]
+          - [ '4.2', '8.0' ]
+
+          - [ '4.4', '4.4' ]
+          - [ '4.4', '5.0' ]
+          - [ '4.4', '6.0' ]
+          - [ '4.4', '8.0' ]
+
+          - [ '5.0', '5.0' ]
+          - [ '5.0', '6.0' ]
+          - [ '5.0', '7.0' ]
+          - [ '5.0', '8.0' ]
+
+          - [ '6.0', '6.0' ]
+          - [ '6.0', '7.0' ]
+          - [ '6.0', '8.0' ]
+
+          - [ '7.0', '7.0' ]
+          - [ '7.0', '8.0' ]
+
+          - [ '8.0', '8.0' ]
 
         toHashedIndexKey: [true, false]
 
@@ -115,8 +109,8 @@ jobs:
 
         topology:
           - replset
-#          - replset-to-sharded
-#          - sharded
+          - replset-to-sharded
+          - sharded
 
     # Ubuntu 24 lacks OpenSSL 1.1.1’s libcrypto, which pre-v6 MongoDB
     # versions need.
