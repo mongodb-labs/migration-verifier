@@ -676,6 +676,7 @@ func (verifier *Verifier) getDocumentsCursor(
 	cmd = append(
 		cmd,
 		bson.E{"readConcern", bson.D{
+			{"level", "majority"},
 			{"afterClusterTime", readConcernTS},
 		}},
 	)
