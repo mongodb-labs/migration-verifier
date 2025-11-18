@@ -2,7 +2,6 @@ package verifier
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"fmt"
 	"time"
@@ -467,8 +466,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.srcClientCollection(task),
 			verifier.srcClusterInfo,
-			cmp.Or(
-				verifier.srcChangeReader.getLastSeenClusterTime(),
+			verifier.srcChangeReader.getLastSeenClusterTime().OrElse(
 				verifier.srcChangeReader.getStartTimestamp(),
 			),
 			task,
@@ -503,8 +501,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.dstClientCollection(task),
 			verifier.dstClusterInfo,
-			cmp.Or(
-				verifier.dstChangeReader.getLastSeenClusterTime(),
+			verifier.dstChangeReader.getLastSeenClusterTime().OrElse(
 				verifier.dstChangeReader.getStartTimestamp(),
 			),
 			task,
@@ -585,7 +582,7 @@ func (verifier *Verifier) getDocumentsCursor(
 	sctx context.Context,
 	collection *mongo.Collection,
 	clusterInfo *util.ClusterInfo,
-	readConcernTS option.Option[bson.Timestamp],
+	readConcernTS bson.Timestamp,
 	task *VerificationTask,
 ) (*mongo.Cursor, error) {
 	var findOptions bson.D
@@ -677,18 +674,14 @@ func (verifier *Verifier) getDocumentsCursor(
 
 	runCommandOptions := options.RunCmd().SetReadPreference(verifier.readPreference)
 
-	if ts, has := readConcernTS.Get(); has {
-		readConcern := bson.D{
-			{"afterClusterTime", ts},
-		}
-
-		// We never want to read before the change stream start time,
-		// or for the last generation, the change stream end time.
-		cmd = append(
-			cmd,
-			bson.E{"readConcern", readConcern},
-		)
-	}
+	// We never want to read before the change stream start time,
+	// or for the last generation, the change stream end time.
+	cmd = append(
+		cmd,
+		bson.E{"readConcern", bson.D{
+			{"afterClusterTime", readConcernTS},
+		}},
+	)
 
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.

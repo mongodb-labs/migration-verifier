@@ -126,6 +126,8 @@ func (suite *IntegrationTestSuite) TestProcessVerifyTask_Failure() {
 	ctx := suite.Context()
 	t := suite.T()
 
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
+
 	dbName := suite.DBNameForTest()
 	collName := "coll"
 
@@ -302,6 +304,7 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 	}
 
 	verifier := suite.BuildVerifier()
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
 	results, docCount, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
 	require.NoError(err, "should fetch & compare")
 	assert.EqualValues(suite.T(), len(docs), docCount, "expected # of docs")
@@ -330,15 +333,15 @@ func getShardIds(t *testing.T, client *mongo.Client) []string {
 }
 
 func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
-	verifier := suite.BuildVerifier()
+
 	ctx := suite.Context()
 	t := suite.T()
 
 	dbName := suite.DBNameForTest()
 	collName := "coll"
 
-	srcColl := verifier.srcClient.Database(dbName).Collection(collName)
-	dstColl := verifier.dstClient.Database(dbName).Collection(collName)
+	srcColl := suite.srcMongoClient.Database(dbName).Collection(collName)
+	dstColl := suite.dstMongoClient.Database(dbName).Collection(collName)
 
 	id1 := bson.NewObjectID()
 	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", id1}})
@@ -362,6 +365,9 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 		},
 	}
 
+	verifier := suite.BuildVerifier()
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
+
 	verifier.globalFilter = bson.D{{"_id", id1}}
 
 	results, docCount, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
@@ -377,8 +383,11 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 }
 
 func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
-	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
 
 	task := &VerificationTask{
 		PrimaryKey: bson.NewObjectID(),
@@ -394,14 +403,14 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 		},
 	}
 
-	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
+	_, err := suite.srcMongoClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", nil}},
 		bson.D{{"_id", int32(123)}},
 		bson.D{{"_id", bson.Symbol("oh yeah")}},
 	})
 	suite.Require().NoError(err)
 
-	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
+	_, err = suite.dstMongoClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", nil}},
 		bson.D{{"_id", int32(123)}},
 		bson.D{{"_id", "oh yeah"}},
@@ -485,12 +494,15 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
-	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
+
 	drop := func() {
-		err := verifier.srcClient.Database("keyhole").Drop(ctx)
+		err := suite.srcMongoClient.Database("keyhole").Drop(ctx)
 		suite.Require().NoError(err)
-		err = verifier.dstClient.Database("keyhole").Drop(ctx)
+		err = suite.dstMongoClient.Database("keyhole").Drop(ctx)
 		suite.Require().NoError(err)
 	}
 	drop()
@@ -506,12 +518,12 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	}
 
 	id := rand.Intn(1000)
-	_, err := verifier.srcClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
+	_, err := suite.srcMongoClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", id}, {"num", 99}, {"name", "srcTest"}},
 		bson.D{{"_id", id + 1}, {"num", 101}, {"name", "srcTest"}},
 	})
 	suite.Require().NoError(err)
-	_, err = verifier.dstClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
+	_, err = suite.dstMongoClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
 		bson.D{{"_id", id}, {"num", 99}, {"name", "dstTest"}},
 		bson.D{{"_id", id + 1}, {"num", 101}, {"name", "dstTest"}},
 	})

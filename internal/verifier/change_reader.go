@@ -36,7 +36,7 @@ const (
 type changeReader interface {
 	getWhichCluster() whichCluster
 	getReadChannel() <-chan changeEventBatch
-	getStartTimestamp() option.Option[bson.Timestamp]
+	getStartTimestamp() bson.Timestamp
 	getLastSeenClusterTime() option.Option[bson.Timestamp]
 	getEventsPerSecond() option.Option[float64]
 	getLag() option.Option[time.Duration]
@@ -97,8 +97,12 @@ func (rc *ChangeReaderCommon) getWhichCluster() whichCluster {
 	return rc.readerType
 }
 
-func (rc *ChangeReaderCommon) getStartTimestamp() option.Option[bson.Timestamp] {
-	return option.FromPointer(rc.startAtTs)
+func (rc *ChangeReaderCommon) getStartTimestamp() bson.Timestamp {
+	if rc.startAtTs == nil {
+		panic("no start timestamp yet?!?")
+	}
+
+	return *rc.startAtTs
 }
 
 func (rc *ChangeReaderCommon) setWritesOff(ts bson.Timestamp) {

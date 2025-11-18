@@ -446,9 +446,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamResumability() {
 
 	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier2)
 
-	startAtTs, hasStartAtTs := verifier2.srcChangeReader.getStartTimestamp().Get()
-
-	suite.Require().True(hasStartAtTs)
+	startAtTs := verifier2.srcChangeReader.getStartTimestamp()
 
 	suite.Assert().False(
 		startAtTs.After(newTime),
@@ -636,14 +634,13 @@ func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 
 		eg := suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
-		startAtTs, hasStartAtTs := verifier.srcChangeReader.getStartTimestamp().Get()
-		suite.Require().True(hasStartAtTs, "startAtTs should be set")
+		startAtTs := verifier.srcChangeReader.getStartTimestamp()
 
 		verifier.srcChangeReader.setWritesOff(insertTs)
 
 		suite.Require().NoError(eg.Wait())
 
-		startAtTs2 := verifier.srcChangeReader.getStartTimestamp().MustGet()
+		startAtTs2 := verifier.srcChangeReader.getStartTimestamp()
 
 		suite.Require().False(
 			startAtTs2.Before(startAtTs),
@@ -668,8 +665,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 	suite.Require().NotNil(origSessionTime)
 	eg := suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
-	startAtTs, hasStartAtTs := verifier.srcChangeReader.getStartTimestamp().Get()
-	suite.Require().True(hasStartAtTs, "startAtTs should be set")
+	startAtTs := verifier.srcChangeReader.getStartTimestamp()
 
 	// srcStartAtTs derives from the change stream’s resume token, which can
 	// postdate our session time but should not precede it.
@@ -702,8 +698,7 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 
 	suite.Require().NoError(eg.Wait())
 
-	startAtTs, hasStartAtTs = verifier.srcChangeReader.getStartTimestamp().Get()
-	suite.Require().True(hasStartAtTs, "startAtTs should be set")
+	startAtTs = verifier.srcChangeReader.getStartTimestamp()
 
 	suite.Assert().False(
 		startAtTs.Before(*postEventsSessionTime),
@@ -724,8 +719,7 @@ func (suite *IntegrationTestSuite) TestNoStartAtTime() {
 	suite.Require().NotNil(origStartTs)
 	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier)
 
-	startAtTs, hasStartAtTs := verifier.srcChangeReader.getStartTimestamp().Get()
-	suite.Require().True(hasStartAtTs, "startAtTs should be set")
+	startAtTs := verifier.srcChangeReader.getStartTimestamp()
 
 	suite.Require().NotNil(startAtTs)
 	suite.Require().LessOrEqual(origStartTs.Compare(startAtTs), 0)
