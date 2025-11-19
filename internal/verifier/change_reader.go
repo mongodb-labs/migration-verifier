@@ -194,6 +194,10 @@ func (rc *ChangeReaderCommon) start(
 						return errors.Wrap(err, "failed to start session")
 					}
 
+					if rc.createIteratorCb == nil {
+						panic("rc.createIteratorCb should be set")
+					}
+
 					startTs, err := rc.createIteratorCb(ctx, sess)
 					if err != nil {
 						logEvent := rc.logger.Debug().
