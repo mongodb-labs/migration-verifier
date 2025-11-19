@@ -42,7 +42,7 @@ func (uee UnknownEventError) Error() string {
 
 type ChangeStreamReader struct {
 	changeStream *mongo.ChangeStream
-	*ChangeReaderCommon
+	ChangeReaderCommon
 }
 
 var _ changeReader = &ChangeStreamReader{}
@@ -64,7 +64,7 @@ func (v *Verifier) newChangeStreamReader(
 
 	common.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
 
-	csr := &ChangeStreamReader{ChangeReaderCommon: &common}
+	csr := &ChangeStreamReader{ChangeReaderCommon: common}
 
 	common.createIteratorCb = csr.createChangeStream
 	common.iterateCb = csr.iterateChangeStream

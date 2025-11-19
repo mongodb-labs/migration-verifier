@@ -21,15 +21,4 @@ func (sp StringHasPrefix) MarshalBSON() ([]byte, error) {
 			}}},
 		}},
 	})
-
-	/*
-		return bson.Marshal(agg.Eq(
-			sp.Prefix,
-			agg.SubstrBytes{
-				sp.FieldRef,
-				0,
-				len(sp.Prefix),
-			},
-		))
-	*/
 }
