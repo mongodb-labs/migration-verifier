@@ -207,11 +207,15 @@ func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Optio
 		bson.D{{"_id", rc.resumeTokenDocID()}},
 	).Raw()
 
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return option.None[bson.Raw](), nil
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			err = nil
+		}
+
+		return option.None[bson.Raw](), err
 	}
 
-	return option.Some(token), err
+	return option.Some(token), nil
 }
 
 func (rc *ChangeReaderCommon) updateLag(sess *mongo.Session, token bson.Raw) {
