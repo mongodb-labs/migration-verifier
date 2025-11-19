@@ -18,7 +18,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"golang.org/x/exp/slices"
 )
 
@@ -467,7 +466,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.srcClientCollection(task),
 			verifier.srcClusterInfo,
-			verifier.srcChangeReader.getStartTimestamp().ToPointer(),
+			verifier.srcChangeReader.getLastSeenClusterTime().OrElse(
+				verifier.srcChangeReader.getStartTimestamp(),
+			),
 			task,
 		)
 
@@ -500,7 +501,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 			sctx,
 			verifier.dstClientCollection(task),
 			verifier.dstClusterInfo,
-			verifier.dstChangeReader.getStartTimestamp().ToPointer(),
+			verifier.dstChangeReader.getLastSeenClusterTime().OrElse(
+				verifier.dstChangeReader.getStartTimestamp(),
+			),
 			task,
 		)
 
@@ -573,10 +576,14 @@ func getMapKey(docKeyValues []bson.RawValue) string {
 	return keyBuffer.String()
 }
 
-func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mongo.Collection, clusterInfo *util.ClusterInfo,
-	startAtTs *bson.Timestamp, task *VerificationTask) (*mongo.Cursor, error) {
+func (verifier *Verifier) getDocumentsCursor(
+	ctx context.Context,
+	collection *mongo.Collection,
+	clusterInfo *util.ClusterInfo,
+	readConcernTS bson.Timestamp,
+	task *VerificationTask,
+) (*mongo.Cursor, error) {
 	var findOptions bson.D
-	runCommandOptions := options.RunCmd()
 	var andPredicates bson.A
 
 	var aggOptions bson.D
@@ -656,21 +663,23 @@ func (verifier *Verifier) getDocumentsCursor(ctx context.Context, collection *mo
 		)
 	}
 
-	if verifier.readPreference.Mode() != readpref.PrimaryMode {
-		runCommandOptions = runCommandOptions.SetReadPreference(verifier.readPreference)
-		if startAtTs != nil {
-			readConcern := bson.D{
-				{"afterClusterTime", *startAtTs},
-			}
+	sess := mongo.SessionFromContext(ctx)
 
-			// We never want to read before the change stream start time,
-			// or for the last generation, the change stream end time.
-			cmd = append(
-				cmd,
-				bson.E{"readConcern", readConcern},
-			)
-		}
+	if sess == nil {
+		panic("No session?!?")
 	}
+
+	runCommandOptions := options.RunCmd().SetReadPreference(verifier.readPreference)
+
+	// We never want to read before the change stream start time,
+	// or for the last generation, the change stream end time.
+	cmd = append(
+		cmd,
+		bson.E{"readConcern", bson.D{
+			{"level", "majority"},
+			{"afterClusterTime", readConcernTS},
+		}},
+	)
 
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.

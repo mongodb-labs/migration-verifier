@@ -47,6 +47,28 @@ type ChangeStreamReader struct {
 
 var _ changeReader = &ChangeStreamReader{}
 
+func (v *Verifier) newChangeStreamReader(
+	namespaces []string,
+	cluster whichCluster,
+	client *mongo.Client,
+	clusterInfo util.ClusterInfo,
+) *ChangeStreamReader {
+	common := newChangeReaderCommon(cluster)
+	common.namespaces = namespaces
+	common.readerType = cluster
+	common.watcherClient = client
+	common.clusterInfo = clusterInfo
+
+	common.logger = v.logger
+	common.metaDB = v.metaClient.Database(v.metaDBName)
+
+	common.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
+
+	csr := &ChangeStreamReader{ChangeReaderCommon: common}
+
+	return csr
+}
+
 // GetChangeStreamFilter returns an aggregation pipeline that filters
 // namespaces as per configuration.
 //
@@ -193,11 +215,9 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			return errors.Errorf("Change event lacks a namespace: %+v", changeEvents[eventsRead])
 		}
 
-		if changeEvents[eventsRead].ClusterTime != nil &&
-			(csr.lastChangeEventTime == nil ||
-				csr.lastChangeEventTime.Before(*changeEvents[eventsRead].ClusterTime)) {
-
-			csr.lastChangeEventTime = changeEvents[eventsRead].ClusterTime
+		eventTime := changeEvents[eventsRead].ClusterTime
+		if eventTime != nil && csr.lastChangeEventTime.Load().OrZero().Before(*eventTime) {
+			csr.lastChangeEventTime.Store(option.Some(*eventTime))
 			latestEvent = option.Some(changeEvents[eventsRead])
 		}
 
@@ -230,9 +250,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		events: changeEvents,
 
 		resumeToken: cs.ResumeToken(),
-
-		// NB: We know by now that OperationTime is non-nil.
-		clusterTime: *sess.OperationTime(),
 	}:
 	}
 
@@ -314,8 +331,8 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 		if gotwritesOffTimestamp {
 			csr.running = false
-			if csr.lastChangeEventTime != nil {
-				csr.startAtTs = csr.lastChangeEventTime
+			if ts, has := csr.lastChangeEventTime.Load().Get(); has {
+				csr.startAtTs = &ts
 			}
 
 			break
@@ -323,10 +340,10 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	}
 
 	infoLog := csr.logger.Info()
-	if csr.lastChangeEventTime == nil {
-		infoLog = infoLog.Str("lastEventTime", "none")
+	if ts, has := csr.lastChangeEventTime.Load().Get(); has {
+		infoLog = infoLog.Any("lastEventTime", ts)
 	} else {
-		infoLog = infoLog.Any("lastEventTime", *csr.lastChangeEventTime)
+		infoLog = infoLog.Str("lastEventTime", "none")
 	}
 
 	infoLog.

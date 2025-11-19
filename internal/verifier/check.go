@@ -6,13 +6,9 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
-	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
-	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/msync"
-	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goaux/timer"
 	"github.com/pkg/errors"
@@ -255,27 +251,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		verifier.phase = Idle
 	}()
 
-	changeReaderGroup, groupCtx := contextplus.ErrGroup(ctx)
-	for _, changeReader := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
-		if changeReader.isRunning() {
-			verifier.logger.Debug().Msgf("Check: %s already running.", changeReader)
-		} else {
-			verifier.logger.Debug().Msgf("%s not running; starting change reader", changeReader)
-
-			err = changeReader.start(groupCtx, changeReaderGroup)
-			if err != nil {
-				return errors.Wrapf(err, "failed to start %s", changeReader)
-			}
-			changeReaderGroup.Go(func() error {
-				return verifier.RunChangeEventPersistor(groupCtx, changeReader)
-			})
-		}
+	if err := verifier.startChangeHandling(ctx); err != nil {
+		return err
 	}
-
-	changeHandlingErr := verifier.changeHandlingErr
-	go func() {
-		changeHandlingErr.Set(changeReaderGroup.Wait())
-	}()
 
 	// Log the verification status when initially booting up so it's easy to see the current state
 	verificationStatus, err := verifier.GetVerificationStatus(ctx)
@@ -407,6 +385,38 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
 		}
 	}
+}
+
+// startChangeHandling starts the goroutines that read changes
+// from the source & destination and that persist those changes
+// to the metadata.
+//
+// As part of this, it sets the change readers’ start timestamps.
+// (It blocks until those are set.)
+func (verifier *Verifier) startChangeHandling(ctx context.Context) error {
+	changeReaderGroup, groupCtx := contextplus.ErrGroup(ctx)
+	for _, changeReader := range mslices.Of(verifier.srcChangeReader, verifier.dstChangeReader) {
+		if changeReader.isRunning() {
+			verifier.logger.Debug().Msgf("Check: %s already running.", changeReader)
+		} else {
+			verifier.logger.Debug().Msgf("%s not running; starting change reader", changeReader)
+
+			err := changeReader.start(groupCtx, changeReaderGroup)
+			if err != nil {
+				return errors.Wrapf(err, "failed to start %s", changeReader)
+			}
+			changeReaderGroup.Go(func() error {
+				return verifier.RunChangeEventPersistor(groupCtx, changeReader)
+			})
+		}
+	}
+
+	changeHandlingErr := verifier.changeHandlingErr
+	go func() {
+		changeHandlingErr.Set(changeReaderGroup.Wait())
+	}()
+
+	return nil
 }
 
 func (verifier *Verifier) setupAllNamespaceList(ctx context.Context) error {
@@ -600,36 +610,18 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 	}
 }
 
-func (verifier *Verifier) initializeChangeReaders() {
-	srcReader := &ChangeStreamReader{
-		ChangeReaderCommon: ChangeReaderCommon{
-			readerType:    src,
-			namespaces:    verifier.srcNamespaces,
-			watcherClient: verifier.srcClient,
-			clusterInfo:   *verifier.srcClusterInfo,
-		},
-	}
-	verifier.srcChangeReader = srcReader
+func (v *Verifier) initializeChangeReaders() {
+	v.srcChangeReader = v.newChangeStreamReader(
+		v.srcNamespaces,
+		src,
+		v.srcClient,
+		*v.srcClusterInfo,
+	)
 
-	dstReader := &ChangeStreamReader{
-		ChangeReaderCommon: ChangeReaderCommon{
-			readerType:    dst,
-			namespaces:    verifier.dstNamespaces,
-			watcherClient: verifier.dstClient,
-			clusterInfo:   *verifier.dstClusterInfo,
-			onDDLEvent:    onDDLEventAllow,
-		},
-	}
-	verifier.dstChangeReader = dstReader
-
-	// Common elements in both readers:
-	for _, csr := range mslices.Of(srcReader, dstReader) {
-		csr.logger = verifier.logger
-		csr.metaDB = verifier.metaClient.Database(verifier.metaDBName)
-		csr.changeEventBatchChan = make(chan changeEventBatch, batchChanBufferSize)
-		csr.writesOffTs = util.NewEventual[bson.Timestamp]()
-		csr.lag = msync.NewTypedAtomic(option.None[time.Duration]())
-		csr.batchSizeHistory = history.New[int](time.Minute)
-		csr.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
-	}
+	v.dstChangeReader = v.newChangeStreamReader(
+		v.dstNamespaces,
+		dst,
+		v.dstClient,
+		*v.dstClusterInfo,
+	)
 }

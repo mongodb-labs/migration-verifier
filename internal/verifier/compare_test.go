@@ -14,7 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// TestFetchAndCompareDocuments_ContextCancellation ensures that nothing hangs
+// TestFetchAndCompareDocuments_Context ensures that nothing hangs
 // when a context is canceled during FetchAndCompareDocuments().
 func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 	ctx := s.Context()
@@ -49,6 +49,7 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 	}
 
 	verifier := s.BuildVerifier()
+	s.Require().NoError(verifier.startChangeHandling(ctx))
 
 	for range 100 {
 		cancelableCtx, cancel := contextplus.WithCancelCause(ctx)
