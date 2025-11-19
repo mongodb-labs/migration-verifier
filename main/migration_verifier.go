@@ -366,7 +366,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	if !slices.Contains(verifier.ChangeReaderOpts, srcChangeReaderVal) {
 		return nil, errors.Errorf("invalid %#q (%s); valid values are: %#q", srcChangeReader, srcChangeReaderVal, verifier.ChangeReaderOpts)
 	}
-	err = v.SetSrcChangeReader(srcChangeReaderVal)
+	err = v.SetSrcChangeReaderMethod(srcChangeReaderVal)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +375,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	if !slices.Contains(verifier.ChangeReaderOpts, dstChangeReaderVal) {
 		return nil, errors.Errorf("invalid %#q (%s); valid values are: %#q", dstChangeReader, dstChangeReaderVal, verifier.ChangeReaderOpts)
 	}
-	err = v.SetDstChangeReader(srcChangeReaderVal)
+	err = v.SetDstChangeReaderMethod(srcChangeReaderVal)
 	if err != nil {
 		return nil, err
 	}

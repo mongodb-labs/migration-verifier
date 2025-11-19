@@ -15,48 +15,40 @@ const (
 	rtBSONLength = 4 + 1 + 2 + 1 + 8 + 1
 )
 
+// Op is an internal representation of the parts of an oplog entry that we
+// care about. This struct is not meant to be marshaled/unmarshaled directly.
 type Op struct {
-	Op      string
-	TS      bson.Timestamp
-	Ns      string
-	CmdName string
-	DocLen  int32
-	DocID   bson.RawValue
-	Ops     []Op
-}
+	// Op holds the oplog entry’s `op`.
+	Op string
 
-type ResumeToken struct {
+	// TS holds the oplog entry’s `ts`.
 	TS bson.Timestamp
+
+	// Ns holds the oplog entry’s `ns`.
+	Ns string
+
+	// CmdName is the first field name in the oplog entry’s `o` document.
+	CmdName string
+
+	// DocLen is the length, in bytes, of whatever document the oplog entry
+	// describes. This will only be meaningful for insert & replace entries.
+	DocLen int32
+
+	// DocID is the `_id` of whatever document the oplog entry describes.
+	// This won’t be populated for multi-op Op instances.
+	DocID bson.RawValue
+
+	// Ops holds the ops in an `applyOps` oplog entry.
+	Ops []Op
 }
 
-func GetRawResumeTokenTimestamp(token bson.Raw) (bson.Timestamp, error) {
-	rv, err := token.LookupErr("ts")
-	if err != nil {
-		return bson.Timestamp{}, errors.Wrap(err, "getting ts")
-	}
-
-	return mbson.CastRawValue[bson.Timestamp](rv)
+func (*Op) UnmarshalBSON([]byte) error {
+	panic("Use UnmarshalFromBSON.")
 }
 
-func (rt ResumeToken) MarshalToBSON() []byte {
-	buf := make([]byte, 4, rtBSONLength)
-
-	binary.LittleEndian.PutUint32(buf, uint32(cap(buf)))
-
-	buf = bsoncore.AppendTimestampElement(buf, "ts", rt.TS.T, rt.TS.I)
-
-	buf = append(buf, 0)
-
-	if len(buf) != rtBSONLength {
-		panic(fmt.Sprintf("bad resume token BSON length: %d", len(buf)))
-	}
-
-	return buf
-}
-
+// UnmarshalFromBSON unmarshals an Op more efficiently than the standard
+// bson.Unmarshal function.
 func (o *Op) UnmarshalFromBSON(in []byte) error {
-	//fmt.Printf("---- unmarshaling: %+v\n\n", bson.Raw(in))
-
 	for el, err := range mbson.RawElements(bson.Raw(in)) {
 		if err != nil {
 			return errors.Wrap(err, "iterating BSON document")
@@ -122,4 +114,42 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 	}
 
 	return nil
+}
+
+// ResumeToken is Migration Verifier’s internal format for storing the
+// timestamp to resume an oplog reader.
+type ResumeToken struct {
+	TS bson.Timestamp
+}
+
+func (ResumeToken) MarshalBSON() ([]byte, error) {
+	panic("Use MarshalToBSON.")
+}
+
+// MarshalToBSON marshals a ResumeToken to BSON. Unlike with the standard
+// bson.Marshaler interface, this method never fails.
+func (rt ResumeToken) MarshalToBSON() []byte {
+	buf := make([]byte, 4, rtBSONLength)
+
+	binary.LittleEndian.PutUint32(buf, uint32(cap(buf)))
+
+	buf = bsoncore.AppendTimestampElement(buf, "ts", rt.TS.T, rt.TS.I)
+
+	buf = append(buf, 0)
+
+	if len(buf) != rtBSONLength {
+		panic(fmt.Sprintf("bad resume token BSON length: %d", len(buf)))
+	}
+
+	return buf
+}
+
+// GetRawResumeTokenTimestamp extracts the timestamp from a given oplog entry.
+func GetRawResumeTokenTimestamp(token bson.Raw) (bson.Timestamp, error) {
+	rv, err := token.LookupErr("ts")
+	if err != nil {
+		return bson.Timestamp{}, errors.Wrap(err, "getting ts")
+	}
+
+	return mbson.CastRawValue[bson.Timestamp](rv)
 }

@@ -381,7 +381,7 @@ func (verifier *Verifier) SetDocCompareMethod(method DocCompareMethod) {
 	verifier.docCompareMethod = method
 }
 
-func (verifier *Verifier) SetSrcChangeReader(method string) error {
+func (verifier *Verifier) SetSrcChangeReaderMethod(method string) error {
 	err := validateChangeReaderOpt(method, *verifier.srcClusterInfo)
 	if err != nil {
 		return errors.Wrap(err, "setting source change reader method")
@@ -392,7 +392,7 @@ func (verifier *Verifier) SetSrcChangeReader(method string) error {
 	return nil
 }
 
-func (verifier *Verifier) SetDstChangeReader(method string) error {
+func (verifier *Verifier) SetDstChangeReaderMethod(method string) error {
 	err := validateChangeReaderOpt(method, *verifier.dstClusterInfo)
 	if err != nil {
 		return errors.Wrap(err, "setting source change reader method")

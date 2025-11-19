@@ -597,7 +597,6 @@ func (verifier *Verifier) getDocumentsCursor(
 		case DocQueryFunctionFind:
 			findOptions = bson.D{
 				bson.E{"filter", filter},
-				//bson.E{"readConcern", readconcern.Majority()},
 			}
 		case DocQueryFunctionAggregate:
 			aggOptions = bson.D{
@@ -687,7 +686,7 @@ func (verifier *Verifier) getDocumentsCursor(
 	if !task.IsRecheck() {
 		if verifier.logger.Trace().Enabled() {
 
-			evt := verifier.logger.Debug().
+			evt := verifier.logger.Trace().
 				Any("task", task.PrimaryKey)
 
 			cmdStr, err := bson.MarshalExtJSON(cmd, true, false)

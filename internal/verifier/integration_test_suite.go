@@ -201,14 +201,14 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		os.Getenv("MVTEST_SRC_CHANGE_READER"),
 		ChangeReaderOptChangeStream,
 	)
-	suite.Require().NoError(verifier.SetSrcChangeReader(envSrcChangeReader))
+	suite.Require().NoError(verifier.SetSrcChangeReaderMethod(envSrcChangeReader))
 
 	envDstChangeReader := cmp.Or(
 		os.Getenv("MVTEST_DST_CHANGE_READER"),
 		ChangeReaderOptChangeStream,
 	)
 
-	suite.Require().NoError(verifier.SetDstChangeReader(envDstChangeReader))
+	suite.Require().NoError(verifier.SetDstChangeReaderMethod(envDstChangeReader))
 
 	suite.Require().NoError(verifier.initializeChangeReaders())
 
