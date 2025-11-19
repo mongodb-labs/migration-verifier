@@ -47,7 +47,8 @@ func (*Op) UnmarshalBSON([]byte) error {
 }
 
 // UnmarshalFromBSON unmarshals an Op more efficiently than the standard
-// bson.Unmarshal function.
+// bson.Unmarshal function. This function is called for every oplog entry,
+// so that efficiency is material.
 func (o *Op) UnmarshalFromBSON(in []byte) error {
 	for el, err := range mbson.RawElements(bson.Raw(in)) {
 		if err != nil {
@@ -127,7 +128,9 @@ func (ResumeToken) MarshalBSON() ([]byte, error) {
 }
 
 // MarshalToBSON marshals a ResumeToken to BSON. Unlike with the standard
-// bson.Marshaler interface, this method never fails.
+// bson.Marshaler interface, this method never fails. It’s also faster/lighter
+// because it avoids reflection, which is relevant because this is called for
+// every batch of ops.
 func (rt ResumeToken) MarshalToBSON() []byte {
 	buf := make([]byte, 4, rtBSONLength)
 
