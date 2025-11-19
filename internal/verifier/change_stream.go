@@ -317,7 +317,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 				err = csr.readAndHandleOneChangeEventBatch(ctx, ri, cs, sess)
 
 				if err != nil {
-					return err
+					return errors.Wrap(err, "finishing change stream after writes-off")
 				}
 			}
 
