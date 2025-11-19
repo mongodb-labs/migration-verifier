@@ -620,16 +620,8 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 }
 
 func (v *Verifier) initializeChangeReaders() error {
-	warnAboutOplog := func(cluster whichCluster) {
-		v.logger.Warn().
-			Str("cluster", string(cluster)).
-			Msg("Reading writes via oplog tailing. This feature is experimental.")
-	}
-
 	switch v.srcChangeReaderMethod {
 	case ChangeReaderOptOplog:
-		warnAboutOplog(src)
-
 		v.srcChangeReader = v.newOplogReader(
 			v.srcNamespaces,
 			src,
@@ -649,8 +641,6 @@ func (v *Verifier) initializeChangeReaders() error {
 
 	switch v.dstChangeReaderMethod {
 	case ChangeReaderOptOplog:
-		warnAboutOplog(dst)
-
 		v.dstChangeReader = v.newOplogReader(
 			v.dstNamespaces,
 			dst,
