@@ -535,27 +535,25 @@ func iterateCursorToChannel(
 ) error {
 	defer close(writer)
 
-	//sess := mongo.SessionFromContext(sctx)
+	sess := mongo.SessionFromContext(sctx)
 
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
 
-		/*
-			clusterTime, err := util.GetClusterTimeFromSession(sess)
-			if err != nil {
-				return errors.Wrap(err, "reading cluster time from session")
-			}
-		*/
+		clusterTime, err := util.GetClusterTimeFromSession(sess)
+		if err != nil {
+			return errors.Wrap(err, "reading cluster time from session")
+		}
 
 		buf := pool.Get(len(cursor.Current))
 		copy(buf, cursor.Current)
 
-		err := chanutil.WriteWithDoneCheck(
+		err = chanutil.WriteWithDoneCheck(
 			sctx,
 			writer,
 			docWithTs{
 				doc: buf,
-				//ts:  clusterTime,
+				ts:  clusterTime,
 			},
 		)
 
