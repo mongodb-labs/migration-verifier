@@ -33,7 +33,7 @@ const (
 // This significantly lightens server load and allows verification of heavier
 // workloads than change streams allow. It only works with replica sets.
 type OplogReader struct {
-	*ChangeReaderCommon
+	ChangeReaderCommon
 
 	curDocs          []bson.Raw
 	scratch          []byte
@@ -59,10 +59,10 @@ func (v *Verifier) newOplogReader(
 
 	common.resumeTokenTSExtractor = oplog.GetRawResumeTokenTimestamp
 
-	o := &OplogReader{ChangeReaderCommon: &common}
+	o := &OplogReader{ChangeReaderCommon: common}
 
-	common.createIteratorCb = o.createCursor
-	common.iterateCb = o.iterateCursor
+	o.createIteratorCb = o.createCursor
+	o.iterateCb = o.iterateCursor
 
 	return o
 }
