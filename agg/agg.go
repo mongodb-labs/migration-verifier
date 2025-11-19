@@ -1,3 +1,12 @@
+// Package agg provides convenience types for aggregation operators.
+// This yields two major advantages over using bson.D or bson.M:
+// - simpler syntax
+// - auto-completion (i.e., via gopls)
+//
+// Guiding principles are:
+// - Prefer [1]any for unary operators (e.g., `$bsonSize`).
+// - Prefer struct types for operators with named parameters.
+// - Use functions sparingly, e.g., for “tuple” operators like `$in`.
 package agg
 
 import (
