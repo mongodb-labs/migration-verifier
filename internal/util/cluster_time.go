@@ -10,6 +10,10 @@ import (
 func GetClusterTimeFromSession(sess *mongo.Session) (bson.Timestamp, error) {
 	clusterTimeRaw := sess.ClusterTime()
 
+	if clusterTimeRaw == nil {
+		panic("session has empty cluster time?!?")
+	}
+
 	ctrv, err := clusterTimeRaw.LookupErr("$clusterTime", "clusterTime")
 	if err != nil {
 		return bson.Timestamp{}, errors.Wrapf(err, "finding clusterTime in session cluster time document (%v)", clusterTimeRaw)

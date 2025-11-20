@@ -536,6 +536,9 @@ func iterateCursorToChannel(
 	defer close(writer)
 
 	sess := mongo.SessionFromContext(sctx)
+	if sess == nil {
+		panic("need a session")
+	}
 
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
@@ -703,7 +706,7 @@ func (verifier *Verifier) getDocumentsCursor(
 	}
 
 	return collection.Database().RunCommandCursor(
-		mongo.NewSessionContext(sctx, nil),
+		sctx,
 		cmd,
 		runCommandOptions,
 	)
