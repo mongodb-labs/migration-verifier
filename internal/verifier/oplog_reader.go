@@ -172,8 +172,6 @@ func (o *OplogReader) createCursor(
 		}}},
 	}}}
 
-	fmt.Printf("------ oplogFilter: %v\n\n", oplogFilter)
-
 	cursor, err := o.watcherClient.
 		Database("local").
 		Collection(
@@ -293,7 +291,12 @@ CursorLoop:
 
 	for {
 		if !o.lastChangeEventTime.Load().OrZero().Before(writesOffTS) {
-			fmt.Printf("----------- %s reached writes off ts %v\n", o, writesOffTS)
+			o.logger.Debug().
+				Stringer("reader", o).
+				Any("lastChangeEventTS", o.lastChangeEventTime.Load()).
+				Any("writesOffTS", writesOffTS).
+				Msg("Reached writes-off timestamp.")
+
 			break
 		}
 
