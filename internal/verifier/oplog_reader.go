@@ -394,8 +394,6 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 	var latestTS bson.Timestamp
 
 	parseOneDocumentOp := func(opName string, ts bson.Timestamp, rawDoc bson.Raw) error {
-		//fmt.Printf("---- got op: %+v\n\n", rawDoc)
-
 		nsStr, err := mbson.Lookup[string](rawDoc, "ns")
 		if err != nil {
 			return err
@@ -557,7 +555,6 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 	var latestTS bson.Timestamp
 
 	for _, rawDoc := range o.curDocs {
-		//fmt.Printf("----- %s got op: %+v\n\n", o, rawDoc)
 		var op oplog.Op
 
 		if err := (&op).UnmarshalFromBSON(rawDoc); err != nil {
