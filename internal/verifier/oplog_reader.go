@@ -306,7 +306,6 @@ CursorLoop:
 		}
 	}
 
-	// TODO: deduplicate
 	o.running = false
 
 	infoLog := o.logger.Info()
