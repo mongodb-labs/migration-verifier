@@ -180,6 +180,10 @@ func (r *Retryer) runRetryLoop(
 
 		// Not a transient error? Fail immediately.
 		if !r.shouldRetryWithSleep(logger, sleepTime, descriptions, cbErr) {
+			if descr, has := r.description.Get(); has {
+				cbErr = errors.Wrap(cbErr, descr)
+			}
+
 			return cbErr
 		}
 
@@ -187,11 +191,17 @@ func (r *Retryer) runRetryLoop(
 		// then fail.
 
 		if failedFuncInfo.GetDurationSoFar() > li.durationLimit {
-			return RetryDurationLimitExceededErr{
+			var err error = RetryDurationLimitExceededErr{
 				attempts: li.attemptsSoFar,
 				duration: failedFuncInfo.GetDurationSoFar(),
 				lastErr:  groupErr.errFromCallback,
 			}
+
+			if descr, has := r.description.Get(); has {
+				err = errors.Wrap(err, descr)
+			}
+
+			return err
 		}
 
 		// Sleep and increase the sleep time for the next retry,

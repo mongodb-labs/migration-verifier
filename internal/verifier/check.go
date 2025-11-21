@@ -31,6 +31,11 @@ var (
 		verificationTaskFailed,
 		verificationTaskMetadataMismatch,
 	)
+
+	ChangeReaderOpts = mslices.Of(
+		ChangeReaderOptChangeStream,
+		ChangeReaderOptOplog,
+	)
 )
 
 // Check is the asynchronous entry point to Check, should only be called by the web server. Use
@@ -215,8 +220,12 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 
 	// Now that we’ve initialized verifier.generation we can
 	// start the change readers.
-	verifier.initializeChangeReaders()
+	err = verifier.initializeChangeReaders()
 	verifier.mux.Unlock()
+
+	if err != nil {
+		return err
+	}
 
 	err = retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
@@ -333,7 +342,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// caught again on the next iteration.
 		if verifier.writesOff {
 			verifier.logger.Debug().
-				Msg("Waiting for change readers to end.")
+				Msg("Waiting for change handling to finish.")
 
 			// It's necessary to wait for the change reader to finish before incrementing the
 			// generation number, or the last changes will not be checked.
@@ -610,18 +619,44 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 	}
 }
 
-func (v *Verifier) initializeChangeReaders() {
-	v.srcChangeReader = v.newChangeStreamReader(
-		v.srcNamespaces,
-		src,
-		v.srcClient,
-		*v.srcClusterInfo,
-	)
+func (v *Verifier) initializeChangeReaders() error {
+	switch v.srcChangeReaderMethod {
+	case ChangeReaderOptOplog:
+		v.srcChangeReader = v.newOplogReader(
+			v.srcNamespaces,
+			src,
+			v.srcClient,
+			*v.srcClusterInfo,
+		)
+	case ChangeReaderOptChangeStream:
+		v.srcChangeReader = v.newChangeStreamReader(
+			v.srcNamespaces,
+			src,
+			v.srcClient,
+			*v.srcClusterInfo,
+		)
+	default:
+		return fmt.Errorf("bad source change reader: %#q", v.srcChangeReaderMethod)
+	}
 
-	v.dstChangeReader = v.newChangeStreamReader(
-		v.dstNamespaces,
-		dst,
-		v.dstClient,
-		*v.dstClusterInfo,
-	)
+	switch v.dstChangeReaderMethod {
+	case ChangeReaderOptOplog:
+		v.dstChangeReader = v.newOplogReader(
+			v.dstNamespaces,
+			dst,
+			v.dstClient,
+			*v.dstClusterInfo,
+		)
+	case ChangeReaderOptChangeStream:
+		v.dstChangeReader = v.newChangeStreamReader(
+			v.dstNamespaces,
+			dst,
+			v.dstClient,
+			*v.dstClusterInfo,
+		)
+	default:
+		return fmt.Errorf("bad destination change reader: %#q", v.srcChangeReaderMethod)
+	}
+
+	return nil
 }
