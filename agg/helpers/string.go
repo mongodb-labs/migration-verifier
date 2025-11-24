@@ -1,9 +1,12 @@
+// Package helpers exposes functions that express common operations
+// that don’t map to a single aggregation operator.
 package helpers
 
 import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+// StringHasPrefix parallels Go’s strings.HasPrefix.
 type StringHasPrefix struct {
 	FieldRef any
 	Prefix   string
