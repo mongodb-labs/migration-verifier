@@ -34,10 +34,10 @@ func (suite *IntegrationTestSuite) TestFailChangeReaderOptChange() {
 
 	badDstOptVerifier := suite.BuildVerifier()
 	suite.Require().NoError(
-		badSrcOptVerifier.SetSrcChangeReaderMethod(ChangeReaderOptChangeStream),
+		badDstOptVerifier.SetSrcChangeReaderMethod(ChangeReaderOptChangeStream),
 	)
 	suite.Require().NoError(
-		badSrcOptVerifier.SetDstChangeReaderMethod(ChangeReaderOptOplog),
+		badDstOptVerifier.SetDstChangeReaderMethod(ChangeReaderOptOplog),
 	)
 
 	err = RunVerifierCheck(ctx, suite.T(), badDstOptVerifier).
