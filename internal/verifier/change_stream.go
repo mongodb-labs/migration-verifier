@@ -87,7 +87,7 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 			{{"$match", util.ExcludePrefixesQuery(
 				"ns.db",
 				append(
-					slices.Clone(MongosyncMetaDBPrefixes),
+					slices.Clone(ExcludedDBPrefixes),
 					csr.metaDB.Name(),
 				),
 			)}},
