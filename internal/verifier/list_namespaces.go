@@ -12,20 +12,26 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-var (
-	MongosyncMetaDBPrefixes = mslices.Of(
-		"mongosync_internal_",
-		"mongosync_reserved_",
-	)
-)
-
-var (
-	// ExcludedSystemDBs are system databases that are excluded from verification.
-	ExcludedSystemDBs = []string{"admin", "config", "local"}
-
+const (
 	// ExcludedSystemCollPrefix is the prefix of system collections,
 	// which we ignore.
 	ExcludedSystemCollPrefix = "system."
+
+	// MongoDBInternalDBPrefix is the prefix for MongoDB-internal databases.
+	// (e.g., Atlas’s availability canary)
+	MongoDBInternalDBPrefix = "__mdb_internal"
+)
+
+var (
+	ExcludedDBPrefixes = mslices.Of(
+		// mongosync metadata:
+		"mongosync_internal_",
+		"mongosync_reserved_",
+		MongoDBInternalDBPrefix,
+	)
+
+	// ExcludedSystemDBs are system databases that are excluded from verification.
+	ExcludedSystemDBs = []string{"admin", "config", "local"}
 )
 
 // ListAllUserNamespaces lists all the user collections on a cluster,
@@ -52,7 +58,7 @@ func ListAllUserNamespaces(
 	dbNames, err := client.ListDatabaseNames(ctx, bson.D{
 		{"$and", []bson.D{
 			{{"name", bson.D{{"$nin", excluded}}}},
-			util.ExcludePrefixesQuery("name", MongosyncMetaDBPrefixes),
+			util.ExcludePrefixesQuery("name", ExcludedDBPrefixes),
 		}},
 	})
 

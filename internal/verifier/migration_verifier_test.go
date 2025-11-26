@@ -2240,6 +2240,48 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(runner.Await())
 }
 
+func (suite *IntegrationTestSuite) TestMongoDBInternalDB() {
+	ctx := suite.Context()
+
+	dbName := MongoDBInternalDBPrefix + "internalDBTest"
+
+	_, err := suite.srcMongoClient.
+		Database(dbName).
+		Collection("foo").
+		InsertOne(ctx, bson.D{})
+	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+
+	// Dry run generation 0 to make sure change stream reader is started.
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	status, err := verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().Zero(status.FailedTasks, "gen0 should have no failed tasks: %+v", status)
+
+	_, err = suite.srcMongoClient.
+		Database(dbName).
+		Collection("foo").
+		InsertOne(ctx, bson.D{})
+	suite.Require().NoError(err)
+
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+	status, err = verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().Zero(status.FailedTasks, "gen1 should have no failed tasks: %+v", status)
+
+	suite.Require().NoError(verifier.WritesOff(ctx))
+	suite.Require().NoError(runner.Await())
+
+	status, err = verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().Zero(status.FailedTasks, "end should have no failed tasks: %+v", status)
+}
+
 func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
