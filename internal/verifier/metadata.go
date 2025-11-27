@@ -6,5 +6,6 @@ package verifier
 // 3: Enqueued rechecks now reference the generation in which they’ll be
 //    rechecked rather than the generation during which they were enqueued.
 // 4: Use “changeReader” instead of “changeStream” collection name.
+// 5: Metadata now stores source & destination change reader options.
 
-const verifierMetadataVersion = 4
+const verifierMetadataVersion = 5
