@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -90,7 +91,7 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 			{{"$match", util.ExcludePrefixesQuery(
 				"ns.db",
 				append(
-					slices.Clone(ExcludedDBPrefixes),
+					slices.Clone(namespaces.ExcludedDBPrefixes),
 					csr.metaDB.Name(),
 				),
 			)}},

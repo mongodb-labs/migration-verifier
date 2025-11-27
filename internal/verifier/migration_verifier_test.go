@@ -25,6 +25,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
@@ -2259,7 +2260,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 func (suite *IntegrationTestSuite) TestMongoDBInternalDB() {
 	ctx := suite.Context()
 
-	dbName := MongoDBInternalDBPrefix + "internalDBTest"
+	dbName := namespaces.MongoDBInternalDBPrefix + "internalDBTest"
 
 	_, err := suite.srcMongoClient.
 		Database(dbName).

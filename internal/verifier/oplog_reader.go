@@ -616,7 +616,8 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 
 func (o *OplogReader) getNSFilter(docroot string) agg.And {
 	prefixes := append(
-		slices.Clone(namespaces.MongosyncMetaDBPrefixes),
+		slices.Clone(namespaces.ExcludedDBPrefixes),
+
 		o.metaDB.Name()+".",
 		"config.",
 		"admin.",
