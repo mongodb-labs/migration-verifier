@@ -93,7 +93,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 				generation,
 			)
 			if err != nil {
-				return errors.Wrapf(err, "fetching generation %d’s failed & incomplete tasks")
+				return errors.Wrapf(err, "fetching generation %d’s failed & incomplete tasks", generation)
 			}
 
 			taskIDsToQuery := lo.Map(
@@ -110,7 +110,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 				true,
 			)
 			if err != nil {
-				return errors.Wrapf(err, "counting generation %d’s mismatches")
+				return errors.Wrapf(err, "counting mismatches seen during generation %d", generation)
 			}
 
 			genStats.MismatchesFound = mismatchCount
