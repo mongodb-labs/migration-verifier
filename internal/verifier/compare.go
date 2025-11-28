@@ -15,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -107,7 +108,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	types.ByteCount,
 	error,
 ) {
-	results := []VerificationResult{}
+	problems := []VerificationResult{}
 	var srcDocCount types.DocumentCount
 	var srcByteCount types.ByteCount
 
@@ -119,6 +120,15 @@ func (verifier *Verifier) compareDocsFromChannels(
 	dstCache := map[string]docWithTs{}
 
 	var idToMismatchCount map[string]int32
+	getMismatchCount := func(doc bson.Raw) int32 {
+		if idToMismatchCount == nil {
+			idToMismatchCount = createIdToMismatchCount(task)
+		}
+
+		mapKey := string(rvToMapKey(nil, lo.Must(srcDoc.doc.LookupErr("_id"))))
+
+		return idToMismatchCount[mapKey]
+	}
 
 	// This is the core document-handling logic. It either:
 	//
@@ -176,7 +186,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 		}
 
 		// Finally we compare the documents and save any mismatch report(s).
-		curResults, err := verifier.compareOneDocument(srcDoc.doc, dstDoc.doc, namespace)
+		curProblems, err := verifier.compareOneDocument(srcDoc.doc, dstDoc.doc, namespace)
 
 		pool.Put(srcDoc.doc)
 		pool.Put(dstDoc.doc)
@@ -185,19 +195,18 @@ func (verifier *Verifier) compareDocsFromChannels(
 			return errors.Wrap(err, "failed to compare documents")
 		}
 
-		if len(curResults) > 0 && idToMismatchCount == nil {
-			idToMismatchCount = createIdToMismatchCount(task)
+		var mismatchCount int32
+		if len(curProblems) > 0 {
+			mismatchCount = getMismatchCount(srcDoc.doc)
 		}
 
-		mismatchCount, _ := idToMismatchCount[string(rvToMapKey(nil, srcDoc.doc.Lookup("_id")))]
-
-		for i := range curResults {
-			curResults[i].mismatches = 1 + mismatchCount
-			curResults[i].SrcTimestamp = option.Some(srcDoc.ts)
-			curResults[i].DstTimestamp = option.Some(dstDoc.ts)
+		for i := range curProblems {
+			curProblems[i].mismatches = 1 + mismatchCount
+			curProblems[i].SrcTimestamp = option.Some(srcDoc.ts)
+			curProblems[i].DstTimestamp = option.Some(dstDoc.ts)
 		}
 
-		results = append(results, curResults...)
+		problems = append(problems, curProblems...)
 
 		return nil
 	}
@@ -322,11 +331,13 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// missing on the other side. We add results for those.
 
 	// We might as well pre-grow the slice:
-	results = slices.Grow(results, len(srcCache)+len(dstCache))
+	problems = slices.Grow(problems, len(srcCache)+len(dstCache))
 
 	for _, docWithTs := range srcCache {
-		results = append(
-			results,
+		priorMismatches := getMismatchCount(docWithTs.doc)
+
+		problems = append(
+			problems,
 			VerificationResult{
 				ID: getDocIdFromComparison(
 					verifier.docCompareMethod,
@@ -335,8 +346,10 @@ func (verifier *Verifier) compareDocsFromChannels(
 				Details:      Missing,
 				Cluster:      ClusterTarget,
 				NameSpace:    namespace,
-				dataSize:     int32(len(docWithTs.doc)),
 				SrcTimestamp: option.Some(docWithTs.ts),
+
+				dataSize:   int32(len(docWithTs.doc)),
+				mismatches: 1 + priorMismatches,
 			},
 		)
 
@@ -344,8 +357,10 @@ func (verifier *Verifier) compareDocsFromChannels(
 	}
 
 	for _, docWithTs := range dstCache {
-		results = append(
-			results,
+		priorMismatches := getMismatchCount(docWithTs.doc)
+
+		problems = append(
+			problems,
 			VerificationResult{
 				ID: getDocIdFromComparison(
 					verifier.docCompareMethod,
@@ -354,15 +369,17 @@ func (verifier *Verifier) compareDocsFromChannels(
 				Details:      Missing,
 				Cluster:      ClusterSource,
 				NameSpace:    namespace,
-				dataSize:     int32(len(docWithTs.doc)),
 				DstTimestamp: option.Some(docWithTs.ts),
+
+				dataSize:   int32(len(docWithTs.doc)),
+				mismatches: 1 + priorMismatches,
 			},
 		)
 
 		pool.Put(docWithTs.doc)
 	}
 
-	return results, srcDocCount, srcByteCount, nil
+	return problems, srcDocCount, srcByteCount, nil
 }
 
 func createIdToMismatchCount(task *VerificationTask) map[string]int32 {
