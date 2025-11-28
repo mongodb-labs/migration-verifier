@@ -245,11 +245,11 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 type ProgressGenerationStats struct {
 	TimeElapsed string `json:"timeElapsed"`
 
-	DocsCompared types.DocumentCount `json:"srcDocsCompared"`
-	TotalDocs    types.DocumentCount `json:"allSrcDocsCompared"`
+	DocsCompared types.DocumentCount `json:"docsCompared"`
+	TotalDocs    types.DocumentCount `json:"totalDocs"`
 
 	SrcBytesCompared types.ByteCount `json:"srcBytesCompared"`
-	TotalSrcBytes    types.ByteCount `json:"allSrcBytes"`
+	TotalSrcBytes    types.ByteCount `json:"totalSrcBytes"`
 
 	MismatchesFound  int64 `json:"mismatchesFound"`
 	RechecksEnqueued int64 `json:"rechecksEnqueued"`
