@@ -1255,8 +1255,16 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 }
 
 func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*VerificationStatus, error) {
-	taskCollection := verifier.verificationTaskCollection()
 	generation, _ := verifier.getGeneration()
+
+	return verifier.getVerificationStatusForGeneration(ctx, generation)
+}
+
+func (verifier *Verifier) getVerificationStatusForGeneration(
+	ctx context.Context,
+	generation int,
+) (*VerificationStatus, error) {
+	taskCollection := verifier.verificationTaskCollection()
 
 	var results []bson.Raw
 
@@ -1394,18 +1402,6 @@ func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mong
 func (verifier *Verifier) StartServer() error {
 	server := NewWebServer(verifier.port, verifier, verifier.logger)
 	return server.Run(context.Background())
-}
-
-func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
-	status, err := verifier.GetVerificationStatus(ctx)
-	if err != nil {
-		return Progress{Error: err}, err
-	}
-	return Progress{
-		Phase:      verifier.phase,
-		Generation: verifier.generation,
-		Status:     status,
-	}, nil
 }
 
 // Returned boolean indicates that namespaces are cached, and
