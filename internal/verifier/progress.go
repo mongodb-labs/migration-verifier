@@ -81,6 +81,8 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 			genStats.SrcBytesCompared = comparedBytes
 			genStats.TotalSrcBytes = totalBytes
 
+			genStats.ActiveWorkers = activeWorkers
+
 			return nil
 		},
 	)
