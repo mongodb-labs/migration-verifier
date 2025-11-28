@@ -39,7 +39,7 @@ type VerificationResult struct {
 
 	// The number of generations where we’ve seen this document ID mismatched
 	// without a change event.
-	mismatches int32
+	Mismatches int32 `bson:",omitempty"`
 
 	SrcTimestamp option.Option[bson.Timestamp]
 	DstTimestamp option.Option[bson.Timestamp]
@@ -55,6 +55,8 @@ func (vr VerificationResult) DocumentIsMissing() bool {
 	return vr.Details == Missing && vr.Field == ""
 }
 
+// Returns an agg expression that indicates whether the VerificationResult
+// refers to a missing document.
 func getResultDocMissingAggExpr(docExpr any) bson.D {
 	return bson.D{
 		{"$and", []bson.D{

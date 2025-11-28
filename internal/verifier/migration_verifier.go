@@ -582,7 +582,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 			for _, problem := range problems {
 				idsToRecheck = append(idsToRecheck, problem.ID)
 				dataSizes = append(dataSizes, problem.dataSize)
-				mismatches = append(mismatches, problem.mismatches)
+				mismatches = append(mismatches, problem.Mismatches)
 			}
 
 			// Create a task for the next generation to recheck the

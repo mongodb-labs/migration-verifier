@@ -117,7 +117,11 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	// First present summaries of failures based on present/missing and differing content
 	countsTable := tablewriter.NewWriter(strBuilder)
-	countsTable.SetHeader([]string{"Failure Type", "Count"})
+
+	countsHeaders := []string{"Mismatch Type", "Count"}
+	if generation > 0 {
+		countsHeaders = append(countsHeaders, "Repeated Count")
+	}
 
 	failedTaskIDs := lo.Map(
 		failedTasks,
@@ -128,10 +132,28 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	var mismatchTaskDiscrepancies, missingOrChangedDiscrepancies map[bson.ObjectID][]VerificationResult
 
-	contentMismatchCount := int64(0)
-	missingOrChangedCount := int64(0)
+	var mismatchCounts mismatchCounts
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
+
+	eg.Go(
+		func() error {
+			var err error
+			mismatchCounts, err = countMismatchesForTasks(
+				egCtx,
+				verifier.verificationDatabase(),
+				failedTaskIDs,
+				getMismatchDocMissingAggExpr("$$ROOT"),
+			)
+
+			return errors.Wrapf(
+				err,
+				"counting %d failed tasks’ discrepancies",
+				len(failedTasks),
+			)
+		},
+	)
+
 	eg.Go(
 		func() error {
 			var err error
@@ -150,24 +172,6 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			return errors.Wrapf(
 				err,
 				"fetching %d failed tasks’ content-mismatch discrepancies",
-				len(failedTasks),
-			)
-		},
-	)
-
-	eg.Go(
-		func() error {
-			var err error
-			missingOrChangedCount, contentMismatchCount, err = countMismatchesForTasks(
-				egCtx,
-				verifier.verificationDatabase(),
-				failedTaskIDs,
-				getMismatchDocMissingAggExpr("$$ROOT"),
-			)
-
-			return errors.Wrapf(
-				err,
-				"counting %d failed tasks’ discrepancies",
 				len(failedTasks),
 			)
 		},
@@ -198,21 +202,34 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		return false, false, errors.Wrapf(err, "gathering mismatch data")
 	}
 
-	countsTable.Append([]string{
+	differContentRow := []string{
 		"Documents With Differing Content",
-		reportutils.FmtReal(contentMismatchCount),
-	})
-	countsTable.Append([]string{
+		reportutils.FmtReal(mismatchCounts.Total - mismatchCounts.Match),
+	}
+	if generation > 0 {
+		differContentRow = append(
+			differContentRow,
+			reportutils.FmtReal(mismatchCounts.Multi-mismatchCounts.MultiMatch),
+		)
+	}
+
+	missingDocRow := []string{
 		"Missing or Changed Documents",
-		reportutils.FmtReal(missingOrChangedCount),
-	})
+		reportutils.FmtReal(mismatchCounts.Match),
+	}
+	if generation > 0 {
+		missingDocRow = append(
+			missingDocRow,
+			reportutils.FmtReal(mismatchCounts.MultiMatch),
+		)
+	}
 	countsTable.Render()
 
 	mismatchedDocsTable := tablewriter.NewWriter(strBuilder)
 	mismatchedDocsTableRows := types.ToNumericTypeOf(0, verifier.failureDisplaySize)
 	mismatchedDocsTable.SetHeader([]string{"ID", "Cluster", "Field", "Namespace", "Details"})
 
-	printAll := int64(contentMismatchCount) <= verifier.failureDisplaySize
+	printAll := int64(differentContentCount) <= verifier.failureDisplaySize
 
 	for _, task := range failedTasks {
 		for _, d := range mismatchTaskDiscrepancies[task.PrimaryKey] {
@@ -245,7 +262,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	missingOrChangedDocsTableRows := types.ToNumericTypeOf(0, verifier.failureDisplaySize)
 	missingOrChangedDocsTable.SetHeader([]string{"Document ID", "Source Namespace", "Destination Namespace"})
 
-	printAll = int64(missingOrChangedCount) <= verifier.failureDisplaySize
+	printAll = int64(missingCount) <= verifier.failureDisplaySize
 	for _, task := range failedTasks {
 		for _, d := range missingOrChangedDiscrepancies[task.PrimaryKey] {
 			if !d.DocumentIsMissing() {

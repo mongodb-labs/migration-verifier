@@ -206,7 +206,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 		}
 
 		for i := range curProblems {
-			curProblems[i].mismatches = 1 + mismatchCount
+			curProblems[i].Mismatches = 1 + mismatchCount
 			curProblems[i].SrcTimestamp = option.Some(srcDoc.ts)
 			curProblems[i].DstTimestamp = option.Some(dstDoc.ts)
 		}
@@ -354,7 +354,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 				SrcTimestamp: option.Some(docWithTs.ts),
 
 				dataSize:   int32(len(docWithTs.doc)),
-				mismatches: 1 + priorMismatches,
+				Mismatches: 1 + priorMismatches,
 			},
 		)
 
@@ -377,7 +377,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 				DstTimestamp: option.Some(docWithTs.ts),
 
 				dataSize:   int32(len(docWithTs.doc)),
-				mismatches: 1 + priorMismatches,
+				Mismatches: 1 + priorMismatches,
 			},
 		)
 

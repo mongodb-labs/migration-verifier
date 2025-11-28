@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -23,6 +24,8 @@ type MismatchInfo struct {
 	Detail VerificationResult
 }
 
+// Returns an aggregation that indicates whether the MismatchInfo refers to
+// a missing document.
 func getMismatchDocMissingAggExpr(docExpr any) bson.D {
 	return getResultDocMissingAggExpr(
 		bson.D{{"$getField", bson.D{
@@ -81,12 +84,31 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 	return nil
 }
 
+type mismatchCounts struct {
+	// Total counts all of the mismatches.
+	Total int
+
+	// Match counts all mismatches that satisfy the filter.
+	Match int
+
+	// Multi counts mismatches that have been seen more than once without
+	// a change event. These are of concern because they indicate a mismatch
+	// that the migrator tool (e.g., mongosync) may never rectify.
+	Multi int
+
+	// MultiMatch counts mismatches that have been seen more than once *and*
+	// satisfy the filter.
+	MultiMatch int
+}
+
 func countMismatchesForTasks(
 	ctx context.Context,
 	db *mongo.Database,
 	taskIDs []bson.ObjectID,
 	filter bson.D,
-) (int64, int64, error) {
+) (mismatchCounts, error) {
+	multiExpr := agg.Gt{"detail.mismatches", 1}
+
 	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(
 		ctx,
 		mongo.Pipeline{
@@ -95,44 +117,43 @@ func countMismatchesForTasks(
 			}}},
 			{{"$group", bson.D{
 				{"_id", nil},
-				{"total", bson.D{{"$sum", 1}}},
-				{"match", bson.D{{"$sum", bson.D{
-					{"$cond", bson.D{
-						{"if", filter},
-						{"then", 1},
-						{"else", 0},
-					}},
-				}}}},
+				{"total", agg.Sum{1}},
+				{"match", agg.Sum{agg.Cond{
+					If:   filter,
+					Then: 1,
+					Else: 0,
+				}}},
+				{"multi", agg.Sum{agg.Cond{
+					If:   multiExpr,
+					Then: 1,
+					Else: 0,
+				}}},
+				{"multiMatch", agg.Sum{agg.Cond{
+					If: agg.And{
+						filter,
+						multiExpr,
+					},
+					Then: 1,
+					Else: 0,
+				}}},
 			}}},
 		},
 	)
 
 	if err != nil {
-		return 0, 0, errors.Wrap(err, "sending mismatch-counting query")
+		return mismatchCounts{}, errors.Wrap(err, "sending mismatch-counting query")
 	}
 
-	var got []bson.Raw
+	var got []mismatchCounts
 	if err := cursor.All(ctx, &got); err != nil {
-		return 0, 0, errors.Wrap(err, "reading mismatch counts")
+		return mismatchCounts{}, errors.Wrap(err, "reading mismatch counts")
 	}
 
 	if len(got) != 1 {
-		return 0, 0, fmt.Errorf("unexpected mismatch count result: %+v", got)
+		return mismatchCounts{}, fmt.Errorf("unexpected mismatch count result: %+v", got)
 	}
 
-	totalRV, err := got[0].LookupErr("total")
-	if err != nil {
-		return 0, 0, errors.Wrap(err, "getting mismatch count’s total")
-	}
-
-	matchRV, err := got[0].LookupErr("match")
-	if err != nil {
-		return 0, 0, errors.Wrap(err, "getting mismatch count’s filter-match count")
-	}
-
-	matched := matchRV.AsInt64()
-
-	return matched, totalRV.AsInt64() - matched, nil
+	return got[0], nil
 }
 
 func getMismatchesForTasks(
