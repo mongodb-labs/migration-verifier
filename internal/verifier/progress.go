@@ -140,15 +140,19 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 	}
 
 	return Progress{
-		Phase:           verifier.phase,
+		Phase: lo.Ternary(
+			verifier.running,
+			lo.Ternary(generation > 0, Recheck, Check),
+			Idle,
+		),
 		Generation:      verifier.generation,
 		GenerationStats: genStats,
-		SrcChangeStreamStats: ProgressChangeStreamStats{
+		SrcChangeStats: ProgressChangeStats{
 			EventsPerSecond:  verifier.srcChangeReader.getEventsPerSecond(),
 			Lag:              optDurationToOptString(verifier.srcChangeReader.getLag()),
 			BufferSaturation: verifier.srcChangeReader.getBufferSaturation(),
 		},
-		DstChangeStreamStats: ProgressChangeStreamStats{
+		DstChangeStats: ProgressChangeStats{
 			EventsPerSecond:  verifier.dstChangeReader.getEventsPerSecond(),
 			Lag:              optDurationToOptString(verifier.dstChangeReader.getLag()),
 			BufferSaturation: verifier.dstChangeReader.getBufferSaturation(),

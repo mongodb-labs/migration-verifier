@@ -246,17 +246,17 @@ type ProgressGenerationStats struct {
 	TimeElapsed   string `json:"timeElapsed"`
 	ActiveWorkers int
 
-	DocsCompared types.DocumentCount `json:"docsCompared"`
-	TotalDocs    types.DocumentCount `json:"totalDocs"`
+	DocsCompared types.DocumentCount
+	TotalDocs    types.DocumentCount
 
-	SrcBytesCompared types.ByteCount `json:"srcBytesCompared"`
-	TotalSrcBytes    types.ByteCount `json:"totalSrcBytes"`
+	SrcBytesCompared types.ByteCount
+	TotalSrcBytes    types.ByteCount
 
-	MismatchesFound  int64 `json:"mismatchesFound"`
-	RechecksEnqueued int64 `json:"rechecksEnqueued"`
+	MismatchesFound  int64
+	RechecksEnqueued int64
 }
 
-type ProgressChangeStreamStats struct {
+type ProgressChangeStats struct {
 	EventsPerSecond  option.Option[float64]
 	Lag              option.Option[string]
 	BufferSaturation float64
@@ -264,15 +264,15 @@ type ProgressChangeStreamStats struct {
 
 // Progress represents the structure of the JSON response from the Progress end point.
 type Progress struct {
-	Phase string `json:"phase"`
+	Phase string
 
-	Generation      int                     `json:"generation"`
-	GenerationStats ProgressGenerationStats `json:"generationStats"`
+	Generation      int
+	GenerationStats ProgressGenerationStats
 
-	SrcChangeStreamStats ProgressChangeStreamStats `json:"srcChangeStreamStats"`
-	DstChangeStreamStats ProgressChangeStreamStats `json:"dstChangeStreamStats"`
+	SrcChangeStats ProgressChangeStats
+	DstChangeStats ProgressChangeStats
 
-	Error  error               `json:"error"`
+	Error  error
 	Status *VerificationStatus `json:"verificationStatus"`
 }
 

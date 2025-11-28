@@ -246,11 +246,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 
 	verifier.logger.Debug().Msg("Starting Check")
 
-	verifier.phase = Check
-	defer func() {
-		verifier.phase = Idle
-	}()
-
 	if err := verifier.startChangeHandling(ctx); err != nil {
 		return err
 	}
@@ -362,7 +357,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// on enqueued rechecks. Meanwhile, generaiton 3’s recheck tasks will
 		// derive from rechecks enqueued during generation 2.
 		verifier.generation++
-		verifier.phase = Recheck
 		verifier.mux.Unlock()
 
 		// Generation of recheck tasks can partial-fail. The following will

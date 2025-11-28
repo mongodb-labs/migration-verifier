@@ -89,7 +89,6 @@ type Verifier struct {
 	lastGeneration     bool
 	running            bool
 	generation         int
-	phase              string
 	port               int
 	metaURI            string
 	metaClient         *mongo.Client
@@ -181,7 +180,6 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		logger: logger,
 		writer: logWriter,
 
-		phase:                Idle,
 		numWorkers:           NumWorkers,
 		readPreference:       readpref.Primary(),
 		partitionSizeInBytes: 400 * 1024 * 1024,
