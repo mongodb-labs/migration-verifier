@@ -24,7 +24,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 	genElapsed := progressTime.Sub(verifier.generationStartTime)
 
 	genStats := ProgressGenerationStats{
-		TimeElapsed: genElapsed,
+		TimeElapsed: genElapsed.String(),
 	}
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
