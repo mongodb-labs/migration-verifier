@@ -116,7 +116,11 @@ func countMismatchesForTasks(
 		return 0, 0, errors.Wrap(err, "reading mismatch counts")
 	}
 
-	if len(got) != 1 {
+	switch len(got) {
+	case 0:
+		return 0, 0, nil
+	case 1:
+	default:
 		return 0, 0, fmt.Errorf("unexpected mismatch count result: %+v", got)
 	}
 
