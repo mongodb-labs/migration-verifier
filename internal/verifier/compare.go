@@ -119,15 +119,20 @@ func (verifier *Verifier) compareDocsFromChannels(
 	srcCache := map[string]docWithTs{}
 	dstCache := map[string]docWithTs{}
 
+	// NB: The below depends on strict, byte-level BSON equality. So if a
+	// document ID changes in some way the server considers equivalent, this
+	// will return 0. That’s OK, though, because the point of mismatch counting
+	// is to track the number of times a document was compared *without*
+	// a change.
 	var idToMismatchCount map[string]int32
 	getMismatchCount := func(doc bson.Raw) int32 {
 		if idToMismatchCount == nil {
 			idToMismatchCount = createIdToMismatchCount(task)
 		}
 
-		mapKey := string(rvToMapKey(nil, lo.Must(srcDoc.doc.LookupErr("_id"))))
+		mapKeyBytes := rvToMapKey(nil, lo.Must(doc.LookupErr("_id")))
 
-		return idToMismatchCount[mapKey]
+		return idToMismatchCount[string(mapKeyBytes)]
 	}
 
 	// This is the core document-handling logic. It either:
