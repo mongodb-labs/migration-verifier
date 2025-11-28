@@ -7,6 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -142,15 +143,25 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 		GenerationStats: genStats,
 		SrcChangeStreamStats: ProgressChangeStreamStats{
 			EventsPerSecond:  verifier.srcChangeReader.getEventsPerSecond(),
-			Lag:              verifier.srcChangeReader.getLag(),
+			Lag:              optDurationToOptString(verifier.srcChangeReader.getLag()),
 			BufferSaturation: verifier.srcChangeReader.getBufferSaturation(),
 		},
 		DstChangeStreamStats: ProgressChangeStreamStats{
 			EventsPerSecond:  verifier.dstChangeReader.getEventsPerSecond(),
-			Lag:              verifier.dstChangeReader.getLag(),
+			Lag:              optDurationToOptString(verifier.dstChangeReader.getLag()),
 			BufferSaturation: verifier.dstChangeReader.getBufferSaturation(),
 		},
 		Status: vStatus,
 	}, nil
 
+}
+
+func optDurationToOptString(dur option.Option[time.Duration]) option.Option[string] {
+	var ret option.Option[string]
+
+	if dur, has := dur.Get(); has {
+		ret = option.Some(dur.String())
+	}
+
+	return ret
 }

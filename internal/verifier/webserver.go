@@ -257,7 +257,7 @@ type ProgressGenerationStats struct {
 
 type ProgressChangeStreamStats struct {
 	EventsPerSecond  option.Option[float64]
-	Lag              option.Option[time.Duration]
+	Lag              option.Option[string]
 	BufferSaturation float64
 }
 
