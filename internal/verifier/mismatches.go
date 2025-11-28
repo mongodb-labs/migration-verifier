@@ -121,7 +121,7 @@ func countMismatchesForTasks(
 		return 0, 0, nil
 	case 1:
 	default:
-		return 0, 0, fmt.Errorf("unexpected mismatch count result: %+v", got)
+		return 0, 0, fmt.Errorf("unexpected mismatch count (%d) result: %+v", len(got), got)
 	}
 
 	totalRV, err := got[0].LookupErr("total")
