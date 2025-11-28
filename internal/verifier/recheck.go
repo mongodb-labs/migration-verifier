@@ -42,7 +42,11 @@ const (
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	ctx context.Context,
-	namespace string, documentIDs []bson.RawValue, dataSizes []int32) error {
+	namespace string,
+	documentIDs []bson.RawValue,
+	dataSizes []int32,
+	mismatches []int32,
+) error {
 	dbName, collName := SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
@@ -56,7 +60,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		Int("count", len(documentIDs)).
 		Msg("Persisting rechecks for mismatched or missing documents.")
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes)
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes, mismatches)
 }
 
 func (verifier *Verifier) insertRecheckDocs(
@@ -65,6 +69,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	collNames []string,
 	documentIDs []bson.RawValue,
 	dataSizes []int32,
+	mismatches []int32,
 ) error {
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
@@ -147,6 +152,10 @@ func (verifier *Verifier) insertRecheckDocs(
 				Rand:              rand.Int32(),
 			},
 			DataSize: dataSizes[i],
+		}
+
+		if mismatches != nil {
+			recheckDoc.Mismatches = mismatches[i]
 		}
 
 		recheckRaw := recheckDoc.MarshalToBSON()
@@ -286,10 +295,12 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	//    this to prevent one thread from doing all of the rechecks.
 
 	var prevDBName, prevCollName string
-	var idAccum []any
+	var idAccum []bson.RawValue
 	var idsSizer util.BSONArraySizer
 	var totalDocs types.DocumentCount
 	var dataSizeAccum, totalRecheckData int64
+
+	mismatchesMap := map[int32]int32{}
 
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
@@ -323,6 +334,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		task, err := verifier.createDocumentRecheckTask(
 			idAccum,
+			mismatchesMap,
 			types.ByteCount(dataSizeAccum),
 			namespace,
 		)
@@ -407,14 +419,32 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			dataSizeAccum = 0
 			idAccum = idAccum[:0]
 			lastIDRaw = bson.RawValue{}
+			clear(mismatchesMap)
 		}
 
+		// A document can be enqueued for recheck for multiple reasons:
+		// - changed on source
+		// - changed on destination
+		// - mismatch seen
+		//
 		// We’re iterating the rechecks in order such that, if the same doc
 		// gets enqueued from multiple sources, we’ll see those records
 		// consecutively. We can deduplicate here, then, by checking to see if
 		// the doc ID has changed. (NB: At this point we know the namespace
 		// has *not* changed because we just checked for that.)
 		if idRaw.Equal(lastIDRaw) {
+
+			if doc.Mismatches == 0 {
+				// A non-mismatch recheck means the document changed. In that
+				// case we want to clear the mismatch count. This way a document
+				// that changes over & over won’t seem persistently mismatched
+				// merely because the replicator hasn’t kept up with the rate
+				// of change.
+				lastIDIndex := len(idAccum) - 1
+
+				delete(mismatchesMap, int32(lastIDIndex))
+			}
+
 			continue
 		}
 
@@ -422,6 +452,9 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
+		if doc.Mismatches > 0 {
+			mismatchesMap[int32(len(idAccum))] = doc.Mismatches
+		}
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 
 		totalRecheckData += int64(doc.DataSize)

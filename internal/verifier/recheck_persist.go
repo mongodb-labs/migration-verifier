@@ -173,5 +173,5 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeE
 		Time("latestTimestampTime", latestTimestampTime).
 		Msg("Persisting rechecks for change events.")
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes)
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, docIDs, dataSizes, nil)
 }

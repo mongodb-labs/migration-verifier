@@ -132,6 +132,8 @@ func TestObjectID(t *testing.T) {
 	for _, cur := range vals {
 		viaMarshal := MustConvertToRawValue(cur)
 
+		assert.Equal(t, viaMarshal, ToRawValue(cur))
+
 		assert.Equal(t, cur, lo.Must(CastRawValue[bson.ObjectID](viaMarshal)))
 	}
 }

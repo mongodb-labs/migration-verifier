@@ -13,7 +13,7 @@ type bsonCastRecipient interface {
 }
 
 type bsonSourceTypes interface {
-	string | int | int32 | int64
+	string | int | int32 | int64 | bson.ObjectID
 }
 
 type cannotCastErr struct {
@@ -121,6 +121,11 @@ func ToRawValue[T bsonSourceTypes](in T) bson.RawValue {
 		return i32ToRawValue(typedIn)
 	case int64:
 		return i64ToRawValue(typedIn)
+	case bson.ObjectID:
+		return bson.RawValue{
+			Type:  bson.TypeObjectID,
+			Value: bsoncore.AppendObjectID(nil, typedIn),
+		}
 	case string:
 		return bson.RawValue{
 			Type:  bson.TypeString,

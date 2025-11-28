@@ -118,6 +118,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 	srcCache := map[string]docWithTs{}
 	dstCache := map[string]docWithTs{}
 
+	var idToMismatchCount map[string]int32
+
 	// This is the core document-handling logic. It either:
 	//
 	// a) caches the new document if its mapKey is unseen, or
@@ -174,20 +176,28 @@ func (verifier *Verifier) compareDocsFromChannels(
 		}
 
 		// Finally we compare the documents and save any mismatch report(s).
-		mismatches, err := verifier.compareOneDocument(srcDoc.doc, dstDoc.doc, namespace)
-		if err != nil {
-			return errors.Wrap(err, "failed to compare documents")
-		}
+		curResults, err := verifier.compareOneDocument(srcDoc.doc, dstDoc.doc, namespace)
 
 		pool.Put(srcDoc.doc)
 		pool.Put(dstDoc.doc)
 
-		for i := range mismatches {
-			mismatches[i].SrcTimestamp = option.Some(srcDoc.ts)
-			mismatches[i].DstTimestamp = option.Some(dstDoc.ts)
+		if err != nil {
+			return errors.Wrap(err, "failed to compare documents")
 		}
 
-		results = append(results, mismatches...)
+		if len(curResults) > 0 && idToMismatchCount == nil {
+			idToMismatchCount = createIdToMismatchCount(task)
+		}
+
+		mismatchCount, _ := idToMismatchCount[string(rvToMapKey(nil, srcDoc.doc.Lookup("_id")))]
+
+		for i := range curResults {
+			curResults[i].mismatches = 1 + mismatchCount
+			curResults[i].SrcTimestamp = option.Some(srcDoc.ts)
+			curResults[i].DstTimestamp = option.Some(dstDoc.ts)
+		}
+
+		results = append(results, curResults...)
 
 		return nil
 	}
@@ -353,6 +363,20 @@ func (verifier *Verifier) compareDocsFromChannels(
 	}
 
 	return results, srcDocCount, srcByteCount, nil
+}
+
+func createIdToMismatchCount(task *VerificationTask) map[string]int32 {
+	idToMismatchCount := map[string]int32{}
+
+	for i, id := range task.Ids {
+		count, _ := task.Mismatches[int32(i)]
+
+		if count > 0 {
+			idToMismatchCount[string(rvToMapKey(nil, id))] = count
+		}
+	}
+
+	return idToMismatchCount
 }
 
 func getDocIdFromComparison(
@@ -566,14 +590,18 @@ func iterateCursorToChannel(
 }
 
 func getMapKey(docKeyValues []bson.RawValue) string {
-	var keyBuffer bytes.Buffer
+	var buf []byte
 	for _, value := range docKeyValues {
-		keyBuffer.Grow(1 + len(value.Value))
-		keyBuffer.WriteByte(byte(value.Type))
-		keyBuffer.Write(value.Value)
+		buf = rvToMapKey(buf, value)
 	}
 
-	return keyBuffer.String()
+	return string(buf)
+}
+
+func rvToMapKey(buf []byte, rv bson.RawValue) []byte {
+	buf = slices.Grow(buf, 1+len(rv.Value))
+	buf = append(buf, byte(rv.Type))
+	return append(buf, rv.Value...)
 }
 
 func (verifier *Verifier) getDocumentsCursor(
