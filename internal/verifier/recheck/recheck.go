@@ -120,6 +120,10 @@ type Doc struct {
 	// and any others that may be added will remain unchanged even if a recheck
 	// is enqueued multiple times for the same document in the same generation.
 	DataSize int32 `bson:"dataSize"`
+
+	// Mismatches is the number of generations that have seen a mismatch on
+	// this document.
+	Mismatches int32 `bson:"mismatches"`
 }
 
 var _ bson.Marshaler = Doc{}

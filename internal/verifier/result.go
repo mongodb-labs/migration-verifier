@@ -37,6 +37,10 @@ type VerificationResult struct {
 	// don't get too large.
 	dataSize int32
 
+	// The number of generations where we’ve seen this document ID mismatched
+	// without a change event.
+	mismatches int32
+
 	SrcTimestamp option.Option[bson.Timestamp]
 	DstTimestamp option.Option[bson.Timestamp]
 }

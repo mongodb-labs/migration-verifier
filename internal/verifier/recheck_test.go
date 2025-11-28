@@ -29,6 +29,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 			"the.namespace",
 			[]bson.RawValue{mbson.ToRawValue("theDocID")},
 			[]int32{1234},
+			[]int32{0},
 		),
 		"insert failed-comparison recheck",
 	)
@@ -315,7 +316,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 
 	t1 := VerificationTask{
 		Generation: 1,
-		Ids:        []any{id1},
+		Ids:        mslices.Of(mbson.ToRawValue(id1)),
 		Status:     verificationTaskAdded,
 		Type:       verificationTaskVerifyDocuments,
 		QueryFilter: QueryFilter{
@@ -327,10 +328,10 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	}
 
 	t2 := t1
-	t2.Ids = []any{id2}
+	t2.Ids = mslices.Of(mbson.ToRawValue(id2))
 
 	t3 := t1
-	t3.Ids = []any{id3}
+	t3.Ids = mslices.Of(mbson.ToRawValue(id3))
 
 	suite.ElementsMatch([]VerificationTask{t1, t2, t3}, foundTasks)
 }
@@ -374,9 +375,12 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 
 	t1 := VerificationTask{
 		Generation: 1,
-		Ids:        []any{id1, id2},
-		Status:     verificationTaskAdded,
-		Type:       verificationTaskVerifyDocuments,
+		Ids: mslices.Of(
+			mbson.ToRawValue(id1),
+			mbson.ToRawValue(id2),
+		),
+		Status: verificationTaskAdded,
+		Type:   verificationTaskVerifyDocuments,
 		QueryFilter: QueryFilter{
 			Namespace: "testDB.testColl",
 			To:        "testDB.testColl",
@@ -386,7 +390,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	}
 
 	t2 := t1
-	t2.Ids = []any{id3}
+	t2.Ids = mslices.Of(mbson.ToRawValue(id3))
 	t2.SourceDocumentCount = 1
 	t2.SourceByteCount = 1024
 
@@ -423,9 +427,13 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 
 	t1 := VerificationTask{
 		Generation: 1,
-		Ids:        []any{id1, id2, id3},
-		Status:     verificationTaskAdded,
-		Type:       verificationTaskVerifyDocuments,
+		Ids: mslices.Of(
+			mbson.ToRawValue(id1),
+			mbson.ToRawValue(id2),
+			mbson.ToRawValue(id3),
+		),
+		Status: verificationTaskAdded,
+		Type:   verificationTaskVerifyDocuments,
 		QueryFilter: QueryFilter{
 			Namespace: "testDB1.testColl1",
 			To:        "testDB1.testColl1",
@@ -507,5 +515,12 @@ func insertRecheckDocs(
 		},
 	)
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, rawIDs, dataSizes)
+	return verifier.insertRecheckDocs(
+		ctx,
+		dbNames,
+		collNames,
+		rawIDs,
+		dataSizes,
+		make([]int32, len(documentIDs)),
+	)
 }

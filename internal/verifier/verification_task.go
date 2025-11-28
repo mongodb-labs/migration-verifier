@@ -77,7 +77,7 @@ type VerificationTask struct {
 	Generation int                    `bson:"generation"`
 
 	// For recheck tasks, this stores the document IDs to check.
-	Ids []any `bson:"_ids"`
+	Ids []bson.RawValue `bson:"_ids"`
 
 	QueryFilter QueryFilter `bson:"query_filter" json:"query_filter"`
 
@@ -88,6 +88,10 @@ type VerificationTask struct {
 	// ByteCount is like DocumentCount: set when the verifier is done
 	// with the task.
 	SourceByteCount types.ByteCount `bson:"source_bytes_count"`
+
+	// Mismatches correlates an index of Ids with the # of generations where
+	// this document was seen to mismatch.
+	Mismatches map[int32]int32
 }
 
 func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
@@ -200,7 +204,8 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 }
 
 func (verifier *Verifier) createDocumentRecheckTask(
-	ids []any,
+	ids []bson.RawValue,
+	mismatches map[int32]int32,
 	dataSize types.ByteCount,
 	srcNamespace string,
 ) (*VerificationTask, error) {
@@ -225,6 +230,7 @@ func (verifier *Verifier) createDocumentRecheckTask(
 		},
 		SourceDocumentCount: types.DocumentCount(len(ids)),
 		SourceByteCount:     dataSize,
+		Mismatches:          mismatches,
 	}, nil
 }
 

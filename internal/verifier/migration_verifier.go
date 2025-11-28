@@ -573,19 +573,21 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 				Msg("Discrepancies found. Will recheck in the next generation.")
 
 			dataSizes := make([]int32, 0, len(problems))
+			mismatches := make([]int32, 0, len(problems))
 
 			// This stores all IDs for the next generation to check.
 			// Its length should equal len(mismatches) + len(missingIds).
 			idsToRecheck := make([]bson.RawValue, 0, len(problems))
 
-			for _, mismatch := range problems {
-				idsToRecheck = append(idsToRecheck, mismatch.ID)
-				dataSizes = append(dataSizes, mismatch.dataSize)
+			for _, problem := range problems {
+				idsToRecheck = append(idsToRecheck, problem.ID)
+				dataSizes = append(dataSizes, problem.dataSize)
+				mismatches = append(mismatches, problem.mismatches)
 			}
 
 			// Create a task for the next generation to recheck the
 			// mismatched & missing docs.
-			err := verifier.InsertFailedCompareRecheckDocs(ctx, task.QueryFilter.Namespace, idsToRecheck, dataSizes)
+			err := verifier.InsertFailedCompareRecheckDocs(ctx, task.QueryFilter.Namespace, idsToRecheck, dataSizes, mismatches)
 			if err != nil {
 				return errors.Wrapf(
 					err,
