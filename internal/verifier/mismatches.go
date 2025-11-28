@@ -85,7 +85,7 @@ func countMismatchesForTasks(
 	ctx context.Context,
 	db *mongo.Database,
 	taskIDs []bson.ObjectID,
-	filter bson.D,
+	filter any,
 ) (int64, int64, error) {
 	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(
 		ctx,
