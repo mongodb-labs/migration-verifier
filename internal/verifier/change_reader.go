@@ -31,13 +31,24 @@ const (
 	changeReaderCollectionName = "changeReader"
 )
 
+type readerCurrentTimes struct {
+	LastResumeTime  bson.Timestamp
+	LastClusterTime bson.Timestamp
+}
+
+func (rp readerCurrentTimes) Lag() time.Duration {
+	return time.Second * time.Duration(
+		int(rp.LastClusterTime.T)-int(rp.LastResumeTime.T),
+	)
+}
+
 type changeReader interface {
 	getWhichCluster() whichCluster
 	getReadChannel() <-chan changeEventBatch
 	getStartTimestamp() bson.Timestamp
 	getLastSeenClusterTime() option.Option[bson.Timestamp]
 	getEventsPerSecond() option.Option[float64]
-	getLag() option.Option[time.Duration]
+	getCurrentTimes() option.Option[readerCurrentTimes]
 	getBufferSaturation() float64
 	setWritesOff(bson.Timestamp)
 	start(context.Context, *errgroup.Group) error
@@ -64,9 +75,10 @@ type ChangeReaderCommon struct {
 
 	lastChangeEventTime *msync.TypedAtomic[option.Option[bson.Timestamp]]
 
+	currentTimes *msync.TypedAtomic[option.Option[readerCurrentTimes]]
+
 	startAtTs *bson.Timestamp
 
-	lag              *msync.TypedAtomic[option.Option[time.Duration]]
 	batchSizeHistory *history.History[int]
 
 	onDDLEvent ddlEventHandling
@@ -77,9 +89,9 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 		readerType:           clusterName,
 		changeEventBatchChan: make(chan changeEventBatch, batchChanBufferSize),
 		writesOffTs:          util.NewEventual[bson.Timestamp](),
-		lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
-		lastChangeEventTime:  msync.NewTypedAtomic(option.None[bson.Timestamp]()),
-		batchSizeHistory:     history.New[int](time.Minute),
+		//lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
+		lastChangeEventTime: msync.NewTypedAtomic(option.None[bson.Timestamp]()),
+		batchSizeHistory:    history.New[int](time.Minute),
 		onDDLEvent: lo.Ternary(
 			clusterName == dst,
 			onDDLEventAllow,
@@ -123,11 +135,23 @@ func (rc *ChangeReaderCommon) getBufferSaturation() float64 {
 	return util.DivideToF64(len(rc.changeEventBatchChan), cap(rc.changeEventBatchChan))
 }
 
+func (rc *ChangeReaderCommon) getCurrentTimes() option.Option[readerCurrentTimes] {
+	return rc.currentTimes.Load()
+}
+
+/*
 // getLag returns the observed change stream lag (i.e., the delta between
 // cluster time and the most-recently-seen change event).
 func (rc *ChangeReaderCommon) getLag() option.Option[time.Duration] {
-	return rc.lag.Load()
+	if prog, has := rc.progress.Load().Get(); has {
+		return option.Some(
+			time.Duration(int(prog.lastClusterTime.T)-int(prog.lastResumeTime.T)) * time.Second,
+		)
+	}
+
+	return option.None[time.Duration]()
 }
+*/
 
 // getEventsPerSecond returns the number of change events per second we’ve been
 // seeing “recently”. (See implementation for the actual period over which we
@@ -221,8 +245,18 @@ func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Optio
 func (rc *ChangeReaderCommon) updateLag(sess *mongo.Session, token bson.Raw) {
 	tokenTs, err := rc.resumeTokenTSExtractor(token)
 	if err == nil {
-		lagSecs := int64(sess.OperationTime().T) - int64(tokenTs.T)
-		rc.lag.Store(option.Some(time.Second * time.Duration(lagSecs)))
+		cTime, err := util.GetClusterTimeFromSession(sess)
+		if err != nil {
+			rc.logger.Warn().
+				Err(err).
+				Str("reader", string(rc.getWhichCluster())).
+				Msg("Failed to extract cluster time from session.")
+		} else {
+			rc.currentTimes.Store(option.Some(readerCurrentTimes{
+				LastResumeTime:  tokenTs,
+				LastClusterTime: cTime,
+			}))
+		}
 	} else {
 		rc.logger.Warn().
 			Err(err).

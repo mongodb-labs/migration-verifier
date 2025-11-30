@@ -587,10 +587,10 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 		if eventsPerSec, has := cluster.csReader.getEventsPerSecond().Get(); has {
 			var lagNote string
 
-			lag, hasLag := cluster.csReader.getLag().Get()
+			prog, hasProg := cluster.csReader.getCurrentTimes().Get()
 
-			if hasLag {
-				lagNote = fmt.Sprintf("lag: %s; ", reportutils.DurationToHMS(lag))
+			if hasProg {
+				lagNote = fmt.Sprintf("lag: %s; ", reportutils.DurationToHMS(prog.Lag()))
 			}
 
 			saturation := cluster.csReader.getBufferSaturation()
@@ -604,7 +604,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 				reportutils.FmtReal(100*saturation),
 			)
 
-			if hasLag && lag > lagWarnThreshold {
+			if hasProg && prog.Lag() > lagWarnThreshold {
 				fmt.Fprint(
 					builder,
 					"⚠️ Lag is excessive. Verification may fail. See documentation.\n",

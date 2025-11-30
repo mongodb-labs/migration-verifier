@@ -243,7 +243,7 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 }
 
 type ProgressGenerationStats struct {
-	TimeElapsed   string `json:"timeElapsed"`
+	TimeElapsed   string
 	ActiveWorkers int
 
 	DocsCompared types.DocumentCount
@@ -258,7 +258,7 @@ type ProgressGenerationStats struct {
 
 type ProgressChangeStats struct {
 	EventsPerSecond  option.Option[float64]
-	Lag              option.Option[string]
+	CurrentTimes     option.Option[readerCurrentTimes]
 	BufferSaturation float64
 }
 
