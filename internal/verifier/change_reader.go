@@ -89,9 +89,9 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 		readerType:           clusterName,
 		changeEventBatchChan: make(chan changeEventBatch, batchChanBufferSize),
 		writesOffTs:          util.NewEventual[bson.Timestamp](),
-		//lag:                  msync.NewTypedAtomic(option.None[time.Duration]()),
-		lastChangeEventTime: msync.NewTypedAtomic(option.None[bson.Timestamp]()),
-		batchSizeHistory:    history.New[int](time.Minute),
+		currentTimes:         msync.NewTypedAtomic(option.None[readerCurrentTimes]()),
+		lastChangeEventTime:  msync.NewTypedAtomic(option.None[bson.Timestamp]()),
+		batchSizeHistory:     history.New[int](time.Minute),
 		onDDLEvent: lo.Ternary(
 			clusterName == dst,
 			onDDLEventAllow,
