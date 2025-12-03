@@ -451,6 +451,10 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 		}
 
 		if docField != "" {
+			if opName == "u" {
+				opName = "r"
+			}
+
 			doc, err := mbson.Lookup[bson.Raw](rawDoc, docField)
 			if err != nil {
 				return errors.Wrap(err, "extracting doc from op")
