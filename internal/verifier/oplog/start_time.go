@@ -13,7 +13,7 @@ import (
 )
 
 // GetTailingStartTimes returns the earliest transaction timestamp and the
-// latest op in the oplog.
+// timestamp of the latest-visible op in the oplog.
 func GetTailingStartTimes(
 	ctx context.Context,
 	client *mongo.Client,
