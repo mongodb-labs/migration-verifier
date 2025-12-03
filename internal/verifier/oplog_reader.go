@@ -198,7 +198,14 @@ func (o *OplogReader) createCursor(
 func (o *OplogReader) getExprProjection() bson.D {
 	return bson.D{
 		{"ts", 1},
-		{"op", 1},
+		{"op", agg.Cond{
+			If: agg.And{
+				agg.Eq{"$op", "u"},
+				helpers.Exists{"$o._id"},
+			},
+			Then: "r",
+			Else: "$op",
+		}},
 		{"ns", 1},
 
 		{"docLen", getOplogDocLenExpr("$$ROOT")},
@@ -326,7 +333,8 @@ CursorLoop:
 
 var oplogOpToOperationType = map[string]string{
 	"i": "insert",
-	"u": "update", // don’t need to distinguish from replace
+	"r": "replace", // NB: This doesn’t happen in the oplog; we project it.
+	"u": "update",
 	"d": "delete",
 }
 
@@ -490,6 +498,7 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 
 		switch opName {
 		case "n":
+			// Ignore.
 		case "c":
 			oDoc, err := mbson.Lookup[bson.Raw](rawDoc, "o")
 			if err != nil {
@@ -579,6 +588,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 
 		switch op.Op {
 		case "n":
+			// Ignore.
 		case "c":
 			if op.CmdName != "applyOps" {
 				if o.onDDLEvent == onDDLEventAllow {
@@ -666,11 +676,11 @@ func getOplogDocLenExpr(docroot string) any {
 			agg.Eq{docroot + ".op", "i"},
 			agg.And{
 				agg.Eq{docroot + ".op", "u"},
-				agg.Not(agg.Eq{"missing", docroot + ".o._id"}),
+				helpers.Exists{docroot + ".o._id"},
 			},
 		},
 		Then: agg.BSONSize{docroot + ".o"},
-		Else: "$$REMOVE",
+		Else: defaultUserDocumentSize,
 	}
 }
 

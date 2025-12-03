@@ -3,6 +3,7 @@ package retry
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
@@ -180,11 +181,7 @@ func (r *Retryer) runRetryLoop(
 
 		// Not a transient error? Fail immediately.
 		if !r.shouldRetryWithSleep(logger, sleepTime, descriptions, cbErr) {
-			if descr, has := r.description.Get(); has {
-				cbErr = errors.Wrap(cbErr, descr)
-			}
-
-			return cbErr
+			return wrapErrWithDescriptions(cbErr, descriptions)
 		}
 
 		// Our error is transient. If we've exhausted the allowed time
@@ -197,11 +194,7 @@ func (r *Retryer) runRetryLoop(
 				lastErr:  groupErr.errFromCallback,
 			}
 
-			if descr, has := r.description.Get(); has {
-				err = errors.Wrap(err, descr)
-			}
-
-			return err
+			return wrapErrWithDescriptions(err, descriptions)
 		}
 
 		// Sleep and increase the sleep time for the next retry,
@@ -243,6 +236,17 @@ func (r *Retryer) addDescriptionToEvent(event *zerolog.Event) *zerolog.Event {
 	}
 
 	return event
+}
+
+func wrapErrWithDescriptions(err error, descriptions []string) error {
+	reversed := slices.Clone(descriptions)
+	slices.Reverse(reversed)
+
+	for _, d := range reversed {
+		err = errors.Wrap(err, d)
+	}
+
+	return err
 }
 
 //

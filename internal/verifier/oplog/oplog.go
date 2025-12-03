@@ -45,7 +45,8 @@ func (*Op) UnmarshalBSON([]byte) error {
 	panic("Use UnmarshalFromBSON.")
 }
 
-// UnmarshalFromBSON unmarshals an Op more efficiently than the standard
+// UnmarshalFromBSON unmarshals an Op as transformed by the oplog reader’s
+// projection of the oplog. It’s more efficient than the standard
 // bson.Unmarshal function. When verifier reads a v4.4+ server, this function
 // is called for every oplog entry, so that efficiency is material.
 func (o *Op) UnmarshalFromBSON(in []byte) error {
