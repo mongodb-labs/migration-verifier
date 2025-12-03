@@ -127,7 +127,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeE
 				srcDBName = changeEvent.Ns.DB
 				srcCollName = changeEvent.Ns.Coll
 			} else {
-				if changeEvent.Ns.DB == "VERIFIER_TEST_META" {
+				if changeEvent.Ns.DB == verifier.metaDBName {
 					continue
 				}
 

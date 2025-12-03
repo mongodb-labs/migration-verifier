@@ -2,6 +2,8 @@ package mmongo
 
 import (
 	"context"
+	"fmt"
+	"slices"
 
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -16,6 +18,8 @@ func GetBatch(
 	docs []bson.Raw,
 	buffer []byte,
 ) ([]bson.Raw, []byte, error) {
+	var docsCount, expectedCount int
+
 	for hasDocs := true; hasDocs; hasDocs = cursor.RemainingBatchLength() > 0 {
 		got := cursor.TryNext(ctx)
 
@@ -24,32 +28,25 @@ func GetBatch(
 		}
 
 		if !got {
+			if docsCount != 0 {
+				panic(fmt.Sprintf("Docs batch ended after %d but expected %d", docsCount, expectedCount))
+			}
+
 			break
 		}
+
+		// This ensures we only reallocate once (if at all):
+		if docsCount == 0 {
+			expectedCount = 1 + cursor.RemainingBatchLength()
+			docs = slices.Grow(docs, expectedCount)
+		}
+
+		docsCount++
 
 		docPos := len(buffer)
 		buffer = append(buffer, cursor.Current...)
 		docs = append(docs, buffer[docPos:])
 	}
-
-	/*
-		batchLen := cursor.RemainingBatchLength()
-
-		docs = slices.Grow(docs, batchLen)
-
-		for range batchLen {
-			if !cursor.Next(ctx) {
-				return nil, nil, mcmp.Or(
-					errors.Wrap(cursor.Err(), "iterating cursor mid-batch"),
-					fmt.Errorf("expected %d docs from cursor but only saw %d", batchLen, len(docs)),
-				)
-			}
-
-			docPos := len(buffer)
-			buffer = append(buffer, cursor.Current...)
-			docs = append(docs, buffer[docPos:])
-		}
-	*/
 
 	return docs, buffer, nil
 }

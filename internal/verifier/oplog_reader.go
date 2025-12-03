@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/helpers"
@@ -392,10 +393,24 @@ func (o *OplogReader) readAndHandleOneBatch(
 func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Timestamp) ([]ParsedEvent, bson.Timestamp, error) {
 	var latestTS bson.Timestamp
 
+	nsPrefixesToExclude := o.getExcludedNSPrefixes()
+
 	parseOneDocumentOp := func(opName string, ts bson.Timestamp, rawDoc bson.Raw) error {
 		nsStr, err := mbson.Lookup[string](rawDoc, "ns")
 		if err != nil {
 			return err
+		}
+
+		// Things we always ignore:
+		for _, prefix := range nsPrefixesToExclude {
+			if strings.HasPrefix(nsStr, prefix) {
+				return nil
+			}
+		}
+
+		// Honor namespace filtering:
+		if len(o.namespaces) > 0 && !slices.Contains(o.namespaces, nsStr) {
+			return nil
 		}
 
 		var docID bson.RawValue
@@ -614,17 +629,19 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 	return events, latestTS, nil
 }
 
-func (o *OplogReader) getNSFilter(docroot string) agg.And {
-	prefixes := append(
+func (o *OplogReader) getExcludedNSPrefixes() []string {
+	return append(
 		slices.Clone(namespaces.ExcludedDBPrefixes),
 
 		o.metaDB.Name()+".",
 		"config.",
 		"admin.",
 	)
+}
 
+func (o *OplogReader) getNSFilter(docroot string) agg.And {
 	filter := agg.And(lo.Map(
-		prefixes,
+		o.getExcludedNSPrefixes(),
 		func(prefix string, _ int) any {
 			return agg.Not{helpers.StringHasPrefix{
 				FieldRef: docroot + ".ns",
