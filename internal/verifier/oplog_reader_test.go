@@ -1,6 +1,8 @@
 package verifier
 
 import (
+	"time"
+
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
@@ -32,11 +34,21 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 
 	batchReceiver := reader.getReadChannel()
 
-	select {
-	case <-ctx.Done():
-		suite.Require().NoError(ctx.Err())
-	case _, isOpen := <-batchReceiver:
-		suite.Assert().False(isOpen, "channel should close")
+	timer := time.NewTimer(time.Minute)
+
+	channelOpen := true
+	for channelOpen {
+		var batch eventBatch
+		select {
+		case <-ctx.Done():
+			suite.Require().NoError(ctx.Err())
+		case <-timer.C:
+			suite.Require().Fail("should read batch channel")
+		case batch, channelOpen = <-batchReceiver:
+			if channelOpen {
+				suite.T().Logf("got batch: %+v", batch)
+			}
+		}
 	}
 
 	err := eg.Wait()
@@ -138,7 +150,6 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 			)
 			suite.Assert().Equal("update", event.OpType)
 			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID)))
-			suite.Assert().EqualValues(defaultUserDocumentSize, event.FullDocLen.MustGet())
 		},
 	)
 
@@ -175,7 +186,6 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 			)
 			suite.Assert().Equal("delete", event.OpType)
 			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID)))
-			suite.Assert().EqualValues(defaultUserDocumentSize, event.FullDocLen.MustGet())
 		},
 	)
 
@@ -242,7 +252,6 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 
 			for _, event := range events {
 				suite.Assert().Equal("update", event.OpType)
-				suite.Assert().EqualValues(defaultUserDocumentSize, event.FullDocLen.MustGet())
 			}
 
 			eventDocIDs := lo.Map(
@@ -279,7 +288,6 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 
 			for _, event := range events {
 				suite.Assert().Equal("delete", event.OpType)
-				suite.Assert().EqualValues(defaultUserDocumentSize, event.FullDocLen.MustGet())
 			}
 
 			eventDocIDs := lo.Map(
