@@ -251,7 +251,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	select {
 	case <-sctx.Done():
 		return util.WrapCtxErrWithCause(sctx)
-	case csr.changeEventBatchChan <- changeEventBatch{
+	case csr.eventBatchChan <- eventBatch{
 		events:      changeEvents,
 		resumeToken: cs.ResumeToken(),
 	}:

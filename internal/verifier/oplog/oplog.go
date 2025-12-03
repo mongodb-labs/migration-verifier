@@ -15,8 +15,7 @@ const (
 	rtBSONLength = 4 + 1 + 2 + 1 + 8 + 1
 )
 
-// Op is an internal representation of the parts of an oplog entry that we
-// care about. This struct is not meant to be marshaled/unmarshaled directly.
+// Op represents the parts of an oplog entry that we care about.
 type Op struct {
 	// Op holds the oplog entry’s `op`.
 	Op string
@@ -47,8 +46,8 @@ func (*Op) UnmarshalBSON([]byte) error {
 }
 
 // UnmarshalFromBSON unmarshals an Op more efficiently than the standard
-// bson.Unmarshal function. This function is called for every oplog entry,
-// so that efficiency is material.
+// bson.Unmarshal function. When verifier reads a v4.4+ server, this function
+// is called for every oplog entry, so that efficiency is material.
 func (o *Op) UnmarshalFromBSON(in []byte) error {
 	for el, err := range mbson.RawElements(bson.Raw(in)) {
 		if err != nil {
@@ -62,55 +61,68 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 
 		switch key {
 		case "op":
-			err = mbson.UnmarshalElementValue(el, &o.Op)
+			err := mbson.UnmarshalElementValue(el, &o.Op)
+			if err != nil {
+				return errors.Wrapf(err, "parsing %#q", key)
+			}
 		case "ts":
-			err = mbson.UnmarshalElementValue(el, &o.TS)
+			err := mbson.UnmarshalElementValue(el, &o.TS)
+			if err != nil {
+				return errors.Wrapf(err, "parsing %#q", key)
+			}
 		case "ns":
-			err = mbson.UnmarshalElementValue(el, &o.Ns)
+			err := mbson.UnmarshalElementValue(el, &o.Ns)
+			if err != nil {
+				return errors.Wrapf(err, "parsing %#q", key)
+			}
 		case "cmdName":
-			err = mbson.UnmarshalElementValue(el, &o.CmdName)
+			err := mbson.UnmarshalElementValue(el, &o.CmdName)
+			if err != nil {
+				return errors.Wrapf(err, "parsing %#q", key)
+			}
 		case "docLen":
-			err = mbson.UnmarshalElementValue(el, &o.DocLen)
+			err := mbson.UnmarshalElementValue(el, &o.DocLen)
+			if err != nil {
+				return errors.Wrapf(err, "parsing %#q", key)
+			}
 		case "docID":
 			o.DocID, err = el.ValueErr()
 			if err != nil {
-				err = errors.Wrapf(err, "parsing %#q value", key)
+				return errors.Wrapf(err, "parsing %#q value", key)
 			}
 			o.DocID.Value = slices.Clone(o.DocID.Value)
 		case "ops":
 			var arr bson.RawArray
-			err = errors.Wrapf(
+			err := errors.Wrapf(
 				mbson.UnmarshalElementValue(el, &arr),
 				"parsing ops",
 			)
 
-			if err == nil {
-				vals, err := arr.Values()
+			if err != nil {
+				return err
+			}
+
+			vals, err := arr.Values()
+			if err != nil {
+				return errors.Wrap(err, "parsing applyOps")
+			}
+
+			o.Ops = make([]Op, len(vals))
+
+			for i, val := range vals {
+
+				var opRaw bson.Raw
+				err := mbson.UnmarshalRawValue(val, &opRaw)
 				if err != nil {
-					return errors.Wrap(err, "parsing applyOps")
+					return errors.Wrapf(err, "parsing applyOps field")
 				}
 
-				o.Ops = make([]Op, len(vals))
-
-				for i, val := range vals {
-
-					var opRaw bson.Raw
-					err := mbson.UnmarshalRawValue(val, &opRaw)
-					if err != nil {
-						return errors.Wrapf(err, "parsing applyOps field")
-					}
-
-					if err := (&o.Ops[i]).UnmarshalFromBSON(opRaw); err != nil {
-						return errors.Wrapf(err, "parsing applyOps value")
-					}
+				if err := (&o.Ops[i]).UnmarshalFromBSON(opRaw); err != nil {
+					return errors.Wrapf(err, "parsing applyOps[%d]", i)
 				}
 			}
 		default:
-			err = errors.Wrapf(err, "unexpected field %#q", key)
-		}
-
-		if err != nil {
-			return err
+			return errors.Wrapf(err, "unexpected field %#q", key)
 		}
 	}
 

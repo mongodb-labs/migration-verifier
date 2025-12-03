@@ -379,7 +379,7 @@ func (o *OplogReader) readAndHandleOneBatch(
 	select {
 	case <-sctx.Done():
 		return err
-	case o.changeEventBatchChan <- changeEventBatch{
+	case o.eventBatchChan <- eventBatch{
 		events:      events,
 		resumeToken: resumeToken,
 	}:

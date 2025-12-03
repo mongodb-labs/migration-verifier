@@ -394,7 +394,8 @@ Additionally, because the amount of data sent to migration-verifier doesn’t ac
 
 # Change reading methods
 
-(**NOTE:** If the verifier restarts, it **MUST** use the same change reader options as before.)
+NB: If the verifier restarts, it **MUST** use the same change reader options
+as before, or it will fail immediately.
 
 ## `changeStream`
 

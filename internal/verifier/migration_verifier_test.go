@@ -697,7 +697,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 
 	err := verifier.PersistChangeEvents(
 		ctx,
-		changeEventBatch{
+		eventBatch{
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
@@ -713,7 +713,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 
 	err = verifier.PersistChangeEvents(
 		ctx,
-		changeEventBatch{
+		eventBatch{
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
@@ -982,7 +982,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		},
 	}
 
-	batch := changeEventBatch{
+	batch := eventBatch{
 		events: mslices.Of(event),
 	}
 

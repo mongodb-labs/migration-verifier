@@ -10,7 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-type changeEventBatch struct {
+type eventBatch struct {
 	events      []ParsedEvent
 	resumeToken bson.Raw
 }
@@ -87,7 +87,7 @@ HandlerLoop:
 }
 
 // PersistChangeEvents performs the necessary work for change events after receiving a batch.
-func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeEventBatch, eventOrigin whichCluster) error {
+func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBatch, eventOrigin whichCluster) error {
 	if len(batch.events) == 0 {
 		return nil
 	}
