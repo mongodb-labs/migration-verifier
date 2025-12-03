@@ -17,6 +17,10 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 
 	verifier := suite.BuildVerifier()
 
+	if suite.GetTopology(verifier.srcClient) == util.TopologySharded {
+		suite.T().Skipf("oplog mode is only for unsharded clusters")
+	}
+
 	var reader changeReader = verifier.newOplogReader(
 		nil,
 		src,
