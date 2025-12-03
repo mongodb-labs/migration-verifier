@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -27,18 +28,18 @@ type Op struct {
 	Ns string
 
 	// CmdName is the first field name in the oplog entry’s `o` document.
-	CmdName string
+	CmdName option.Option[string] `bson:",omitempty"`
 
 	// DocLen is the length, in bytes, of whatever document the oplog entry
 	// describes. This will only be meaningful for insert & replace entries.
-	DocLen int32
+	DocLen int32 `bson:"docLen"`
 
 	// DocID is the `_id` of whatever document the oplog entry describes.
 	// This won’t be populated for multi-op Op instances.
-	DocID bson.RawValue
+	DocID bson.RawValue `bson:"docID"`
 
 	// Ops holds the ops in an `applyOps` oplog entry.
-	Ops []Op
+	Ops []Op `bson:",omitempty"`
 }
 
 func (*Op) UnmarshalBSON([]byte) error {
@@ -77,10 +78,12 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 				return errors.Wrapf(err, "parsing %#q", key)
 			}
 		case "cmdName":
-			err := mbson.UnmarshalElementValue(el, &o.CmdName)
+			var cmdName string
+			err := mbson.UnmarshalElementValue(el, &cmdName)
 			if err != nil {
 				return errors.Wrapf(err, "parsing %#q", key)
 			}
+			o.CmdName = option.Some(cmdName)
 		case "docLen":
 			err := mbson.UnmarshalElementValue(el, &o.DocLen)
 			if err != nil {

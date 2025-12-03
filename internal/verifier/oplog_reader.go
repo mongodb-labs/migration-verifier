@@ -422,7 +422,7 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 		}
 
 		var docID bson.RawValue
-		var docLength types.ByteCount
+		var docLength option.Option[types.ByteCount]
 		var docField string
 
 		switch opName {
@@ -456,7 +456,7 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 				return errors.Wrap(err, "extracting doc from op")
 			}
 
-			docLength = types.ByteCount(len(doc))
+			docLength = option.Some(types.ByteCount(len(doc)))
 			docID, err = doc.LookupErr("_id")
 			if err != nil {
 				return errors.Wrap(err, "extracting doc ID from op")
@@ -465,8 +465,6 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 			if docID.IsZero() {
 				panic("zero doc ID!")
 			}
-
-			docLength = defaultUserDocumentSize
 		}
 
 		docID.Value = slices.Clone(docID.Value)
@@ -477,7 +475,7 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 				OpType:      oplogOpToOperationType[opName],
 				Ns:          NewNamespace(SplitNamespace(nsStr)),
 				DocID:       docID,
-				FullDocLen:  option.Some(docLength),
+				FullDocLen:  docLength,
 				ClusterTime: lo.ToPtr(ts),
 			},
 		)
@@ -590,7 +588,12 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 		case "n":
 			// Ignore.
 		case "c":
-			if op.CmdName != "applyOps" {
+			cmdName, has := op.CmdName.Get()
+			if !has {
+				return nil, bson.Timestamp{}, fmt.Errorf("no cmdname in op=c: %+v", op)
+			}
+
+			if cmdName != "applyOps" {
 				if o.onDDLEvent == onDDLEventAllow {
 					o.logIgnoredDDL(rawDoc)
 					continue
@@ -680,7 +683,7 @@ func getOplogDocLenExpr(docroot string) any {
 			},
 		},
 		Then: agg.BSONSize{docroot + ".o"},
-		Else: defaultUserDocumentSize,
+		Else: "$$REMOVE",
 	}
 }
 

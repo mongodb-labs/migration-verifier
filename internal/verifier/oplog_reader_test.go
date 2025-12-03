@@ -9,9 +9,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// TestOplogReader_DDL verifies that the oplog reader sees & publishes
-// document changes on the source.
-func (suite *IntegrationTestSuite) TestOplogReader_DDL() {
+// TestOplogReader_SourceDDL verifies that source DDL crashes the oplog reader.
+func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 	ctx := suite.Context()
 
 	verifier := suite.BuildVerifier()

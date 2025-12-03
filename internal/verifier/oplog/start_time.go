@@ -12,6 +12,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 )
 
+// GetTailingStartTimes returns the earliest transaction timestamp and the
+// latest op in the oplog.
 func GetTailingStartTimes(
 	ctx context.Context,
 	client *mongo.Client,
@@ -132,7 +134,7 @@ func getOldestTransactionTime(
 	coll := client.Database("config").
 		Collection(
 			"transactions",
-			options.Collection().SetReadConcern(readconcern.Local()),
+			options.Collection().SetReadConcern(readconcern.Majority()),
 		)
 
 	decoded := struct {
