@@ -17,15 +17,7 @@ import (
 func TestGetBatch(t *testing.T) {
 	ctx := t.Context()
 
-	connStr := os.Getenv("MVTEST_META")
-	if connStr == "" {
-		t.Skipf("No MVTEST_META found; skipping.")
-	}
-
-	client, err := mongo.Connect(
-		options.Client().ApplyURI(connStr),
-	)
-	require.NoError(t, err)
+	client := getClientFromEnv(t)
 
 	coll := client.Database(t.Name()).Collection(
 		"coll",
@@ -81,15 +73,7 @@ func TestGetBatch(t *testing.T) {
 func TestUnmarshalCursor(t *testing.T) {
 	ctx := t.Context()
 
-	connStr := os.Getenv("MVTEST_META")
-	if connStr == "" {
-		t.Skipf("No MVTEST_META found; skipping.")
-	}
-
-	client, err := mongo.Connect(
-		options.Client().ApplyURI(connStr),
-	)
-	require.NoError(t, err)
+	client := getClientFromEnv(t)
 
 	cursor, err := client.Database("admin").Aggregate(
 		ctx,
@@ -119,6 +103,20 @@ func TestUnmarshalCursor(t *testing.T) {
 		batch,
 		"should be as expected",
 	)
+}
+
+func getClientFromEnv(t *testing.T) *mongo.Client {
+	connStr := os.Getenv("MVTEST_META")
+	if connStr == "" {
+		t.Skipf("No MVTEST_META found; skipping.")
+	}
+
+	client, err := mongo.Connect(
+		options.Client().ApplyURI(connStr),
+	)
+	require.NoError(t, err)
+
+	return client
 }
 
 type unmarshaler struct {
