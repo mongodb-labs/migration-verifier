@@ -160,15 +160,3 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 	}, nil
 
 }
-
-/*
-func optDurationToOptString(dur option.Option[time.Duration]) option.Option[string] {
-	var ret option.Option[string]
-
-	if dur, has := dur.Get(); has {
-		ret = option.Some(dur.String())
-	}
-
-	return ret
-}
-*/

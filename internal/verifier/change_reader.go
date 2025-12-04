@@ -32,13 +32,13 @@ const (
 )
 
 type readerCurrentTimes struct {
-	LastResumeTime  bson.Timestamp
-	LastClusterTime bson.Timestamp
+	LastHandledTime bson.Timestamp `json:"lastHandledTime"`
+	LastClusterTime bson.Timestamp `json:"lastClusterTime"`
 }
 
 func (rp readerCurrentTimes) Lag() time.Duration {
 	return time.Second * time.Duration(
-		int(rp.LastClusterTime.T)-int(rp.LastResumeTime.T),
+		int(rp.LastClusterTime.T)-int(rp.LastHandledTime.T),
 	)
 }
 
@@ -253,7 +253,7 @@ func (rc *ChangeReaderCommon) updateLag(sess *mongo.Session, token bson.Raw) {
 				Msg("Failed to extract cluster time from session.")
 		} else {
 			rc.currentTimes.Store(option.Some(readerCurrentTimes{
-				LastResumeTime:  tokenTs,
+				LastHandledTime: tokenTs,
 				LastClusterTime: cTime,
 			}))
 		}

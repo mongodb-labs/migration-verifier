@@ -243,36 +243,36 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 }
 
 type ProgressGenerationStats struct {
-	TimeElapsed   string
-	ActiveWorkers int
+	TimeElapsed   string `json:"timeElapsed"`
+	ActiveWorkers int    `json:"activeWorkers"`
 
-	DocsCompared types.DocumentCount
-	TotalDocs    types.DocumentCount
+	DocsCompared types.DocumentCount `json:"docsCompared"`
+	TotalDocs    types.DocumentCount `json:"totalDocs"`
 
-	SrcBytesCompared types.ByteCount
-	TotalSrcBytes    types.ByteCount
+	SrcBytesCompared types.ByteCount `json:"srcBytesCompared"`
+	TotalSrcBytes    types.ByteCount `json:"totalSrcBytes,omitempty"`
 
-	MismatchesFound  int64
-	RechecksEnqueued int64
+	MismatchesFound  int64 `json:"mismatchesFound"`
+	RechecksEnqueued int64 `json:"rechecksEnqueued"`
 }
 
 type ProgressChangeStats struct {
-	EventsPerSecond  option.Option[float64]
-	CurrentTimes     option.Option[readerCurrentTimes]
-	BufferSaturation float64
+	EventsPerSecond  option.Option[float64]            `json:"eventsPerSecond"`
+	CurrentTimes     option.Option[readerCurrentTimes] `json:"currentTimes"`
+	BufferSaturation float64                           `json:"bufferSaturation"`
 }
 
 // Progress represents the structure of the JSON response from the Progress end point.
 type Progress struct {
-	Phase string
+	Phase string `json:"phase"`
 
-	Generation      int
-	GenerationStats ProgressGenerationStats
+	Generation      int                     `json:"generation"`
+	GenerationStats ProgressGenerationStats `json:"generationStats"`
 
-	SrcChangeStats ProgressChangeStats
-	DstChangeStats ProgressChangeStats
+	SrcChangeStats ProgressChangeStats `json:"srcChangeStats"`
+	DstChangeStats ProgressChangeStats `json:"dstChangeStats"`
 
-	Error  error
+	Error  error               `json:"error,omitempty"`
 	Status *VerificationStatus `json:"verificationStatus"`
 }
 
