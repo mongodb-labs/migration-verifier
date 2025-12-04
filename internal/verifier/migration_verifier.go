@@ -25,10 +25,8 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
-	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/event"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
@@ -221,17 +219,6 @@ func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
 	verifier.doIfForceReadConcernMajority(func() {
 		opts.SetReadConcern(readconcern.Majority())
 	})
-
-	if verifier.logger.GetLevel() <= zerolog.TraceLevel {
-		opts.SetMonitor(&event.CommandMonitor{
-			Succeeded: func(ctx context.Context, cse *event.CommandSucceededEvent) {
-				verifier.logger.Trace().
-					Str("commandName", cse.CommandName).
-					Stringer("reply", cse.Reply).
-					Msg("Command succeeded.")
-			},
-		})
-	}
 
 	return opts
 }
