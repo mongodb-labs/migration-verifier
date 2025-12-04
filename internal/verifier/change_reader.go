@@ -180,6 +180,10 @@ func (rc *ChangeReaderCommon) getEventsPerSecond() option.Option[float64] {
 }
 
 func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson.Raw) error {
+	if len(token) == 0 {
+		panic("internal error: resume token is empty but should never be")
+	}
+
 	coll := rc.metaDB.Collection(changeReaderCollectionName)
 	_, err := coll.ReplaceOne(
 		ctx,
