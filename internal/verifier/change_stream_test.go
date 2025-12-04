@@ -29,7 +29,7 @@ import (
 )
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_InitialNonempty() {
-	//zerolog.SetGlobalLevel(zerolog.TraceLevel) // gets restored automatically
+	zerolog.SetGlobalLevel(zerolog.TraceLevel) // gets restored automatically
 
 	ctx := suite.Context()
 	dbName := suite.DBNameForTest()
