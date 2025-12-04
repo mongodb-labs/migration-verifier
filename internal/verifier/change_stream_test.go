@@ -28,6 +28,49 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+func (suite *IntegrationTestSuite) TestChangeStreamFilter_InitialNonempty() {
+	//zerolog.SetGlobalLevel(zerolog.TraceLevel) // gets restored automatically
+
+	ctx := suite.Context()
+	dbName := suite.DBNameForTest()
+
+	go func() {
+		for ctx.Err() == nil {
+			coll := suite.srcMongoClient.
+				Database(dbName).
+				Collection("coll")
+
+			_, _ = coll.InsertOne(ctx, bson.D{{"_id", 123}})
+			_, _ = coll.DeleteOne(ctx, bson.D{{"_id", 123}})
+		}
+	}()
+
+	for i := range 100 {
+		suite.Run(
+			fmt.Sprint(i),
+			func() {
+				ctx, cancel := contextplus.WithCancelCause(ctx)
+				defer cancel(fmt.Errorf("subtest is done"))
+
+				verifier := suite.BuildVerifier()
+
+				rdr, ok := verifier.srcChangeReader.(*ChangeStreamReader)
+				if !ok {
+					suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeReader, rdr)
+				}
+
+				eg, egCtx := contextplus.ErrGroup(ctx)
+				suite.Require().NoError(rdr.start(egCtx, eg))
+
+				suite.Require().NoError(
+					verifier.metaClient.Database(verifier.metaDBName).Drop(ctx),
+				)
+			},
+		)
+
+	}
+}
+
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
 	ctx := suite.Context()
 

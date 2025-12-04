@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
@@ -376,11 +377,13 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 	csStartLogEvent := csr.logger.Info()
 
-	if token, hasToken := savedResumeToken.Get(); hasToken {
-		logEvent := csStartLogEvent.
-			Stringer(csr.resumeTokenDocID(), token)
+	resumetoken, hasSavedToken := savedResumeToken.Get()
 
-		ts, err := csr.resumeTokenTSExtractor(token)
+	if hasSavedToken {
+		logEvent := csStartLogEvent.
+			Stringer(csr.resumeTokenDocID(), resumetoken)
+
+		ts, err := csr.resumeTokenTSExtractor(resumetoken)
 		if err == nil {
 			logEvent = addTimestampToLogEvent(ts, logEvent)
 		} else {
@@ -392,9 +395,9 @@ func (csr *ChangeStreamReader) createChangeStream(
 		logEvent.Msg("Starting change stream from persisted resume token.")
 
 		if util.ClusterHasChangeStreamStartAfter([2]int(csr.clusterInfo.VersionArray)) {
-			opts = opts.SetStartAfter(token)
+			opts = opts.SetStartAfter(resumetoken)
 		} else {
-			opts = opts.SetResumeAfter(token)
+			opts = opts.SetResumeAfter(resumetoken)
 		}
 	} else {
 		csStartLogEvent.Msgf("Starting change stream from current %s cluster time.", csr.readerType)
@@ -410,9 +413,22 @@ func (csr *ChangeStreamReader) createChangeStream(
 		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "opening change stream")
 	}
 
-	err = csr.persistResumeToken(ctx, changeStream.ResumeToken())
-	if err != nil {
-		return nil, nil, bson.Timestamp{}, err
+	if !hasSavedToken {
+		// Usually the change stream’s initial response is empty, but sometimes
+		// there are events right away. We can discard those events because
+		// they’ve already happened, and our initial scan is yet to come.
+		if len(changeStream.ResumeToken()) == 0 {
+			_, _, err := mmongo.GetBatch(ctx, changeStream, nil, nil)
+
+			if err != nil {
+				return nil, nil, bson.Timestamp{}, errors.Wrap(err, "discarding change stream’s initial events")
+			}
+		}
+
+		err = csr.persistResumeToken(ctx, changeStream.ResumeToken())
+		if err != nil {
+			return nil, nil, bson.Timestamp{}, errors.Wrapf(err, "persisting initial resume token")
+		}
 	}
 
 	startTs, err := csr.resumeTokenTSExtractor(changeStream.ResumeToken())
@@ -428,14 +444,19 @@ func (csr *ChangeStreamReader) createChangeStream(
 		return nil, nil, bson.Timestamp{}, errors.Wrap(err, "failed to read cluster time from session")
 	}
 
-	csr.logger.Debug().
-		Any("resumeTokenTimestamp", startTs).
-		Any("clusterTime", clusterTime).
-		Stringer("changeStreamReader", csr).
-		Msg("Using earlier time as start timestamp.")
-
 	if startTs.After(clusterTime) {
+		csr.logger.Debug().
+			Any("resumeTokenTimestamp", startTs).
+			Any("clusterTime", clusterTime).
+			Stringer("changeStreamReader", csr).
+			Msg("Cluster time predates resume token; using it as start timestamp.")
+
 		startTs = clusterTime
+	} else {
+		csr.logger.Debug().
+			Any("resumeTokenTimestamp", startTs).
+			Stringer("changeStreamReader", csr).
+			Msg("Got start timestamp from change stream.")
 	}
 
 	return changeStream, sess, startTs, nil
@@ -532,6 +553,10 @@ func (csr *ChangeStreamReader) String() string {
 }
 
 func extractTSFromChangeStreamResumeToken(resumeToken bson.Raw) (bson.Timestamp, error) {
+	if len(resumeToken) == 0 {
+		panic("internal error: resume token is empty but should never be")
+	}
+
 	// Change stream token is always a V1 keystring in the _data field
 	tokenDataRV, err := resumeToken.LookupErr("_data")
 
