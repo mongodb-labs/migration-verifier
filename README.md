@@ -137,10 +137,11 @@ These represent a logical time in MongoDB’s replication protocol.
     - `rechecksEnqueued` (unsigned integer)
   - `srcChangeStats`
     - `eventsPerSecond` (nonnegative float, optional)
-    - `currentTimes`
+    - `currentTimes` (optional)
       - `lastHandledTime` (timestamp)
       - `lastClusterTime` (timestamp)
     - `bufferSaturation` (nonnegative float)
+  - `dstChangeStats` (same fields as `srcChangeStats`)
   - `error` (string, optional)
   - `verificationStatus` (tasks for the current generation)
     - `totalTasks` (unsigned integer)
