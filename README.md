@@ -118,7 +118,7 @@ The verifier will now check to completion to make sure that there are no inconsi
 curl http://127.0.0.1:27020/api/v1/progress
 ```
 
-### `/progress` API contents
+### `/progress` API Response Contents
 
 In the below a “timestamp” is an object with `T` and `I` unsigned integers.
 These represent a logical time in MongoDB’s replication protocol.
