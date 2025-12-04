@@ -108,14 +108,14 @@ metaURI: mongodb://localhost:28012
 The verifier will now check to completion to make sure that there are no inconsistencies. The command you need to send the verifier here is `writesOff`. The command doesn’t block. This means that you will have to poll the verifier, or watch its logs, to see the status of the verification (see `progress`).
 
     ```
-    curl -H "Content-Type: application/json" -X POST -d '{}' http://127.0.0.1:27020/api/v1/writesOff
+    curl -H "Content-Type: application/json" -d '{}' http://127.0.0.1:27020/api/v1/writesOff
     ```
 
 
 3. You can poll the status of the verification by hitting the `progress` endpoint. In particular, the `phase` should reveal whether the verifier is done verifying. Once the `phase` is `idle`, the verification has completed. At that point the `error` field should be `null`, and the `failedTasks` field should be `0`, if the verification was successful. A non-`null` `error` field indicates that the verifier itself ran into an error. `failedTasks` being non-`0` indicates that there was an inconsistency. See below for how to investigate mismatches.
 
 ```
-curl -H "Content-Type: application/json" -X GET http://127.0.0.1:27020/api/v1/progress
+curl http://127.0.0.1:27020/api/v1/progress
 ```
 
 ### `/progress` API contents
