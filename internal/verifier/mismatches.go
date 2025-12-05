@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -137,6 +138,53 @@ func countMismatchesForTasks(
 	matched := matchRV.AsInt64()
 
 	return matched, totalRV.AsInt64() - matched, nil
+}
+
+func countMismatchesForGeneration(
+	ctx context.Context,
+	metaDB *mongo.Database,
+	generation int,
+) (int64, error) {
+	cursor, err := metaDB.Collection(verificationTasksCollection).Aggregate(
+		ctx,
+		mongo.Pipeline{
+			{{"$match", bson.D{
+				{"generation", generation},
+			}}},
+			{{"$lookup", bson.D{
+				{"from", mismatchesCollectionName},
+				{"localField", "_id"},
+				{"foreignField", "task"},
+				{"as", "mismatches"},
+			}}},
+			{{"$group", bson.D{
+				{"_id", nil},
+				{"mismatches", bson.D{
+					{"$sum", bson.D{{"$size", "$mismatches"}}},
+				}},
+			}}},
+		},
+	)
+	if err != nil {
+		return 0, errors.Wrap(err, "sending query to count last generation’s found mismatches")
+	}
+
+	defer cursor.Close(ctx)
+
+	if !cursor.Next(ctx) {
+		if cursor.Err() != nil {
+			return 0, errors.Wrap(err, "reading count of last generation’s found mismatches")
+		}
+
+		panic("no mismatches result and no error??")
+	}
+
+	count, err := mbson.Lookup[int64](cursor.Current, "mismatches")
+	if err != nil {
+		return 0, errors.Wrapf(err, "reading mismatches from result (%v)", cursor.Current)
+	}
+
+	return count, nil
 }
 
 func getMismatchesForTasks(

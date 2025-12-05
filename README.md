@@ -133,6 +133,7 @@ These represent a logical time in MongoDB’s replication protocol.
     - `totalDocs` (unsigned integer)
     - `srcBytesCompared` (unsigned integer)
     - `totalSrcBytes` (unsigned integer, only present in `check` phase)
+    - `priorMismatches` (unsigned integer, optional, mismatches seen in prior generation)
     - `mismatchesFound` (unsigned integer)
     - `rechecksEnqueued` (unsigned integer)
   - `srcChangeStats`

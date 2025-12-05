@@ -7,6 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -36,6 +37,25 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 			return errors.Wrapf(err, "fetching generation %d’s tasks’ status", generation)
 		},
 	)
+
+	if generation > 0 {
+		eg.Go(
+			func() error {
+				count, err := countMismatchesForGeneration(
+					egCtx,
+					verifier.metaClient.Database(verifier.metaDBName),
+					generation-1,
+				)
+
+				if err != nil {
+					return errors.Wrapf(err, "counting mismatches seen during generation %d", generation-1)
+				}
+
+				genStats.PriorMismatches = option.Some(count)
+			},
+		)
+	}
+
 	eg.Go(
 		func() error {
 			var err error
