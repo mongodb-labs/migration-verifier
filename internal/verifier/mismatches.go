@@ -176,7 +176,8 @@ func countMismatchesForGeneration(
 			return 0, errors.Wrap(err, "reading count of last generation’s found mismatches")
 		}
 
-		panic("no mismatches result and no error??")
+		// This happens if there were no tasks in the queried generation.
+		return 0, nil
 	}
 
 	count, err := mbson.Lookup[int64](cursor.Current, "mismatches")
