@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -139,16 +140,25 @@ func countMismatchesForTasks(
 	return matched, totalRV.AsInt64() - matched, nil
 }
 
-func countRechecksForGeneration(
+func countRechecksForPriorGeneration(
 	ctx context.Context,
 	metaDB *mongo.Database,
 	generation int,
 ) (int64, int64, error) {
+	if generation < 1 {
+		panic(fmt.Sprintf("only generation >= 1 has rechecks (got generation=%d)", generation))
+	}
+
+	// We start with the given generation’s tasks. These tell us all of the
+	// generation’s rechecks. Then we $lookup on mismatches, matching on the
+	// task ID. That gives us all of the mismatches seen in the generation.
+	// The changes, then, are the non-mismatch rechecks.
 	cursor, err := metaDB.Collection(verificationTasksCollection).Aggregate(
 		ctx,
 		mongo.Pipeline{
 			{{"$match", bson.D{
 				{"generation", generation},
+				{"type", verificationTaskVerifyDocuments},
 			}}},
 			{{"$lookup", bson.D{
 				{"from", mismatchesCollectionName},
@@ -157,21 +167,17 @@ func countRechecksForGeneration(
 				{"as", "mismatches"},
 			}}},
 			{{"$addFields", bson.D{
-				{"mismatches", bson.D{{"$size", "$mismatches"}}},
+				{"mismatches", agg.Size{"$mismatches"}},
 			}}},
 			{{"$group", bson.D{
 				{"_id", nil},
-				{"changes", bson.D{
-					{"$sum", bson.D{
-						{"$subtract", bson.A{
-							bson.D{{"$size", "$_ids"}},
-							"$mismatches",
-						}},
-					}},
+				{"changes", agg.Sum{
+					agg.Subtract{
+						agg.Size{"$_ids"},
+						"$mismatches",
+					},
 				}},
-				{"mismatches", bson.D{
-					{"$sum", "$mismatches"},
-				}},
+				{"mismatches", agg.Sum{"$mismatches"}},
 			}}},
 		},
 	)

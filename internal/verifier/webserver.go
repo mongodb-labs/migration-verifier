@@ -257,9 +257,8 @@ type ProgressGenerationStats struct {
 	SrcBytesCompared types.ByteCount `json:"srcBytesCompared"`
 	TotalSrcBytes    types.ByteCount `json:"totalSrcBytes,omitempty"`
 
-	PriorRechecks    option.Option[ProgressRechecks] `json:"priorRechecks"`
-	MismatchesFound  int64                           `json:"mismatchesFound"`
-	RechecksEnqueued int64                           `json:"rechecksEnqueued"`
+	PriorRechecks   option.Option[ProgressRechecks] `json:"priorRechecks"`
+	MismatchesFound int64                           `json:"mismatchesFound"`
 }
 
 type ProgressChangeStats struct {

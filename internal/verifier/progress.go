@@ -42,7 +42,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 	if generation > 0 {
 		eg.Go(
 			func() error {
-				mismatches, changes, err := countRechecksForGeneration(
+				mismatches, changes, err := countRechecksForPriorGeneration(
 					egCtx,
 					verifier.metaClient.Database(verifier.metaDBName),
 					generation-1,
@@ -142,19 +142,6 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 			}
 
 			genStats.MismatchesFound = mismatchCount
-
-			return nil
-		},
-	)
-	eg.Go(
-		func() error {
-			recheckColl := verifier.getRecheckQueueCollection(1 + generation)
-			count, err := recheckColl.EstimatedDocumentCount(ctx)
-			if err != nil {
-				return errors.Wrapf(err, "counting rechecks enqueued during generation %d", generation)
-			}
-
-			genStats.RechecksEnqueued = count
 
 			return nil
 		},
