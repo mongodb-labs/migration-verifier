@@ -9,7 +9,7 @@ import (
 )
 
 type bsonCastRecipient interface {
-	bson.Raw | bson.Timestamp | bson.ObjectID | string | int32
+	bson.Raw | bson.Timestamp | bson.ObjectID | string | int32 | int64
 }
 
 type bsonSourceTypes interface {
@@ -50,6 +50,10 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 		}
 	case int32:
 		if val, ok := in.Int32OK(); ok {
+			return any(val).(T), nil
+		}
+	case int64:
+		if val, ok := in.Int64OK(); ok {
 			return any(val).(T), nil
 		}
 	default:
