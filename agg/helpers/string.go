@@ -1,5 +1,3 @@
-// Package helpers exposes functions that express common operations
-// that don’t map to a single aggregation operator.
 package helpers
 
 import (

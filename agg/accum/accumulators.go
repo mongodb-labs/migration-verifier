@@ -1,3 +1,4 @@
+// Package accum exposes helper types for accumulation operators.
 package accum
 
 import "go.mongodb.org/mongo-driver/v2/bson"

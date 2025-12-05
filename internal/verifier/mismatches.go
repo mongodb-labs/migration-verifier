@@ -141,24 +141,33 @@ func countMismatchesForTasks(
 	return matched, totalRV.AsInt64() - matched, nil
 }
 
-func countRechecksForPriorGeneration(
+type recheckCounts struct {
+	// FromMismatch are rechecks from previously-seen mismatches.
+	FromMismatch int64
+
+	// FromChange are rechecks from previously-seen changes.
+	FromChange int64
+
+	// NewMismatches are newly-seen mismatches that *will* require rechecks.
+	NewMismatches int64
+}
+
+// NB: This is OK to call for generation==0. In this case it will only
+// add up newly-seen document mismatches.
+func countRechecksForGeneration(
 	ctx context.Context,
 	metaDB *mongo.Database,
 	generation int,
-) (int64, int64, error) {
-	if generation < 1 {
-		panic(fmt.Sprintf("only generation >= 1 has rechecks (got generation=%d)", generation))
-	}
+) (recheckCounts, error) {
 
-	// We start with the given generation’s tasks. These tell us all of the
-	// generation’s rechecks. Then we $lookup on mismatches, matching on the
-	// task ID. That gives us all of the mismatches seen in the generation.
-	// The changes, then, are the non-mismatch rechecks.
+	// The numbers we need are:
+	// - the given generation’s total # of docs to recheck
+	// - the # of mismatches found in the prior generation
 	cursor, err := metaDB.Collection(verificationTasksCollection).Aggregate(
 		ctx,
 		mongo.Pipeline{
 			{{"$match", bson.D{
-				{"generation", generation},
+				{"generation", bson.D{{"$in", []any{generation, generation - 1}}}},
 				{"type", verificationTaskVerifyDocuments},
 			}}},
 			{{"$lookup", bson.D{
@@ -167,47 +176,73 @@ func countRechecksForPriorGeneration(
 				{"foreignField", "task"},
 				{"as", "mismatches"},
 			}}},
-			{{"$addFields", bson.D{
-				{"mismatches", agg.Size{"$mismatches"}},
-			}}},
 			{{"$group", bson.D{
 				{"_id", nil},
-				{"changes", accum.Sum{
-					agg.Subtract{
-						agg.Size{"$_ids"},
-						"$mismatches",
+				{"allRechecks", accum.Sum{
+					agg.Cond{
+						If:   agg.Eq{"generation", generation},
+						Then: agg.Size{"_ids"},
+						Else: 0,
 					},
 				}},
-				{"mismatches", accum.Sum{"$mismatches"}},
+				{"rechecksFromMismatch", accum.Sum{
+					agg.Cond{
+						If:   agg.Eq{"generation", generation - 1},
+						Then: agg.Size{"$mismatches"},
+						Else: 0,
+					},
+				}},
+				{"newMismatches", accum.Sum{
+					agg.Cond{
+						If:   agg.Eq{"generation", generation},
+						Then: agg.Size{"$mismatches"},
+						Else: 0,
+					},
+				}},
 			}}},
 		},
 	)
 	if err != nil {
-		return 0, 0, errors.Wrap(err, "sending query to count last generation’s found mismatches")
+		return recheckCounts{}, errors.Wrap(err, "sending query to count last generation’s found mismatches")
 	}
 
 	defer cursor.Close(ctx)
 
 	if !cursor.Next(ctx) {
 		if cursor.Err() != nil {
-			return 0, 0, errors.Wrap(err, "reading count of last generation’s found mismatches")
+			return recheckCounts{}, errors.Wrap(err, "reading count of last generation’s found mismatches")
 		}
 
-		// This happens if there were no tasks in the queried generation.
-		return 0, 0, nil
+		// This happens if there were no tasks in the queried generations.
+		return recheckCounts{}, nil
 	}
 
 	result := struct {
-		Mismatches int64
-		Changes    int64
+		AllRechecks          int64
+		RechecksFromMismatch int64
+		NewMismatches        int64
 	}{}
 
 	err = cursor.Decode(&result)
 	if err != nil {
-		return 0, 0, errors.Wrapf(err, "reading mismatches from result (%v)", cursor.Current)
+		return recheckCounts{}, errors.Wrapf(err, "reading mismatches from result (%v)", cursor.Current)
 	}
 
-	return result.Mismatches, result.Changes, nil
+	if result.RechecksFromMismatch > result.AllRechecks {
+		return recheckCounts{}, fmt.Errorf(
+			"INTERNAL ERROR: generation %d’s found mismatches (%d) outnumber generation %d’s total documents to recheck (%d); this is nonsensical",
+			generation-1,
+			result.RechecksFromMismatch,
+			generation,
+			result.AllRechecks,
+		)
+	}
+
+	return recheckCounts{
+		FromMismatch:  result.RechecksFromMismatch,
+		FromChange:    result.AllRechecks - result.RechecksFromMismatch,
+		NewMismatches: result.NewMismatches,
+	}, nil
 }
 
 func getMismatchesForTasks(

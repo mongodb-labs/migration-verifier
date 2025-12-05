@@ -6,11 +6,9 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
@@ -39,28 +37,28 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 		},
 	)
 
-	if generation > 0 {
-		eg.Go(
-			func() error {
-				mismatches, changes, err := countRechecksForPriorGeneration(
-					egCtx,
-					verifier.metaClient.Database(verifier.metaDBName),
-					generation-1,
-				)
+	eg.Go(
+		func() error {
+			recheckStats, err := countRechecksForGeneration(
+				egCtx,
+				verifier.metaClient.Database(verifier.metaDBName),
+				generation-1,
+			)
 
-				if err != nil {
-					return errors.Wrapf(err, "counting mismatches seen during generation %d", generation-1)
-				}
+			if err != nil {
+				return errors.Wrapf(err, "counting mismatches seen during generation %d", generation-1)
+			}
 
-				genStats.PriorRechecks = option.Some(ProgressRechecks{
-					Changes:    changes,
-					Mismatches: mismatches,
-				})
+			genStats.PriorRechecks = option.Some(ProgressRechecks{
+				Changes:    recheckStats.FromChange,
+				Mismatches: recheckStats.FromMismatch,
+			})
 
-				return nil
-			},
-		)
-	}
+			genStats.MismatchesFound = recheckStats.NewMismatches
+
+			return nil
+		},
+	)
 
 	eg.Go(
 		func() error {
@@ -107,41 +105,6 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 			genStats.TotalSrcBytes = totalBytes
 
 			genStats.ActiveWorkers = activeWorkers
-
-			return nil
-		},
-	)
-	eg.Go(
-		func() error {
-			failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
-				ctx,
-				verifier.logger,
-				verifier.verificationTaskCollection(),
-				verificationTaskVerifyDocuments,
-				generation,
-			)
-			if err != nil {
-				return errors.Wrapf(err, "fetching generation %d’s failed & incomplete tasks", generation)
-			}
-
-			taskIDsToQuery := lo.Map(
-				lo.Flatten(mslices.Of(failedTasks, incompleteTasks)),
-				func(ft VerificationTask, _ int) bson.ObjectID {
-					return ft.PrimaryKey
-				},
-			)
-
-			mismatchCount, _, err := countMismatchesForTasks(
-				egCtx,
-				verifier.verificationDatabase(),
-				taskIDsToQuery,
-				true,
-			)
-			if err != nil {
-				return errors.Wrapf(err, "counting mismatches seen during generation %d", generation)
-			}
-
-			genStats.MismatchesFound = mismatchCount
 
 			return nil
 		},
