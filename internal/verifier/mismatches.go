@@ -180,21 +180,21 @@ func countRechecksForGeneration(
 				{"_id", nil},
 				{"allRechecks", accum.Sum{
 					agg.Cond{
-						If:   agg.Eq{"generation", generation},
+						If:   agg.Eq{"$generation", generation},
 						Then: agg.Size{"$_ids"},
 						Else: 0,
 					},
 				}},
 				{"rechecksFromMismatch", accum.Sum{
 					agg.Cond{
-						If:   agg.Eq{"generation", generation - 1},
+						If:   agg.Eq{"$generation", generation - 1},
 						Then: agg.Size{"$mismatches"},
 						Else: 0,
 					},
 				}},
 				{"newMismatches", accum.Sum{
 					agg.Cond{
-						If:   agg.Eq{"generation", generation},
+						If:   agg.Eq{"$generation", generation},
 						Then: agg.Size{"$mismatches"},
 						Else: 0,
 					},
