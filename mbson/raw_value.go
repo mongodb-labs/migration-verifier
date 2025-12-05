@@ -63,6 +63,15 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 	return *new(T), cannotCastErr{in.Type, *new(T)}
 }
 
+func ToInt64(in bson.RawValue) (int64, error) {
+	i64, ok := in.AsInt64OK()
+	if !ok {
+		return 0, cannotCastErr{in.Type, i64}
+	}
+
+	return i64, nil
+}
+
 // Lookup fetches a value from a BSON document, casts it to the appropriate
 // type, then returns the result.
 func Lookup[T bsonCastRecipient](doc bson.Raw, pointer ...string) (T, error) {
