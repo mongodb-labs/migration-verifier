@@ -181,7 +181,7 @@ func countRechecksForGeneration(
 				{"allRechecks", accum.Sum{
 					agg.Cond{
 						If:   agg.Eq{"generation", generation},
-						Then: agg.Size{"_ids"},
+						Then: agg.Size{"$_ids"},
 						Else: 0,
 					},
 				}},
