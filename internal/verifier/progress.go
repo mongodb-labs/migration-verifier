@@ -20,12 +20,13 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 	var vStatus *VerificationStatus
 
 	generation := verifier.generation
+	genStats := ProgressGenerationStats{}
 
-	progressTime := time.Now()
-	genElapsed := progressTime.Sub(verifier.generationStartTime)
+	if !verifier.generationStartTime.IsZero() {
+		progressTime := time.Now()
+		genElapsed := progressTime.Sub(verifier.generationStartTime)
 
-	genStats := ProgressGenerationStats{
-		TimeElapsed: genElapsed.Round(10 * time.Millisecond).String(),
+		genStats.TimeElapsed = option.Some(genElapsed.Round(10 * time.Millisecond).String())
 	}
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
