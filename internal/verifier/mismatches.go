@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/10gen/migration-verifier/agg"
+	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -171,13 +172,13 @@ func countRechecksForPriorGeneration(
 			}}},
 			{{"$group", bson.D{
 				{"_id", nil},
-				{"changes", agg.Sum{
+				{"changes", accum.Sum{
 					agg.Subtract{
 						agg.Size{"$_ids"},
 						"$mismatches",
 					},
 				}},
-				{"mismatches", agg.Sum{"$mismatches"}},
+				{"mismatches", accum.Sum{"$mismatches"}},
 			}}},
 		},
 	)
