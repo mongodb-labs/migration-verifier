@@ -36,8 +36,6 @@ migration-verifier needs a MongoDB cluster to store its state. This cluster *mus
 
 See [above](#Quick-Start) for a one-line command to start up a local, single-node replica set that you can use for this purpose.
 
-The verifier can alternatively store its metadata on the destination cluster. This can severely degrade performance, though. Also, if you’re using mongosync, it requires either disabling mongosync’s destination write blocking or giving the `bypassWriteBlockingMode` to the verifier’s `--metaURI` user.
-
 # More Details
 
 To see all options:
