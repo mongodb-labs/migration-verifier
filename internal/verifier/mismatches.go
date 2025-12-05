@@ -180,12 +180,12 @@ func countMismatchesForGeneration(
 		return 0, nil
 	}
 
-	count, err := mbson.Lookup[int64](cursor.Current, "mismatches")
+	mmRV, err := cursor.Current.LookupErr("mismatches")
 	if err != nil {
 		return 0, errors.Wrapf(err, "reading mismatches from result (%v)", cursor.Current)
 	}
 
-	return count, nil
+	return mbson.ToInt64(mmRV)
 }
 
 func getMismatchesForTasks(
