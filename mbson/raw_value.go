@@ -60,7 +60,7 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 		panic(fmt.Sprintf("Unrecognized Go type: %T (maybe augment bsonType?)", in))
 	}
 
-	return *new(T), cannotCastErr{in.Type, any(in)}
+	return *new(T), cannotCastErr{in.Type, *new(T)}
 }
 
 // Lookup fetches a value from a BSON document, casts it to the appropriate
