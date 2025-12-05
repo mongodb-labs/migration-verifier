@@ -26,7 +26,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 		progressTime := time.Now()
 		genElapsed := progressTime.Sub(verifier.generationStartTime)
 
-		genStats.TimeElapsed = option.Some(genElapsed.Round(10 * time.Millisecond).String())
+		genStats.TimeElapsed = option.Some(genElapsed.Round(time.Millisecond).String())
 	}
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
@@ -42,7 +42,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 	if generation > 0 {
 		eg.Go(
 			func() error {
-				count, err := countMismatchesForGeneration(
+				mismatches, changes, err := countRechecksForGeneration(
 					egCtx,
 					verifier.metaClient.Database(verifier.metaDBName),
 					generation-1,
@@ -52,7 +52,10 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 					return errors.Wrapf(err, "counting mismatches seen during generation %d", generation-1)
 				}
 
-				genStats.PriorMismatches = option.Some(count)
+				genStats.PriorRechecks = option.Some(ProgressRechecks{
+					Changes:    changes,
+					Mismatches: mismatches,
+				})
 
 				return nil
 			},

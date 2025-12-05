@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -140,11 +139,11 @@ func countMismatchesForTasks(
 	return matched, totalRV.AsInt64() - matched, nil
 }
 
-func countMismatchesForGeneration(
+func countRechecksForGeneration(
 	ctx context.Context,
 	metaDB *mongo.Database,
 	generation int,
-) (int64, error) {
+) (int64, int64, error) {
 	cursor, err := metaDB.Collection(verificationTasksCollection).Aggregate(
 		ctx,
 		mongo.Pipeline{
@@ -157,35 +156,51 @@ func countMismatchesForGeneration(
 				{"foreignField", "task"},
 				{"as", "mismatches"},
 			}}},
+			{{"$addFields", bson.D{
+				{"mismatches", bson.D{{"$size", "$mismatches"}}},
+			}}},
 			{{"$group", bson.D{
 				{"_id", nil},
+				{"changes", bson.D{
+					{"$sum", bson.D{
+						{"$subtract", bson.A{
+							bson.D{{"$size", "$_ids"}},
+							"$mismatches",
+						}},
+					}},
+				}},
 				{"mismatches", bson.D{
-					{"$sum", bson.D{{"$size", "$mismatches"}}},
+					{"$sum", "$mismatches"},
 				}},
 			}}},
 		},
 	)
 	if err != nil {
-		return 0, errors.Wrap(err, "sending query to count last generation’s found mismatches")
+		return 0, 0, errors.Wrap(err, "sending query to count last generation’s found mismatches")
 	}
 
 	defer cursor.Close(ctx)
 
 	if !cursor.Next(ctx) {
 		if cursor.Err() != nil {
-			return 0, errors.Wrap(err, "reading count of last generation’s found mismatches")
+			return 0, 0, errors.Wrap(err, "reading count of last generation’s found mismatches")
 		}
 
 		// This happens if there were no tasks in the queried generation.
-		return 0, nil
+		return 0, 0, nil
 	}
 
-	mmRV, err := cursor.Current.LookupErr("mismatches")
+	result := struct {
+		Mismatches int64
+		Changes    int64
+	}{}
+
+	err = cursor.Decode(&result)
 	if err != nil {
-		return 0, errors.Wrapf(err, "reading mismatches from result (%v)", cursor.Current)
+		return 0, 0, errors.Wrapf(err, "reading mismatches from result (%v)", cursor.Current)
 	}
 
-	return mbson.ToInt64(mmRV)
+	return result.Mismatches, result.Changes, nil
 }
 
 func getMismatchesForTasks(

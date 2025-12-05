@@ -242,6 +242,11 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 	successResponse(c)
 }
 
+type ProgressRechecks struct {
+	Mismatches int64 `json:"mismatches"`
+	Changes    int64 `json:"changes"`
+}
+
 type ProgressGenerationStats struct {
 	TimeElapsed   option.Option[string] `json:"timeElapsed"`
 	ActiveWorkers int                   `json:"activeWorkers"`
@@ -252,9 +257,9 @@ type ProgressGenerationStats struct {
 	SrcBytesCompared types.ByteCount `json:"srcBytesCompared"`
 	TotalSrcBytes    types.ByteCount `json:"totalSrcBytes,omitempty"`
 
-	PriorMismatches  option.Option[int64] `json:"priorMismatches"`
-	MismatchesFound  int64                `json:"mismatchesFound"`
-	RechecksEnqueued int64                `json:"rechecksEnqueued"`
+	PriorRechecks    option.Option[ProgressRechecks] `json:"priorRechecks"`
+	MismatchesFound  int64                           `json:"mismatchesFound"`
+	RechecksEnqueued int64                           `json:"rechecksEnqueued"`
 }
 
 type ProgressChangeStats struct {
