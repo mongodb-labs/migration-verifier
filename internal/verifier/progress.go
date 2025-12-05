@@ -52,6 +52,8 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 				}
 
 				genStats.PriorMismatches = option.Some(count)
+
+				return nil
 			},
 		)
 	}
