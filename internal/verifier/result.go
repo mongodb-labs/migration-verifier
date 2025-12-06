@@ -42,7 +42,7 @@ type VerificationResult struct {
 
 	// The number of generations where we’ve seen this document ID mismatched
 	// without a change event.
-	Mismatches option.Option[recheck.MismatchTimes] `bson:",omitempty"`
+	MismatchTimes option.Option[recheck.MismatchTimes] `bson:"mismatchTimes,omitempty"`
 }
 
 // DocumentIsMissing returns a boolean that indicates whether the
@@ -110,8 +110,8 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 		bsonLen += 1 + 12 + 1 + 8
 	}
 
-	if vr.Mismatches.IsSome() {
-		bsonLen += 1 + 10 + 1 + recheck.MismatchTimesBSONLength + 1
+	if vr.MismatchTimes.IsSome() {
+		bsonLen += 1 + 13 + 1 + recheck.MismatchTimesBSONLength + 1
 	}
 
 	buf := make(bson.Raw, 4, bsonLen)
@@ -138,8 +138,8 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 		buf = bsoncore.AppendTimestampElement(buf, "dsttimestamp", ts.T, ts.I)
 	}
 
-	if mm, has := vr.Mismatches.Get(); has {
-		buf = bsoncore.AppendDocumentElement(buf, "mismatches", mm.MarshalToBSON())
+	if mm, has := vr.MismatchTimes.Get(); has {
+		buf = bsoncore.AppendDocumentElement(buf, "mismatchTimes", mm.MarshalToBSON())
 	}
 
 	buf = append(buf, 0)

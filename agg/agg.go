@@ -37,16 +37,6 @@ func In[T any](needle any, haystack []T) bson.D {
 
 // ---------------------------------------------
 
-type Sum [1]any
-
-var _ bson.Marshaler = Sum{}
-
-func (s Sum) MarshalBSON() ([]byte, error) {
-	return bson.Marshal(bson.D{{"$sum", s[0]}})
-}
-
-// ---------------------------------------------
-
 type BSONSize [1]any
 
 var _ bson.Marshaler = BSONSize{}

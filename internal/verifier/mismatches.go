@@ -4,19 +4,22 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/10gen/migration-verifier/agg"
+	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 const (
 	mismatchesCollectionName = "mismatches"
+
+	persistentMatchThreshold = time.Minute
 )
 
 type MismatchInfo struct {
@@ -91,14 +94,14 @@ type mismatchCounts struct {
 	// Match counts all mismatches that satisfy the filter.
 	Match int
 
-	// Multi counts mismatches that have been seen more than once without
+	// Persistent counts mismatches that have been seen for “a while” without
 	// a change event. These are of concern because they indicate a mismatch
 	// that the migrator tool (e.g., mongosync) may never rectify.
-	Multi int
+	Persistent int
 
-	// MultiMatch counts mismatches that have been seen more than once *and*
+	// PersistentMatch counts mismatches that have been seen for a while *and*
 	// satisfy the filter.
-	MultiMatch int
+	PersistentMatch int
 }
 
 func countMismatchesForTasks(
@@ -107,7 +110,10 @@ func countMismatchesForTasks(
 	taskIDs []bson.ObjectID,
 	filter bson.D,
 ) (mismatchCounts, error) {
-	multiExpr := agg.Gt{"detail.mismatches", 1}
+	persistentExpr := agg.Gt{
+		agg.Subtract{"$detail.mismatchTimes.latest", "$detail.mismatchTimes.first"},
+		persistentMatchThreshold.Milliseconds(),
+	}
 
 	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(
 		ctx,
@@ -117,21 +123,21 @@ func countMismatchesForTasks(
 			}}},
 			{{"$group", bson.D{
 				{"_id", nil},
-				{"total", agg.Sum{1}},
-				{"match", agg.Sum{agg.Cond{
+				{"total", accum.Sum{1}},
+				{"match", accum.Sum{agg.Cond{
 					If:   filter,
 					Then: 1,
 					Else: 0,
 				}}},
-				{"multi", agg.Sum{agg.Cond{
-					If:   multiExpr,
+				{"persistent", accum.Sum{agg.Cond{
+					If:   persistentExpr,
 					Then: 1,
 					Else: 0,
 				}}},
-				{"multiMatch", agg.Sum{agg.Cond{
+				{"persistentMatch", accum.Sum{agg.Cond{
 					If: agg.And{
 						filter,
-						multiExpr,
+						persistentExpr,
 					},
 					Then: 1,
 					Else: 0,
@@ -156,24 +162,13 @@ func countMismatchesForTasks(
 	return got[0], nil
 }
 
-func getMismatchesForTasks(
+func getMostPersistentMismatchesForTasks(
 	ctx context.Context,
 	db *mongo.Database,
 	taskIDs []bson.ObjectID,
 	filter option.Option[bson.D],
 	limit option.Option[int64],
-) (map[bson.ObjectID][]VerificationResult, error) {
-	findOpts := options.Find().
-		SetSort(
-			bson.D{
-				{"detail.id", 1},
-			},
-		)
-
-	if limit, has := limit.Get(); has {
-		findOpts.SetLimit(limit)
-	}
-
+) ([]MismatchInfo, error) {
 	query := bson.D{
 		{"task", bson.D{{"$in", taskIDs}}},
 	}
@@ -183,45 +178,40 @@ func getMismatchesForTasks(
 			{"$and", []bson.D{query, filter}},
 		}
 	}
-	cursor, err := db.Collection(mismatchesCollectionName).Find(
-		ctx,
-		query,
-		findOpts,
-	)
+
+	pl := mongo.Pipeline{
+		{{"$match", query}},
+		{{"$addFields", bson.D{
+			{"_mismatchMS", agg.Subtract{
+				"$detail.mismatchTimes.latest",
+				"$detail.mismatchTimes.first",
+			}},
+		}}},
+		{{"$match", bson.D{
+			{"_mismatchMS", bson.D{
+				{"$gt", persistentMatchThreshold.Milliseconds()},
+			}},
+		}}},
+		{{"$sort", bson.D{{"_mismatchMS", -1}}}},
+	}
+
+	if limit, has := limit.Get(); has {
+		pl = append(pl, bson.D{{"$limit", limit}})
+	}
+
+	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(ctx, pl)
 
 	if err != nil {
 		return nil, errors.Wrapf(err, "fetching %d tasks' discrepancies", len(taskIDs))
 	}
 
-	result := map[bson.ObjectID][]VerificationResult{}
+	var results []MismatchInfo
 
-	for cursor.Next(ctx) {
-		if cursor.Err() != nil {
-			break
-		}
-
-		var d MismatchInfo
-		if err := cursor.Decode(&d); err != nil {
-			return nil, errors.Wrapf(err, "parsing discrepancy %+v", cursor.Current)
-		}
-
-		result[d.Task] = append(
-			result[d.Task],
-			d.Detail,
-		)
+	if err := cursor.All(ctx, &results); err != nil {
+		return nil, errors.Wrapf(err, "reading mismatch aggregation")
 	}
 
-	if cursor.Err() != nil {
-		return nil, errors.Wrapf(err, "reading %d tasks' discrepancies", len(taskIDs))
-	}
-
-	for _, taskID := range taskIDs {
-		if _, ok := result[taskID]; !ok {
-			result[taskID] = []VerificationResult{}
-		}
-	}
-
-	return result, nil
+	return results, nil
 }
 
 func recordMismatches(

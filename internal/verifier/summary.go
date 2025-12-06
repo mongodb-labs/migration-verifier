@@ -8,6 +8,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -20,7 +22,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"golang.org/x/exp/maps"
 )
 
 const (
@@ -52,35 +53,40 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 
 	anyAreIncomplete := len(incompleteTasks) > 0
 
+	// TODO
+
 	if len(failedTasks) != 0 {
 		table := tablewriter.NewWriter(strBuilder)
 		table.SetHeader([]string{"Index", "Cluster", "Field", "Namespace", "Details"})
 
-		taskDiscrepancies, err := getMismatchesForTasks(
-			ctx,
-			verifier.verificationDatabase(),
-			lo.Map(
-				failedTasks,
-				func(ft VerificationTask, _ int) bson.ObjectID {
-					return ft.PrimaryKey
-				},
-			),
-			option.None[bson.D](),
-			option.None[int64](),
-		)
-		if err != nil {
-			return false, false, errors.Wrapf(
-				err,
-				"fetching %d failed tasks' discrepancies",
-				len(failedTasks),
+		/*
+			taskDiscrepancies, err := getMostPersistentMismatchesForTasks(
+				ctx,
+				verifier.verificationDatabase(),
+				lo.Map(
+					failedTasks,
+					func(ft VerificationTask, _ int) bson.ObjectID {
+						return ft.PrimaryKey
+					},
+				),
+				option.None[bson.D](),
+				option.None[int64](),
 			)
-		}
-
-		for _, v := range failedTasks {
-			for _, f := range taskDiscrepancies[v.PrimaryKey] {
-				table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
+			if err != nil {
+				return false, false, errors.Wrapf(
+					err,
+					"fetching %d failed tasks' discrepancies",
+					len(failedTasks),
+				)
 			}
-		}
+
+
+				for _, v := range failedTasks {
+					for _, f := range taskDiscrepancies[v.PrimaryKey] {
+						table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
+					}
+				}
+		*/
 		strBuilder.WriteString("\nCollections/Indexes in failed or retry status:\n")
 		table.Render()
 
@@ -92,6 +98,107 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 
 func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (bool, bool, error) {
 	generation, _ := verifier.getGeneration()
+
+	/*
+		_, _ = verifier.verificationTaskCollection().Aggregate(
+			ctx,
+			mongo.Pipeline{
+				bson.D{{"$match", bson.D{
+					{"generation", generation},
+					{"type", verificationTaskVerifyDocuments},
+				}}},
+				bson.D{{"$addFields", bson.D{
+					{"_category", agg.Switch{
+						Branches: []agg.SwitchCase{
+							{
+								Case: agg.Eq{"$status", verificationTaskFailed},
+								Then: "mismatch",
+							},
+							{
+								Case: agg.In("$status", []any{
+									verificationTaskAdded,
+									verificationTaskProcessing,
+								}),
+								Then: "incomplete",
+							},
+						},
+						Default: "$$REMOVE",
+					}},
+				}}},
+				bson.D{{"$match", bson.D{
+					{"$expr", helpers.Exists{"$_category"}},
+				}}},
+				bson.D{{"$lookup", bson.D{
+					{"from", mismatchesCollectionName},
+					{"localField", "_id"},
+					{"foreignField", "task"},
+					{"as", "mismatches"},
+					{"pipeline", mongo.Pipeline{
+						{{"$addFields", bson.D{
+							{"_mismatchMS", agg.Cond{
+								If:   helpers.Exists{"$mismatch"},
+								Then: agg.Subtract{"$mismatch.latest", "$mismatch.first"},
+								Else: "$$REMOVE",
+							}},
+						}}},
+						{{"$group", bson.D{
+							{"_id", nil},
+
+							{"countAll", accum.Sum{1}},
+
+							{"countPersistent", accum.Sum{agg.Cond{
+								If:   agg.Gt{"$_mismatchMS", persistentMatchThreshold.Milliseconds()},
+								Then: 1,
+								Else: 0,
+							}}},
+
+							{"countMissing", accum.Sum{agg.Cond{
+								If:   getMismatchDocMissingAggExpr("$$ROOT"),
+								Then: 1,
+								Else: 0,
+							}}},
+
+							{"countPersistentMissing", accum.Sum{agg.Cond{
+								If: agg.And{
+									agg.Gt{"$_mismatchMS", persistentMatchThreshold.Milliseconds()},
+									getMismatchDocMissingAggExpr("$$ROOT"),
+								},
+								Then: 1,
+								Else: 0,
+							}}},
+
+							{"longestMissing", accum.TopN{
+								N:      verifier.failureDisplaySize,
+								SortBy: bson.D{{"$_mismatchMS", -1}},
+								Output: agg.Cond{
+									If:   getMismatchDocMissingAggExpr("$$ROOT"),
+									Then: "$$ROOT",
+									Else: "$$REMOVE",
+								},
+							}},
+
+							{"longestMismatched", accum.TopN{
+								N:      verifier.failureDisplaySize,
+								SortBy: bson.D{{"$_mismatchMS", -1}},
+								Output: agg.Cond{
+									If:   agg.Not{getMismatchDocMissingAggExpr("$$ROOT")},
+									Then: "$$ROOT",
+									Else: "$$REMOVE",
+								},
+							}},
+						}}},
+					}},
+				}}},
+
+				bson.D{{"$addFields", bson.D{
+					{"$mismatches", agg.ArrayElemAt{
+						Array: "$mismatches",
+						Index: 0,
+					}},
+				}}},
+			},
+		)
+	*/
 
 	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
 		ctx,
@@ -120,17 +227,18 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	countsHeaders := []string{"Mismatch Type", "Count"}
 	if generation > 0 {
-		countsHeaders = append(countsHeaders, "Repeated Count")
+		countsHeaders = append(countsHeaders, "Persistent Count")
 	}
 
-	failedTaskIDs := lo.Map(
-		failedTasks,
-		func(ft VerificationTask, _ int) bson.ObjectID {
-			return ft.PrimaryKey
+	failedTaskMap := lo.SliceToMap(
+		lo.Range(len(failedTasks)),
+		func(i int) (bson.ObjectID, VerificationTask) {
+			return failedTasks[i].PrimaryKey, failedTasks[i]
 		},
 	)
+	failedTaskIDs := slices.Collect(maps.Keys(failedTaskMap))
 
-	var mismatchTaskDiscrepancies, missingOrChangedDiscrepancies map[bson.ObjectID][]VerificationResult
+	var mismatchTaskDiscrepancies, missingOrChangedDiscrepancies []MismatchInfo
 
 	var mismatchCounts mismatchCounts
 
@@ -157,7 +265,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	eg.Go(
 		func() error {
 			var err error
-			mismatchTaskDiscrepancies, err = getMismatchesForTasks(
+			mismatchTaskDiscrepancies, err = getMostPersistentMismatchesForTasks(
 				egCtx,
 				verifier.verificationDatabase(),
 				failedTaskIDs,
@@ -180,7 +288,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	eg.Go(
 		func() error {
 			var err error
-			missingOrChangedDiscrepancies, err = getMismatchesForTasks(
+			missingOrChangedDiscrepancies, err = getMostPersistentMismatchesForTasks(
 				egCtx,
 				verifier.verificationDatabase(),
 				failedTaskIDs,
@@ -202,50 +310,55 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		return false, false, errors.Wrapf(err, "gathering mismatch data")
 	}
 
+	differentContentCount := mismatchCounts.Total - mismatchCounts.Match
 	differContentRow := []string{
 		"Documents With Differing Content",
-		reportutils.FmtReal(mismatchCounts.Total - mismatchCounts.Match),
+		reportutils.FmtReal(differentContentCount),
 	}
+
+	persistentDifferentContentCount := mismatchCounts.Persistent - mismatchCounts.PersistentMatch
 	if generation > 0 {
 		differContentRow = append(
 			differContentRow,
-			reportutils.FmtReal(mismatchCounts.Multi-mismatchCounts.MultiMatch),
+			reportutils.FmtReal(persistentDifferentContentCount),
 		)
 	}
 
 	missingDocRow := []string{
-		"Missing or Changed Documents",
+		"Missing Documents",
 		reportutils.FmtReal(mismatchCounts.Match),
 	}
 	if generation > 0 {
 		missingDocRow = append(
 			missingDocRow,
-			reportutils.FmtReal(mismatchCounts.MultiMatch),
+			reportutils.FmtReal(mismatchCounts.PersistentMatch),
 		)
 	}
 	countsTable.Render()
 
 	mismatchedDocsTable := tablewriter.NewWriter(strBuilder)
 	mismatchedDocsTableRows := types.ToNumericTypeOf(0, verifier.failureDisplaySize)
-	mismatchedDocsTable.SetHeader([]string{"ID", "Cluster", "Field", "Namespace", "Details"})
+	mismatchedDocsTable.SetHeader([]string{"ID", "Cluster", "Field", "Namespace", "Details", "Duration"})
 
-	printAll := int64(differentContentCount) <= verifier.failureDisplaySize
+	printAll := int64(persistentDifferentContentCount) <= verifier.failureDisplaySize
 
-	for _, task := range failedTasks {
-		for _, d := range mismatchTaskDiscrepancies[task.PrimaryKey] {
-			if d.DocumentIsMissing() {
-				panic(fmt.Sprintf("found missing-type mismatch but expected content-mismatch: %+v", d))
-			}
-
-			mismatchedDocsTableRows++
-			mismatchedDocsTable.Append([]string{
-				fmt.Sprintf("%v", d.ID),
-				d.Cluster,
-				d.Field,
-				d.NameSpace,
-				d.Details,
-			})
+	for _, m := range mismatchTaskDiscrepancies {
+		if m.Detail.DocumentIsMissing() {
+			panic(fmt.Sprintf("found missing-type mismatch but expected content-mismatch: %+v", m))
 		}
+
+		times := m.Detail.MismatchTimes.MustGet()
+		duration := times.Latest.Sub(times.First)
+
+		mismatchedDocsTableRows++
+		mismatchedDocsTable.Append([]string{
+			fmt.Sprintf("%v", m.Detail.ID),
+			m.Detail.Cluster,
+			m.Detail.Field,
+			m.Detail.NameSpace,
+			m.Detail.Details,
+			reportutils.DurationToHMS(duration),
+		})
 	}
 
 	if mismatchedDocsTableRows > 0 {
@@ -260,22 +373,31 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	missingOrChangedDocsTable := tablewriter.NewWriter(strBuilder)
 	missingOrChangedDocsTableRows := types.ToNumericTypeOf(0, verifier.failureDisplaySize)
-	missingOrChangedDocsTable.SetHeader([]string{"Document ID", "Source Namespace", "Destination Namespace"})
+	missingOrChangedDocsTable.SetHeader([]string{
+		"Document ID",
+		"Source Namespace",
+		"Destination Namespace",
+		"Duration",
+	})
 
-	printAll = int64(missingCount) <= verifier.failureDisplaySize
-	for _, task := range failedTasks {
-		for _, d := range missingOrChangedDiscrepancies[task.PrimaryKey] {
-			if !d.DocumentIsMissing() {
-				panic(fmt.Sprintf("found content-mismatch mismatch but expected missing/changed: %+v", d))
-			}
-
-			missingOrChangedDocsTableRows++
-			missingOrChangedDocsTable.Append([]string{
-				fmt.Sprintf("%v", d.ID),
-				task.QueryFilter.Namespace,
-				task.QueryFilter.To,
-			})
+	printAll = int64(mismatchCounts.PersistentMatch) <= verifier.failureDisplaySize
+	for _, d := range missingOrChangedDiscrepancies {
+		if !d.Detail.DocumentIsMissing() {
+			panic(fmt.Sprintf("found content-mismatch mismatch but expected missing/changed: %+v", d))
 		}
+
+		task := failedTaskMap[d.Task]
+
+		times := d.Detail.MismatchTimes.MustGet()
+		duration := times.Latest.Sub(times.First)
+
+		missingOrChangedDocsTableRows++
+		missingOrChangedDocsTable.Append([]string{
+			fmt.Sprintf("%v", d.Detail.ID),
+			task.QueryFilter.Namespace,
+			task.QueryFilter.To,
+			reportutils.DurationToHMS(duration),
+		})
 	}
 
 	if missingOrChangedDocsTableRows > 0 {
@@ -643,7 +765,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 		// We only print event breakdowns for the source because we assume that
 		// events on the destination will largely mirror the source’s.
 		if totalEvents > 0 && cluster.csReader == verifier.srcChangeReader {
-			reverseSortedNamespaces := maps.Keys(nsTotals)
+			reverseSortedNamespaces := slices.Collect(maps.Keys(nsTotals))
 			sort.Slice(
 				reverseSortedNamespaces,
 				func(i, j int) bool {
