@@ -15,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -45,7 +46,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	namespace string,
 	documentIDs []bson.RawValue,
 	dataSizes []int32,
-	mismatches []int32,
+	mismatches []option.Option[recheck.MismatchTimes],
 ) error {
 	dbName, collName := SplitNamespace(namespace)
 
@@ -69,7 +70,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	collNames []string,
 	documentIDs []bson.RawValue,
 	dataSizes []int32,
-	mismatches []int32,
+	mismatches []option.Option[recheck.MismatchTimes],
 ) error {
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
@@ -155,7 +156,7 @@ func (verifier *Verifier) insertRecheckDocs(
 		}
 
 		if mismatches != nil {
-			recheckDoc.Mismatches = mismatches[i]
+			recheckDoc.Mismatch = mismatches[i]
 		}
 
 		recheckRaw := recheckDoc.MarshalToBSON()
@@ -300,7 +301,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	var totalDocs types.DocumentCount
 	var dataSizeAccum, totalRecheckData int64
 
-	mismatchesMap := map[int32]int32{}
+	mismatchTimes := map[int32]recheck.MismatchTimes{}
 
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
@@ -334,7 +335,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		task, err := verifier.createDocumentRecheckTask(
 			idAccum,
-			mismatchesMap,
+			mismatchTimes,
 			types.ByteCount(dataSizeAccum),
 			namespace,
 		)
@@ -419,7 +420,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			dataSizeAccum = 0
 			idAccum = idAccum[:0]
 			lastIDRaw = bson.RawValue{}
-			clear(mismatchesMap)
+			clear(mismatchTimes)
 		}
 
 		// A document can be enqueued for recheck for multiple reasons:
@@ -434,7 +435,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		// has *not* changed because we just checked for that.)
 		if idRaw.Equal(lastIDRaw) {
 
-			if doc.Mismatches == 0 {
+			if doc.Mismatch.IsNone() {
 				// A non-mismatch recheck means the document changed. In that
 				// case we want to clear the mismatch count. This way a document
 				// that changes over & over won’t seem persistently mismatched
@@ -442,7 +443,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 				// of change.
 				lastIDIndex := len(idAccum) - 1
 
-				delete(mismatchesMap, int32(lastIDIndex))
+				delete(mismatchTimes, int32(lastIDIndex))
 			}
 
 			continue
@@ -452,8 +453,8 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
-		if doc.Mismatches > 0 {
-			mismatchesMap[int32(len(idAccum))] = doc.Mismatches
+		if mm, has := doc.Mismatch.Get(); has {
+			mismatchTimes[int32(len(idAccum))] = mm
 		}
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 

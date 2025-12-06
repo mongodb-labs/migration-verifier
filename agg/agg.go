@@ -69,7 +69,7 @@ func (t Type) MarshalBSON() ([]byte, error) {
 
 type Not [1]any
 
-var _ bson.Marshaler = Type{}
+var _ bson.Marshaler = Not{}
 
 func (n Not) MarshalBSON() ([]byte, error) {
 	return bson.Marshal(bson.D{{"$not", n[0]}})

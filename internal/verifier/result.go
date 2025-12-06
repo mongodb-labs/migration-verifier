@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -15,7 +16,6 @@ const (
 
 // VerificationResult holds the Verification Results.
 type VerificationResult struct {
-
 	// This field gets used differently depending on whether this result
 	// came from a document comparison or something else. If it’s from a
 	// document comparison, it *MUST* be a document ID, not a
@@ -37,12 +37,12 @@ type VerificationResult struct {
 	// don't get too large.
 	dataSize int32
 
-	// The number of generations where we’ve seen this document ID mismatched
-	// without a change event.
-	Mismatches int32 `bson:",omitempty"`
-
 	SrcTimestamp option.Option[bson.Timestamp]
 	DstTimestamp option.Option[bson.Timestamp]
+
+	// The number of generations where we’ve seen this document ID mismatched
+	// without a change event.
+	Mismatches option.Option[recheck.MismatchTimes] `bson:",omitempty"`
 }
 
 // DocumentIsMissing returns a boolean that indicates whether the
@@ -110,6 +110,10 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 		bsonLen += 1 + 12 + 1 + 8
 	}
 
+	if vr.Mismatches.IsSome() {
+		bsonLen += 1 + 10 + 1 + recheck.MismatchTimesBSONLength + 1
+	}
+
 	buf := make(bson.Raw, 4, bsonLen)
 
 	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
@@ -132,6 +136,10 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 
 	if ts, has := vr.DstTimestamp.Get(); has {
 		buf = bsoncore.AppendTimestampElement(buf, "dsttimestamp", ts.T, ts.I)
+	}
+
+	if mm, has := vr.Mismatches.Get(); has {
+		buf = bsoncore.AppendDocumentElement(buf, "mismatches", mm.MarshalToBSON())
 	}
 
 	buf = append(buf, 0)
