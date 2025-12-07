@@ -111,7 +111,7 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 	}
 
 	if vr.MismatchTimes.IsSome() {
-		bsonLen += 1 + 13 + 1 + recheck.MismatchTimesBSONLength + 1
+		bsonLen += 1 + 13 + 1 + recheck.MismatchTimesBSONLength
 	}
 
 	buf := make(bson.Raw, 4, bsonLen)
