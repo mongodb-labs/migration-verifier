@@ -46,8 +46,12 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	namespace string,
 	documentIDs []bson.RawValue,
 	dataSizes []int32,
-	mismatches []option.Option[recheck.MismatchTimes],
+	mismatches []recheck.MismatchTimes,
 ) error {
+	if mismatches == nil {
+		panic("mismatch recheck must have times!")
+	}
+
 	dbName, collName := SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
@@ -70,7 +74,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	collNames []string,
 	documentIDs []bson.RawValue,
 	dataSizes []int32,
-	mismatches []option.Option[recheck.MismatchTimes],
+	mismatches []recheck.MismatchTimes,
 ) error {
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
@@ -156,7 +160,7 @@ func (verifier *Verifier) insertRecheckDocs(
 		}
 
 		if mismatches != nil {
-			recheckDoc.Mismatch = mismatches[i]
+			recheckDoc.Mismatch = option.Some(mismatches[i])
 		}
 
 		recheckRaw := recheckDoc.MarshalToBSON()
