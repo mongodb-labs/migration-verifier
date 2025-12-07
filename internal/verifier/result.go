@@ -32,6 +32,10 @@ type VerificationResult struct {
 	Cluster   string
 	NameSpace string
 
+	// The number of generations where we’ve seen this document ID mismatched
+	// without a change event.
+	MismatchTimes recheck.MismatchTimes `bson:"mismatchTimes,omitempty"`
+
 	// The data size of the largest of the mismatched objects.
 	// Note this is not persisted; it is used only to ensure recheck tasks
 	// don't get too large.
@@ -39,10 +43,6 @@ type VerificationResult struct {
 
 	SrcTimestamp option.Option[bson.Timestamp]
 	DstTimestamp option.Option[bson.Timestamp]
-
-	// The number of generations where we’ve seen this document ID mismatched
-	// without a change event.
-	MismatchTimes option.Option[recheck.MismatchTimes] `bson:"mismatchTimes,omitempty"`
 }
 
 // DocumentIsMissing returns a boolean that indicates whether the
@@ -90,6 +90,7 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 		1 + 7 + 1 + 4 + 1 + // Details
 		1 + 7 + 1 + 4 + 1 + // Cluster
 		1 + 9 + 1 + 4 + 1 + // NameSpace
+		1 + 13 + 1 + recheck.MismatchTimesBSONLength +
 		1 // NUL
 
 	bsonLen += 0 +
@@ -110,10 +111,6 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 		bsonLen += 1 + 12 + 1 + 8
 	}
 
-	if vr.MismatchTimes.IsSome() {
-		bsonLen += 1 + 13 + 1 + recheck.MismatchTimesBSONLength
-	}
-
 	buf := make(bson.Raw, 4, bsonLen)
 
 	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
@@ -129,6 +126,7 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 	buf = bsoncore.AppendStringElement(buf, "details", vr.Details)
 	buf = bsoncore.AppendStringElement(buf, "cluster", vr.Cluster)
 	buf = bsoncore.AppendStringElement(buf, "namespace", vr.NameSpace)
+	buf = bsoncore.AppendDocumentElement(buf, "mismatchTimes", vr.MismatchTimes.MarshalToBSON())
 
 	if ts, has := vr.SrcTimestamp.Get(); has {
 		buf = bsoncore.AppendTimestampElement(buf, "srctimestamp", ts.T, ts.I)
@@ -136,10 +134,6 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 
 	if ts, has := vr.DstTimestamp.Get(); has {
 		buf = bsoncore.AppendTimestampElement(buf, "dsttimestamp", ts.T, ts.I)
-	}
-
-	if mm, has := vr.MismatchTimes.Get(); has {
-		buf = bsoncore.AppendDocumentElement(buf, "mismatchTimes", mm.MarshalToBSON())
 	}
 
 	buf = append(buf, 0)

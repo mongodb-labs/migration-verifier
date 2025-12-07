@@ -310,6 +310,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		return false, false, errors.Wrapf(err, "gathering mismatch data")
 	}
 
+	fmt.Printf("---------- missingOrChangedDiscrepancies: %+v\n", missingOrChangedDiscrepancies)
+
 	differentContentCount := mismatchCounts.Total - mismatchCounts.Match
 	differContentRow := []string{
 		"Documents With Differing Content",
@@ -347,7 +349,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			panic(fmt.Sprintf("found missing-type mismatch but expected content-mismatch: %+v", m))
 		}
 
-		times := m.Detail.MismatchTimes.MustGet()
+		times := m.Detail.MismatchTimes
 		duration := times.Latest.Sub(times.First)
 
 		mismatchedDocsTableRows++
@@ -388,7 +390,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 		task := failedTaskMap[d.Task]
 
-		times := d.Detail.MismatchTimes.MustGet()
+		times := d.Detail.MismatchTimes
 		duration := times.Latest.Sub(times.First)
 
 		missingOrChangedDocsTableRows++

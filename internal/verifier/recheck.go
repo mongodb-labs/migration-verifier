@@ -146,9 +146,13 @@ func (verifier *Verifier) insertRecheckDocs(
 		})
 	}
 
+	var mismatch option.Option[recheck.MismatchTimes]
 	curRechecks := make([]bson.Raw, 0, recheckBatchCountLimit)
 	curBatchBytes := 0
 	for i, dbName := range dbNames {
+		if mismatches != nil {
+			mismatch = option.Some(mismatches[i])
+		}
 		recheckDoc := recheck.Doc{
 			PrimaryKey: recheck.PrimaryKey{
 				SrcDatabaseName:   dbName,
@@ -156,11 +160,12 @@ func (verifier *Verifier) insertRecheckDocs(
 				DocumentID:        documentIDs[i],
 				Rand:              rand.Int32(),
 			},
-			DataSize: dataSizes[i],
+			DataSize:      dataSizes[i],
+			MismatchTimes: mismatch,
 		}
 
 		if mismatches != nil {
-			recheckDoc.Mismatch = option.Some(mismatches[i])
+			recheckDoc.MismatchTimes = option.Some(mismatches[i])
 		}
 
 		recheckRaw := recheckDoc.MarshalToBSON()
@@ -439,7 +444,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		// has *not* changed because we just checked for that.)
 		if idRaw.Equal(lastIDRaw) {
 
-			if doc.Mismatch.IsNone() {
+			if doc.MismatchTimes.IsNone() {
 				// A non-mismatch recheck means the document changed. In that
 				// case we want to clear the mismatch count. This way a document
 				// that changes over & over won’t seem persistently mismatched
@@ -457,7 +462,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
-		if mm, has := doc.Mismatch.Get(); has {
+		if mm, has := doc.MismatchTimes.Get(); has {
 			mismatchTimes[int32(len(idAccum))] = mm
 		}
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)

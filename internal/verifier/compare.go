@@ -126,7 +126,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// is to track the number of times a document was compared *without*
 	// a change.
 	var idToMismatch map[string]recheck.MismatchTimes
-	getMismatchTimes := func(doc bson.Raw) option.Option[recheck.MismatchTimes] {
+	getPriorMismatchTimes := func(doc bson.Raw) option.Option[recheck.MismatchTimes] {
 		if idToMismatch == nil {
 			idToMismatch = createIdToMismatchTimes(task)
 		}
@@ -203,7 +203,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 		var mismatchTimes option.Option[recheck.MismatchTimes]
 		if len(curProblems) > 0 {
-			mismatchTimes = getMismatchTimes(srcDoc.doc)
+			mismatchTimes = getPriorMismatchTimes(srcDoc.doc)
 		}
 
 		for i := range curProblems {
@@ -340,7 +340,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	problems = slices.Grow(problems, len(srcCache)+len(dstCache))
 
 	for _, docWithTs := range srcCache {
-		priorMismatches := getMismatchTimes(docWithTs.doc)
+		priorMismatches := getPriorMismatchTimes(docWithTs.doc)
 
 		problems = append(
 			problems,
@@ -363,7 +363,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	}
 
 	for _, docWithTs := range dstCache {
-		priorMismatches := getMismatchTimes(docWithTs.doc)
+		priorMismatches := getPriorMismatchTimes(docWithTs.doc)
 
 		problems = append(
 			problems,
@@ -388,7 +388,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	return problems, srcDocCount, srcByteCount, nil
 }
 
-func getMismatchTimesFromPrior(prior option.Option[recheck.MismatchTimes]) option.Option[recheck.MismatchTimes] {
+func getMismatchTimesFromPrior(prior option.Option[recheck.MismatchTimes]) recheck.MismatchTimes {
 	mmTimes := recheck.MismatchTimes{
 		Latest: time.Now(),
 	}
@@ -399,7 +399,7 @@ func getMismatchTimesFromPrior(prior option.Option[recheck.MismatchTimes]) optio
 		mmTimes.First = mmTimes.Latest
 	}
 
-	return option.Some(mmTimes)
+	return mmTimes
 }
 
 func createIdToMismatchTimes(task *VerificationTask) map[string]recheck.MismatchTimes {

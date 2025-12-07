@@ -90,7 +90,7 @@ type VerificationTask struct {
 	// with the task.
 	SourceByteCount types.ByteCount `bson:"source_bytes_count"`
 
-	// Mismatches correlates an index of Ids with the time when
+	// MismatchTimes correlates an index of Ids with the time when
 	// this document was first seen to mismatch.
 	MismatchTimes map[int32]recheck.MismatchTimes
 }
@@ -314,6 +314,7 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *Veri
 						"status":                 task.Status,
 						"source_documents_count": task.SourceDocumentCount,
 						"source_bytes_count":     task.SourceByteCount,
+						"mismatchtimes":          task.MismatchTimes,
 					},
 				},
 			)

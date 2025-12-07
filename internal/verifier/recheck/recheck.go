@@ -190,8 +190,8 @@ type Doc struct {
 	// is enqueued multiple times for the same document in the same generation.
 	DataSize int32 `bson:"dataSize"`
 
-	// Mismatch tracks the times when this doc was seen mismatched.
-	Mismatch option.Option[MismatchTimes] `bson:"mismatch"`
+	// MismatchTimes tracks the times when this doc was seen mismatched.
+	MismatchTimes option.Option[MismatchTimes] `bson:"mismatchTimes"`
 }
 
 var _ bson.Marshaler = Doc{}
@@ -209,9 +209,17 @@ func (rd Doc) MarshalToBSON() []byte {
 	// This document’s nonvariable parts comprise 24 bytes.
 	expectedLen := 24 + len(keyRaw)
 
+	if rd.MismatchTimes.IsSome() {
+		expectedLen += 1 + 13 + 1 + MismatchTimesBSONLength
+	}
+
 	doc := make(bson.Raw, 4, expectedLen)
 	doc = bsoncore.AppendDocumentElement(doc, "_id", keyRaw)
 	doc = bsoncore.AppendInt32Element(doc, "dataSize", int32(rd.DataSize))
+
+	if mt, has := rd.MismatchTimes.Get(); has {
+		doc = bsoncore.AppendDocumentElement(doc, "mismatchTimes", mt.MarshalToBSON())
+	}
 
 	doc = append(doc, 0)
 
@@ -253,7 +261,7 @@ func (rd *Doc) UnmarshalFromBSON(in []byte) error {
 			if err := mbson.UnmarshalElementValue(el, &rd.DataSize); err != nil {
 				return err
 			}
-		case "mismatch":
+		case "mismatchTimes":
 			elType := bson.Type(el[0])
 			if elType != bson.TypeEmbeddedDocument {
 				return fmt.Errorf(
@@ -269,7 +277,7 @@ func (rd *Doc) UnmarshalFromBSON(in []byte) error {
 				return errors.Wrapf(err, "unmarshaling %#q", key)
 			}
 
-			rd.Mismatch = option.Some(mmTimes)
+			rd.MismatchTimes = option.Some(mmTimes)
 		}
 	}
 
