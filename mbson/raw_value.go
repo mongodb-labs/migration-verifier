@@ -56,7 +56,7 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 		}
 	case time.Time:
 		if val, ok := in.DateTimeOK(); ok {
-			return any(time.Duration(val) * time.Millisecond).(T), nil
+			return any(bson.DateTime(val).Time()).(T), nil
 		}
 	default:
 		panic(fmt.Sprintf("Unrecognized Go type: %T (maybe augment bsonType?)", in))
