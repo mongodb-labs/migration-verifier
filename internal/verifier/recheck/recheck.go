@@ -136,11 +136,11 @@ func (mt *MismatchTimes) UnmarshalBSON(in []byte) error {
 func (mt MismatchTimes) MarshalToBSON() []byte {
 	expectedLen := 4 + // header
 		1 + 5 + 1 + 8 + // first
-		1 + 6 + 1 + 8 + //latest
-		0
+		1 + 6 + 1 + 8 + // latest
+		1
 
 	doc := make(bson.Raw, 4, expectedLen)
-	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
+	binary.LittleEndian.PutUint32(doc, uint32(cap(doc)))
 
 	doc = bsoncore.AppendDateTimeElement(doc, "first", mt.First.UnixMilli())
 	doc = bsoncore.AppendDateTimeElement(doc, "latest", mt.Latest.UnixMilli())
