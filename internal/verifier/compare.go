@@ -131,7 +131,10 @@ func (verifier *Verifier) compareDocsFromChannels(
 			idToMismatch = createIdToMismatchTimes(task)
 		}
 
-		mapKeyBytes := rvToMapKey(nil, lo.Must(doc.LookupErr("_id")))
+		mapKeyBytes := rvToMapKey(
+			nil,
+			getDocIdFromComparison(verifier.docCompareMethod, doc),
+		)
 
 		return option.IfNotZero(idToMismatch[string(mapKeyBytes)])
 	}
@@ -424,9 +427,9 @@ func getDocIdFromComparison(
 
 	switch docCompareMethod {
 	case DocCompareBinary, DocCompareIgnoreOrder:
-		docID = doc.Lookup("_id")
+		docID = lo.Must(doc.LookupErr("_id"))
 	case DocCompareToHashedIndexKey:
-		docID = doc.Lookup(docKeyInHashedCompare, "_id")
+		docID = lo.Must(doc.LookupErr(docKeyInHashedCompare, "_id"))
 	default:
 		panic("bad doc compare method: " + docCompareMethod)
 	}
