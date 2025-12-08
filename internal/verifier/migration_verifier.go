@@ -1546,12 +1546,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		if metadataMismatches || reportState == mismatchReportAlarm {
 			verifier.printMismatchInvestigationNotes(strBuilder)
 
-			statusLine = fmt.Sprintf(notOkSymbol + " Investigate mismatches.")
-		} else if reportState == mismatchReportUncertain {
-			statusLine = fmt.Sprintf(
-				"? No mismatches require investigation yet. Please recheck after %s.",
-				persistentMatchThreshold,
-			)
+			statusLine = fmt.Sprintf(notOkSymbol + " Mismatches found.")
 		} else if anyCollsIncomplete || anyPartitionsIncomplete {
 			statusLine = fmt.Sprintf(infoSymbol + " No mismatches found yet, but verification is still in progress.")
 		} else {

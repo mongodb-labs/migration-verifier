@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"time"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
@@ -18,8 +17,6 @@ import (
 
 const (
 	mismatchesCollectionName = "mismatches"
-
-	persistentMatchThreshold = time.Minute
 )
 
 type MismatchInfo struct {
@@ -102,8 +99,7 @@ type mismatchReportData struct {
 	MissingOnDst   []MismatchInfo
 	ExtraOnDst     []MismatchInfo
 
-	All        mismatchCountsPerType
-	Persistent mismatchCountsPerType
+	Counts mismatchCountsPerType
 }
 
 // This is a low-level function used to display metadata mismatches.
@@ -170,11 +166,6 @@ func getDocumentMismatchReportData(
 
 	mismatchFilter := agg.Not{missingFilter}
 
-	persistentExpr := agg.Gt{
-		agg.Subtract{"$detail.mismatchTimes.latest", "$detail.mismatchTimes.first"},
-		persistentMatchThreshold.Milliseconds(),
-	}
-
 	pl := mongo.Pipeline{
 		{{"$match", bson.D{
 			{"task", bson.D{{"$in", taskIDs}}},
@@ -200,7 +191,7 @@ func getDocumentMismatchReportData(
 				Input: extraOnDstFilter,
 			}},
 
-			{"all", bson.D{
+			{"counts", bson.D{
 				{"missingOnDst", accum.Sum{agg.Cond{
 					If:   missingOnDstFilter,
 					Then: 1,
@@ -213,33 +204,6 @@ func getDocumentMismatchReportData(
 				}}},
 				{"contentDiffers", accum.Sum{agg.Cond{
 					If:   mismatchFilter,
-					Then: 1,
-					Else: 0,
-				}}},
-			}},
-
-			{"persistent", bson.D{
-				{"missingOnDst", accum.Sum{agg.Cond{
-					If: agg.And{
-						missingOnDstFilter,
-						persistentExpr,
-					},
-					Then: 1,
-					Else: 0,
-				}}},
-				{"extraOnDst", accum.Sum{agg.Cond{
-					If: agg.And{
-						extraOnDstFilter,
-						persistentExpr,
-					},
-					Then: 1,
-					Else: 0,
-				}}},
-				{"contentDiffers", accum.Sum{agg.Cond{
-					If: agg.And{
-						mismatchFilter,
-						persistentExpr,
-					},
 					Then: 1,
 					Else: 0,
 				}}},
