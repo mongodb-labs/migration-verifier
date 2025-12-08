@@ -57,34 +57,35 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		table := tablewriter.NewWriter(strBuilder)
 		table.SetHeader([]string{"Index", "Cluster", "Field", "Namespace", "Details"})
 
-		/*
-			taskDiscrepancies, err := getMostPersistentMismatchesForTasks(
-				ctx,
-				verifier.verificationDatabase(),
-				lo.Map(
-					failedTasks,
-					func(ft VerificationTask, _ int) bson.ObjectID {
-						return ft.PrimaryKey
-					},
-				),
-				option.None[bson.D](),
-				option.None[int64](),
+		taskDiscrepancies, err := getMismatchesForTasks(
+			ctx,
+			verifier.verificationDatabase(),
+			lo.Map(
+				failedTasks,
+				func(ft VerificationTask, _ int) bson.ObjectID {
+					return ft.PrimaryKey
+				},
+			),
+		)
+		if err != nil {
+			return false, false, errors.Wrapf(
+				err,
+				"fetching %d failed tasks' discrepancies",
+				len(failedTasks),
 			)
-			if err != nil {
-				return false, false, errors.Wrapf(
-					err,
-					"fetching %d failed tasks' discrepancies",
-					len(failedTasks),
-				)
+		}
+
+		for _, v := range failedTasks {
+			for _, f := range taskDiscrepancies[v.PrimaryKey] {
+				table.Append([]string{
+					fmt.Sprintf("%v", f.ID),
+					f.Cluster,
+					f.Field,
+					f.NameSpace,
+					f.Details,
+				})
 			}
-
-
-				for _, v := range failedTasks {
-					for _, f := range taskDiscrepancies[v.PrimaryKey] {
-						table.Append([]string{fmt.Sprintf("%v", f.ID), fmt.Sprintf("%v", f.Cluster), fmt.Sprintf("%v", f.Field), fmt.Sprintf("%v", f.NameSpace), fmt.Sprintf("%v", f.Details)})
-					}
-				}
-		*/
+		}
 		strBuilder.WriteString("\nCollections/Indexes in failed or retry status:\n")
 		table.Render()
 
@@ -97,114 +98,12 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 type mismatchReportState string
 
 const (
-	mismatchReportAlarm     mismatchReportState = "alarm"
-	mismatchReportUncertain mismatchReportState = "uncertain"
-	mismatchReportOK        mismatchReportState = "ok"
+	mismatchReportAlarm mismatchReportState = "alarm"
+	mismatchReportOK    mismatchReportState = "ok"
 )
 
 func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (mismatchReportState, bool, error) {
 	generation, _ := verifier.getGeneration()
-
-	/*
-		_, _ = verifier.verificationTaskCollection().Aggregate(
-			ctx,
-			mongo.Pipeline{
-				bson.D{{"$match", bson.D{
-					{"generation", generation},
-					{"type", verificationTaskVerifyDocuments},
-				}}},
-				bson.D{{"$addFields", bson.D{
-					{"_category", agg.Switch{
-						Branches: []agg.SwitchCase{
-							{
-								Case: agg.Eq{"$status", verificationTaskFailed},
-								Then: "mismatch",
-							},
-							{
-								Case: agg.In("$status", []any{
-									verificationTaskAdded,
-									verificationTaskProcessing,
-								}),
-								Then: "incomplete",
-							},
-						},
-						Default: "$$REMOVE",
-					}},
-				}}},
-				bson.D{{"$match", bson.D{
-					{"$expr", helpers.Exists{"$_category"}},
-				}}},
-				bson.D{{"$lookup", bson.D{
-					{"from", mismatchesCollectionName},
-					{"localField", "_id"},
-					{"foreignField", "task"},
-					{"as", "mismatches"},
-					{"pipeline", mongo.Pipeline{
-						{{"$addFields", bson.D{
-							{"_mismatchMS", agg.Cond{
-								If:   helpers.Exists{"$mismatch"},
-								Then: agg.Subtract{"$mismatch.latest", "$mismatch.first"},
-								Else: "$$REMOVE",
-							}},
-						}}},
-						{{"$group", bson.D{
-							{"_id", nil},
-
-							{"countAll", accum.Sum{1}},
-
-							{"countPersistent", accum.Sum{agg.Cond{
-								If:   agg.Gt{"$_mismatchMS", persistentMatchThreshold.Milliseconds()},
-								Then: 1,
-								Else: 0,
-							}}},
-
-							{"countMissing", accum.Sum{agg.Cond{
-								If:   getMismatchDocMissingAggExpr("$$ROOT"),
-								Then: 1,
-								Else: 0,
-							}}},
-
-							{"countPersistentMissing", accum.Sum{agg.Cond{
-								If: agg.And{
-									agg.Gt{"$_mismatchMS", persistentMatchThreshold.Milliseconds()},
-									getMismatchDocMissingAggExpr("$$ROOT"),
-								},
-								Then: 1,
-								Else: 0,
-							}}},
-
-							{"longestMissing", accum.TopN{
-								N:      verifier.failureDisplaySize,
-								SortBy: bson.D{{"$_mismatchMS", -1}},
-								Output: agg.Cond{
-									If:   getMismatchDocMissingAggExpr("$$ROOT"),
-									Then: "$$ROOT",
-									Else: "$$REMOVE",
-								},
-							}},
-
-							{"longestMismatched", accum.TopN{
-								N:      verifier.failureDisplaySize,
-								SortBy: bson.D{{"$_mismatchMS", -1}},
-								Output: agg.Cond{
-									If:   agg.Not{getMismatchDocMissingAggExpr("$$ROOT")},
-									Then: "$$ROOT",
-									Else: "$$REMOVE",
-								},
-							}},
-						}}},
-					}},
-				}}},
-
-				bson.D{{"$addFields", bson.D{
-					{"$mismatches", agg.ArrayElemAt{
-						Array: "$mismatches",
-						Index: 0,
-					}},
-				}}},
-			},
-		)
-	*/
 
 	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
 		ctx,
