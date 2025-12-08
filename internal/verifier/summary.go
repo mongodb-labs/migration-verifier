@@ -237,7 +237,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	)
 	failedTaskIDs := slices.Collect(maps.Keys(failedTaskMap))
 
-	reportData, err := getMismatchReportData(
+	reportData, err := getDocumentMismatchReportData(
 		ctx,
 		verifier.verificationDatabase(),
 		failedTaskIDs,

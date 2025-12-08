@@ -106,7 +106,7 @@ type mismatchReportData struct {
 	Persistent mismatchCountsPerType
 }
 
-func getMismatchReportData(
+func getDocumentMismatchReportData(
 	ctx context.Context,
 	db *mongo.Database,
 	taskIDs []bson.ObjectID,

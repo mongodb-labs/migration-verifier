@@ -958,7 +958,12 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		"foo.bar",
 		mslices.Of(mbson.ToRawValue(42)),
 		[]int32{100},
-		[]int32{0},
+		[]recheck.MismatchTimes{
+			{
+				First:  time.Now(),
+				Latest: time.Now(),
+			},
+		},
 	)
 	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs(
@@ -966,7 +971,16 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		"foo.bar",
 		mslices.Of(mbson.ToRawValue(43), mbson.ToRawValue(44)),
 		[]int32{100, 100},
-		[]int32{0, 0},
+		[]recheck.MismatchTimes{
+			{
+				First:  time.Now(),
+				Latest: time.Now(),
+			},
+			{
+				First:  time.Now(),
+				Latest: time.Now(),
+			},
+		},
 	)
 	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs(
@@ -974,7 +988,12 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		"foo.bar2",
 		mslices.Of(mbson.ToRawValue(42)),
 		[]int32{100},
-		[]int32{0},
+		[]recheck.MismatchTimes{
+			{
+				First:  time.Now(),
+				Latest: time.Now(),
+			},
+		},
 	)
 	suite.Require().NoError(err)
 
@@ -1273,7 +1292,7 @@ func (suite *IntegrationTestSuite) getFailuresForTask(
 	verifier *Verifier,
 	taskID bson.ObjectID,
 ) []VerificationResult {
-	discrepancies, err := getMostPersistentMismatchesForTasks(
+	discrepancies, err := getDocumentMismatchReportData(
 		suite.Context(),
 		verifier.verificationDatabase(),
 		mslices.Of(taskID),
