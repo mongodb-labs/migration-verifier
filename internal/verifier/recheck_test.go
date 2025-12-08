@@ -29,7 +29,12 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 			"the.namespace",
 			[]bson.RawValue{mbson.ToRawValue("theDocID")},
 			[]int32{1234},
-			[]int32{0},
+			[]recheck.MismatchTimes{
+				{
+					First:  time.Now(),
+					Latest: time.Now(),
+				},
+			},
 		),
 		"insert failed-comparison recheck",
 	)
@@ -521,6 +526,6 @@ func insertRecheckDocs(
 		collNames,
 		rawIDs,
 		dataSizes,
-		make([]int32, len(documentIDs)),
+		nil,
 	)
 }

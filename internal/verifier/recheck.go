@@ -153,6 +153,7 @@ func (verifier *Verifier) insertRecheckDocs(
 		if mismatches != nil {
 			mismatch = option.Some(mismatches[i])
 		}
+
 		recheckDoc := recheck.Doc{
 			PrimaryKey: recheck.PrimaryKey{
 				SrcDatabaseName:   dbName,

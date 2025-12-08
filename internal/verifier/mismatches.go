@@ -106,6 +106,44 @@ type mismatchReportData struct {
 	Persistent mismatchCountsPerType
 }
 
+// This is a low-level function used to display metadata mismatches.
+// It’s also used in tests.
+func getMismatchesForTasks(
+	ctx context.Context,
+	db *mongo.Database,
+	taskIDs []bson.ObjectID,
+) (map[bson.ObjectID][]VerificationResult, error) {
+	cursor, err := db.Collection(mismatchesCollectionName).Find(
+		ctx,
+		bson.D{
+			{"task", bson.D{{"$in", taskIDs}}},
+		},
+	)
+	if err != nil {
+		return nil, errors.Wrapf(err, "querying mismatches for %d task(s)", len(taskIDs))
+	}
+
+	result := map[bson.ObjectID][]VerificationResult{}
+
+	for cursor.Next(ctx) {
+		var d MismatchInfo
+		if err := cursor.Decode(&d); err != nil {
+			return nil, errors.Wrapf(err, "parsing discrepancy %+v", cursor.Current)
+		}
+
+		result[d.Task] = append(
+			result[d.Task],
+			d.Detail,
+		)
+	}
+
+	if cursor.Err() != nil {
+		return nil, errors.Wrapf(err, "reading %d tasks’ mismatches", len(taskIDs))
+	}
+
+	return result, nil
+}
+
 func getDocumentMismatchReportData(
 	ctx context.Context,
 	db *mongo.Database,
