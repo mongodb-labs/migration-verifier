@@ -87,128 +87,138 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 	return nil
 }
 
-type mismatchCounts struct {
-	// Total counts all of the mismatches.
-	Total int
-
-	// Match counts all mismatches that satisfy the filter.
-	Match int
-
-	// Persistent counts mismatches that have been seen for “a while” without
-	// a change event. These are of concern because they indicate a mismatch
-	// that the migrator tool (e.g., mongosync) may never rectify.
-	Persistent int
-
-	// PersistentMatch counts mismatches that have been seen for a while *and*
-	// satisfy the filter.
-	PersistentMatch int
+type mismatchCountsPerType struct {
+	MissingOnDst   int64
+	ExtraOnDst     int64
+	ContentDiffers int64
 }
 
-func countMismatchesForTasks(
+func (mct mismatchCountsPerType) Total() int64 {
+	return mct.MissingOnDst + mct.ExtraOnDst + mct.ContentDiffers
+}
+
+type mismatchReportData struct {
+	ContentDiffers []MismatchInfo
+	MissingOnDst   []MismatchInfo
+	ExtraOnDst     []MismatchInfo
+
+	All        mismatchCountsPerType
+	Persistent mismatchCountsPerType
+}
+
+func getMismatchReportData(
 	ctx context.Context,
 	db *mongo.Database,
 	taskIDs []bson.ObjectID,
-	filter bson.D,
-) (mismatchCounts, error) {
+	limit int64,
+) (mismatchReportData, error) {
+	// A filter to identify docs marked “missing” (on either src or dst)
+	missingFilter := getMismatchDocMissingAggExpr("$$ROOT")
+
+	missingOnDstFilter := agg.And{
+		missingFilter,
+		agg.Eq{
+			"$detail.cluster",
+			ClusterTarget,
+		},
+	}
+	extraOnDstFilter := agg.And{
+		missingFilter,
+		agg.Eq{
+			"$detail.cluster",
+			ClusterSource,
+		},
+	}
+
+	mismatchFilter := agg.Not{missingFilter}
+
 	persistentExpr := agg.Gt{
 		agg.Subtract{"$detail.mismatchTimes.latest", "$detail.mismatchTimes.first"},
 		persistentMatchThreshold.Milliseconds(),
 	}
 
-	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(
-		ctx,
-		mongo.Pipeline{
-			{{"$match", bson.D{
-				{"task", bson.D{{"$in", taskIDs}}},
-			}}},
-			{{"$group", bson.D{
-				{"_id", nil},
-				{"total", accum.Sum{1}},
-				{"match", accum.Sum{agg.Cond{
-					If:   filter,
-					Then: 1,
-					Else: 0,
-				}}},
-				{"persistent", accum.Sum{agg.Cond{
-					If:   persistentExpr,
-					Then: 1,
-					Else: 0,
-				}}},
-				{"persistentMatch", accum.Sum{agg.Cond{
-					If: agg.And{
-						filter,
-						persistentExpr,
-					},
-					Then: 1,
-					Else: 0,
-				}}},
-			}}},
-		},
-	)
-
-	if err != nil {
-		return mismatchCounts{}, errors.Wrap(err, "sending mismatch-counting query")
-	}
-
-	var got []mismatchCounts
-	if err := cursor.All(ctx, &got); err != nil {
-		return mismatchCounts{}, errors.Wrap(err, "reading mismatch counts")
-	}
-
-	if len(got) != 1 {
-		return mismatchCounts{}, fmt.Errorf("unexpected mismatch count result: %+v", got)
-	}
-
-	return got[0], nil
-}
-
-func getMostPersistentMismatchesForTasks(
-	ctx context.Context,
-	db *mongo.Database,
-	taskIDs []bson.ObjectID,
-	filter option.Option[bson.D],
-	limit option.Option[int64],
-) ([]MismatchInfo, error) {
-	query := bson.D{
-		{"task", bson.D{{"$in", taskIDs}}},
-	}
-
-	if filter, has := filter.Get(); has {
-		query = bson.D{
-			{"$and", []bson.D{query, filter}},
-		}
-	}
-
 	pl := mongo.Pipeline{
-		{{"$match", query}},
+		{{"$match", bson.D{
+			{"task", bson.D{{"$in", taskIDs}}},
+		}}},
 		{{"$addFields", bson.D{
 			{"_mismatchMS", agg.Subtract{
 				"$detail.mismatchTimes.latest",
 				"$detail.mismatchTimes.first",
 			}},
 		}}},
-		{{"$match", bson.D{
-			{"_mismatchMS", bson.D{
-				{"$gt", persistentMatchThreshold.Milliseconds()},
+		{{"$sort", bson.D{{"_mismatchMS", -1}}}},
+		{{"$group", bson.D{
+			{"contentDiffers", accum.FirstN{
+				N:     limit,
+				Input: agg.Not{missingFilter},
+			}},
+			{"missingOnDst", accum.FirstN{
+				N:     limit,
+				Input: missingOnDstFilter,
+			}},
+			{"extraOnDst", accum.FirstN{
+				N:     limit,
+				Input: extraOnDstFilter,
+			}},
+
+			{"all", bson.D{
+				{"missingOnDst", accum.Sum{agg.Cond{
+					If:   missingOnDstFilter,
+					Then: 1,
+					Else: 0,
+				}}},
+				{"extraOnDst", accum.Sum{agg.Cond{
+					If:   extraOnDstFilter,
+					Then: 1,
+					Else: 0,
+				}}},
+				{"contentDiffers", accum.Sum{agg.Cond{
+					If:   mismatchFilter,
+					Then: 1,
+					Else: 0,
+				}}},
+			}},
+
+			{"persistent", bson.D{
+				{"missingOnDst", accum.Sum{agg.Cond{
+					If: agg.And{
+						missingOnDstFilter,
+						persistentExpr,
+					},
+					Then: 1,
+					Else: 0,
+				}}},
+				{"extraOnDst", accum.Sum{agg.Cond{
+					If: agg.And{
+						extraOnDstFilter,
+						persistentExpr,
+					},
+					Then: 1,
+					Else: 0,
+				}}},
+				{"contentDiffers", accum.Sum{agg.Cond{
+					If: agg.And{
+						mismatchFilter,
+						persistentExpr,
+					},
+					Then: 1,
+					Else: 0,
+				}}},
 			}},
 		}}},
-		{{"$sort", bson.D{{"_mismatchMS", -1}}}},
-	}
-
-	if limit, has := limit.Get(); has {
-		pl = append(pl, bson.D{{"$limit", limit}})
 	}
 
 	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(ctx, pl)
 
 	if err != nil {
-		return nil, errors.Wrapf(err, "fetching %d tasks' discrepancies", len(taskIDs))
+		return mismatchReportData{}, errors.Wrapf(err, "fetching %d tasks' discrepancies", len(taskIDs))
 	}
 
-	var results []MismatchInfo
+	var results mismatchReportData
 
 	if err := cursor.All(ctx, &results); err != nil {
-		return nil, errors.Wrapf(err, "reading mismatch aggregation")
+		return mismatchReportData{}, errors.Wrapf(err, "reading mismatch aggregation")
 	}
 
 	return results, nil

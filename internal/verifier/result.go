@@ -3,6 +3,7 @@ package verifier
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/option"
@@ -53,6 +54,10 @@ func (vr VerificationResult) DocumentIsMissing() bool {
 	// but the document exists. To ascertain that the document is entirely
 	// absent we have to check Field as well.
 	return vr.Details == Missing && vr.Field == ""
+}
+
+func (vr VerificationResult) MismatchDuration() time.Duration {
+	return vr.MismatchTimes.Latest.Sub(vr.MismatchTimes.First)
 }
 
 // Returns an agg expression that indicates whether the VerificationResult

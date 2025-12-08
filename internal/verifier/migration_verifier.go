@@ -1537,20 +1537,25 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	var statusLine string
 
 	if hasTasks {
-		docMismatches, anyPartitionsIncomplete, err := verifier.reportDocumentMismatches(ctx, strBuilder)
+		reportState, anyPartitionsIncomplete, err := verifier.reportDocumentMismatches(ctx, strBuilder)
 		if err != nil {
 			verifier.logger.Err(err).Msgf("Failed to report document mismatches")
 			return
 		}
 
-		if metadataMismatches || docMismatches {
+		if metadataMismatches || reportState == mismatchReportAlarm {
 			verifier.printMismatchInvestigationNotes(strBuilder)
 
-			statusLine = fmt.Sprintf(notOkSymbol + " Mismatches found.")
+			statusLine = fmt.Sprintf(notOkSymbol + " Investigate mismatches.")
+		} else if reportState == mismatchReportUncertain {
+			statusLine = fmt.Sprintf(
+				"? No mismatches require investigation yet. Please recheck after %s.",
+				persistentMatchThreshold,
+			)
 		} else if anyCollsIncomplete || anyPartitionsIncomplete {
 			statusLine = fmt.Sprintf(infoSymbol + " No mismatches found yet, but verification is still in progress.")
 		} else {
-			statusLine = fmt.Sprintf(okSymbol + " No mismatches found. Source & destination completely match!")
+			statusLine = fmt.Sprintf(okSymbol + " No mismatches found.")
 		}
 	} else {
 		switch genstatus {

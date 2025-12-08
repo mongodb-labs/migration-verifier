@@ -103,6 +103,25 @@ func (m MergeObjects) MarshalBSON() ([]byte, error) {
 
 // ---------------------------------------------
 
+type GetField struct {
+	Input, Field any
+}
+
+var _ bson.Marshaler = GetField{}
+
+func (gf GetField) MarshalBSON() ([]byte, error) {
+	return bson.Marshal(
+		bson.D{
+			{"$getField", bson.D{
+				{"input", gf.Input},
+				{"field", gf.Field},
+			}},
+		},
+	)
+}
+
+// ---------------------------------------------
+
 type Cond struct {
 	If, Then, Else any
 }

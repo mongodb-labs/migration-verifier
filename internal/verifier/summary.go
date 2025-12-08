@@ -14,10 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -96,7 +95,15 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 	return false, anyAreIncomplete, nil
 }
 
-func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (bool, bool, error) {
+type mismatchReportState string
+
+const (
+	mismatchReportAlarm     mismatchReportState = "alarm"
+	mismatchReportUncertain mismatchReportState = "uncertain"
+	mismatchReportOK        mismatchReportState = "ok"
+)
+
+func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (mismatchReportState, bool, error) {
 	generation, _ := verifier.getGeneration()
 
 	/*
@@ -209,7 +216,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	)
 
 	if err != nil {
-		return false, false, err
+		return "", false, err
 	}
 
 	anyAreIncomplete := len(incompleteTasks) > 0
@@ -217,18 +224,10 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	if len(failedTasks) == 0 {
 
 		// Nothing has failed/mismatched, so there’s nothing to print.
-		return false, anyAreIncomplete, nil
+		return mismatchReportOK, anyAreIncomplete, nil
 	}
 
 	strBuilder.WriteString("\n")
-
-	// First present summaries of failures based on present/missing and differing content
-	countsTable := tablewriter.NewWriter(strBuilder)
-
-	countsHeaders := []string{"Mismatch Type", "Count"}
-	if generation > 0 {
-		countsHeaders = append(countsHeaders, "Persistent Count")
-	}
 
 	failedTaskMap := lo.SliceToMap(
 		lo.Range(len(failedTasks)),
@@ -238,181 +237,312 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	)
 	failedTaskIDs := slices.Collect(maps.Keys(failedTaskMap))
 
-	var mismatchTaskDiscrepancies, missingOrChangedDiscrepancies []MismatchInfo
-
-	var mismatchCounts mismatchCounts
-
-	eg, egCtx := contextplus.ErrGroup(ctx)
-
-	eg.Go(
-		func() error {
-			var err error
-			mismatchCounts, err = countMismatchesForTasks(
-				egCtx,
-				verifier.verificationDatabase(),
-				failedTaskIDs,
-				getMismatchDocMissingAggExpr("$$ROOT"),
-			)
-
-			return errors.Wrapf(
-				err,
-				"counting %d failed tasks’ discrepancies",
-				len(failedTasks),
-			)
-		},
+	reportData, err := getMismatchReportData(
+		ctx,
+		verifier.verificationDatabase(),
+		failedTaskIDs,
+		verifier.failureDisplaySize,
 	)
-
-	eg.Go(
-		func() error {
-			var err error
-			mismatchTaskDiscrepancies, err = getMostPersistentMismatchesForTasks(
-				egCtx,
-				verifier.verificationDatabase(),
-				failedTaskIDs,
-				option.Some(
-					bson.D{{"$expr", bson.D{
-						{"$not", getMismatchDocMissingAggExpr("$$ROOT")},
-					}}},
-				),
-				option.Some(verifier.failureDisplaySize),
-			)
-
-			return errors.Wrapf(
-				err,
-				"fetching %d failed tasks’ content-mismatch discrepancies",
-				len(failedTasks),
-			)
-		},
-	)
-
-	eg.Go(
-		func() error {
-			var err error
-			missingOrChangedDiscrepancies, err = getMostPersistentMismatchesForTasks(
-				egCtx,
-				verifier.verificationDatabase(),
-				failedTaskIDs,
-				option.Some(
-					bson.D{{"$expr", getMismatchDocMissingAggExpr("$$ROOT")}},
-				),
-				option.Some(verifier.failureDisplaySize),
-			)
-
-			return errors.Wrapf(
-				err,
-				"fetching %d failed tasks' missing/changed discrepancies",
-				len(failedTasks),
-			)
-		},
-	)
-
-	if err := eg.Wait(); err != nil {
-		return false, false, errors.Wrapf(err, "gathering mismatch data")
-	}
-
-	fmt.Printf("---------- missingOrChangedDiscrepancies: %+v\n", missingOrChangedDiscrepancies)
-
-	differentContentCount := mismatchCounts.Total - mismatchCounts.Match
-	differContentRow := []string{
-		"Documents With Differing Content",
-		reportutils.FmtReal(differentContentCount),
-	}
-
-	persistentDifferentContentCount := mismatchCounts.Persistent - mismatchCounts.PersistentMatch
-	if generation > 0 {
-		differContentRow = append(
-			differContentRow,
-			reportutils.FmtReal(persistentDifferentContentCount),
+	if err != nil {
+		return "", false, errors.Wrapf(
+			err,
+			"fetching %d failed tasks’ most persistent discrepancies",
+			len(failedTasks),
 		)
 	}
 
-	missingDocRow := []string{
-		"Missing Documents",
-		reportutils.FmtReal(mismatchCounts.Match),
+	var showRecentMismatches bool
+
+	if reportData.All.Total() == 0 {
+		fmt.Printf("failedTaskIDs: %+v\n", failedTaskIDs)
+		fmt.Printf("reportData: %+v\n", reportData)
+
+		panic("No failed tasks, but no mismatches at all?!?")
+	} else if !verifier.logger.Debug().Enabled() {
+		if reportData.Persistent.Total() == 0 {
+			return mismatchReportUncertain, anyAreIncomplete, nil
+		}
+	} else {
+		showRecentMismatches = true
 	}
-	if generation > 0 {
-		missingDocRow = append(
-			missingDocRow,
-			reportutils.FmtReal(mismatchCounts.PersistentMatch),
-		)
+
+	// First present summaries of failures based on present/missing and differing content
+	countsTable := tablewriter.NewWriter(strBuilder)
+
+	countsHeaders := []string{"Mismatch Type", "Count (Persistent)"}
+	if showRecentMismatches {
+		countsHeaders = append(countsHeaders, "Count (Recent)")
 	}
+
+	countsTable.SetHeader(countsHeaders)
+
+	showContentDiffersRow := lo.Ternary(
+		showRecentMismatches,
+		reportData.All.ContentDiffers,
+		reportData.Persistent.ContentDiffers,
+	) > 0
+
+	if showContentDiffersRow {
+		contentDiffersRow := []string{
+			"Documents With Differing Content",
+			reportutils.FmtReal(reportData.Persistent.ContentDiffers),
+		}
+		if showRecentMismatches {
+			contentDiffersRow = append(
+				contentDiffersRow,
+				reportutils.FmtReal(
+					reportData.All.ContentDiffers-reportData.Persistent.ContentDiffers,
+				),
+			)
+		}
+		countsTable.Append(contentDiffersRow)
+	}
+
+	showMissingOnDstRow := lo.Ternary(
+		showRecentMismatches,
+		reportData.All.MissingOnDst,
+		reportData.Persistent.MissingOnDst,
+	) > 0
+
+	if showMissingOnDstRow {
+		missingOnDstRow := []string{
+			"Missing on Destination",
+			reportutils.FmtReal(reportData.Persistent.MissingOnDst),
+		}
+
+		if showRecentMismatches {
+			missingOnDstRow = append(
+				missingOnDstRow,
+				reportutils.FmtReal(reportData.All.MissingOnDst-reportData.Persistent.MissingOnDst),
+			)
+		}
+
+		countsTable.Append(missingOnDstRow)
+	}
+
+	showExtraOnDstRow := lo.Ternary(
+		showRecentMismatches,
+		reportData.All.ExtraOnDst,
+		reportData.Persistent.ExtraOnDst,
+	) > 0
+
+	if showExtraOnDstRow {
+		extraOnDstRow := []string{
+			"Extra on Destination",
+			reportutils.FmtReal(reportData.Persistent.ExtraOnDst),
+		}
+
+		if showRecentMismatches {
+			extraOnDstRow = append(
+				extraOnDstRow,
+				reportutils.FmtReal(reportData.All.ExtraOnDst-reportData.Persistent.ExtraOnDst),
+			)
+		}
+
+		countsTable.Append(extraOnDstRow)
+	}
+
 	countsTable.Render()
 
-	mismatchedDocsTable := tablewriter.NewWriter(strBuilder)
-	mismatchedDocsTableRows := types.ToNumericTypeOf(0, verifier.failureDisplaySize)
-	mismatchedDocsTable.SetHeader([]string{"ID", "Cluster", "Field", "Namespace", "Details", "Duration"})
-
-	printAll := int64(persistentDifferentContentCount) <= verifier.failureDisplaySize
-
-	for _, m := range mismatchTaskDiscrepancies {
-		if m.Detail.DocumentIsMissing() {
-			panic(fmt.Sprintf("found missing-type mismatch but expected content-mismatch: %+v", m))
+	if !showRecentMismatches {
+		for _, mismatchesRef := range mslices.Of(
+			&reportData.ContentDiffers,
+			&reportData.MissingOnDst,
+			&reportData.ExtraOnDst,
+		) {
+			*mismatchesRef = lo.Filter(
+				*mismatchesRef,
+				func(mmInfo MismatchInfo, _ int) bool {
+					return mmInfo.Detail.MismatchDuration() > persistentMatchThreshold
+				},
+			)
 		}
-
-		times := m.Detail.MismatchTimes
-		duration := times.Latest.Sub(times.First)
-
-		mismatchedDocsTableRows++
-		mismatchedDocsTable.Append([]string{
-			fmt.Sprintf("%v", m.Detail.ID),
-			m.Detail.Cluster,
-			m.Detail.Field,
-			m.Detail.NameSpace,
-			m.Detail.Details,
-			reportutils.DurationToHMS(duration),
-		})
 	}
 
-	if mismatchedDocsTableRows > 0 {
-		strBuilder.WriteString("\n")
-		if printAll {
-			strBuilder.WriteString("All documents found with differing content:\n")
-		} else {
-			fmt.Fprintf(strBuilder, "First %d documents found with differing content:\n", verifier.failureDisplaySize)
+	if len(reportData.ContentDiffers) > 0 {
+		mismatchedDocsTable := tablewriter.NewWriter(strBuilder)
+		mismatchedDocsTable.SetHeader([]string{"ID", "Cluster", "Field", "Namespace", "Details", "Duration"})
+
+		tableIsComplete := lo.Ternary(
+			showRecentMismatches,
+			reportData.All.ContentDiffers,
+			reportData.Persistent.ContentDiffers,
+		) == int64(len(reportData.ContentDiffers))
+
+		for _, m := range reportData.ContentDiffers {
+			if m.Detail.DocumentIsMissing() {
+				panic(fmt.Sprintf("found missing-type mismatch but expected content-differs: %+v", m))
+			}
+
+			times := m.Detail.MismatchTimes
+			duration := times.Latest.Sub(times.First)
+
+			mismatchedDocsTable.Append([]string{
+				fmt.Sprintf("%v", m.Detail.ID),
+				m.Detail.Cluster,
+				m.Detail.Field,
+				m.Detail.NameSpace,
+				m.Detail.Details,
+				reportutils.DurationToHMS(duration),
+			})
 		}
+
+		strBuilder.WriteString("\n")
+		if tableIsComplete {
+			fmt.Fprintf(
+				strBuilder,
+				"All documents %sfound with differing content:\n",
+				lo.Ternary(
+					showRecentMismatches,
+					"",
+					"persistently ",
+				),
+			)
+		} else {
+			fmt.Fprintf(
+				strBuilder,
+				"First %d documents %sfound with differing content:\n",
+				verifier.failureDisplaySize,
+				lo.Ternary(
+					showRecentMismatches,
+					"",
+					"persistently ",
+				),
+			)
+		}
+
 		mismatchedDocsTable.Render()
 	}
 
-	missingOrChangedDocsTable := tablewriter.NewWriter(strBuilder)
-	missingOrChangedDocsTableRows := types.ToNumericTypeOf(0, verifier.failureDisplaySize)
-	missingOrChangedDocsTable.SetHeader([]string{
-		"Document ID",
-		"Source Namespace",
-		"Destination Namespace",
-		"Duration",
-	})
-
-	printAll = int64(mismatchCounts.PersistentMatch) <= verifier.failureDisplaySize
-	for _, d := range missingOrChangedDiscrepancies {
-		if !d.Detail.DocumentIsMissing() {
-			panic(fmt.Sprintf("found content-mismatch mismatch but expected missing/changed: %+v", d))
-		}
-
-		task := failedTaskMap[d.Task]
-
-		times := d.Detail.MismatchTimes
-		duration := times.Latest.Sub(times.First)
-
-		missingOrChangedDocsTableRows++
-		missingOrChangedDocsTable.Append([]string{
-			fmt.Sprintf("%v", d.Detail.ID),
-			task.QueryFilter.Namespace,
-			task.QueryFilter.To,
-			reportutils.DurationToHMS(duration),
+	if len(reportData.MissingOnDst) > 0 {
+		missingDocsTable := tablewriter.NewWriter(strBuilder)
+		missingDocsTable.SetHeader([]string{
+			"Document ID",
+			"Source Namespace",
+			"Destination Namespace",
+			"Duration",
 		})
-	}
 
-	if missingOrChangedDocsTableRows > 0 {
-		strBuilder.WriteString("\n")
-		if printAll {
-			strBuilder.WriteString("All documents marked missing or changed:\n")
-		} else {
-			fmt.Fprintf(strBuilder, "First %d documents marked missing or changed:\n", verifier.failureDisplaySize)
+		tableIsComplete := lo.Ternary(
+			showRecentMismatches,
+			reportData.All.MissingOnDst,
+			reportData.Persistent.MissingOnDst,
+		) == int64(len(reportData.MissingOnDst))
+
+		for _, d := range reportData.MissingOnDst {
+			if !d.Detail.DocumentIsMissing() {
+				panic(fmt.Sprintf("found content-mismatch mismatch but expected missing: %+v", d))
+			}
+
+			task := failedTaskMap[d.Task]
+
+			times := d.Detail.MismatchTimes
+			duration := times.Latest.Sub(times.First)
+
+			missingDocsTable.Append([]string{
+				fmt.Sprintf("%v", d.Detail.ID),
+				task.QueryFilter.Namespace,
+				task.QueryFilter.To,
+				reportutils.DurationToHMS(duration),
+			})
+
+			strBuilder.WriteString("\n")
+
+			if tableIsComplete {
+				fmt.Fprintf(
+					strBuilder,
+					"All documents %sfound missing on the destination:\n",
+					lo.Ternary(
+						showRecentMismatches,
+						"",
+						"persistently ",
+					),
+				)
+			} else {
+				fmt.Fprintf(
+					strBuilder,
+					"First %d documents %sfound missing on the destination:\n",
+					verifier.failureDisplaySize,
+					lo.Ternary(
+						showRecentMismatches,
+						"",
+						"persistently ",
+					),
+				)
+			}
+
+			missingDocsTable.Render()
 		}
-		missingOrChangedDocsTable.Render()
 	}
 
-	return true, anyAreIncomplete, nil
+	if len(reportData.ExtraOnDst) > 0 {
+		extraDocsTable := tablewriter.NewWriter(strBuilder)
+		extraDocsTable.SetHeader([]string{
+			"Document ID",
+			"Source Namespace",
+			"Destination Namespace",
+			"Duration",
+		})
+
+		tableIsComplete := lo.Ternary(
+			showRecentMismatches,
+			reportData.All.ExtraOnDst,
+			reportData.Persistent.ExtraOnDst,
+		) == int64(len(reportData.ExtraOnDst))
+
+		for _, d := range reportData.ExtraOnDst {
+			if !d.Detail.DocumentIsMissing() {
+				panic(fmt.Sprintf("found content-mismatch mismatch but expected missing: %+v", d))
+			}
+
+			task := failedTaskMap[d.Task]
+
+			times := d.Detail.MismatchTimes
+			duration := times.Latest.Sub(times.First)
+
+			extraDocsTable.Append([]string{
+				fmt.Sprintf("%v", d.Detail.ID),
+				task.QueryFilter.Namespace,
+				task.QueryFilter.To,
+				reportutils.DurationToHMS(duration),
+			})
+
+			strBuilder.WriteString("\n")
+
+			if tableIsComplete {
+				fmt.Fprintf(
+					strBuilder,
+					"All documents %sfound only on the destination:\n",
+					lo.Ternary(
+						showRecentMismatches,
+						"",
+						"persistently ",
+					),
+				)
+			} else {
+				fmt.Fprintf(
+					strBuilder,
+					"First %d documents %sfound only on the destination:\n",
+					verifier.failureDisplaySize,
+					lo.Ternary(
+						showRecentMismatches,
+						"",
+						"persistently ",
+					),
+				)
+			}
+
+			extraDocsTable.Render()
+		}
+	}
+
+	reportState := lo.Ternary(
+		reportData.Persistent.Total() > 0,
+		mismatchReportAlarm,
+		mismatchReportUncertain,
+	)
+
+	return reportState, anyAreIncomplete, nil
 }
 
 // Boolean returned indicates whether this generation has any tasks.
