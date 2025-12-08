@@ -358,7 +358,10 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 
 	task := &VerificationTask{
 		PrimaryKey: bson.NewObjectID(),
-		Ids:        []any{id1, id2},
+		Ids: mslices.Of(
+			mbson.ToRawValue(id1),
+			mbson.ToRawValue(id2),
+		),
 		QueryFilter: QueryFilter{
 			Namespace: namespace,
 			To:        namespace,
@@ -529,9 +532,12 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	})
 	suite.Require().NoError(err)
 	task := &VerificationTask{
-		PrimaryKey:  bson.NewObjectID(),
-		Generation:  1,
-		Ids:         []any{id, id + 1},
+		PrimaryKey: bson.NewObjectID(),
+		Generation: 1,
+		Ids: mslices.Of(
+			mbson.ToRawValue(id),
+			mbson.ToRawValue(id+1),
+		),
 		QueryFilter: basicQueryFilter("keyhole.dealers"),
 	}
 
