@@ -3,6 +3,7 @@ package mbson
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -135,5 +136,18 @@ func TestObjectID(t *testing.T) {
 		assert.Equal(t, viaMarshal, ToRawValue(cur))
 
 		assert.Equal(t, cur, lo.Must(CastRawValue[bson.ObjectID](viaMarshal)))
+	}
+}
+
+func TestTime(t *testing.T) {
+	vals := []time.Time{
+		time.UnixMilli(time.Now().UnixMilli()),
+		time.UnixMilli(0),
+	}
+
+	for _, cur := range vals {
+		viaMarshal := MustConvertToRawValue(cur)
+
+		assert.Equal(t, cur, lo.Must(CastRawValue[time.Time](viaMarshal)))
 	}
 }
