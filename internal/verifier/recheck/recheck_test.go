@@ -13,8 +13,8 @@ import (
 
 func TestMismatchTimesBSON(t *testing.T) {
 	mt := MismatchTimes{
-		First:  time.UnixMilli(time.Now().UnixMilli()),
-		Latest: time.UnixMilli(time.Now().UnixMilli()),
+		First:  bson.NewDateTimeFromTime(time.Now()),
+		Latest: bson.NewDateTimeFromTime(time.Now()),
 	}
 
 	raw := mt.MarshalToBSON()
@@ -24,8 +24,8 @@ func TestMismatchTimesBSON(t *testing.T) {
 	assert.Equal(
 		t,
 		bson.D{
-			{"first", bson.NewDateTimeFromTime(mt.First)},
-			{"latest", bson.NewDateTimeFromTime(mt.Latest)},
+			{"first", mt.First},
+			{"latest", mt.Latest},
 		},
 		mtd,
 	)

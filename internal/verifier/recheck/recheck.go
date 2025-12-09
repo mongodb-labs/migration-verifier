@@ -3,7 +3,6 @@ package recheck
 import (
 	"encoding/binary"
 	"fmt"
-	"time"
 
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
@@ -115,8 +114,8 @@ func (pk *PrimaryKey) UnmarshalFromBSON(in []byte) error {
 }
 
 type MismatchTimes struct {
-	First  time.Time
-	Latest time.Time
+	First  bson.DateTime
+	Latest bson.DateTime
 }
 
 var MismatchTimesBSONLength = len(MismatchTimes{}.MarshalToBSON())
@@ -142,8 +141,8 @@ func (mt MismatchTimes) MarshalToBSON() []byte {
 	doc := make(bson.Raw, 4, expectedLen)
 	binary.LittleEndian.PutUint32(doc, uint32(cap(doc)))
 
-	doc = bsoncore.AppendDateTimeElement(doc, "first", mt.First.UnixMilli())
-	doc = bsoncore.AppendDateTimeElement(doc, "latest", mt.Latest.UnixMilli())
+	doc = bsoncore.AppendDateTimeElement(doc, "first", int64(mt.First))
+	doc = bsoncore.AppendDateTimeElement(doc, "latest", int64(mt.Latest))
 	doc = append(doc, 0)
 
 	if len(doc) != expectedLen {

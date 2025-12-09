@@ -959,8 +959,8 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		[]int32{100},
 		[]recheck.MismatchTimes{
 			{
-				First:  time.Now(),
-				Latest: time.Now(),
+				First:  bson.NewDateTimeFromTime(time.Now()),
+				Latest: bson.NewDateTimeFromTime(time.Now()),
 			},
 		},
 	)
@@ -972,12 +972,12 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		[]int32{100, 100},
 		[]recheck.MismatchTimes{
 			{
-				First:  time.Now(),
-				Latest: time.Now(),
+				First:  bson.NewDateTimeFromTime(time.Now()),
+				Latest: bson.NewDateTimeFromTime(time.Now()),
 			},
 			{
-				First:  time.Now(),
-				Latest: time.Now(),
+				First:  bson.NewDateTimeFromTime(time.Now()),
+				Latest: bson.NewDateTimeFromTime(time.Now()),
 			},
 		},
 	)
@@ -989,8 +989,8 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		[]int32{100},
 		[]recheck.MismatchTimes{
 			{
-				First:  time.Now(),
-				Latest: time.Now(),
+				First:  bson.NewDateTimeFromTime(time.Now()),
+				Latest: bson.NewDateTimeFromTime(time.Now()),
 			},
 		},
 	)
@@ -1298,6 +1298,7 @@ func (suite *IntegrationTestSuite) getFailuresForTask(
 	)
 
 	require.NoError(suite.T(), err)
+	require.NotEmpty(suite.T(), discrepancies)
 
 	return slices.Collect(maps.Values(discrepancies))[0]
 }

@@ -31,8 +31,8 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 			[]int32{1234},
 			[]recheck.MismatchTimes{
 				{
-					First:  time.Now(),
-					Latest: time.Now(),
+					First:  bson.NewDateTimeFromTime(time.Now()),
+					Latest: bson.NewDateTimeFromTime(time.Now()),
 				},
 			},
 		),

@@ -198,7 +198,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			}
 
 			times := m.Detail.MismatchTimes
-			duration := times.Latest.Sub(times.First)
+			duration := times.Latest.Time().Sub(times.First.Time())
 
 			mismatchedDocsTable.Append([]string{
 				fmt.Sprintf("%v", m.Detail.ID),
@@ -246,7 +246,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			task := failedTaskMap[d.Task]
 
 			times := d.Detail.MismatchTimes
-			duration := times.Latest.Sub(times.First)
+			duration := times.Latest.Time().Sub(times.First.Time())
 
 			missingDocsTable.Append([]string{
 				fmt.Sprintf("%v", d.Detail.ID),
@@ -293,7 +293,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			task := failedTaskMap[d.Task]
 
 			times := d.Detail.MismatchTimes
-			duration := times.Latest.Sub(times.First)
+			duration := times.Latest.Time().Sub(times.First.Time())
 
 			extraDocsTable.Append([]string{
 				fmt.Sprintf("%v", d.Detail.ID),
