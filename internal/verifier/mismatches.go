@@ -185,8 +185,6 @@ func getDocumentMismatchReportData(
 				{{"$group", bson.D{
 					{"_id", nil},
 
-					// These have to be root-level for now.
-					// We’ll move them a level lower below.
 					{"missingOnDst", accum.Sum{agg.Cond{
 						If:   missingOnDstFilter,
 						Then: 1,
