@@ -185,6 +185,11 @@ func getDocumentMismatchReportData(
 				{{"$group", bson.D{
 					{"_id", nil},
 
+					{"contentDiffers", accum.Sum{agg.Cond{
+						If:   contentDiffersFilter,
+						Then: 1,
+						Else: 0,
+					}}},
 					{"missingOnDst", accum.Sum{agg.Cond{
 						If:   missingOnDstFilter,
 						Then: 1,
@@ -192,11 +197,6 @@ func getDocumentMismatchReportData(
 					}}},
 					{"extraOnDst", accum.Sum{agg.Cond{
 						If:   extraOnDstFilter,
-						Then: 1,
-						Else: 0,
-					}}},
-					{"contentDiffers", accum.Sum{agg.Cond{
-						If:   contentDiffersFilter,
 						Then: 1,
 						Else: 0,
 					}}},
