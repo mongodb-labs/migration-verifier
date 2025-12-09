@@ -194,11 +194,11 @@ func (verifier *Verifier) compareDocsFromChannels(
 			dstDoc = curDocWithTs
 		}
 
+		defer pool.Put(srcDoc.doc)
+		defer pool.Put(dstDoc.doc)
+
 		// Finally we compare the documents and save any mismatch report(s).
 		curProblems, err := verifier.compareOneDocument(srcDoc.doc, dstDoc.doc, namespace)
-
-		pool.Put(srcDoc.doc)
-		pool.Put(dstDoc.doc)
 
 		if err != nil {
 			return errors.Wrap(err, "failed to compare documents")
