@@ -13,6 +13,16 @@ func (s Sum) MarshalBSON() ([]byte, error) {
 
 //----------------------------------------------------------------------
 
+type Push [1]any
+
+var _ bson.Marshaler = Push{}
+
+func (p Push) MarshalBSON() ([]byte, error) {
+	return bson.Marshal(bson.D{{"$push", p[0]}})
+}
+
+//----------------------------------------------------------------------
+
 type Max [1]any
 
 var _ bson.Marshaler = Max{}

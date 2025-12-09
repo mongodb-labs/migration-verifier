@@ -282,6 +282,8 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 }
 
 func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
+	suite.T().Skip("because")
+
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
 

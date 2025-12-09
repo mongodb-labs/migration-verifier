@@ -165,7 +165,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	if reportData.Counts.ContentDiffers > 0 {
 		countsTable.Append([]string{
-			"Documents With Differing Content",
+			"Differing Content",
 			reportutils.FmtReal(reportData.Counts.ContentDiffers),
 		})
 	}
@@ -240,7 +240,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 		for _, d := range reportData.MissingOnDst {
 			if !d.Detail.DocumentIsMissing() {
-				panic(fmt.Sprintf("found content-mismatch mismatch but expected missing: %+v", d))
+				panic(fmt.Sprintf("MissingOnDst: found content-mismatch mismatch but expected missing: %+v", reportData))
 			}
 
 			task := failedTaskMap[d.Task]
@@ -254,24 +254,24 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				task.QueryFilter.To,
 				reportutils.DurationToHMS(duration),
 			})
-
-			strBuilder.WriteString("\n")
-
-			if tableIsComplete {
-				fmt.Fprint(
-					strBuilder,
-					"All documents found missing on the destination:\n",
-				)
-			} else {
-				fmt.Fprintf(
-					strBuilder,
-					"First %d documents found missing on the destination:\n",
-					verifier.failureDisplaySize,
-				)
-			}
-
-			missingDocsTable.Render()
 		}
+
+		strBuilder.WriteString("\n")
+
+		if tableIsComplete {
+			fmt.Fprint(
+				strBuilder,
+				"All documents found missing on the destination:\n",
+			)
+		} else {
+			fmt.Fprintf(
+				strBuilder,
+				"First %d documents found missing on the destination:\n",
+				verifier.failureDisplaySize,
+			)
+		}
+
+		missingDocsTable.Render()
 	}
 
 	if len(reportData.ExtraOnDst) > 0 {
@@ -287,7 +287,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 		for _, d := range reportData.ExtraOnDst {
 			if !d.Detail.DocumentIsMissing() {
-				panic(fmt.Sprintf("found content-mismatch mismatch but expected missing: %+v", d))
+				panic(fmt.Sprintf("ExtraOnDst: found content-mismatch mismatch but expected missing (%+v); reportData = %+v", d, reportData))
 			}
 
 			task := failedTaskMap[d.Task]
@@ -301,24 +301,24 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				task.QueryFilter.To,
 				reportutils.DurationToHMS(duration),
 			})
-
-			strBuilder.WriteString("\n")
-
-			if tableIsComplete {
-				fmt.Fprint(
-					strBuilder,
-					"All documents found only on the destination:\n",
-				)
-			} else {
-				fmt.Fprintf(
-					strBuilder,
-					"First %d documents found only on the destination:\n",
-					verifier.failureDisplaySize,
-				)
-			}
-
-			extraDocsTable.Render()
 		}
+
+		strBuilder.WriteString("\n")
+
+		if tableIsComplete {
+			fmt.Fprint(
+				strBuilder,
+				"All documents found only on the destination:\n",
+			)
+		} else {
+			fmt.Fprintf(
+				strBuilder,
+				"First %d documents found only on the destination:\n",
+				verifier.failureDisplaySize,
+			)
+		}
+
+		extraDocsTable.Render()
 	}
 
 	return mismatchReportAlarm, anyAreIncomplete, nil

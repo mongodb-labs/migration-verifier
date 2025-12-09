@@ -176,37 +176,51 @@ func getDocumentMismatchReportData(
 				"$detail.mismatchTimes.first",
 			}},
 		}}},
-		{{"$sort", bson.D{{"_mismatchMS", -1}}}},
-		{{"$group", bson.D{
-			{"contentDiffers", accum.FirstN{
-				N:     limit,
-				Input: agg.Not{missingFilter},
-			}},
-			{"missingOnDst", accum.FirstN{
-				N:     limit,
-				Input: missingOnDstFilter,
-			}},
-			{"extraOnDst", accum.FirstN{
-				N:     limit,
-				Input: extraOnDstFilter,
-			}},
+		{{"$sort", bson.D{
+			{"_mismatchMS", -1},
+			{"detail.id", 1},
+		}}},
+		{{"$facet", bson.D{
+			{"counts", mongo.Pipeline{
+				{{"$group", bson.D{
+					{"_id", nil},
 
-			{"counts", bson.D{
-				{"missingOnDst", accum.Sum{agg.Cond{
-					If:   missingOnDstFilter,
-					Then: 1,
-					Else: 0,
+					// These have to be root-level for now.
+					// We’ll move them a level lower below.
+					{"missingOnDst", accum.Sum{agg.Cond{
+						If:   missingOnDstFilter,
+						Then: 1,
+						Else: 0,
+					}}},
+					{"extraOnDst", accum.Sum{agg.Cond{
+						If:   extraOnDstFilter,
+						Then: 1,
+						Else: 0,
+					}}},
+					{"contentDiffers", accum.Sum{agg.Cond{
+						If:   mismatchFilter,
+						Then: 1,
+						Else: 0,
+					}}},
 				}}},
-				{"extraOnDst", accum.Sum{agg.Cond{
-					If:   extraOnDstFilter,
-					Then: 1,
-					Else: 0,
-				}}},
-				{"contentDiffers", accum.Sum{agg.Cond{
-					If:   mismatchFilter,
-					Then: 1,
-					Else: 0,
-				}}},
+			}},
+			{"contentDiffers", mongo.Pipeline{
+				{{"$match", bson.D{{"$expr", agg.Not{missingFilter}}}}},
+				{{"$limit", limit}},
+			}},
+			{"missingOnDst", mongo.Pipeline{
+				{{"$match", bson.D{{"$expr", missingOnDstFilter}}}},
+				{{"$limit", limit}},
+			}},
+			{"extraOnDst", mongo.Pipeline{
+				{{"$match", bson.D{{"$expr", extraOnDstFilter}}}},
+				{{"$limit", limit}},
+			}},
+		}}},
+		{{"$addFields", bson.D{
+			{"counts", agg.ArrayElemAt{
+				Array: "$counts",
+				Index: 0,
 			}},
 		}}},
 	}
@@ -217,13 +231,17 @@ func getDocumentMismatchReportData(
 		return mismatchReportData{}, errors.Wrapf(err, "fetching %d tasks' discrepancies", len(taskIDs))
 	}
 
-	var results mismatchReportData
+	var results []mismatchReportData
 
 	if err := cursor.All(ctx, &results); err != nil {
 		return mismatchReportData{}, errors.Wrapf(err, "reading mismatch aggregation")
 	}
 
-	return results, nil
+	if len(results) != 1 {
+		panic(fmt.Sprintf("got != 1 result: %+v", results))
+	}
+
+	return results[0], nil
 }
 
 func recordMismatches(
