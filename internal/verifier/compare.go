@@ -396,7 +396,7 @@ func getMismatchTimesFromPrior(prior option.Option[recheck.MismatchTimes]) reche
 	if pmm, has := prior.Get(); has {
 		return recheck.MismatchTimes{
 			First:      pmm.First,
-			DurationMS: time.Now().Sub(pmm.First.Time()).Milliseconds(),
+			DurationMS: time.Since(pmm.First.Time()).Milliseconds(),
 		}
 	}
 
@@ -409,7 +409,7 @@ func createIdToMismatchTimes(task *VerificationTask) map[string]recheck.Mismatch
 	idToMismatchTimes := map[string]recheck.MismatchTimes{}
 
 	for i, id := range task.Ids {
-		mmTimes, _ := task.MismatchTimes[int32(i)]
+		mmTimes := task.MismatchTimes[int32(i)]
 
 		if mmTimes.First != 0 {
 			idToMismatchTimes[string(rvToMapKey(nil, id))] = mmTimes

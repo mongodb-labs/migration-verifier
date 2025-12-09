@@ -97,13 +97,6 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 	return false, anyAreIncomplete, nil
 }
 
-type mismatchReportState string
-
-const (
-	mismatchReportAlarm mismatchReportState = "alarm"
-	mismatchReportOK    mismatchReportState = "ok"
-)
-
 func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (option.Option[time.Duration], bool, error) {
 	generation, _ := verifier.getGeneration()
 

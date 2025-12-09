@@ -1601,7 +1601,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	if elapsed > progressReportTimeWarnThreshold {
 		verifier.logger.Warn().
 			Stringer("elapsed", elapsed).
-			Msg("Report generation took longer than expected. The metadata database may be under excess load.")
+			Msg("Report generation took longer than ideal. The metadata database may be under excess load.")
 	}
 
 	verifier.writeStringBuilder(strBuilder)
