@@ -16,6 +16,8 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -102,7 +104,7 @@ const (
 	mismatchReportOK    mismatchReportState = "ok"
 )
 
-func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (mismatchReportState, bool, error) {
+func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (option.Option[time.Duration], bool, error) {
 	generation, _ := verifier.getGeneration()
 
 	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
@@ -114,7 +116,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	)
 
 	if err != nil {
-		return "", false, err
+		return option.None[time.Duration](), false, err
 	}
 
 	anyAreIncomplete := len(incompleteTasks) > 0
@@ -122,7 +124,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	if len(failedTasks) == 0 {
 
 		// Nothing has failed/mismatched, so there’s nothing to print.
-		return mismatchReportOK, anyAreIncomplete, nil
+		return option.None[time.Duration](), anyAreIncomplete, nil
 	}
 
 	strBuilder.WriteString("\n")
@@ -142,7 +144,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		verifier.failureDisplaySize,
 	)
 	if err != nil {
-		return "", false, errors.Wrapf(
+		return option.None[time.Duration](), false, errors.Wrapf(
 			err,
 			"fetching %d failed tasks’ most persistent discrepancies",
 			len(failedTasks),
@@ -188,7 +190,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	if len(reportData.ContentDiffers) > 0 {
 		mismatchedDocsTable := tablewriter.NewWriter(strBuilder)
-		mismatchedDocsTable.SetHeader([]string{"ID", "Cluster", "Field", "Namespace", "Details", "Duration"})
+		mismatchedDocsTable.SetHeader([]string{"ID", "Field", "Namespace", "Details", "Duration"})
 
 		tableIsComplete := reportData.Counts.ContentDiffers == int64(len(reportData.ContentDiffers))
 
@@ -202,7 +204,6 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 			mismatchedDocsTable.Append([]string{
 				fmt.Sprintf("%v", m.Detail.ID),
-				m.Detail.Cluster,
 				m.Detail.Field,
 				m.Detail.NameSpace,
 				m.Detail.Details,
@@ -321,7 +322,20 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		extraDocsTable.Render()
 	}
 
-	return mismatchReportAlarm, anyAreIncomplete, nil
+	longestMismatch := lo.Max(
+		lo.Map(
+			lo.Flatten(mslices.Of(
+				reportData.ContentDiffers,
+				reportData.MissingOnDst,
+				reportData.ExtraOnDst,
+			)),
+			func(mi MismatchInfo, _ int) time.Duration {
+				return time.Duration(mi.Detail.MismatchTimes.DurationMS) * time.Millisecond
+			},
+		),
+	)
+
+	return option.IfNotZero(longestMismatch), anyAreIncomplete, nil
 }
 
 // Boolean returned indicates whether this generation has any tasks.
@@ -584,25 +598,12 @@ func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, st
 	return true, nil
 }
 
-func (verifier *Verifier) printMismatchInvestigationNotes(strBuilder *strings.Builder) {
-	gen, _ := verifier.getGeneration()
-
-	lines := []string{
-		"",
-		"To investigate mismatches, connect to the metadata cluster, then run:",
-		fmt.Sprintf("\tuse %s", verifier.metaDBName),
-		fmt.Sprintf("\tdb.%s.find({generation: %d, status: 'failed'})", verificationTasksCollection, gen),
-	}
-
-	for _, line := range lines {
-		strBuilder.WriteString(line + "\n")
-	}
-}
-
-func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
+func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 	var eventsTable *tablewriter.Table
 
 	fmt.Fprint(builder, "\n")
+
+	totalEventsForBothClusters := 0
 
 	for _, cluster := range []struct {
 		title         string
@@ -631,6 +632,8 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 				reportutils.FmtReal(activeNamespacesCount),
 			)
 		}
+
+		totalEventsForBothClusters += totalEvents
 
 		fmt.Fprintf(builder, "%s change events this generation: %s\n", cluster.title, eventsDescr)
 
@@ -716,6 +719,8 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 
 		eventsTable.Render()
 	}
+
+	return totalEventsForBothClusters
 }
 
 func (verifier *Verifier) getPerNamespaceWorkerStats() map[string][]WorkerStatus {

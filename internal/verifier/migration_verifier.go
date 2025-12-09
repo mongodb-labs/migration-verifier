@@ -64,9 +64,10 @@ const (
 
 	DefaultFailureDisplaySize = 20
 
-	okSymbol    = "\u2705" // white heavy check mark
-	infoSymbol  = "\u24d8" // circled Latin small letter I
-	notOkSymbol = "\u2757" // heavy exclamation mark symbol
+	okSymbol      = "\u2705" // white heavy check mark
+	infoSymbol    = "\u24d8" // circled Latin small letter I
+	maybeOkSymbol = "\u2753" // heavy question mark symbol
+	notOkSymbol   = "\u2757" // heavy exclamation mark symbol
 
 	clientAppName = "Migration Verifier"
 
@@ -1469,6 +1470,18 @@ func startReport() *strings.Builder {
 	return strBuilder
 }
 
+func (verifier *Verifier) logIfNotContextErr(
+	err error,
+	template string,
+	vars ...any,
+) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+
+	verifier.logger.Err(err).Msgf(template, vars...)
+}
+
 func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatus GenerationStatus) {
 	if !verifier.ensureNamespaces(ctx) {
 		return
@@ -1503,7 +1516,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	metadataMismatches, anyCollsIncomplete, err := verifier.reportCollectionMetadataMismatches(ctx, strBuilder)
 	if err != nil {
-		verifier.logger.Err(err).Msgf("Failed to report collection metadata mismatches")
+		verifier.logIfNotContextErr(err, "Failed to report collection metadata mismatches.")
 		return
 	}
 
@@ -1520,11 +1533,11 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	}
 
 	if err != nil {
-		verifier.logger.Err(err).Msgf("Failed to report per-namespace statistics")
+		verifier.logIfNotContextErr(err, "Failed to report per-namespace statistics")
 		return
 	}
 
-	verifier.printChangeEventStatistics(strBuilder)
+	changeEvents := verifier.printChangeEventStatistics(strBuilder)
 
 	// Only print the worker status table if debug logging is enabled.
 	if verifier.logger.Debug().Enabled() {
@@ -1537,20 +1550,35 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	var statusLine string
 
 	if hasTasks {
-		reportState, anyPartitionsIncomplete, err := verifier.reportDocumentMismatches(ctx, strBuilder)
+		longestLivedMismatch, anyPartitionsIncomplete, err := verifier.reportDocumentMismatches(ctx, strBuilder)
 		if err != nil {
-			verifier.logger.Err(err).Msgf("Failed to report document mismatches")
+			verifier.logIfNotContextErr(err, "Failed to report document mismatches.")
 			return
 		}
 
-		if metadataMismatches || reportState == mismatchReportAlarm {
-			verifier.printMismatchInvestigationNotes(strBuilder)
-
-			statusLine = fmt.Sprintf(notOkSymbol + " Mismatches found.")
+		if mismatchDuration, hasDocMismatch := longestLivedMismatch.Get(); hasDocMismatch {
+			if verifier.writesOff {
+				statusLine = notOkSymbol + " Document mismatches found. Investigate them.\n"
+				statusLine += "See the verifier’s documentation for details."
+			} else if mismatchDuration > 0 {
+				statusLine = maybeOkSymbol + " Recurrent document mismatches found. If any mismatch durations exceed the\n"
+				statusLine += "replicator’s lag, investigate those. See the verifier’s documentation for details."
+			} else {
+				statusLine = maybeOkSymbol + " New document mismatches found. The replicator may fix them.\n"
+				statusLine += "The verifier will recheck them in the next generation."
+			}
+		} else if metadataMismatches {
+			if verifier.writesOff {
+				statusLine = notOkSymbol + " Metadata mismatches found. These may be fixable."
+			} else {
+				statusLine = maybeOkSymbol + " Metadata mismatches found. The replicator may correct these later."
+			}
 		} else if anyCollsIncomplete || anyPartitionsIncomplete {
-			statusLine = fmt.Sprintf(infoSymbol + " No mismatches found yet, but verification is still in progress.")
+			statusLine = infoSymbol + " No mismatches found yet, but verification is still in progress."
+		} else if changeEvents > 0 {
+			statusLine = infoSymbol + " No mismatches found, but some documents have changed and so will be rechecked."
 		} else {
-			statusLine = fmt.Sprintf(okSymbol + " No mismatches found.")
+			statusLine = okSymbol + " No mismatches found, and no change events have been seen."
 		}
 	} else {
 		switch genstatus {
