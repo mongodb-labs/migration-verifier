@@ -453,6 +453,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 		},
 		SourceDocumentCount: 3,
 		SourceByteCount:     3000,
+		MismatchTimes:       map[int32]recheck.MismatchTimes{},
 	}
 	t2, t3, t4 := t1, t1, t1
 	t2.QueryFilter.Namespace = "testDB2.testColl1"
