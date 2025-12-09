@@ -333,6 +333,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 		},
 		SourceDocumentCount: 1,
 		SourceByteCount:     types.ByteCount(overlyLarge),
+		MismatchTimes:       map[int32]recheck.MismatchTimes{},
 	}
 
 	t2 := t1
