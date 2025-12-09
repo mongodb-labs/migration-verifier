@@ -4,21 +4,25 @@
 // - auto-completion (i.e., via gopls)
 //
 // Guiding principles are:
-// - Prefer [1]any for unary operators (e.g., `$bsonSize`).
-// - Prefer struct types for operators with named parameters.
-// - Use functions sparingly, e.g., for “tuple” operators like `$in`.
+//   - Prefer [1]any for 1-arg operators (e.g., `$bsonSize`).
+//   - Prefer [2]any for binary operators whose arguments don’t benefit
+//     from naming. (e.g., $eq)
+//   - Prefer struct types for operators with named parameters.
+//   - Prefer struct types for operators whose documentation gives names,
+//     even if those names aren’t sent to the server.
+//   - Use functions sparingly, e.g., for “tuple” operators like `$in`.
 package agg
 
 import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-type Eq []any
+type Eq [2]any
 
 var _ bson.Marshaler = Eq{}
 
 func (e Eq) MarshalBSON() ([]byte, error) {
-	return bson.Marshal(bson.D{{"$eq", []any(e)}})
+	return bson.Marshal(bson.D{{"$eq", [2]any(e)}})
 }
 
 // ---------------------------------------------
@@ -26,7 +30,7 @@ func (e Eq) MarshalBSON() ([]byte, error) {
 type Gt [2]any
 
 func (g Gt) MarshalBSON() ([]byte, error) {
-	return bson.Marshal(bson.D{{"$gt", []any(g[:])}})
+	return bson.Marshal(bson.D{{"$gt", [2]any(g)}})
 }
 
 // ---------------------------------------------
