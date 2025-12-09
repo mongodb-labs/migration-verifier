@@ -183,7 +183,13 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	if len(reportData.ContentDiffers) > 0 {
 		mismatchedDocsTable := tablewriter.NewWriter(strBuilder)
-		mismatchedDocsTable.SetHeader([]string{"ID", "Field", "Namespace", "Details", "Duration"})
+		mismatchedDocsTable.SetHeader([]string{
+			"ID",
+			"Field",
+			"Src NS",
+			"Details",
+			"Duration",
+		})
 
 		tableIsComplete := reportData.Counts.ContentDiffers == int64(len(reportData.ContentDiffers))
 
@@ -192,13 +198,15 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				panic(fmt.Sprintf("found missing-type mismatch but expected content-differs: %+v", m))
 			}
 
+			task := failedTaskMap[m.Task]
+
 			times := m.Detail.MismatchTimes
 			duration := time.Duration(times.DurationMS) * time.Millisecond
 
 			mismatchedDocsTable.Append([]string{
 				fmt.Sprintf("%v", m.Detail.ID),
 				m.Detail.Field,
-				m.Detail.NameSpace,
+				task.QueryFilter.Namespace,
 				m.Detail.Details,
 				reportutils.DurationToHMS(duration),
 			})
@@ -224,9 +232,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	if len(reportData.MissingOnDst) > 0 {
 		missingDocsTable := tablewriter.NewWriter(strBuilder)
 		missingDocsTable.SetHeader([]string{
-			"Document ID",
-			"Source Namespace",
-			"Destination Namespace",
+			"Doc ID",
+			"Src NS",
 			"Duration",
 		})
 
@@ -245,7 +252,6 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			missingDocsTable.Append([]string{
 				fmt.Sprintf("%v", d.Detail.ID),
 				task.QueryFilter.Namespace,
-				task.QueryFilter.To,
 				reportutils.DurationToHMS(duration),
 			})
 		}
@@ -271,9 +277,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	if len(reportData.ExtraOnDst) > 0 {
 		extraDocsTable := tablewriter.NewWriter(strBuilder)
 		extraDocsTable.SetHeader([]string{
-			"Document ID",
-			"Source Namespace",
-			"Destination Namespace",
+			"Doc ID",
+			"Src NS",
 			"Duration",
 		})
 
@@ -292,7 +297,6 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			extraDocsTable.Append([]string{
 				fmt.Sprintf("%v", d.Detail.ID),
 				task.QueryFilter.Namespace,
-				task.QueryFilter.To,
 				reportutils.DurationToHMS(duration),
 			})
 		}
