@@ -1,7 +1,6 @@
 package verifier
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -139,27 +138,4 @@ func (qf QueryFilter) GetDocKeyFields() []string {
 		[]string{"_id"},
 		qf.ShardKeys...,
 	)
-}
-
-func (verifier *Verifier) doInMetaTransaction(
-	ctx context.Context,
-	todo func(context.Context, context.Context) error,
-) error {
-	if mongo.SessionFromContext(ctx) != nil {
-		verifier.logger.Panic().
-			Msg("Context indicates an active session when it should not.")
-	}
-
-	session, err := verifier.metaClient.StartSession()
-	if err != nil {
-		return errors.Wrap(err, "failed to start metadata session")
-	}
-
-	defer session.EndSession(ctx)
-
-	_, err = session.WithTransaction(ctx, func(sctx context.Context) (any, error) {
-		return nil, todo(ctx, sctx)
-	})
-
-	return err
 }

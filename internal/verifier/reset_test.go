@@ -1,7 +1,6 @@
 package verifier
 
 import (
-	"context"
 	"strings"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
@@ -23,12 +22,7 @@ func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
 	_, err = verifier.InsertCollectionVerificationTask(ctx, "foo.bar")
 	suite.Require().NoError(err)
 
-	err = verifier.doInMetaTransaction(
-		ctx,
-		func(_ context.Context, ctx context.Context) error {
-			return verifier.ResetInProgressTasks(ctx)
-		},
-	)
+	err = verifier.ResetInProgressTasks(ctx)
 	suite.Require().NoError(err)
 
 	tasksColl := verifier.verificationTaskCollection()
@@ -99,12 +93,7 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	}
 
 	// Reset tasks
-	err = verifier.doInMetaTransaction(
-		ctx,
-		func(_ context.Context, ctx context.Context) error {
-			return verifier.ResetInProgressTasks(ctx)
-		},
-	)
+	err = verifier.ResetInProgressTasks(ctx)
 	suite.Require().NoError(err)
 
 	orderedTypes := mslices.Of(

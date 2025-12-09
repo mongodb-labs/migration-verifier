@@ -12,6 +12,17 @@ var defaultTaskUpdate = bson.M{
 	"$unset": bson.M{"begin_time": 1},
 }
 
+// ResetInProgressTasks surveys the metadata & rolls back any in-progress tasks.
+// Specifically:
+// - If the primary task is not complete: delete all non-primary tasks. Done!
+// - Otherwise:
+//   - For each in-progress collection-metadata task:
+//   - delete all doc-verification tasks for that namespace
+//   - reset the metadata task
+//   - For each (remaining) in-progress document task:
+//   - reset the task
+//
+// The above is resumable. Thus you can safely call this outside a transaction.
 func (verifier *Verifier) ResetInProgressTasks(ctx context.Context) error {
 	didReset, err := verifier.handleIncompletePrimary(ctx)
 
