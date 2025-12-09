@@ -1578,7 +1578,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		} else if changeEvents > 0 {
 			statusLine = infoSymbol + " No mismatches found, but some documents have changed and so will be rechecked."
 		} else {
-			statusLine = okSymbol + " No mismatches found, and no change events have been seen."
+			statusLine = okSymbol + " No mismatches found, and no documents have changed."
 		}
 	} else {
 		switch genstatus {

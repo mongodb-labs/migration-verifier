@@ -315,20 +315,24 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		extraDocsTable.Render()
 	}
 
-	longestMismatch := lo.Max(
-		lo.Map(
-			lo.Flatten(mslices.Of(
-				reportData.ContentDiffers,
-				reportData.MissingOnDst,
-				reportData.ExtraOnDst,
-			)),
-			func(mi MismatchInfo, _ int) time.Duration {
-				return time.Duration(mi.Detail.MismatchTimes.DurationMS) * time.Millisecond
-			},
-		),
+	var longestDurationOpt option.Option[time.Duration]
+
+	allShownMismatches := lo.Map(
+		lo.Flatten(mslices.Of(
+			reportData.ContentDiffers,
+			reportData.MissingOnDst,
+			reportData.ExtraOnDst,
+		)),
+		func(mi MismatchInfo, _ int) time.Duration {
+			return time.Duration(mi.Detail.MismatchTimes.DurationMS) * time.Millisecond
+		},
 	)
 
-	return option.IfNotZero(longestMismatch), anyAreIncomplete, nil
+	if len(allShownMismatches) > 0 {
+		longestDurationOpt = option.Some(lo.Max(allShownMismatches))
+	}
+
+	return longestDurationOpt, anyAreIncomplete, nil
 }
 
 // Boolean returned indicates whether this generation has any tasks.
