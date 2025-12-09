@@ -239,7 +239,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_BucketsOnly() {
 func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 	ctx := suite.Context()
 
-	if suite.BuildVerifier().srcClusterInfo.VersionArray[0] < 6 {
+	if suite.BuildVerifier().srcClusterInfo.VersionArray[0] < 5 {
 		suite.T().Skipf("Need a source version with time-series support.")
 	}
 
