@@ -2,6 +2,8 @@ package agg
 
 import "go.mongodb.org/mongo-driver/v2/bson"
 
+// Slice represents `$slice`’s 2-argument form.
+// See SliceFrom for that operator’s 3-argument form.
 type Slice struct {
 	Array any
 	N     any
