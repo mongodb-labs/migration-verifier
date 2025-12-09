@@ -11,9 +11,9 @@ curl -sSL https://raw.githubusercontent.com/mongodb-labs/migration-verifier/refs
 ```
 (Alternatively, you can check out this repository then `./build.sh` to build from source.)
 
-Then start a local replica set to store verification metadata:
+Then start a local mongod to store verification metadata:
 ```
-podman run -it --rm -p27017:27017 -v ./verifier_db:/data/db --entrypoint bash docker.io/mongodb/mongodb-community-server -c 'mongod --bind_ip_all --replSet rs & mpid=$! && until mongosh --eval "rs.initiate({_id: \"rs\", members: [{_id: 0, host: \"localhost:27017\"}]})"; do sleep 1; done && wait $mpid'
+podman run -it --rm -p27017:27017 -v ./verifier_db:/data/db --entrypoint bash docker.io/mongodb/mongodb-community-server
 ```
 (This will create a local `verifier_db` directory so that you can resume verification if needed. Omit `-v` with its argument to avoid that.)
 
@@ -32,9 +32,9 @@ mismatches or a confirmation of exact match between the clusters.
 
 # Verifier Metadata Considerations
 
-migration-verifier needs a MongoDB cluster to store its state. This cluster *must* support transactions (i.e., either a replica set or sharded cluster, NOT a standalone instance). By default, this is assumed to run on localhost:27017.
+migration-verifier needs a `mongod` to store its state. By default, this is assumed to run on localhost:27017. For best performance this should be a standalone `mongod`.
 
-See [above](#Quick-Start) for a one-line command to start up a local, single-node replica set that you can use for this purpose.
+See [above](#Quick-Start) for a one-line command to start up such a `mongod`.
 
 The verifier can alternatively store its metadata on the destination cluster. This can severely degrade performance, though. Also, if you’re using mongosync, it requires either disabling mongosync’s destination write blocking or giving the `bypassWriteBlockingMode` to the verifier’s `--metaURI` user.
 
