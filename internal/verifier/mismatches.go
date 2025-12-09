@@ -164,7 +164,7 @@ func getDocumentMismatchReportData(
 		},
 	}
 
-	mismatchFilter := agg.Not{missingFilter}
+	contentDiffersFilter := agg.Not{missingFilter}
 
 	pl := mongo.Pipeline{
 		{{"$match", bson.D{
@@ -196,14 +196,14 @@ func getDocumentMismatchReportData(
 						Else: 0,
 					}}},
 					{"contentDiffers", accum.Sum{agg.Cond{
-						If:   mismatchFilter,
+						If:   contentDiffersFilter,
 						Then: 1,
 						Else: 0,
 					}}},
 				}}},
 			}},
 			{"contentDiffers", mongo.Pipeline{
-				{{"$match", bson.D{{"$expr", agg.Not{missingFilter}}}}},
+				{{"$match", bson.D{{"$expr", contentDiffersFilter}}}},
 				{{"$limit", limit}},
 			}},
 			{"missingOnDst", mongo.Pipeline{
