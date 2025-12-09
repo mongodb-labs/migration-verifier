@@ -22,7 +22,7 @@ require (
 	github.com/urfave/cli v1.22.9
 
 	// NB: This is the last driver version that supported 4.0.
-	go.mongodb.org/mongo-driver/v2 v2.3.1
+	go.mongodb.org/mongo-driver/v2 v2.4.0
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
 	golang.org/x/sync v0.18.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
