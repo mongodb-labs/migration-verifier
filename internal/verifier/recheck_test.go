@@ -39,6 +39,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 	)
 
 	recheckDocs := suite.fetchRecheckDocs(ctx, verifier)
+	suite.Require().NotEmpty(recheckDocs)
 
 	suite.Assert().Equal(
 		[]recheck.Doc{
@@ -48,6 +49,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 					SrcCollectionName: "namespace",
 					DocumentID:        mbson.ToRawValue("theDocID"),
 				},
+				MismatchTimes: recheckDocs[0].MismatchTimes,
 			},
 		},
 		recheckDocs,
@@ -75,6 +77,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 	suite.Require().NoError(err)
 
 	recheckDocs = suite.fetchRecheckDocs(ctx, verifier)
+	suite.Require().NotEmpty(recheckDocs)
 	suite.Assert().Equal(
 		[]recheck.Doc{
 			{
@@ -83,6 +86,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 					SrcCollectionName: "namespace",
 					DocumentID:        mbson.ToRawValue("theDocID"),
 				},
+				MismatchTimes: recheckDocs[0].MismatchTimes,
 			},
 		},
 		recheckDocs,
@@ -379,6 +383,8 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	err = cursor.All(ctx, &actualTasks)
 	suite.Require().NoError(err)
 
+	suite.Require().Len(actualTasks, 2, "actualTasks: %+v", actualTasks)
+
 	t1 := VerificationTask{
 		Generation: 1,
 		Ids: mslices.Of(
@@ -393,6 +399,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 		},
 		SourceDocumentCount: 2,
 		SourceByteCount:     1126400,
+		MismatchTimes:       map[int32]recheck.MismatchTimes{},
 	}
 
 	t2 := t1
