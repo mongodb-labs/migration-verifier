@@ -178,19 +178,13 @@ func getDocumentMismatchReportData(
 
 	contentDiffersFilter := agg.Not{missingFilter}
 
-	limitAndSortMismatches := mongo.Pipeline{
-		{{"$limit", limit}},
-		{{"$sort", bson.D{
-			{"detail.id", 1},
-		}}},
-	}
-
 	pl := mongo.Pipeline{
 		{{"$match", bson.D{
 			{"task", bson.D{{"$in", taskIDs}}},
 		}}},
 		{{"$sort", bson.D{
 			{"detail.mismatchTimes.duration", -1},
+			{"detail.id", 1},
 		}}},
 		{{"$facet", bson.D{
 			{"counts", mongo.Pipeline{
@@ -214,26 +208,19 @@ func getDocumentMismatchReportData(
 					}}},
 				}}},
 			}},
-			{"contentDiffers", append(
-				mongo.Pipeline{
-					{{"$match", bson.D{{"$expr", contentDiffersFilter}}}},
-				},
-				limitAndSortMismatches...,
-			)},
-			{"missingOnDst", append(
-				mongo.Pipeline{
-					{{"$match", bson.D{{"$expr", missingOnDstFilter}}}},
-				},
-				limitAndSortMismatches...,
-			)},
-			{"extraOnDst", append(
-				mongo.Pipeline{
-					{{"$match", bson.D{{"$expr", extraOnDstFilter}}}},
-				},
-				limitAndSortMismatches...,
-			)},
+			{"contentDiffers", mongo.Pipeline{
+				{{"$match", bson.D{{"$expr", contentDiffersFilter}}}},
+				{{"$limit", limit}},
+			}},
+			{"missingOnDst", mongo.Pipeline{
+				{{"$match", bson.D{{"$expr", missingOnDstFilter}}}},
+				{{"$limit", limit}},
+			}},
+			{"extraOnDst", mongo.Pipeline{
+				{{"$match", bson.D{{"$expr", extraOnDstFilter}}}},
+				{{"$limit", limit}},
+			}},
 		}}},
-
 		{{"$addFields", bson.D{
 			{"counts", agg.ArrayElemAt{
 				Array: "$counts",
