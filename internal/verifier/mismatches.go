@@ -127,7 +127,6 @@ func getMismatchesForTasks(
 	result := map[bson.ObjectID][]VerificationResult{}
 
 	for cursor.Next(ctx) {
-		fmt.Printf("-------- cursor.current: %+v\n", cursor.Current)
 		var d MismatchInfo
 		if err := cursor.Decode(&d); err != nil {
 			return nil, errors.Wrapf(err, "parsing discrepancy %+v", cursor.Current)
