@@ -74,6 +74,11 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 					{"task", 1},
 				},
 			},
+			{
+				Keys: bson.D{
+					{"detail.mismatchTimes.durationMS", 1},
+				},
+			},
 		},
 	)
 

@@ -184,9 +184,9 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	if len(reportData.ContentDiffers) > 0 {
 		mismatchedDocsTable := tablewriter.NewWriter(strBuilder)
 		mismatchedDocsTable.SetHeader([]string{
-			"ID",
-			"Field",
 			"Src NS",
+			"Doc ID",
+			"Field",
 			"Details",
 			"Duration",
 		})
@@ -204,9 +204,9 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			duration := time.Duration(times.DurationMS) * time.Millisecond
 
 			mismatchedDocsTable.Append([]string{
+				task.QueryFilter.Namespace,
 				fmt.Sprintf("%v", m.Detail.ID),
 				m.Detail.Field,
-				task.QueryFilter.Namespace,
 				m.Detail.Details,
 				reportutils.DurationToHMS(duration),
 			})
@@ -232,8 +232,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	if len(reportData.MissingOnDst) > 0 {
 		missingDocsTable := tablewriter.NewWriter(strBuilder)
 		missingDocsTable.SetHeader([]string{
-			"Doc ID",
 			"Src NS",
+			"Doc ID",
 			"Duration",
 		})
 
@@ -250,8 +250,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			duration := time.Duration(times.DurationMS) * time.Millisecond
 
 			missingDocsTable.Append([]string{
-				fmt.Sprintf("%v", d.Detail.ID),
 				task.QueryFilter.Namespace,
+				fmt.Sprintf("%v", d.Detail.ID),
 				reportutils.DurationToHMS(duration),
 			})
 		}
@@ -277,8 +277,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	if len(reportData.ExtraOnDst) > 0 {
 		extraDocsTable := tablewriter.NewWriter(strBuilder)
 		extraDocsTable.SetHeader([]string{
-			"Doc ID",
 			"Src NS",
+			"Doc ID",
 			"Duration",
 		})
 
@@ -295,8 +295,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			duration := time.Duration(times.DurationMS) * time.Millisecond
 
 			extraDocsTable.Append([]string{
-				fmt.Sprintf("%v", d.Detail.ID),
 				task.QueryFilter.Namespace,
+				fmt.Sprintf("%v", d.Detail.ID),
 				reportutils.DurationToHMS(duration),
 			})
 		}
