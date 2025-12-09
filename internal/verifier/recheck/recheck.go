@@ -114,8 +114,8 @@ func (pk *PrimaryKey) UnmarshalFromBSON(in []byte) error {
 }
 
 type MismatchTimes struct {
-	First  bson.DateTime
-	Latest bson.DateTime
+	First      bson.DateTime
+	DurationMS int64
 }
 
 var MismatchTimesBSONLength = len(MismatchTimes{}.MarshalToBSON())
@@ -135,14 +135,14 @@ func (mt *MismatchTimes) UnmarshalBSON(in []byte) error {
 func (mt MismatchTimes) MarshalToBSON() []byte {
 	expectedLen := 4 + // header
 		1 + 5 + 1 + 8 + // first
-		1 + 6 + 1 + 8 + // latest
+		1 + 10 + 1 + 8 + // latest
 		1
 
 	doc := make(bson.Raw, 4, expectedLen)
 	binary.LittleEndian.PutUint32(doc, uint32(cap(doc)))
 
 	doc = bsoncore.AppendDateTimeElement(doc, "first", int64(mt.First))
-	doc = bsoncore.AppendDateTimeElement(doc, "latest", int64(mt.Latest))
+	doc = bsoncore.AppendInt64Element(doc, "durationMS", mt.DurationMS)
 	doc = append(doc, 0)
 
 	if len(doc) != expectedLen {
@@ -168,8 +168,8 @@ func (mt *MismatchTimes) UnmarshalFromBSON(in []byte) error {
 			if err = mbson.UnmarshalElementValue(el, &mt.First); err != nil {
 				return err
 			}
-		case "latest":
-			if err = mbson.UnmarshalElementValue(el, &mt.Latest); err != nil {
+		case "durationMS":
+			if err = mbson.UnmarshalElementValue(el, &mt.DurationMS); err != nil {
 				return err
 			}
 		default:

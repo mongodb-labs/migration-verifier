@@ -392,17 +392,17 @@ func (verifier *Verifier) compareDocsFromChannels(
 }
 
 func getMismatchTimesFromPrior(prior option.Option[recheck.MismatchTimes]) recheck.MismatchTimes {
-	mmTimes := recheck.MismatchTimes{
-		Latest: bson.NewDateTimeFromTime(time.Now()),
-	}
 
 	if pmm, has := prior.Get(); has {
-		mmTimes.First = pmm.First
-	} else {
-		mmTimes.First = mmTimes.Latest
+		return recheck.MismatchTimes{
+			First:      pmm.First,
+			DurationMS: time.Now().Sub(pmm.First.Time()).Milliseconds(),
+		}
 	}
 
-	return mmTimes
+	return recheck.MismatchTimes{
+		First: bson.NewDateTimeFromTime(time.Now()),
+	}
 }
 
 func createIdToMismatchTimes(task *VerificationTask) map[string]recheck.MismatchTimes {

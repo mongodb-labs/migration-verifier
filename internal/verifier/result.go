@@ -57,7 +57,7 @@ func (vr VerificationResult) DocumentIsMissing() bool {
 }
 
 func (vr VerificationResult) MismatchDuration() time.Duration {
-	return vr.MismatchTimes.Latest.Time().Sub(vr.MismatchTimes.First.Time())
+	return time.Duration(vr.MismatchTimes.DurationMS) * time.Millisecond
 }
 
 // Returns an agg expression that indicates whether the VerificationResult

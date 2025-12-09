@@ -959,8 +959,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		[]int32{100},
 		[]recheck.MismatchTimes{
 			{
-				First:  bson.NewDateTimeFromTime(time.Now()),
-				Latest: bson.NewDateTimeFromTime(time.Now()),
+				First: bson.NewDateTimeFromTime(time.Now()),
 			},
 		},
 	)
@@ -972,12 +971,10 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		[]int32{100, 100},
 		[]recheck.MismatchTimes{
 			{
-				First:  bson.NewDateTimeFromTime(time.Now()),
-				Latest: bson.NewDateTimeFromTime(time.Now()),
+				First: bson.NewDateTimeFromTime(time.Now()),
 			},
 			{
-				First:  bson.NewDateTimeFromTime(time.Now()),
-				Latest: bson.NewDateTimeFromTime(time.Now()),
+				First: bson.NewDateTimeFromTime(time.Now()),
 			},
 		},
 	)
@@ -989,8 +986,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		[]int32{100},
 		[]recheck.MismatchTimes{
 			{
-				First:  bson.NewDateTimeFromTime(time.Now()),
-				Latest: bson.NewDateTimeFromTime(time.Now()),
+				First: bson.NewDateTimeFromTime(time.Now()),
 			},
 		},
 	)
