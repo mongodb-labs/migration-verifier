@@ -1,4 +1,6 @@
 name: Release
+permissions:
+  contents: write # to do releases
 
 on:
   push:
