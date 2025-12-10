@@ -42,19 +42,20 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 			recheckStats, err := countRechecksForGeneration(
 				egCtx,
 				verifier.metaClient.Database(verifier.metaDBName),
-				generation-1,
+				generation,
 			)
 
 			if err != nil {
-				return errors.Wrapf(err, "counting mismatches seen during generation %d", generation-1)
+				return errors.Wrapf(err, "counting mismatches seen during generation %d", generation)
 			}
 
-			genStats.CurrentRechecks = option.Some(ProgressRechecks{
+			genStats.PriorRechecks = option.Some(ProgressRechecks{
 				Changes:    recheckStats.FromChange,
 				Mismatches: recheckStats.FromMismatch,
 			})
 
 			genStats.MismatchesFound = recheckStats.NewMismatches
+			genStats.MaxMismatchDuration = recheckStats.MaxMismatchDuration
 
 			return nil
 		},
@@ -107,22 +108,6 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 			genStats.ActiveWorkers = activeWorkers
 
 			return nil
-		},
-	)
-
-	eg.Go(
-		func() error {
-			reportData, err := getDocumentMismatchReportDataForGeneration(
-				ctx,
-				verifier.metaClient.Database(verifier.metaDBName),
-				generation,
-				1,
-			)
-
-			if err != nil {
-				return errors.Wrapf(err, "running mismatch report for generation %d", generation)
-			}
-
 		},
 	)
 
