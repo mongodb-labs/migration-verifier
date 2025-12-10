@@ -11,7 +11,9 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/webserver"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -240,12 +242,38 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 	successResponse(c)
 }
 
+type ProgressGenerationStats struct {
+	TimeElapsed   string
+	ActiveWorkers int
+
+	DocsCompared types.DocumentCount
+	TotalDocs    types.DocumentCount
+
+	SrcBytesCompared types.ByteCount
+	TotalSrcBytes    types.ByteCount
+
+	MismatchesFound  int64
+	RechecksEnqueued int64
+}
+
+type ProgressChangeStats struct {
+	EventsPerSecond  option.Option[float64]
+	CurrentTimes     option.Option[readerCurrentTimes]
+	BufferSaturation float64
+}
+
 // Progress represents the structure of the JSON response from the Progress end point.
 type Progress struct {
-	Phase      string              `json:"phase"`
-	Generation int                 `json:"generation"`
-	Error      error               `json:"error"`
-	Status     *VerificationStatus `json:"verificationStatus"`
+	Phase string
+
+	Generation      int
+	GenerationStats ProgressGenerationStats
+
+	SrcChangeStats ProgressChangeStats
+	DstChangeStats ProgressChangeStats
+
+	Error  error
+	Status *VerificationStatus `json:"verificationStatus"`
 }
 
 // progressEndpoint implements the gin handle for the progress endpoint.
