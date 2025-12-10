@@ -7,12 +7,14 @@ import (
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -255,11 +257,63 @@ func getMismatchesForTasks(
 	return result, nil
 }
 
-func getDocumentMismatchReportData(
+func getDocumentMismatchReportDataForGeneration(
+	ctx context.Context,
+	db *mongo.Database,
+	generation int,
+	limit int64,
+) (mismatchReportData, error) {
+	reportData, err := getDocumentMismatchReportData(
+		ctx,
+		db.Collection(verificationTasksCollection),
+		limit,
+		mongo.Pipeline{
+			{{"$match", bson.D{
+				{"generation", generation},
+				{"status", bson.D{{"$in", mslices.Of(
+					verificationTaskProcessing,
+					verificationTaskFailed,
+				)}}},
+			}}},
+			{{"$lookup", bson.D{
+				{"from", mismatchesCollectionName},
+				{"localField", "_id"},
+				{"foreignField", "task"},
+				{"as", "mismatch"},
+			}}},
+			{{"$unwind", "$mismatch"}},
+			{{"$replaceWith", "$mismatch"}},
+		},
+	)
+
+	return reportData, errors.Wrapf(err, "fetching generation %d’s discrepancies", generation)
+}
+
+func getDocumentMismatchReportDataForTasks(
 	ctx context.Context,
 	db *mongo.Database,
 	taskIDs []bson.ObjectID,
 	limit int64,
+) (mismatchReportData, error) {
+	reportData, err := getDocumentMismatchReportData(
+		ctx,
+		db.Collection(mismatchesCollectionName),
+		limit,
+		mongo.Pipeline{
+			{{"$match", bson.D{
+				{"task", bson.D{{"$in", taskIDs}}},
+			}}},
+		},
+	)
+
+	return reportData, errors.Wrapf(err, "fetching %d tasks’ discrepancies", len(taskIDs))
+}
+
+func getDocumentMismatchReportData(
+	ctx context.Context,
+	coll *mongo.Collection,
+	limit int64,
+	initialStages mongo.Pipeline,
 ) (mismatchReportData, error) {
 	// A filter to identify docs marked “missing” (on either src or dst)
 	missingFilter := getMismatchDocMissingAggExpr("$$ROOT")
@@ -281,61 +335,61 @@ func getDocumentMismatchReportData(
 
 	contentDiffersFilter := agg.Not{missingFilter}
 
-	pl := mongo.Pipeline{
-		{{"$match", bson.D{
-			{"task", bson.D{{"$in", taskIDs}}},
-		}}},
-		{{"$sort", bson.D{
-			{"detail.mismatchTimes.duration", -1},
-			{"detail.id", 1},
-		}}},
-		{{"$facet", bson.D{
-			{"counts", mongo.Pipeline{
-				{{"$group", bson.D{
-					{"_id", nil},
+	pl := append(
+		slices.Clone(initialStages),
+		mongo.Pipeline{
+			{{"$sort", bson.D{
+				{"detail.mismatchTimes.duration", -1},
+				{"detail.id", 1},
+			}}},
+			{{"$facet", bson.D{
+				{"counts", mongo.Pipeline{
+					{{"$group", bson.D{
+						{"_id", nil},
 
-					{"contentDiffers", accum.Sum{agg.Cond{
-						If:   contentDiffersFilter,
-						Then: 1,
-						Else: 0,
+						{"contentDiffers", accum.Sum{agg.Cond{
+							If:   contentDiffersFilter,
+							Then: 1,
+							Else: 0,
+						}}},
+						{"missingOnDst", accum.Sum{agg.Cond{
+							If:   missingOnDstFilter,
+							Then: 1,
+							Else: 0,
+						}}},
+						{"extraOnDst", accum.Sum{agg.Cond{
+							If:   extraOnDstFilter,
+							Then: 1,
+							Else: 0,
+						}}},
 					}}},
-					{"missingOnDst", accum.Sum{agg.Cond{
-						If:   missingOnDstFilter,
-						Then: 1,
-						Else: 0,
-					}}},
-					{"extraOnDst", accum.Sum{agg.Cond{
-						If:   extraOnDstFilter,
-						Then: 1,
-						Else: 0,
-					}}},
-				}}},
-			}},
-			{"contentDiffers", mongo.Pipeline{
-				{{"$match", bson.D{{"$expr", contentDiffersFilter}}}},
-				{{"$limit", limit}},
-			}},
-			{"missingOnDst", mongo.Pipeline{
-				{{"$match", bson.D{{"$expr", missingOnDstFilter}}}},
-				{{"$limit", limit}},
-			}},
-			{"extraOnDst", mongo.Pipeline{
-				{{"$match", bson.D{{"$expr", extraOnDstFilter}}}},
-				{{"$limit", limit}},
-			}},
-		}}},
-		{{"$addFields", bson.D{
-			{"counts", agg.ArrayElemAt{
-				Array: "$counts",
-				Index: 0,
-			}},
-		}}},
-	}
+				}},
+				{"contentDiffers", mongo.Pipeline{
+					{{"$match", bson.D{{"$expr", contentDiffersFilter}}}},
+					{{"$limit", limit}},
+				}},
+				{"missingOnDst", mongo.Pipeline{
+					{{"$match", bson.D{{"$expr", missingOnDstFilter}}}},
+					{{"$limit", limit}},
+				}},
+				{"extraOnDst", mongo.Pipeline{
+					{{"$match", bson.D{{"$expr", extraOnDstFilter}}}},
+					{{"$limit", limit}},
+				}},
+			}}},
+			{{"$addFields", bson.D{
+				{"counts", agg.ArrayElemAt{
+					Array: "$counts",
+					Index: 0,
+				}},
+			}}},
+		}...,
+	)
 
-	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(ctx, pl)
+	cursor, err := coll.Aggregate(ctx, pl)
 
 	if err != nil {
-		return mismatchReportData{}, errors.Wrapf(err, "fetching %d tasks' discrepancies", len(taskIDs))
+		return mismatchReportData{}, errors.Wrap(err, "starting aggregation")
 	}
 
 	var results []mismatchReportData
