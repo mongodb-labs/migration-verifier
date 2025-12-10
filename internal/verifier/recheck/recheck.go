@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -112,6 +113,73 @@ func (pk *PrimaryKey) UnmarshalFromBSON(in []byte) error {
 	return nil
 }
 
+type MismatchTimes struct {
+	First      bson.DateTime
+	DurationMS int64
+}
+
+var MismatchTimesBSONLength = len(MismatchTimes{}.MarshalToBSON())
+
+// NB: We allow bson.Unmarshal to work because it’s needed in VerificationTask.
+var _ bson.Marshaler = MismatchTimes{}
+var _ bson.Unmarshaler = &MismatchTimes{}
+
+func (mt MismatchTimes) MarshalBSON() ([]byte, error) {
+	return mt.MarshalToBSON(), nil
+}
+
+func (mt *MismatchTimes) UnmarshalBSON(in []byte) error {
+	return mt.UnmarshalFromBSON(in)
+}
+
+func (mt MismatchTimes) MarshalToBSON() []byte {
+	expectedLen := 4 + // header
+		1 + 5 + 1 + 8 + // first
+		1 + 10 + 1 + 8 + // latest
+		1
+
+	doc := make(bson.Raw, 4, expectedLen)
+	binary.LittleEndian.PutUint32(doc, uint32(cap(doc)))
+
+	doc = bsoncore.AppendDateTimeElement(doc, "first", int64(mt.First))
+	doc = bsoncore.AppendInt64Element(doc, "durationMS", mt.DurationMS)
+	doc = append(doc, 0)
+
+	if len(doc) != expectedLen {
+		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", mt, len(doc), expectedLen))
+	}
+
+	return doc
+}
+
+func (mt *MismatchTimes) UnmarshalFromBSON(in []byte) error {
+	for el, err := range mbson.RawElements(bson.Raw(in)) {
+		if err != nil {
+			return errors.Wrap(err, "iterating BSON doc fields")
+		}
+
+		key, err := el.KeyErr()
+		if err != nil {
+			return errors.Wrap(err, "extracting BSON doc’s field name")
+		}
+
+		switch key {
+		case "first":
+			if err = mbson.UnmarshalElementValue(el, &mt.First); err != nil {
+				return err
+			}
+		case "durationMS":
+			if err = mbson.UnmarshalElementValue(el, &mt.DurationMS); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unmarshaling to %T: unknown BSON field %#q", *mt, key)
+		}
+	}
+
+	return nil
+}
+
 // Doc stores the necessary information to know which documents must be rechecked.
 type Doc struct {
 	PrimaryKey PrimaryKey `bson:"_id"`
@@ -120,6 +188,9 @@ type Doc struct {
 	// and any others that may be added will remain unchanged even if a recheck
 	// is enqueued multiple times for the same document in the same generation.
 	DataSize int32 `bson:"dataSize"`
+
+	// MismatchTimes tracks the times when this doc was seen mismatched.
+	MismatchTimes option.Option[MismatchTimes] `bson:"mismatchTimes"`
 }
 
 var _ bson.Marshaler = Doc{}
@@ -137,9 +208,17 @@ func (rd Doc) MarshalToBSON() []byte {
 	// This document’s nonvariable parts comprise 24 bytes.
 	expectedLen := 24 + len(keyRaw)
 
+	if rd.MismatchTimes.IsSome() {
+		expectedLen += 1 + 13 + 1 + MismatchTimesBSONLength
+	}
+
 	doc := make(bson.Raw, 4, expectedLen)
 	doc = bsoncore.AppendDocumentElement(doc, "_id", keyRaw)
 	doc = bsoncore.AppendInt32Element(doc, "dataSize", int32(rd.DataSize))
+
+	if mt, has := rd.MismatchTimes.Get(); has {
+		doc = bsoncore.AppendDocumentElement(doc, "mismatchTimes", mt.MarshalToBSON())
+	}
 
 	doc = append(doc, 0)
 
@@ -181,6 +260,23 @@ func (rd *Doc) UnmarshalFromBSON(in []byte) error {
 			if err := mbson.UnmarshalElementValue(el, &rd.DataSize); err != nil {
 				return err
 			}
+		case "mismatchTimes":
+			elType := bson.Type(el[0])
+			if elType != bson.TypeEmbeddedDocument {
+				return fmt.Errorf(
+					"%#q should be BSON %s but found %s",
+					key,
+					bson.TypeEmbeddedDocument,
+					elType,
+				)
+			}
+
+			var mmTimes MismatchTimes
+			if err := mmTimes.UnmarshalFromBSON(el.Value().Document()); err != nil {
+				return errors.Wrapf(err, "unmarshaling %#q", key)
+			}
+
+			rd.MismatchTimes = option.Some(mmTimes)
 		}
 	}
 

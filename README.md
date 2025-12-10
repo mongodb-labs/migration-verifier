@@ -181,7 +181,7 @@ These represent a logical time in MongoDB’s replication protocol.
 
 # Investigation of Mismatches
 
-The verifier records any mismatches it finds in its metadata’s `mismatches`
+The verifier records mismatches in its metadata’s `mismatches`
 collection. Mismatches are indexed by verification task ID. To find a given
 generation’s mismatches, aggregate like this on the metadata cluster:
 
@@ -191,7 +191,7 @@ generation’s mismatches, aggregate like this on the metadata cluster:
     db.verification_tasks.aggregate(
         { $match: {
             generation: <whichever generation>,
-            status: "failed",
+            status: {$in: ["failed", "mismatch"]},
         } },
         { $lookup: {
             from: "mismatches",

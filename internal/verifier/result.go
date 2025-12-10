@@ -3,7 +3,9 @@ package verifier
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 
+	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -15,7 +17,6 @@ const (
 
 // VerificationResult holds the Verification Results.
 type VerificationResult struct {
-
 	// This field gets used differently depending on whether this result
 	// came from a document comparison or something else. If it’s from a
 	// document comparison, it *MUST* be a document ID, not a
@@ -31,6 +32,10 @@ type VerificationResult struct {
 	Details   string
 	Cluster   string
 	NameSpace string
+
+	// The number of generations where we’ve seen this document ID mismatched
+	// without a change event.
+	MismatchTimes recheck.MismatchTimes `bson:"mismatchTimes,omitempty"`
 
 	// The data size of the largest of the mismatched objects.
 	// Note this is not persisted; it is used only to ensure recheck tasks
@@ -51,6 +56,12 @@ func (vr VerificationResult) DocumentIsMissing() bool {
 	return vr.Details == Missing && vr.Field == ""
 }
 
+func (vr VerificationResult) MismatchDuration() time.Duration {
+	return time.Duration(vr.MismatchTimes.DurationMS) * time.Millisecond
+}
+
+// Returns an agg expression that indicates whether the VerificationResult
+// refers to a missing document.
 func getResultDocMissingAggExpr(docExpr any) bson.D {
 	return bson.D{
 		{"$and", []bson.D{
@@ -84,6 +95,7 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 		1 + 7 + 1 + 4 + 1 + // Details
 		1 + 7 + 1 + 4 + 1 + // Cluster
 		1 + 9 + 1 + 4 + 1 + // NameSpace
+		1 + 13 + 1 + recheck.MismatchTimesBSONLength +
 		1 // NUL
 
 	bsonLen += 0 +
@@ -119,6 +131,7 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 	buf = bsoncore.AppendStringElement(buf, "details", vr.Details)
 	buf = bsoncore.AppendStringElement(buf, "cluster", vr.Cluster)
 	buf = bsoncore.AppendStringElement(buf, "namespace", vr.NameSpace)
+	buf = bsoncore.AppendDocumentElement(buf, "mismatchTimes", vr.MismatchTimes.MarshalToBSON())
 
 	if ts, has := vr.SrcTimestamp.Get(); has {
 		buf = bsoncore.AppendTimestampElement(buf, "srctimestamp", ts.T, ts.I)

@@ -15,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -88,6 +89,10 @@ type VerificationTask struct {
 	// ByteCount is like DocumentCount: set when the verifier is done
 	// with the task.
 	SourceByteCount types.ByteCount `bson:"source_bytes_count"`
+
+	// MismatchTimes correlates an index of Ids with the time when
+	// this document was first seen to mismatch.
+	MismatchTimes map[int32]recheck.MismatchTimes
 }
 
 func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
@@ -201,6 +206,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 
 func (verifier *Verifier) createDocumentRecheckTask(
 	ids []bson.RawValue,
+	mismatchTimes map[int32]recheck.MismatchTimes,
 	dataSize types.ByteCount,
 	srcNamespace string,
 ) (*VerificationTask, error) {
@@ -225,6 +231,7 @@ func (verifier *Verifier) createDocumentRecheckTask(
 		},
 		SourceDocumentCount: types.DocumentCount(len(ids)),
 		SourceByteCount:     dataSize,
+		MismatchTimes:       mismatchTimes,
 	}, nil
 }
 
@@ -307,6 +314,7 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *Veri
 						"status":                 task.Status,
 						"source_documents_count": task.SourceDocumentCount,
 						"source_bytes_count":     task.SourceByteCount,
+						"mismatchtimes":          task.MismatchTimes,
 					},
 				},
 			)

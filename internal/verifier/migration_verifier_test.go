@@ -28,7 +28,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/option"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -958,6 +957,11 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		"foo.bar",
 		mslices.Of(mbson.ToRawValue(42)),
 		[]int32{100},
+		[]recheck.MismatchTimes{
+			{
+				First: bson.NewDateTimeFromTime(time.Now()),
+			},
+		},
 	)
 	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs(
@@ -965,6 +969,14 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		"foo.bar",
 		mslices.Of(mbson.ToRawValue(43), mbson.ToRawValue(44)),
 		[]int32{100, 100},
+		[]recheck.MismatchTimes{
+			{
+				First: bson.NewDateTimeFromTime(time.Now()),
+			},
+			{
+				First: bson.NewDateTimeFromTime(time.Now()),
+			},
+		},
 	)
 	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs(
@@ -972,6 +984,11 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		"foo.bar2",
 		mslices.Of(mbson.ToRawValue(42)),
 		[]int32{100},
+		[]recheck.MismatchTimes{
+			{
+				First: bson.NewDateTimeFromTime(time.Now()),
+			},
+		},
 	)
 	suite.Require().NoError(err)
 
@@ -1274,11 +1291,10 @@ func (suite *IntegrationTestSuite) getFailuresForTask(
 		suite.Context(),
 		verifier.verificationDatabase(),
 		mslices.Of(taskID),
-		option.None[bson.D](),
-		option.None[int64](),
 	)
 
 	require.NoError(suite.T(), err)
+	require.NotEmpty(suite.T(), discrepancies)
 
 	return slices.Collect(maps.Values(discrepancies))[0]
 }

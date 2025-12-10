@@ -20,6 +20,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
+	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/dustin/go-humanize"
@@ -63,9 +64,10 @@ const (
 
 	DefaultFailureDisplaySize = 20
 
-	okSymbol    = "\u2705" // white heavy check mark
-	infoSymbol  = "\u24d8" // circled Latin small letter I
-	notOkSymbol = "\u2757" // heavy exclamation mark symbol
+	okSymbol      = "\u2705" // white heavy check mark
+	infoSymbol    = "\u24d8" // circled Latin small letter I
+	maybeOkSymbol = "\u2753" // heavy question mark symbol
+	notOkSymbol   = "\u2757" // heavy exclamation mark symbol
 
 	clientAppName = "Migration Verifier"
 
@@ -571,19 +573,21 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 				Msg("Discrepancies found. Will recheck in the next generation.")
 
 			dataSizes := make([]int32, 0, len(problems))
+			mismatches := make([]recheck.MismatchTimes, 0, len(problems))
 
 			// This stores all IDs for the next generation to check.
 			// Its length should equal len(mismatches) + len(missingIds).
 			idsToRecheck := make([]bson.RawValue, 0, len(problems))
 
-			for _, mismatch := range problems {
-				idsToRecheck = append(idsToRecheck, mismatch.ID)
-				dataSizes = append(dataSizes, mismatch.dataSize)
+			for _, problem := range problems {
+				idsToRecheck = append(idsToRecheck, problem.ID)
+				dataSizes = append(dataSizes, problem.dataSize)
+				mismatches = append(mismatches, problem.MismatchTimes)
 			}
 
 			// Create a task for the next generation to recheck the
 			// mismatched & missing docs.
-			err := verifier.InsertFailedCompareRecheckDocs(ctx, task.QueryFilter.Namespace, idsToRecheck, dataSizes)
+			err := verifier.InsertFailedCompareRecheckDocs(ctx, task.QueryFilter.Namespace, idsToRecheck, dataSizes, mismatches)
 			if err != nil {
 				return errors.Wrapf(
 					err,
@@ -1460,6 +1464,18 @@ func startReport() *strings.Builder {
 	return strBuilder
 }
 
+func (verifier *Verifier) logIfNotContextErr(
+	err error,
+	template string,
+	vars ...any,
+) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+
+	verifier.logger.Err(err).Msgf(template, vars...)
+}
+
 func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatus GenerationStatus) {
 	if !verifier.ensureNamespaces(ctx) {
 		return
@@ -1494,7 +1510,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	metadataMismatches, anyCollsIncomplete, err := verifier.reportCollectionMetadataMismatches(ctx, strBuilder)
 	if err != nil {
-		verifier.logger.Err(err).Msgf("Failed to report collection metadata mismatches")
+		verifier.logIfNotContextErr(err, "Failed to report collection metadata mismatches.")
 		return
 	}
 
@@ -1511,11 +1527,11 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	}
 
 	if err != nil {
-		verifier.logger.Err(err).Msgf("Failed to report per-namespace statistics")
+		verifier.logIfNotContextErr(err, "Failed to report per-namespace statistics")
 		return
 	}
 
-	verifier.printChangeEventStatistics(strBuilder)
+	changeEvents := verifier.printChangeEventStatistics(strBuilder)
 
 	// Only print the worker status table if debug logging is enabled.
 	if verifier.logger.Debug().Enabled() {
@@ -1528,20 +1544,35 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	var statusLine string
 
 	if hasTasks {
-		docMismatches, anyPartitionsIncomplete, err := verifier.reportDocumentMismatches(ctx, strBuilder)
+		longestLivedMismatch, anyPartitionsIncomplete, err := verifier.reportDocumentMismatches(ctx, strBuilder)
 		if err != nil {
-			verifier.logger.Err(err).Msgf("Failed to report document mismatches")
+			verifier.logIfNotContextErr(err, "Failed to report document mismatches.")
 			return
 		}
 
-		if metadataMismatches || docMismatches {
-			verifier.printMismatchInvestigationNotes(strBuilder)
-
-			statusLine = fmt.Sprintf(notOkSymbol + " Mismatches found.")
+		if mismatchDuration, hasDocMismatch := longestLivedMismatch.Get(); hasDocMismatch {
+			if verifier.writesOff {
+				statusLine = notOkSymbol + " Document mismatches found. Investigate them.\n"
+				statusLine += "See the verifier’s documentation for details."
+			} else if mismatchDuration > 0 {
+				statusLine = maybeOkSymbol + " Recurrent document mismatches found. If any mismatch durations exceed the\n"
+				statusLine += "replicator’s lag, investigate those. See the verifier’s documentation for details."
+			} else {
+				statusLine = maybeOkSymbol + " New document mismatches found. The replicator may fix them.\n"
+				statusLine += "The verifier will recheck them in the next generation."
+			}
+		} else if metadataMismatches {
+			if verifier.writesOff {
+				statusLine = notOkSymbol + " Metadata mismatches found. These may be fixable."
+			} else {
+				statusLine = maybeOkSymbol + " Metadata mismatches found. The replicator may correct these later."
+			}
 		} else if anyCollsIncomplete || anyPartitionsIncomplete {
-			statusLine = fmt.Sprintf(infoSymbol + " No mismatches found yet, but verification is still in progress.")
+			statusLine = infoSymbol + " No mismatches found yet, but verification is still in progress."
+		} else if changeEvents > 0 {
+			statusLine = infoSymbol + " No mismatches found, but some documents have changed and so will be rechecked."
 		} else {
-			statusLine = fmt.Sprintf(okSymbol + " No mismatches found. Source & destination completely match!")
+			statusLine = okSymbol + " No mismatches found, and no documents have changed."
 		}
 	} else {
 		switch genstatus {
@@ -1564,7 +1595,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	if elapsed > progressReportTimeWarnThreshold {
 		verifier.logger.Warn().
 			Stringer("elapsed", elapsed).
-			Msg("Report generation took longer than expected. The metadata database may be under excess load.")
+			Msg("Report generation took longer than ideal. The metadata database may be under excess load.")
 	}
 
 	verifier.writeStringBuilder(strBuilder)
