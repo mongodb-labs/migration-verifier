@@ -3,17 +3,19 @@ package mbson
 import (
 	"fmt"
 	"math"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 type bsonCastRecipient interface {
-	bson.Raw | bson.Timestamp | bson.ObjectID | string | int32 | int64
+	bson.Raw | bson.Timestamp | bson.ObjectID |
+		string | int32 | int64 | time.Time
 }
 
 type bsonSourceTypes interface {
-	string | int | int32 | int64
+	string | int | int32 | int64 | bson.ObjectID
 }
 
 type cannotCastErr struct {
@@ -55,6 +57,10 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 	case int64:
 		if val, ok := in.Int64OK(); ok {
 			return any(val).(T), nil
+		}
+	case time.Time:
+		if val, ok := in.DateTimeOK(); ok {
+			return any(bson.DateTime(val).Time()).(T), nil
 		}
 	default:
 		panic(fmt.Sprintf("Unrecognized Go type: %T (maybe augment bsonType?)", in))
@@ -134,6 +140,11 @@ func ToRawValue[T bsonSourceTypes](in T) bson.RawValue {
 		return i32ToRawValue(typedIn)
 	case int64:
 		return i64ToRawValue(typedIn)
+	case bson.ObjectID:
+		return bson.RawValue{
+			Type:  bson.TypeObjectID,
+			Value: bsoncore.AppendObjectID(nil, typedIn),
+		}
 	case string:
 		return bson.RawValue{
 			Type:  bson.TypeString,

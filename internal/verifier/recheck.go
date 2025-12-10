@@ -286,7 +286,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	//    this to prevent one thread from doing all of the rechecks.
 
 	var prevDBName, prevCollName string
-	var idAccum []any
+	var idAccum []bson.RawValue
 	var idsSizer util.BSONArraySizer
 	var totalDocs types.DocumentCount
 	var dataSizeAccum, totalRecheckData int64
