@@ -36,8 +36,6 @@ migration-verifier needs a `mongod` to store its state. By default, this is assu
 
 See [above](#Quick-Start) for a one-line command to start up such a `mongod`.
 
-The verifier can alternatively store its metadata on the destination cluster. This can severely degrade performance, though. Also, if you’re using mongosync, it requires either disabling mongosync’s destination write blocking or giving the `bypassWriteBlockingMode` to the verifier’s `--metaURI` user.
-
 # More Details
 
 To see all options:
