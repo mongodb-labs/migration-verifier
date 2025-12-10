@@ -98,6 +98,11 @@ type recheckCounts struct {
 	// FromChange are rechecks from changes seen in the prior generation.
 	FromChange int64
 
+	// Total adds up all of the given generation’s rechecks. This will be less
+	// than FromMismatch + FromChange by however many documents both changed
+	// and were seen to mismatch.
+	Total int64
+
 	// NewMismatches are mismatches seen thus far in the current generation
 	// that will be rechecked in the next generation.
 	NewMismatches int64
@@ -155,6 +160,30 @@ func countRechecksForGeneration(
 					0,
 					agg.Size{"$_ids"},
 				)},
+				{"rechecksFromChange", lo.Ternary[any](
+					generation == 0,
+					0,
+
+					// _ids is the array of document IDs to recheck.
+					// mismatch_first_seen_at maps indexes of that array to
+					// the document’s first mismatch time. It only contains
+					// entries for documents that mismatched without a change
+					// event. Thus, any _ids member whose index is *not* in
+					// mismatch_first_seen_at was enqueued from a change event.
+					agg.Size{agg.Filter{
+						Input: agg.Map{
+							Input: "$_ids",
+							In:    "$$thisIndex",
+						},
+						Cond: agg.Eq{
+							"missing",
+							agg.GetField{
+								Input: "$mismatch_first_seen_at",
+								Field: "$$this",
+							},
+						},
+					}},
+				)},
 			}}},
 			{{"$group", bson.D{
 				{"_id", nil},
@@ -169,6 +198,13 @@ func countRechecksForGeneration(
 					agg.Cond{
 						If:   agg.Eq{"$generation", generation - 1},
 						Then: "$mismatches.count",
+						Else: 0,
+					},
+				}},
+				{"rechecksFromChange", accum.Sum{
+					agg.Cond{
+						If:   agg.Eq{"$generation", generation},
+						Then: "$rechecksFromChange",
 						Else: 0,
 					},
 				}},
@@ -201,6 +237,7 @@ func countRechecksForGeneration(
 	result := struct {
 		AllRechecks           int64
 		RechecksFromMismatch  int64
+		RechecksFromChange    int64
 		NewMismatches         int64
 		MaxMismatchDurationMS option.Option[int64]
 	}{}
@@ -221,8 +258,9 @@ func countRechecksForGeneration(
 	}
 
 	return recheckCounts{
+		Total:         result.AllRechecks,
 		FromMismatch:  result.RechecksFromMismatch,
-		FromChange:    result.AllRechecks - result.RechecksFromMismatch,
+		FromChange:    result.RechecksFromChange,
 		NewMismatches: result.NewMismatches,
 		MaxMismatchDuration: option.Map(
 			result.MaxMismatchDurationMS,

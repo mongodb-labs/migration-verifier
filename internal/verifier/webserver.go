@@ -243,8 +243,16 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 }
 
 type ProgressRechecks struct {
+	// Mismatches counts the # of rechecks from a mismatch.
 	Mismatches int64 `json:"mismatches"`
-	Changes    int64 `json:"changes"`
+
+	// Changes counts the # of rechecks from a change event.
+	Changes int64 `json:"changes"`
+
+	// Total counts all rechecks. This needn’t equal Mismatches + Changes
+	// because a document can both change and be seen to mismatch in the
+	// same generation. (Mismatches + Changes - Total counts those.)
+	Total int64 `json:"total"`
 }
 
 type ProgressGenerationStats struct {
