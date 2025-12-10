@@ -150,3 +150,16 @@ func (o Option[T]) IsNone() bool {
 func (o Option[T]) IsSome() bool {
 	return o.val != nil
 }
+
+// Map returns None if the given Option is empty; otherwise it
+// returns cb’s result. This is useful, e.g., to transform a
+// (possibly-empty) value of one type into another.
+func Map[T any, V any](in Option[T], cb func(T) Option[V]) Option[V] {
+	var ret Option[V]
+
+	if val, has := in.Get(); has {
+		ret = cb(val)
+	}
+
+	return ret
+}

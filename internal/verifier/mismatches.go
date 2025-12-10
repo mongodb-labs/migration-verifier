@@ -105,7 +105,7 @@ type recheckCounts struct {
 
 	// MaxMismatchDuration indicates the longest-lived mismatch, among either
 	// the current or the prior generation.
-	MaxMismatchDuration time.Duration
+	MaxMismatchDuration option.Option[time.Duration]
 }
 
 // NB: This is OK to call for generation==0. In this case it will only
@@ -195,7 +195,7 @@ func countRechecksForGeneration(
 		AllRechecks           int64
 		RechecksFromMismatch  int64
 		NewMismatches         int64
-		MaxMismatchDurationMS int64
+		MaxMismatchDurationMS option.Option[int64]
 	}{}
 
 	err = cursor.Decode(&result)
@@ -214,10 +214,15 @@ func countRechecksForGeneration(
 	}
 
 	return recheckCounts{
-		FromMismatch:        result.RechecksFromMismatch,
-		FromChange:          result.AllRechecks - result.RechecksFromMismatch,
-		NewMismatches:       result.NewMismatches,
-		MaxMismatchDuration: time.Duration(result.MaxMismatchDurationMS) * time.Millisecond,
+		FromMismatch:  result.RechecksFromMismatch,
+		FromChange:    result.AllRechecks - result.RechecksFromMismatch,
+		NewMismatches: result.NewMismatches,
+		MaxMismatchDuration: option.Map(
+			result.MaxMismatchDurationMS,
+			func(ms int64) option.Option[time.Duration] {
+				return option.Some(time.Duration(ms) * time.Millisecond)
+			},
+		),
 	}, nil
 }
 

@@ -125,10 +125,10 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// will return 0. That’s OK, though, because the point of mismatch counting
 	// is to track the number of times a document was compared *without*
 	// a change.
-	var idToMismatch map[string]recheck.MismatchTimes
-	getPriorMismatchTimes := func(doc bson.Raw) option.Option[recheck.MismatchTimes] {
+	var idToMismatch map[string]bson.DateTime
+	getFirstMismatchTime := func(doc bson.Raw) option.Option[bson.DateTime] {
 		if idToMismatch == nil {
-			idToMismatch = createIdToMismatchTimes(task)
+			idToMismatch = createIdToMismatchTime(task)
 		}
 
 		mapKeyBytes := rvToMapKey(
@@ -204,9 +204,9 @@ func (verifier *Verifier) compareDocsFromChannels(
 			return errors.Wrap(err, "failed to compare documents")
 		}
 
-		var mismatchTimes option.Option[recheck.MismatchTimes]
+		var mismatchTimes option.Option[bson.DateTime]
 		if len(curProblems) > 0 {
-			mismatchTimes = getPriorMismatchTimes(srcDoc.doc)
+			mismatchTimes = getFirstMismatchTime(srcDoc.doc)
 		}
 
 		for i := range curProblems {
@@ -343,7 +343,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	problems = slices.Grow(problems, len(srcCache)+len(dstCache))
 
 	for _, docWithTs := range srcCache {
-		priorMismatches := getPriorMismatchTimes(docWithTs.doc)
+		firstMismatchTime := getFirstMismatchTime(docWithTs.doc)
 
 		problems = append(
 			problems,
@@ -358,7 +358,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 				SrcTimestamp: option.Some(docWithTs.ts),
 
 				dataSize:      int32(len(docWithTs.doc)),
-				MismatchTimes: getMismatchTimesFromPrior(priorMismatches),
+				MismatchTimes: getMismatchTimesFromPrior(firstMismatchTime),
 			},
 		)
 
@@ -366,7 +366,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	}
 
 	for _, docWithTs := range dstCache {
-		priorMismatches := getPriorMismatchTimes(docWithTs.doc)
+		firstMismatchTime := getFirstMismatchTime(docWithTs.doc)
 
 		problems = append(
 			problems,
@@ -381,7 +381,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 				DstTimestamp: option.Some(docWithTs.ts),
 
 				dataSize:      int32(len(docWithTs.doc)),
-				MismatchTimes: getMismatchTimesFromPrior(priorMismatches),
+				MismatchTimes: getMismatchTimesFromPrior(firstMismatchTime),
 			},
 		)
 
@@ -391,12 +391,12 @@ func (verifier *Verifier) compareDocsFromChannels(
 	return problems, srcDocCount, srcByteCount, nil
 }
 
-func getMismatchTimesFromPrior(prior option.Option[recheck.MismatchTimes]) recheck.MismatchTimes {
+func getMismatchTimesFromPrior(prior option.Option[bson.DateTime]) recheck.MismatchTimes {
 
-	if pmm, has := prior.Get(); has {
+	if mmFirst, has := prior.Get(); has {
 		return recheck.MismatchTimes{
-			First:      pmm.First,
-			DurationMS: time.Since(pmm.First.Time()).Milliseconds(),
+			First:      mmFirst,
+			DurationMS: time.Since(mmFirst.Time()).Milliseconds(),
 		}
 	}
 
@@ -405,18 +405,18 @@ func getMismatchTimesFromPrior(prior option.Option[recheck.MismatchTimes]) reche
 	}
 }
 
-func createIdToMismatchTimes(task *VerificationTask) map[string]recheck.MismatchTimes {
-	idToMismatchTimes := map[string]recheck.MismatchTimes{}
+func createIdToMismatchTime(task *VerificationTask) map[string]bson.DateTime {
+	idToFirstMismatchSeenAt := map[string]bson.DateTime{}
 
 	for i, id := range task.Ids {
-		mmTimes := task.MismatchTimes[int32(i)]
+		mmFirst := task.MismatchFirstSeenAt[int32(i)]
 
-		if mmTimes.First != 0 {
-			idToMismatchTimes[string(rvToMapKey(nil, id))] = mmTimes
+		if mmFirst != 0 {
+			idToFirstMismatchSeenAt[string(rvToMapKey(nil, id))] = mmFirst
 		}
 	}
 
-	return idToMismatchTimes
+	return idToFirstMismatchSeenAt
 }
 
 func getDocIdFromComparison(

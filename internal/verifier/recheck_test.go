@@ -333,7 +333,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 		},
 		SourceDocumentCount: 1,
 		SourceByteCount:     types.ByteCount(overlyLarge),
-		MismatchTimes:       map[int32]recheck.MismatchTimes{},
+		MismatchFirstSeenAt: map[int32]bson.DateTime{},
 	}
 
 	t2 := t1
@@ -398,7 +398,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 		},
 		SourceDocumentCount: 2,
 		SourceByteCount:     1126400,
-		MismatchTimes:       map[int32]recheck.MismatchTimes{},
+		MismatchFirstSeenAt: map[int32]bson.DateTime{},
 	}
 
 	t2 := t1
@@ -452,7 +452,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 		},
 		SourceDocumentCount: 3,
 		SourceByteCount:     3000,
-		MismatchTimes:       map[int32]recheck.MismatchTimes{},
+		MismatchFirstSeenAt: map[int32]bson.DateTime{},
 	}
 	t2, t3, t4 := t1, t1, t1
 	t2.QueryFilter.Namespace = "testDB2.testColl1"

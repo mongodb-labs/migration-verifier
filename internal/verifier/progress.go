@@ -49,13 +49,32 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 				return errors.Wrapf(err, "counting mismatches seen during generation %d", generation)
 			}
 
-			genStats.PriorRechecks = option.Some(ProgressRechecks{
-				Changes:    recheckStats.FromChange,
-				Mismatches: recheckStats.FromMismatch,
-			})
+			if generation > 0 {
+				genStats.CurrentGenerationRechecks = option.Some(ProgressRechecks{
+					Changes:    recheckStats.FromChange,
+					Mismatches: recheckStats.FromMismatch,
+				})
+			}
 
 			genStats.MismatchesFound = recheckStats.NewMismatches
 			genStats.MaxMismatchDuration = recheckStats.MaxMismatchDuration
+
+			return nil
+		},
+	)
+
+	eg.Go(
+		func() error {
+			enqueuedRecheckCounts, err := verifier.countEnqueuedRechecksWhileLocked(ctx)
+
+			if err != nil {
+				return errors.Wrap(err, "analyzing rechecks enqueued for next generation")
+			}
+
+			genStats.NextGenerationRechecks = ProgressRechecks{
+				Changes:    enqueuedRecheckCounts.Changed,
+				Mismatches: enqueuedRecheckCounts.Mismatched,
+			}
 
 			return nil
 		},

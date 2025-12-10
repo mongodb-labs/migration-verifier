@@ -15,7 +15,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -90,9 +89,15 @@ type VerificationTask struct {
 	// with the task.
 	SourceByteCount types.ByteCount `bson:"source_bytes_count"`
 
-	// MismatchTimes correlates an index of Ids with the time when
-	// this document was first seen to mismatch.
-	MismatchTimes map[int32]recheck.MismatchTimes
+	// MismatchFirstSeenAt correlates an index of Ids with the time when
+	// this document was first seen to mismatch. This is set only on recheck
+	// tasks, and only when those tasks are created. (It is *not* set again in
+	// response to document comparisons; see the recheck queue & mismatch table
+	// for that.)
+	//
+	// This is here so that document comparisons can know how long a given
+	// mismatch has been continuously seen without any changes on either source or destination.
+	MismatchFirstSeenAt map[int32]bson.DateTime
 }
 
 func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
@@ -206,7 +211,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 
 func (verifier *Verifier) createDocumentRecheckTask(
 	ids []bson.RawValue,
-	mismatchTimes map[int32]recheck.MismatchTimes,
+	mismatchFirstSeenAt map[int32]bson.DateTime,
 	dataSize types.ByteCount,
 	srcNamespace string,
 ) (*VerificationTask, error) {
@@ -231,7 +236,7 @@ func (verifier *Verifier) createDocumentRecheckTask(
 		},
 		SourceDocumentCount: types.DocumentCount(len(ids)),
 		SourceByteCount:     dataSize,
-		MismatchTimes:       mismatchTimes,
+		MismatchFirstSeenAt: mismatchFirstSeenAt,
 	}, nil
 }
 
@@ -314,7 +319,6 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *Veri
 						"status":                 task.Status,
 						"source_documents_count": task.SourceDocumentCount,
 						"source_bytes_count":     task.SourceByteCount,
-						"mismatchtimes":          task.MismatchTimes,
 					},
 				},
 			)
