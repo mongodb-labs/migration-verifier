@@ -8,7 +8,6 @@ import (
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -126,13 +125,9 @@ func countRechecksForGeneration(
 				{"generation", bson.D{{"$in", []any{generation, generation - 1}}}},
 				{"type", verificationTaskVerifyDocuments},
 
-				// Mismatches can exist only for “failed” tasks, or for tasks
-				// that *will* be “failed” once they finish but are currently
-				// “processing”.
-				{"status", bson.D{{"$in", mslices.Of(
-					verificationTaskProcessing,
-					verificationTaskFailed,
-				)}}},
+				// NB: We don’t filter by task status because we need to count
+				// all rechecks, including those in tasks that turned up no
+				// mismatches.
 			}}},
 			{{"$lookup", bson.D{
 				{"from", mismatchesCollectionName},
@@ -144,35 +139,47 @@ func countRechecksForGeneration(
 						{"_id", nil},
 
 						{"count", accum.Sum{1}},
-						{"maxDurationMS", accum.Max{"$durationMS"}},
+						{"maxDurationMS", accum.Max{"$detail.mismatchTimes.durationMS"}},
 					}}},
 				}},
 			}}},
-			{{"$unwind", "$mismatches"}},
+			// We don’t want $unwind here because that’ll erase any tasks that
+			// don’t match up to >=1 mismatch.
+			{{"$addFields", bson.D{
+				{"mismatches", agg.ArrayElemAt{
+					Array: "$mismatches",
+					Index: 0,
+				}},
+				{"_ids", lo.Ternary[any](
+					generation == 0,
+					0,
+					agg.Size{"$_ids"},
+				)},
+			}}},
 			{{"$group", bson.D{
 				{"_id", nil},
 				{"allRechecks", accum.Sum{
 					agg.Cond{
 						If:   agg.Eq{"$generation", generation},
-						Then: agg.Size{"$_ids"},
+						Then: "$_ids",
 						Else: 0,
 					},
 				}},
 				{"rechecksFromMismatch", accum.Sum{
 					agg.Cond{
 						If:   agg.Eq{"$generation", generation - 1},
-						Then: agg.Size{"$mismatches.count"},
+						Then: "$mismatches.count",
 						Else: 0,
 					},
 				}},
 				{"newMismatches", accum.Sum{
 					agg.Cond{
 						If:   agg.Eq{"$generation", generation},
-						Then: agg.Size{"$mismatches.count"},
+						Then: "$mismatches.count",
 						Else: 0,
 					},
 				}},
-				{"maxMismatchDurationMS", accum.Max{"$count.maxDurationMS"}},
+				{"maxMismatchDurationMS", accum.Max{"$mismatches.maxDurationMS"}},
 			}}},
 		},
 	)
@@ -205,7 +212,7 @@ func countRechecksForGeneration(
 
 	if result.RechecksFromMismatch > result.AllRechecks {
 		return recheckCounts{}, fmt.Errorf(
-			"INTERNAL ERROR: generation %d’s found mismatches (%d) outnumber generation %d’s total documents to recheck (%d); this is nonsensical",
+			"INTERNAL ERROR: mismatches found in generation %d (%d) outnumber generation %d’s total documents to recheck (%d); this is nonsensical",
 			generation-1,
 			result.RechecksFromMismatch,
 			generation,
@@ -219,8 +226,8 @@ func countRechecksForGeneration(
 		NewMismatches: result.NewMismatches,
 		MaxMismatchDuration: option.Map(
 			result.MaxMismatchDurationMS,
-			func(ms int64) option.Option[time.Duration] {
-				return option.Some(time.Duration(ms) * time.Millisecond)
+			func(ms int64) time.Duration {
+				return time.Duration(ms) * time.Millisecond
 			},
 		),
 	}, nil

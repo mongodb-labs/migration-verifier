@@ -57,7 +57,10 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 			}
 
 			genStats.MismatchesFound = recheckStats.NewMismatches
-			genStats.MaxMismatchDuration = recheckStats.MaxMismatchDuration
+			genStats.MaxMismatchDuration = option.Map(
+				recheckStats.MaxMismatchDuration,
+				time.Duration.String,
+			)
 
 			return nil
 		},

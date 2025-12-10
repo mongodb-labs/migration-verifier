@@ -260,7 +260,7 @@ type ProgressGenerationStats struct {
 	CurrentGenerationRechecks option.Option[ProgressRechecks] `json:"currentGenerationRechecks"`
 	NextGenerationRechecks    ProgressRechecks                `json:"nextGenerationRechecks"`
 	MismatchesFound           int64                           `json:"mismatchesFound"`
-	MaxMismatchDuration       option.Option[time.Duration]    `json:"maxMismatchDuration"`
+	MaxMismatchDuration       option.Option[string]           `json:"maxMismatchDuration"`
 }
 
 type ProgressChangeStats struct {
