@@ -3,12 +3,37 @@ package recheck
 import (
 	"math/rand/v2"
 	"testing"
+	"time"
 
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
+
+func TestMismatchTimesBSON(t *testing.T) {
+	mt := MismatchHistory{
+		First:      bson.NewDateTimeFromTime(time.Now()),
+		DurationMS: 123,
+	}
+
+	raw := mt.MarshalToBSON()
+	mtd := bson.D{}
+
+	assert.NoError(t, bson.Unmarshal(raw, &mtd))
+	assert.Equal(
+		t,
+		bson.D{
+			{"first", mt.First},
+			{"durationMS", mt.DurationMS},
+		},
+		mtd,
+	)
+
+	var mtRT MismatchHistory
+	assert.NoError(t, bson.Unmarshal(raw, &mtRT))
+	assert.Equal(t, mt, mtRT)
+}
 
 func TestPrimaryKeyBSON(t *testing.T) {
 	pk := PrimaryKey{

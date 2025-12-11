@@ -88,6 +88,10 @@ type VerificationTask struct {
 	// ByteCount is like DocumentCount: set when the verifier is done
 	// with the task.
 	SourceByteCount types.ByteCount `bson:"source_bytes_count"`
+
+	// FirstMismatchTime correlates an index in Ids with the time when
+	// this document was first seen to mismatch.
+	FirstMismatchTime map[int32]bson.DateTime
 }
 
 func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
@@ -201,6 +205,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 
 func (verifier *Verifier) createDocumentRecheckTask(
 	ids []bson.RawValue,
+	firstMismatchTime map[int32]bson.DateTime,
 	dataSize types.ByteCount,
 	srcNamespace string,
 ) (*VerificationTask, error) {
@@ -225,6 +230,7 @@ func (verifier *Verifier) createDocumentRecheckTask(
 		},
 		SourceDocumentCount: types.DocumentCount(len(ids)),
 		SourceByteCount:     dataSize,
+		FirstMismatchTime:   firstMismatchTime,
 	}, nil
 }
 

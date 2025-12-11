@@ -29,11 +29,15 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 			"the.namespace",
 			[]bson.RawValue{mbson.ToRawValue("theDocID")},
 			[]int32{1234},
+			mslices.Of(
+				bson.NewDateTimeFromTime(time.Now()),
+			),
 		),
 		"insert failed-comparison recheck",
 	)
 
 	recheckDocs := suite.fetchRecheckDocs(ctx, verifier)
+	suite.Require().NotEmpty(recheckDocs)
 
 	suite.Assert().Equal(
 		[]recheck.Doc{
@@ -43,6 +47,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 					SrcCollectionName: "namespace",
 					DocumentID:        mbson.ToRawValue("theDocID"),
 				},
+				FirstMismatchTime: recheckDocs[0].FirstMismatchTime,
 			},
 		},
 		recheckDocs,
@@ -70,6 +75,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 	suite.Require().NoError(err)
 
 	recheckDocs = suite.fetchRecheckDocs(ctx, verifier)
+	suite.Require().NotEmpty(recheckDocs)
 	suite.Assert().Equal(
 		[]recheck.Doc{
 			{
@@ -78,6 +84,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 					SrcCollectionName: "namespace",
 					DocumentID:        mbson.ToRawValue("theDocID"),
 				},
+				FirstMismatchTime: recheckDocs[0].FirstMismatchTime,
 			},
 		},
 		recheckDocs,
@@ -324,6 +331,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 		},
 		SourceDocumentCount: 1,
 		SourceByteCount:     types.ByteCount(overlyLarge),
+		FirstMismatchTime:   map[int32]bson.DateTime{},
 	}
 
 	t2 := t1
@@ -372,6 +380,8 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	err = cursor.All(ctx, &actualTasks)
 	suite.Require().NoError(err)
 
+	suite.Require().Len(actualTasks, 2, "actualTasks: %+v", actualTasks)
+
 	t1 := VerificationTask{
 		Generation: 1,
 		Ids: mslices.Of(
@@ -386,6 +396,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 		},
 		SourceDocumentCount: 2,
 		SourceByteCount:     1126400,
+		FirstMismatchTime:   map[int32]bson.DateTime{},
 	}
 
 	t2 := t1
@@ -439,6 +450,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 		},
 		SourceDocumentCount: 3,
 		SourceByteCount:     3000,
+		FirstMismatchTime:   map[int32]bson.DateTime{},
 	}
 	t2, t3, t4 := t1, t1, t1
 	t2.QueryFilter.Namespace = "testDB2.testColl1"
@@ -514,5 +526,12 @@ func insertRecheckDocs(
 		},
 	)
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, rawIDs, dataSizes)
+	return verifier.insertRecheckDocs(
+		ctx,
+		dbNames,
+		collNames,
+		rawIDs,
+		dataSizes,
+		nil,
+	)
 }
