@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/10gen/migration-verifier/agg"
@@ -251,18 +250,20 @@ func countRechecksForGeneration(
 		return recheckCounts{}, errors.Wrapf(err, "reading mismatches from result (%v)", cursor.Current)
 	}
 
-	if result.RechecksFromMismatch > result.AllRechecks {
-		// TODO: fix
-		slog.Warn(
-			fmt.Sprintf(
-				"Mismatches found in generation %d outnumber generation %d’s total docs to recheck. This should be rare.",
-				generation-1,
-				generation,
-			),
-			"priorGenMismatches", result.RechecksFromMismatch,
-			"curGenRechecks", result.AllRechecks,
-		)
-	}
+	/*
+		if result.RechecksFromMismatch > result.AllRechecks {
+			// TODO: fix
+			slog.Warn(
+				fmt.Sprintf(
+					"Mismatches found in generation %d outnumber generation %d’s total docs to recheck. This should be rare.",
+					generation-1,
+					generation,
+				),
+				"priorGenMismatches", result.RechecksFromMismatch,
+				"curGenRechecks", result.AllRechecks,
+			)
+		}
+	*/
 
 	return recheckCounts{
 		Total:         result.AllRechecks,
