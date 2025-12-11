@@ -11,6 +11,7 @@
 //   - Prefer struct types for operators whose documentation gives names,
 //     even if those names aren’t sent to the server.
 //   - Use functions sparingly, e.g., for “tuple” operators like `$in`.
+//   - Use Go type `any` for generic expressions.
 package agg
 
 import (
@@ -169,24 +170,4 @@ func (s Switch) D() bson.D {
 
 func (s Switch) MarshalBSON() ([]byte, error) {
 	return bson.Marshal(s.D())
-}
-
-// ---------------------------------------------
-
-type ArrayElemAt struct {
-	Array any
-	Index int
-}
-
-var _ bson.Marshaler = ArrayElemAt{}
-
-func (a ArrayElemAt) D() bson.D {
-	return bson.D{{"$arrayElemAt", bson.A{
-		a.Array,
-		a.Index,
-	}}}
-}
-
-func (a ArrayElemAt) MarshalBSON() ([]byte, error) {
-	return bson.Marshal(a.D())
 }

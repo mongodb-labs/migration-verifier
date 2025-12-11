@@ -89,15 +89,9 @@ type VerificationTask struct {
 	// with the task.
 	SourceByteCount types.ByteCount `bson:"source_bytes_count"`
 
-	// MismatchFirstSeenAt correlates an index of Ids with the time when
-	// this document was first seen to mismatch. This is set only on recheck
-	// tasks, and only when those tasks are created. (It is *not* set again in
-	// response to document comparisons; see the recheck queue & mismatch table
-	// for that.)
-	//
-	// This is here so that document comparisons can know how long a given
-	// mismatch has been continuously seen without any changes on either source or destination.
-	MismatchFirstSeenAt map[int32]bson.DateTime `bson:"mismatch_first_seen_at"`
+	// FirstMismatchTime correlates an index in Ids with the time when
+	// this document was first seen to mismatch.
+	FirstMismatchTime map[int32]bson.DateTime
 }
 
 func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
@@ -211,7 +205,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 
 func (verifier *Verifier) createDocumentRecheckTask(
 	ids []bson.RawValue,
-	mismatchFirstSeenAt map[int32]bson.DateTime,
+	firstMismatchTime map[int32]bson.DateTime,
 	dataSize types.ByteCount,
 	srcNamespace string,
 ) (*VerificationTask, error) {
@@ -236,7 +230,7 @@ func (verifier *Verifier) createDocumentRecheckTask(
 		},
 		SourceDocumentCount: types.DocumentCount(len(ids)),
 		SourceByteCount:     dataSize,
-		MismatchFirstSeenAt: mismatchFirstSeenAt,
+		FirstMismatchTime:   firstMismatchTime,
 	}, nil
 }
 

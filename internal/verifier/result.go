@@ -35,7 +35,7 @@ type VerificationResult struct {
 
 	// The number of generations where we’ve seen this document ID mismatched
 	// without a change event.
-	MismatchTimes recheck.MismatchTimes `bson:"mismatchTimes,omitempty"`
+	MismatchHistory recheck.MismatchHistory `bson:"mismatchHistory,omitempty"`
 
 	// The data size of the largest of the mismatched objects.
 	// Note this is not persisted; it is used only to ensure recheck tasks
@@ -57,7 +57,7 @@ func (vr VerificationResult) DocumentIsMissing() bool {
 }
 
 func (vr VerificationResult) MismatchDuration() time.Duration {
-	return time.Duration(vr.MismatchTimes.DurationMS) * time.Millisecond
+	return time.Duration(vr.MismatchHistory.DurationMS) * time.Millisecond
 }
 
 // Returns an agg expression that indicates whether the VerificationResult
@@ -95,7 +95,7 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 		1 + 7 + 1 + 4 + 1 + // Details
 		1 + 7 + 1 + 4 + 1 + // Cluster
 		1 + 9 + 1 + 4 + 1 + // NameSpace
-		1 + 13 + 1 + recheck.MismatchTimesBSONLength +
+		1 + 15 + 1 + recheck.MismatchHistoryBSONLength +
 		1 // NUL
 
 	bsonLen += 0 +
@@ -131,7 +131,7 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 	buf = bsoncore.AppendStringElement(buf, "details", vr.Details)
 	buf = bsoncore.AppendStringElement(buf, "cluster", vr.Cluster)
 	buf = bsoncore.AppendStringElement(buf, "namespace", vr.NameSpace)
-	buf = bsoncore.AppendDocumentElement(buf, "mismatchTimes", vr.MismatchTimes.MarshalToBSON())
+	buf = bsoncore.AppendDocumentElement(buf, "mismatchHistory", vr.MismatchHistory.MarshalToBSON())
 
 	if ts, has := vr.SrcTimestamp.Get(); has {
 		buf = bsoncore.AppendTimestampElement(buf, "srctimestamp", ts.T, ts.I)

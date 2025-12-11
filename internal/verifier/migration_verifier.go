@@ -20,7 +20,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
-	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/dustin/go-humanize"
@@ -573,7 +572,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 				Msg("Discrepancies found. Will recheck in the next generation.")
 
 			dataSizes := make([]int32, 0, len(problems))
-			mismatchTimes := make([]recheck.MismatchTimes, 0, len(problems))
+			firstMismatchTimes := make([]bson.DateTime, 0, len(problems))
 
 			// This stores all IDs for the next generation to check.
 			// Its length should equal len(mismatches) + len(missingIds).
@@ -582,12 +581,12 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 			for _, problem := range problems {
 				idsToRecheck = append(idsToRecheck, problem.ID)
 				dataSizes = append(dataSizes, problem.dataSize)
-				mismatchTimes = append(mismatchTimes, problem.MismatchTimes)
+				firstMismatchTimes = append(firstMismatchTimes, problem.MismatchHistory.First)
 			}
 
 			// Create a task for the next generation to recheck the
 			// mismatched & missing docs.
-			err := verifier.InsertFailedCompareRecheckDocs(ctx, task.QueryFilter.Namespace, idsToRecheck, dataSizes, mismatchTimes)
+			err := verifier.InsertFailedCompareRecheckDocs(ctx, task.QueryFilter.Namespace, idsToRecheck, dataSizes, firstMismatchTimes)
 			if err != nil {
 				return errors.Wrapf(
 					err,

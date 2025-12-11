@@ -12,7 +12,7 @@ import (
 )
 
 func TestMismatchTimesBSON(t *testing.T) {
-	mt := MismatchTimes{
+	mt := MismatchHistory{
 		First:      bson.NewDateTimeFromTime(time.Now()),
 		DurationMS: 123,
 	}
@@ -30,7 +30,7 @@ func TestMismatchTimesBSON(t *testing.T) {
 		mtd,
 	)
 
-	var mtRT MismatchTimes
+	var mtRT MismatchHistory
 	assert.NoError(t, bson.Unmarshal(raw, &mtRT))
 	assert.Equal(t, mt, mtRT)
 }

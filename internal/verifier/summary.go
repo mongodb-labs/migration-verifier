@@ -200,7 +200,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 			task := failedTaskMap[m.Task]
 
-			times := m.Detail.MismatchTimes
+			times := m.Detail.MismatchHistory
 			duration := time.Duration(times.DurationMS) * time.Millisecond
 
 			mismatchedDocsTable.Append([]string{
@@ -246,7 +246,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 			task := failedTaskMap[d.Task]
 
-			times := d.Detail.MismatchTimes
+			times := d.Detail.MismatchHistory
 			duration := time.Duration(times.DurationMS) * time.Millisecond
 
 			missingDocsTable.Append([]string{
@@ -291,7 +291,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 			task := failedTaskMap[d.Task]
 
-			times := d.Detail.MismatchTimes
+			times := d.Detail.MismatchHistory
 			duration := time.Duration(times.DurationMS) * time.Millisecond
 
 			extraDocsTable.Append([]string{
@@ -328,7 +328,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 			reportData.ExtraOnDst,
 		)),
 		func(mi MismatchInfo, _ int) time.Duration {
-			return time.Duration(mi.Detail.MismatchTimes.DurationMS) * time.Millisecond
+			return time.Duration(mi.Detail.MismatchHistory.DurationMS) * time.Millisecond
 		},
 	)
 

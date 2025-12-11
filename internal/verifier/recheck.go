@@ -49,10 +49,10 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	namespace string,
 	documentIDs []bson.RawValue,
 	dataSizes []int32,
-	mismatchTimes []recheck.MismatchTimes,
+	firstMismatchTimes []bson.DateTime,
 ) error {
-	if mismatchTimes == nil {
-		panic("mismatch recheck must have times!")
+	if firstMismatchTimes == nil {
+		panic("mismatch recheck must have first-mismatch times!")
 	}
 
 	dbName, collName := SplitNamespace(namespace)
@@ -68,7 +68,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		Int("count", len(documentIDs)).
 		Msg("Persisting rechecks for mismatched or missing documents.")
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes, mismatchTimes)
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes, firstMismatchTimes)
 }
 
 type enqueuedRecheckCounts struct {
@@ -160,7 +160,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	collNames []string,
 	documentIDs []bson.RawValue,
 	dataSizes []int32,
-	mismatchTimes []recheck.MismatchTimes,
+	firstMismatchTimes []bson.DateTime,
 ) error {
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
@@ -232,12 +232,12 @@ func (verifier *Verifier) insertRecheckDocs(
 		})
 	}
 
-	var mismatch option.Option[recheck.MismatchTimes]
+	var firstMismatchTime option.Option[bson.DateTime]
 	curRechecks := make([]bson.Raw, 0, recheckBatchCountLimit)
 	curBatchBytes := 0
 	for i, dbName := range dbNames {
-		if mismatchTimes != nil {
-			mismatch = option.Some(mismatchTimes[i])
+		if firstMismatchTimes != nil {
+			firstMismatchTime = option.Some(firstMismatchTimes[i])
 		}
 
 		recheckDoc := recheck.Doc{
@@ -247,12 +247,8 @@ func (verifier *Verifier) insertRecheckDocs(
 				DocumentID:        documentIDs[i],
 				Rand:              rand.Int32(),
 			},
-			DataSize:      dataSizes[i],
-			MismatchTimes: mismatch,
-		}
-
-		if mismatchTimes != nil {
-			recheckDoc.MismatchTimes = option.Some(mismatchTimes[i])
+			DataSize:          dataSizes[i],
+			FirstMismatchTime: firstMismatchTime,
 		}
 
 		recheckRaw := recheckDoc.MarshalToBSON()
@@ -397,7 +393,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	var totalDocs types.DocumentCount
 	var dataSizeAccum, totalRecheckData int64
 
-	mismatchFirstSeenAt := map[int32]bson.DateTime{}
+	firstMismatchTime := map[int32]bson.DateTime{}
 
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
@@ -431,7 +427,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		task, err := verifier.createDocumentRecheckTask(
 			idAccum,
-			mismatchFirstSeenAt,
+			firstMismatchTime,
 			types.ByteCount(dataSizeAccum),
 			namespace,
 		)
@@ -516,7 +512,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			dataSizeAccum = 0
 			idAccum = idAccum[:0]
 			lastIDRaw = bson.RawValue{}
-			clear(mismatchFirstSeenAt)
+			clear(firstMismatchTime)
 		}
 
 		// A document can be enqueued for recheck for multiple reasons:
@@ -531,7 +527,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		// has *not* changed because we just checked for that.)
 		if idRaw.Equal(lastIDRaw) {
 
-			if doc.MismatchTimes.IsNone() {
+			if doc.FirstMismatchTime.IsNone() {
 				// A non-mismatch recheck means the document changed. In that
 				// case we want to clear the mismatch count. This way a document
 				// that changes over & over won’t seem persistently mismatched
@@ -539,7 +535,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 				// of change.
 				lastIDIndex := len(idAccum) - 1
 
-				delete(mismatchFirstSeenAt, int32(lastIDIndex))
+				delete(firstMismatchTime, int32(lastIDIndex))
 			}
 
 			continue
@@ -549,8 +545,8 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
-		if mm, has := doc.MismatchTimes.Get(); has {
-			mismatchFirstSeenAt[int32(len(idAccum))] = mm.First
+		if fmt, has := doc.FirstMismatchTime.Get(); has {
+			firstMismatchTime[int32(len(idAccum))] = fmt
 		}
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 

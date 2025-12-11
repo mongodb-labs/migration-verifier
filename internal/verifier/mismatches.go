@@ -76,9 +76,11 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 					{"task", 1},
 				},
 			},
+			// This index is a descending index because we care most about
+			// long-lived mismatches.
 			{
 				Keys: bson.D{
-					{"detail.mismatchTimes.durationMS", 1},
+					{"detail.mismatchHistory.durationMS", -1},
 				},
 			},
 		},
@@ -372,7 +374,7 @@ func getDocumentMismatchReportData(
 			{"task", bson.D{{"$in", taskIDs}}},
 		}}},
 		{{"$sort", bson.D{
-			{"detail.mismatchTimes.duration", -1},
+			{"detail.mismatchHistory.duration", -1},
 			{"detail.id", 1},
 		}}},
 		{{"$facet", bson.D{

@@ -29,11 +29,9 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 			"the.namespace",
 			[]bson.RawValue{mbson.ToRawValue("theDocID")},
 			[]int32{1234},
-			[]recheck.MismatchTimes{
-				{
-					First: bson.NewDateTimeFromTime(time.Now()),
-				},
-			},
+			mslices.Of(
+				bson.NewDateTimeFromTime(time.Now()),
+			),
 		),
 		"insert failed-comparison recheck",
 	)
@@ -49,7 +47,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 					SrcCollectionName: "namespace",
 					DocumentID:        mbson.ToRawValue("theDocID"),
 				},
-				MismatchTimes: recheckDocs[0].MismatchTimes,
+				FirstMismatchTime: recheckDocs[0].FirstMismatchTime,
 			},
 		},
 		recheckDocs,
@@ -86,7 +84,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 					SrcCollectionName: "namespace",
 					DocumentID:        mbson.ToRawValue("theDocID"),
 				},
-				MismatchTimes: recheckDocs[0].MismatchTimes,
+				FirstMismatchTime: recheckDocs[0].FirstMismatchTime,
 			},
 		},
 		recheckDocs,
@@ -333,7 +331,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 		},
 		SourceDocumentCount: 1,
 		SourceByteCount:     types.ByteCount(overlyLarge),
-		MismatchFirstSeenAt: map[int32]bson.DateTime{},
+		FirstMismatchTime:   map[int32]bson.DateTime{},
 	}
 
 	t2 := t1
@@ -398,7 +396,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 		},
 		SourceDocumentCount: 2,
 		SourceByteCount:     1126400,
-		MismatchFirstSeenAt: map[int32]bson.DateTime{},
+		FirstMismatchTime:   map[int32]bson.DateTime{},
 	}
 
 	t2 := t1
@@ -452,7 +450,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 		},
 		SourceDocumentCount: 3,
 		SourceByteCount:     3000,
-		MismatchFirstSeenAt: map[int32]bson.DateTime{},
+		FirstMismatchTime:   map[int32]bson.DateTime{},
 	}
 	t2, t3, t4 := t1, t1, t1
 	t2.QueryFilter.Namespace = "testDB2.testColl1"
