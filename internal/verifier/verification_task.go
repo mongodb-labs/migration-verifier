@@ -97,7 +97,7 @@ type VerificationTask struct {
 	//
 	// This is here so that document comparisons can know how long a given
 	// mismatch has been continuously seen without any changes on either source or destination.
-	MismatchFirstSeenAt map[int32]bson.DateTime `bson:"mismatch_first_seen_at`
+	MismatchFirstSeenAt map[int32]bson.DateTime `bson:"mismatch_first_seen_at"`
 }
 
 func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
