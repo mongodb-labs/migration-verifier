@@ -53,7 +53,6 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 				genStats.CurrentGenerationRechecks = option.Some(ProgressRechecks{
 					Changes:    recheckStats.FromChange,
 					Mismatches: recheckStats.FromMismatch,
-					Total:      recheckStats.Total,
 				})
 			}
 
@@ -78,7 +77,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 			genStats.NextGenerationRechecks = ProgressRechecks{
 				Changes:    enqueuedRecheckCounts.Changed,
 				Mismatches: enqueuedRecheckCounts.Mismatched,
-				Total:      enqueuedRecheckCounts.Changed + enqueuedRecheckCounts.Mismatched - enqueuedRecheckCounts.ChangedAndMismatched,
+				Total:      option.Some(enqueuedRecheckCounts.Changed + enqueuedRecheckCounts.Mismatched - enqueuedRecheckCounts.ChangedAndMismatched),
 			}
 
 			return nil

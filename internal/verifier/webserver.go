@@ -252,7 +252,7 @@ type ProgressRechecks struct {
 	// Total counts all rechecks. This needn’t equal Mismatches + Changes
 	// because a document can both change and be seen to mismatch in the
 	// same generation. (Mismatches + Changes - Total counts those.)
-	Total int64 `json:"total"`
+	Total option.Option[int64] `json:"total,omitzero"`
 }
 
 type ProgressGenerationStats struct {

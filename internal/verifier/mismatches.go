@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
+	"github.com/10gen/migration-verifier/agg/helpers"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -155,35 +157,34 @@ func countRechecksForGeneration(
 					Array: "$mismatches",
 					Index: 0,
 				}},
-				{"_ids", lo.Ternary[any](
-					generation == 0,
-					0,
-					agg.Size{"$_ids"},
-				)},
-				{"rechecksFromChange", lo.Ternary[any](
-					generation == 0,
-					0,
-
+				{"_ids", agg.Cond{
+					If:   agg.Eq{0, "$generation"},
+					Then: 0,
+					Else: agg.Size{"$_ids"},
+				},
+				{"rechecksFromChange", agg.Cond{
+					If: agg.Or{
+						agg.Eq{0, "$generation"},
+						agg.Eq{generation - 1, "$generation"},
+					},
+					Then: 0,
 					// _ids is the array of document IDs to recheck.
 					// mismatch_first_seen_at maps indexes of that array to
 					// the document’s first mismatch time. It only contains
 					// entries for documents that mismatched without a change
 					// event. Thus, any _ids member whose index is *not* in
 					// mismatch_first_seen_at was enqueued from a change event.
-					agg.Size{agg.Filter{
-						Input: agg.Map{
-							Input: "$_ids",
-							In:    "$$thisIndex",
-						},
-						Cond: agg.Eq{
-							"missing",
+					Else: agg.Size{agg.Filter{
+						Input: agg.Range{End: agg.Size{"$_ids"}},
+						As:    "idx",
+						Cond: agg.Not{helpers.Exists{
 							agg.GetField{
 								Input: "$mismatch_first_seen_at",
-								Field: "$$this",
+								Field: agg.ToString{"$$idx"},
 							},
-						},
+						}},
 					}},
-				)},
+				}},
 			}}},
 			{{"$group", bson.D{
 				{"_id", nil},
@@ -248,12 +249,15 @@ func countRechecksForGeneration(
 	}
 
 	if result.RechecksFromMismatch > result.AllRechecks {
-		return recheckCounts{}, fmt.Errorf(
-			"INTERNAL ERROR: mismatches found in generation %d (%d) outnumber generation %d’s total documents to recheck (%d); this is nonsensical",
-			generation-1,
-			result.RechecksFromMismatch,
-			generation,
-			result.AllRechecks,
+		// TODO: fix
+		slog.Warn(
+			fmt.Sprintf(
+				"Mismatches found in generation %d outnumber generation %d’s total docs to recheck. This should be rare.",
+				generation-1,
+				generation,
+			),
+			"priorGenMismatches", result.RechecksFromMismatch,
+			"curGenRechecks", result.AllRechecks,
 		)
 	}
 
