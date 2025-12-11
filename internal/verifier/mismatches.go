@@ -161,7 +161,7 @@ func countRechecksForGeneration(
 					If:   agg.Eq{0, "$generation"},
 					Then: 0,
 					Else: agg.Size{"$_ids"},
-				},
+				}},
 				{"rechecksFromChange", agg.Cond{
 					If: agg.Or{
 						agg.Eq{0, "$generation"},
