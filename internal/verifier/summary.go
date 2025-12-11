@@ -53,8 +53,6 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 
 	anyAreIncomplete := len(incompleteTasks) > 0
 
-	// TODO
-
 	if len(failedTasks) != 0 {
 		table := tablewriter.NewWriter(strBuilder)
 		table.SetHeader([]string{"Index", "Cluster", "Field", "Namespace", "Details"})
