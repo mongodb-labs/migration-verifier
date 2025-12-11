@@ -150,9 +150,10 @@ func countRechecksForGeneration(
 					}}},
 				}},
 			}}},
-			// We don’t want $unwind here because that’ll erase any tasks that
-			// don’t match up to >=1 mismatch.
+
 			{{"$addFields", bson.D{
+				// We avoid $unwind here because that’ll erase any tasks that
+				// don’t match up to >=1 mismatch.
 				{"mismatches", agg.ArrayElemAt{
 					Array: "$mismatches",
 					Index: 0,
@@ -168,6 +169,7 @@ func countRechecksForGeneration(
 						agg.Eq{generation - 1, "$generation"},
 					},
 					Then: 0,
+
 					// _ids is the array of document IDs to recheck.
 					// mismatch_first_seen_at maps indexes of that array to
 					// the document’s first mismatch time. It only contains
@@ -175,6 +177,7 @@ func countRechecksForGeneration(
 					// event. Thus, any _ids member whose index is *not* in
 					// mismatch_first_seen_at was enqueued from a change event.
 					Else: agg.Size{agg.Filter{
+						// This gives us all the array indices.
 						Input: agg.Range{End: agg.Size{"$_ids"}},
 						As:    "idx",
 						Cond: agg.Not{helpers.Exists{
