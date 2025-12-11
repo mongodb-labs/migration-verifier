@@ -77,7 +77,7 @@ type VerificationTask struct {
 	Generation int                    `bson:"generation"`
 
 	// For recheck tasks, this stores the document IDs to check.
-	Ids []any `bson:"_ids"`
+	Ids []bson.RawValue `bson:"_ids"`
 
 	QueryFilter QueryFilter `bson:"query_filter" json:"query_filter"`
 
@@ -200,7 +200,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 }
 
 func (verifier *Verifier) createDocumentRecheckTask(
-	ids []any,
+	ids []bson.RawValue,
 	dataSize types.ByteCount,
 	srcNamespace string,
 ) (*VerificationTask, error) {

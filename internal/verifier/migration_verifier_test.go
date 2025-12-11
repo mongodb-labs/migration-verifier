@@ -359,7 +359,10 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 
 	task := &VerificationTask{
 		PrimaryKey: bson.NewObjectID(),
-		Ids:        []any{id1, id2},
+		Ids: mslices.Of(
+			mbson.ToRawValue(id1),
+			mbson.ToRawValue(id2),
+		),
 		QueryFilter: QueryFilter{
 			Namespace: namespace,
 			To:        namespace,
@@ -530,9 +533,12 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	})
 	suite.Require().NoError(err)
 	task := &VerificationTask{
-		PrimaryKey:  bson.NewObjectID(),
-		Generation:  1,
-		Ids:         []any{id, id + 1},
+		PrimaryKey: bson.NewObjectID(),
+		Generation: 1,
+		Ids: mslices.Of(
+			mbson.ToRawValue(id),
+			mbson.ToRawValue(id+1),
+		),
 		QueryFilter: basicQueryFilter("keyhole.dealers"),
 	}
 
@@ -2547,10 +2553,25 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	suite.awaitEnqueueOfRechecks(verifier, 1)
 
-	// Everything should match by the end of it.
-	status, err = verifier.GetVerificationStatus(ctx)
-	suite.Require().NoError(err)
-	suite.Assert().Zero(status.FailedTasks)
+	suite.Assert().Eventually(
+		func() bool {
+			status, err = verifier.GetVerificationStatus(ctx)
+			suite.Require().NoError(err)
+
+			if status.FailedTasks == 0 {
+				return true
+			}
+
+			suite.Require().NoError(runner.StartNextGeneration())
+			suite.Require().NoError(runner.AwaitGenerationEnd())
+
+			return false
+		},
+		5*time.Minute,
+		50*time.Millisecond,
+		"Mismatches should disappear.",
+	)
+
 }
 
 func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {

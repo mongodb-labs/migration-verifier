@@ -10,15 +10,23 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
+type cursorLike interface {
+	TryNext(context.Context) bool
+	RemainingBatchLength() int
+	Err() error
+}
+
 // GetBatch returns a batch of documents from a cursor. It does so by appending
 // to passed-in slices, which lets you optimize memory handling.
-func GetBatch(
+func GetBatch[T cursorLike](
 	ctx context.Context,
-	cursor *mongo.Cursor,
+	cursor T,
 	docs []bson.Raw,
 	buffer []byte,
 ) ([]bson.Raw, []byte, error) {
 	var docsCount, expectedCount int
+
+	var curDoc bson.Raw
 
 	for hasDocs := true; hasDocs; hasDocs = cursor.RemainingBatchLength() > 0 {
 		got := cursor.TryNext(ctx)
@@ -43,8 +51,17 @@ func GetBatch(
 
 		docsCount++
 
+		switch typedCursor := any(cursor).(type) {
+		case *mongo.Cursor:
+			curDoc = typedCursor.Current
+		case *mongo.ChangeStream:
+			curDoc = typedCursor.Current
+		default:
+			panic(fmt.Sprintf("unknown cursor type: %T", cursor))
+		}
+
 		docPos := len(buffer)
-		buffer = append(buffer, cursor.Current...)
+		buffer = append(buffer, curDoc...)
 		docs = append(docs, buffer[docPos:])
 	}
 

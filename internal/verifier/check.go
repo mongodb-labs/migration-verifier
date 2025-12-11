@@ -234,14 +234,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				return errors.Wrap(err, "adding metadata indexes")
 			}
 
-			err = verifier.doInMetaTransaction(
-				ctx,
-				func(ctx context.Context, sCtx context.Context) error {
-					return verifier.ResetInProgressTasks(sCtx)
-				},
-			)
+			err = verifier.ResetInProgressTasks(ctx)
 			if err != nil {
-				return errors.Wrap(err, "failed to reset any in-progress tasks")
+				return errors.Wrap(err, "resetting in-progress tasks")
 			}
 
 			return nil

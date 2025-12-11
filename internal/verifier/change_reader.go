@@ -253,6 +253,10 @@ func (rc *ChangeReaderCommon) start(
 }
 
 func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson.Raw) error {
+	if len(token) == 0 {
+		panic("internal error: resume token is empty but should never be")
+	}
+
 	ts, err := rc.resumeTokenTSExtractor(token)
 	if err != nil {
 		return errors.Wrapf(err, "parsing resume token %#q", token)
