@@ -50,7 +50,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	var srcChannel, dstChannel <-chan docWithTs
 	var readSrcCallback, readDstCallback func(context.Context, *retry.FuncInfo) error
 
-	problems := []VerificationResult{}
+	results := []VerificationResult{}
 	var docCount types.DocumentCount
 	var byteCount types.ByteCount
 
@@ -80,7 +80,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 		WithCallback(
 			func(ctx context.Context, fi *retry.FuncInfo) error {
 				var err error
-				problems, docCount, byteCount, err = verifier.compareDocsFromChannels(
+				results, docCount, byteCount, err = verifier.compareDocsFromChannels(
 					ctx,
 					workerNum,
 					fi,
@@ -94,7 +94,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 			"comparing documents",
 		).Run(givenCtx, verifier.logger)
 
-	return problems, docCount, byteCount, err
+	return results, docCount, byteCount, err
 }
 
 func (verifier *Verifier) compareDocsFromChannels(
