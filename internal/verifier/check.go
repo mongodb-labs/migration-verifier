@@ -216,7 +216,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	// Now that we’ve initialized verifier.generation we can
 	// start the change readers.
 	verifier.initializeChangeReaders()
-	verifier.mux.Unlock()
+	//verifier.mux.Unlock()
 
 	err = retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
@@ -241,17 +241,12 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 
 	verifier.logger.Debug().Msg("Starting Check")
 
-	verifier.phase = Check
-	defer func() {
-		verifier.phase = Idle
-	}()
-
 	if err := verifier.startChangeHandling(ctx); err != nil {
 		return err
 	}
 
 	// Log the verification status when initially booting up so it's easy to see the current state
-	verificationStatus, err := verifier.GetVerificationStatus(ctx)
+	verificationStatus, err := verifier.getVerificationStatusForGeneration(ctx, verifier.generation)
 	if err != nil {
 		return errors.Wrapf(
 			err,
@@ -269,7 +264,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	}
 	// Now enter the multi-generational steady check state
 	for {
-		verifier.mux.Lock()
+		//verifier.mux.Lock()
 		err = retry.New().WithCallback(
 			func(ctx context.Context, _ *retry.FuncInfo) error {
 				return verifier.persistGenerationWhileLocked(ctx)
@@ -281,11 +276,12 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 			verifier.mux.Unlock()
 			return errors.Wrapf(err, "failed to persist generation (%d)", verifier.generation)
 		}
-		verifier.mux.Unlock()
 
 		verifier.generationStartTime = time.Now()
 		verifier.srcEventRecorder.Reset()
 		verifier.dstEventRecorder.Reset()
+
+		verifier.mux.Unlock()
 
 		err := verifier.CheckWorker(ctx)
 		if err != nil {
@@ -357,7 +353,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// on enqueued rechecks. Meanwhile, generaiton 3’s recheck tasks will
 		// derive from rechecks enqueued during generation 2.
 		verifier.generation++
-		verifier.phase = Recheck
 		verifier.mux.Unlock()
 
 		// Generation of recheck tasks can partial-fail. The following will
@@ -379,6 +374,8 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				Err(err).
 				Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
 		}
+
+		verifier.mux.Lock()
 	}
 }
 

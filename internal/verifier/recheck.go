@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/10gen/migration-verifier/agg"
+	"github.com/10gen/migration-verifier/agg/accum"
+	"github.com/10gen/migration-verifier/agg/helpers"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
@@ -15,6 +18,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -42,7 +46,15 @@ const (
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	ctx context.Context,
-	namespace string, documentIDs []bson.RawValue, dataSizes []int32) error {
+	namespace string,
+	documentIDs []bson.RawValue,
+	dataSizes []int32,
+	firstMismatchTimes []bson.DateTime,
+) error {
+	if firstMismatchTimes == nil {
+		panic("mismatch recheck must have first-mismatch times!")
+	}
+
 	dbName, collName := SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
@@ -56,7 +68,90 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		Int("count", len(documentIDs)).
 		Msg("Persisting rechecks for mismatched or missing documents.")
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes)
+	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes, firstMismatchTimes)
+}
+
+type enqueuedRecheckCounts struct {
+	Changed              int64
+	Mismatched           int64
+	ChangedAndMismatched int64
+}
+
+func (verifier *Verifier) countEnqueuedRechecksWhileLocked(
+	ctx context.Context,
+) (enqueuedRecheckCounts, error) {
+	generation, _ := verifier.getGenerationWhileLocked()
+
+	// We enqueue for the generation after the current one.
+	generation++
+
+	genCollection := verifier.getRecheckQueueCollection(generation)
+
+	cursor, err := genCollection.Aggregate(
+		ctx,
+		mongo.Pipeline{
+			{{"$group", bson.D{
+				{"_id", bson.D{
+					{"db", "$_id.db"},
+					{"coll", "$_id.coll"},
+					{"docID", "$_id.docID"},
+				}},
+
+				{"fromChanges", accum.Sum{agg.Cond{
+					If:   agg.Not{helpers.Exists{"$mismatchTimes"}},
+					Then: 1,
+					Else: 0,
+				}}},
+
+				{"fromMismatch", accum.Sum{agg.Cond{
+					If:   helpers.Exists{"$mismatchTimes"},
+					Then: 1,
+					Else: 0,
+				}}},
+			}}},
+			{{"$group", bson.D{
+				{"_id", nil},
+
+				{"changed", accum.Sum{agg.Cond{
+					If:   agg.Gt{"$fromChanges", 0},
+					Then: 1,
+					Else: 0,
+				}}},
+
+				{"mismatched", accum.Sum{agg.Cond{
+					If:   agg.Gt{"$fromMismatch", 0},
+					Then: 1,
+					Else: 0,
+				}}},
+
+				{"changedAndMismatched", accum.Sum{agg.Cond{
+					If: agg.And{
+						agg.Gt{"$fromChanges", 0},
+						agg.Gt{"$fromMismatch", 0},
+					},
+					Then: 1,
+					Else: 0,
+				}}},
+			}}},
+		},
+	)
+	if err != nil {
+		return enqueuedRecheckCounts{}, errors.Wrap(err, "surveying enqueued rechecks")
+	}
+
+	var results []enqueuedRecheckCounts
+	if err := cursor.All(ctx, &results); err != nil {
+		return enqueuedRecheckCounts{}, errors.Wrap(err, "reading survey of enqueued rechecks")
+	}
+
+	switch len(results) {
+	case 0:
+		return enqueuedRecheckCounts{}, nil
+	case 1:
+		return results[0], nil
+	}
+
+	panic(fmt.Sprintf("multiple group results: %+v", results))
 }
 
 func (verifier *Verifier) insertRecheckDocs(
@@ -65,6 +160,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	collNames []string,
 	documentIDs []bson.RawValue,
 	dataSizes []int32,
+	firstMismatchTimes []bson.DateTime,
 ) error {
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
@@ -136,9 +232,14 @@ func (verifier *Verifier) insertRecheckDocs(
 		})
 	}
 
+	var firstMismatchTime option.Option[bson.DateTime]
 	curRechecks := make([]bson.Raw, 0, recheckBatchCountLimit)
 	curBatchBytes := 0
 	for i, dbName := range dbNames {
+		if firstMismatchTimes != nil {
+			firstMismatchTime = option.Some(firstMismatchTimes[i])
+		}
+
 		recheckDoc := recheck.Doc{
 			PrimaryKey: recheck.PrimaryKey{
 				SrcDatabaseName:   dbName,
@@ -146,7 +247,8 @@ func (verifier *Verifier) insertRecheckDocs(
 				DocumentID:        documentIDs[i],
 				Rand:              rand.Int32(),
 			},
-			DataSize: dataSizes[i],
+			DataSize:          dataSizes[i],
+			FirstMismatchTime: firstMismatchTime,
 		}
 
 		recheckRaw := recheckDoc.MarshalToBSON()
@@ -291,6 +393,8 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	var totalDocs types.DocumentCount
 	var dataSizeAccum, totalRecheckData int64
 
+	firstMismatchTime := map[int32]bson.DateTime{}
+
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
 	// namespace will be consecutive in this query’s result.
@@ -336,6 +440,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		task, err := verifier.createDocumentRecheckTask(
 			idAccum,
+			firstMismatchTime,
 			types.ByteCount(dataSizeAccum),
 			namespace,
 		)
@@ -414,14 +519,32 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			dataSizeAccum = 0
 			idAccum = idAccum[:0]
 			lastIDRaw = bson.RawValue{}
+			clear(firstMismatchTime)
 		}
 
+		// A document can be enqueued for recheck for multiple reasons:
+		// - changed on source
+		// - changed on destination
+		// - mismatch seen
+		//
 		// We’re iterating the rechecks in order such that, if the same doc
 		// gets enqueued from multiple sources, we’ll see those records
 		// consecutively. We can deduplicate here, then, by checking to see if
 		// the doc ID has changed. (NB: At this point we know the namespace
 		// has *not* changed because we just checked for that.)
 		if idRaw.Equal(lastIDRaw) {
+
+			if doc.FirstMismatchTime.IsNone() {
+				// A non-mismatch recheck means the document changed. In that
+				// case we want to clear the mismatch count. This way a document
+				// that changes over & over won’t seem persistently mismatched
+				// merely because the replicator hasn’t kept up with the rate
+				// of change.
+				lastIDIndex := len(idAccum) - 1
+
+				delete(firstMismatchTime, int32(lastIDIndex))
+			}
+
 			continue
 		}
 
@@ -429,6 +552,9 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
+		if fmt, has := doc.FirstMismatchTime.Get(); has {
+			firstMismatchTime[int32(len(idAccum))] = fmt
+		}
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 
 		totalRecheckData += int64(doc.DataSize)

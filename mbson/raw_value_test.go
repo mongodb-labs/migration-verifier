@@ -74,6 +74,8 @@ func TestInt64(t *testing.T) {
 		viaUs := ToRawValue(cur)
 
 		assert.Equal(t, viaMarshal, viaUs, "%d", cur)
+
+		assert.Equal(t, cur, lo.Must(CastRawValue[int64](viaMarshal)), "round-trip")
 	}
 }
 
@@ -136,6 +138,19 @@ func TestObjectID(t *testing.T) {
 		assert.Equal(t, viaMarshal, ToRawValue(cur))
 
 		assert.Equal(t, cur, lo.Must(CastRawValue[bson.ObjectID](viaMarshal)))
+	}
+}
+
+func TestBSONDateTime(t *testing.T) {
+	vals := []bson.DateTime{
+		0,
+		123123,
+	}
+
+	for _, cur := range vals {
+		viaMarshal := MustConvertToRawValue(cur)
+
+		assert.Equal(t, cur, lo.Must(CastRawValue[bson.DateTime](viaMarshal)))
 	}
 }
 
