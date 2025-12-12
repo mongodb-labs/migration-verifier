@@ -32,13 +32,13 @@ const (
 )
 
 type readerCurrentTimes struct {
-	LastHandledTime bson.Timestamp `json:"lastHandledTime"`
-	LastClusterTime bson.Timestamp `json:"lastClusterTime"`
+	LastHandledTime   bson.Timestamp `json:"lastHandledTime"`
+	LastOperationTime bson.Timestamp `json:"lastOperationTime"`
 }
 
 func (rp readerCurrentTimes) Lag() time.Duration {
 	return time.Second * time.Duration(
-		int(rp.LastClusterTime.T)-int(rp.LastHandledTime.T),
+		int(rp.LastOperationTime.T)-int(rp.LastHandledTime.T),
 	)
 }
 
@@ -246,21 +246,19 @@ func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Optio
 	return option.Some(token), nil
 }
 
-func (rc *ChangeReaderCommon) updateLag(sess *mongo.Session, token bson.Raw) {
+func (rc *ChangeReaderCommon) updateTimes(sess *mongo.Session, token bson.Raw) {
 	tokenTs, err := rc.resumeTokenTSExtractor(token)
 	if err == nil {
-		cTime, err := util.GetClusterTimeFromSession(sess)
-		if err != nil {
-			rc.logger.Warn().
-				Err(err).
-				Str("reader", string(rc.getWhichCluster())).
-				Msg("Failed to extract cluster time from session.")
-		} else {
-			rc.currentTimes.Store(option.Some(readerCurrentTimes{
-				LastHandledTime: tokenTs,
-				LastClusterTime: cTime,
-			}))
+		opTime := sess.OperationTime()
+
+		if opTime == nil {
+			panic("session operationTime is nil … did this get called prematurely?")
 		}
+
+		rc.currentTimes.Store(option.Some(readerCurrentTimes{
+			LastHandledTime:   tokenTs,
+			LastOperationTime: *opTime,
+		}))
 	} else {
 		rc.logger.Warn().
 			Err(err).
