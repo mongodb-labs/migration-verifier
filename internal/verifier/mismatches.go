@@ -374,7 +374,7 @@ func getDocumentMismatchReportData(
 			{"task", bson.D{{"$in", taskIDs}}},
 		}}},
 		{{"$sort", bson.D{
-			{"detail.mismatchHistory.duration", -1},
+			{"detail.mismatchHistory.durationMS", -1},
 			{"detail.id", 1},
 		}}},
 		{{"$facet", bson.D{
