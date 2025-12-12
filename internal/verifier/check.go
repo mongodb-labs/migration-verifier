@@ -211,12 +211,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		}
 	}
 
-	verifier.logger.Info().Msg("Starting change readers.")
-
 	// Now that we’ve initialized verifier.generation we can
 	// start the change readers.
 	verifier.initializeChangeReaders()
-	verifier.mux.Unlock()
 
 	err = retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
@@ -588,6 +585,9 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 }
 
 func (v *Verifier) initializeChangeReaders() {
+
+	v.logger.Info().Msg("Starting change readers.")
+
 	v.srcChangeReader = v.newChangeStreamReader(
 		v.srcNamespaces,
 		src,
