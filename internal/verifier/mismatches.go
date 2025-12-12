@@ -147,7 +147,7 @@ func countRechecksForGeneration(
 						{"_id", nil},
 
 						{"count", accum.Sum{1}},
-						{"maxDurationMS", accum.Max{"$detail.mismatchTimes.durationMS"}},
+						{"maxDurationMS", accum.Max{"$detail.mismatchHistory.durationMS"}},
 					}}},
 				}},
 			}}},
