@@ -438,14 +438,7 @@ func (verifier *Verifier) getGeneration() (generation int, lastGeneration bool) 
 }
 
 func (verifier *Verifier) getGenerationWhileLocked() (int, bool) {
-
-	// As long as no other goroutine has locked the mux this will
-	// usefully panic if the caller neglected the lock.
-	wasUnlocked := verifier.mux.TryLock()
-	if wasUnlocked {
-		verifier.mux.Unlock()
-		panic("getGenerationWhileLocked() while unlocked")
-	}
+	verifier.assertLocked()
 
 	return verifier.generation, verifier.lastGeneration
 }
@@ -1400,27 +1393,6 @@ func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mong
 func (verifier *Verifier) StartServer() error {
 	server := NewWebServer(verifier.port, verifier, verifier.logger)
 	return server.Run(context.Background())
-}
-
-func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
-	verifier.mux.RLock()
-	defer verifier.mux.RUnlock()
-
-	generation := verifier.generation
-
-	status, err := verifier.getVerificationStatusForGeneration(ctx, generation)
-	if err != nil {
-		return Progress{Error: err}, err
-	}
-	return Progress{
-		Phase: lo.Ternary(
-			verifier.running,
-			lo.Ternary(generation > 0, Recheck, Check),
-			Idle,
-		),
-		Generation: verifier.generation,
-		Status:     status,
-	}, nil
 }
 
 // Returned boolean indicates that namespaces are cached, and
