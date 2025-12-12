@@ -308,11 +308,11 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	}
 	defer cursor.Close(ctx)
 
-    var  (
-        curTasks []bson.Raw
-        curTasksBytes int
- 	    totalTasks int
-	    totalInserts int
+	var (
+		curTasks      []bson.Raw
+		curTasksBytes int
+		totalTasks    int
+		totalInserts  int
 	)
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
