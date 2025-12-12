@@ -560,40 +560,60 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 
 	firstMismatchTime := mismatches[0].Detail.MismatchHistory.First
 
-	// Now let another generation go by.
-	suite.Require().NoError(runner.StartNextGeneration())
-	suite.Require().NoError(runner.AwaitGenerationEnd())
+	_, err = suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection(collName).
+		InsertOne(ctx, bson.D{{"_id", "z"}})
+	suite.Require().NoError(err)
 
 	suite.Run(
-		"generation 1",
+		"add 2nd mismatch",
 		func() {
-			cur, err := verifier.verificationTaskCollection().Find(
-				ctx,
-				bson.D{
-					{"generation", verifier.generation},
-					{"type", verificationTaskVerifyDocuments},
-				},
-			)
-			suite.Require().NoError(err)
-			suite.Require().NoError(cur.All(ctx, &tasks))
-			suite.Require().Len(tasks, 1)
-			suite.Require().Contains(tasks[0].FirstMismatchTime, int32(0))
+			for len(mismatches) == 1 {
+				suite.Require().NoError(runner.StartNextGeneration())
+				suite.Require().NoError(runner.AwaitGenerationEnd())
+				cur, err := verifier.verificationTaskCollection().Find(
+					ctx,
+					bson.D{
+						{"generation", verifier.generation},
+						{"type", verificationTaskVerifyDocuments},
+					},
+				)
+				suite.Require().NoError(err)
+				suite.Require().NoError(cur.All(ctx, &tasks))
+				suite.Require().Len(tasks, 1)
+				suite.Require().Contains(tasks[0].FirstMismatchTime, int32(0))
 
-			suite.Assert().Equal(
-				firstMismatchTime,
-				tasks[0].FirstMismatchTime[0],
-				"task in new gen should have the old gen’s mismatch’s first mismatch time",
-			)
+				suite.Assert().Equal(
+					firstMismatchTime,
+					tasks[0].FirstMismatchTime[0],
+					"task in new gen should have the old gen’s mismatch’s first mismatch time",
+				)
 
-			cur, err = mmColl.Find(ctx, bson.D{
-				{"task", tasks[0].PrimaryKey},
-			})
-			suite.Require().NoError(err)
-			suite.Require().NoError(cur.All(ctx, &mismatches))
-			suite.Require().Len(mismatches, 1)
+				cur, err = mmColl.Find(ctx, bson.D{
+					{"task", tasks[0].PrimaryKey},
+				})
+				suite.Require().NoError(err)
+				suite.Require().NoError(cur.All(ctx, &mismatches))
+			}
+
+			suite.Require().Len(mismatches, 2)
 
 			suite.Assert().Equal(firstMismatchTime, mismatches[0].Detail.MismatchHistory.First)
 			suite.Require().NotZero(mismatches[0].Detail.MismatchHistory.DurationMS)
+
+			suite.Assert().True(
+				mismatches[1].Detail.MismatchHistory.First.Time().After(
+					firstMismatchTime.Time(),
+				),
+				"2nd mismatch’s first-seen time should postdate the first’s",
+			)
+
+			suite.Assert().Greater(
+				mismatches[0].Detail.MismatchHistory.DurationMS,
+				mismatches[1].Detail.MismatchHistory.DurationMS,
+				"2nd mismatch should be less long-lived",
+			)
 
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
@@ -607,7 +627,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			suite.Assert().Empty(reportData.ExtraOnDst)
 			suite.Assert().Equal(
 				mismatchCountsPerType{
-					MissingOnDst: 1,
+					MissingOnDst: 2,
 				},
 				reportData.Counts,
 			)
@@ -620,7 +640,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
 	suite.Run(
-		"generation 2",
+		"generation 2 or later",
 		func() {
 			cur, err := verifier.verificationTaskCollection().Find(
 				ctx,
@@ -647,7 +667,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			})
 			suite.Require().NoError(err)
 			suite.Require().NoError(cur.All(ctx, &mismatches))
-			suite.Require().Len(mismatches, 1)
+			suite.Require().Len(mismatches, 2)
 
 			suite.Assert().Equal(firstMismatchTime, mismatches[0].Detail.MismatchHistory.First)
 			suite.Require().GreaterOrEqual(mismatches[0].Detail.MismatchHistory.DurationMS, lastMismatchDuration)
@@ -664,7 +684,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			suite.Assert().Empty(reportData.ExtraOnDst)
 			suite.Assert().Equal(
 				mismatchCountsPerType{
-					MissingOnDst: 1,
+					MissingOnDst: 2,
 				},
 				reportData.Counts,
 			)
