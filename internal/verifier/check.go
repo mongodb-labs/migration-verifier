@@ -357,8 +357,8 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// derive from rechecks enqueued during generation 2.
 		verifier.generation++
 		verifier.generationStartTime = time.Now()
-		verifier.srcEventRecorder.Reset()
-		verifier.dstEventRecorder.Reset()
+		verifier.srcChangeReader.getEventRecorder().Reset()
+		verifier.dstChangeReader.getEventRecorder().Reset()
 		verifier.phase = Recheck
 		verifier.mux.Unlock()
 

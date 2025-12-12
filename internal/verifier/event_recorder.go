@@ -32,6 +32,7 @@ func NewEventRecorder() *EventRecorder {
 	}
 }
 
+// Reset empties the event recorder.
 func (er EventRecorder) Reset() {
 	er.guard.Store(func(m eventRecorderMap) eventRecorderMap {
 		return eventRecorderMap{}
