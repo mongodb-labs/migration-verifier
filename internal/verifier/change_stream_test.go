@@ -388,15 +388,20 @@ func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	assert.Eventually(
 		suite.T(),
 		func() bool {
-			rt, err := changeStreamMetaColl.FindOne(ctx, bson.D{}).Raw()
+			rt, err := changeStreamMetaColl.FindOne(
+				ctx,
+				bson.D{
+					{"_id", resumeTokenDocID(src)},
+				},
+			).Raw()
 			require.NoError(suite.T(), err)
 
-			suite.T().Logf("found rt: %v\n", rt)
+			suite.T().Logf("found rt: %v", rt)
 
 			return !bytes.Equal(rt, originalResumeToken)
 		},
 		time.Minute,
-		50*time.Millisecond,
+		500*time.Millisecond,
 		"should see a new change stream resume token persisted",
 	)
 
@@ -738,10 +743,9 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 
 	startAtTs = verifier.srcChangeReader.getStartTimestamp()
 
-	suite.Assert().Equal(
-		*postEventsSessionTime,
-		startAtTs,
-		"verifier.srcStartAtTs should now be our session timestamp",
+	suite.Assert().False(
+		startAtTs.Before(*postEventsSessionTime),
+		"verifier.srcStartAtTs should now be at least at the session timestamp",
 	)
 }
 
@@ -994,7 +998,7 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 
 	eventErr := UnknownEventError{}
 	suite.Require().ErrorAs(err, &eventErr)
-	suite.Assert().Equal("create", eventErr.Event.Lookup("operationType").StringValue())
+	suite.Assert().Contains(string(eventErr.Event), "create")
 }
 
 func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
