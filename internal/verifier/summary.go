@@ -555,14 +555,13 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 	fmt.Fprint(builder, "\n")
 
 	for _, cluster := range []struct {
-		title         string
-		eventRecorder *EventRecorder
-		csReader      changeReader
+		title    string
+		csReader changeReader
 	}{
-		{"Source", verifier.srcEventRecorder, verifier.srcChangeReader},
-		{"Destination", verifier.dstEventRecorder, verifier.dstChangeReader},
+		{"Source", verifier.srcChangeReader},
+		{"Destination", verifier.dstChangeReader},
 	} {
-		nsStats := cluster.eventRecorder.Read()
+		nsStats := cluster.csReader.getEventRecorder().Read()
 
 		activeNamespacesCount := len(nsStats)
 
