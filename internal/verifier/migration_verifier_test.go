@@ -712,7 +712,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 				},
 			}},
 		},
-		src,
+		verifier.srcChangeReader,
 	)
 	suite.Require().NoError(err)
 
@@ -728,7 +728,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 				},
 			}},
 		},
-		src,
+		verifier.srcChangeReader,
 	)
 	suite.Require().NoError(err)
 
@@ -991,23 +991,23 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		events: mslices.Of(event),
 	}
 
-	err = verifier.PersistChangeEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 
 	event.OpType = "insert"
-	err = verifier.PersistChangeEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 	event.OpType = "replace"
-	err = verifier.PersistChangeEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 	event.OpType = "update"
-	err = verifier.PersistChangeEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 
 	batch.events[0].OpType = "flibbity"
 	suite.Assert().Panics(
 		func() {
-			_ = verifier.PersistChangeEvents(ctx, batch, src)
+			_ = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 		},
 		"PersistChangeEvents should panic if it gets an unknown optype",
 	)

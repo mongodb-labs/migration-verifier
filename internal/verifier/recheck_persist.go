@@ -69,7 +69,7 @@ HandlerLoop:
 				Msg("Handling change event batch.")
 
 			err = errors.Wrap(
-				verifier.PersistChangeEvents(ctx, batch, clusterName),
+				verifier.PersistChangeEvents(ctx, batch, reader),
 				"failed to handle change stream events",
 			)
 
@@ -83,7 +83,7 @@ HandlerLoop:
 }
 
 // PersistChangeEvents performs the necessary work for change events after receiving a batch.
-func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeEventBatch, eventOrigin whichCluster) error {
+func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeEventBatch, reader changeReader) error {
 	if len(batch.events) == 0 {
 		return nil
 	}
@@ -94,6 +94,8 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeE
 	dataSizes := make([]int32, len(batch.events))
 
 	latestTimestamp := bson.Timestamp{}
+
+	eventOrigin := reader.getWhichCluster()
 
 	for i, changeEvent := range batch.events {
 		if !supportedEventOpTypes.Contains(changeEvent.OpType) {
@@ -110,14 +112,10 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeE
 
 		var srcDBName, srcCollName string
 
-		var eventRecorder EventRecorder
-
 		// Recheck Docs are keyed by source namespaces.
 		// We need to retrieve the source namespaces if change events are from the destination.
 		switch eventOrigin {
 		case dst:
-			eventRecorder = *verifier.dstEventRecorder
-
 			if verifier.nsMap.Len() == 0 {
 				// Namespace is not remapped. Source namespace is the same as the destination.
 				srcDBName = changeEvent.Ns.DB
@@ -131,8 +129,6 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeE
 				srcDBName, srcCollName = SplitNamespace(srcNs)
 			}
 		case src:
-			eventRecorder = *verifier.srcEventRecorder
-
 			srcDBName = changeEvent.Ns.DB
 			srcCollName = changeEvent.Ns.Coll
 		default:
@@ -154,7 +150,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeE
 			dataSizes[i] = int32(len(changeEvent.FullDocument))
 		}
 
-		if err := eventRecorder.AddEvent(&changeEvent); err != nil {
+		if err := reader.getEventRecorder().AddEvent(&changeEvent); err != nil {
 			return errors.Wrapf(
 				err,
 				"failed to augment stats with %s change event (%+v)",
