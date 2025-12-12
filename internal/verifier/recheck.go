@@ -310,10 +310,20 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 	var curTasks []bson.Raw
 	var curTasksBytes int
+	var totalTasks, totalInserts int
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
 
-	var totalTasks, totalInserts int
+	addInsertRequest := func(tasks []bson.Raw) {
+		eg.Go(
+			func() error {
+				return verifier.insertDocumentRecheckTasks(egCtx, tasks)
+			},
+		)
+
+		totalInserts++
+	}
+
 	persistBufferedRechecks := func() error {
 		if len(idAccum) == 0 {
 			return nil
@@ -352,13 +362,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			tasksClone := slices.Clone(curTasks)
 			curTasks = curTasks[:0]
 
-			eg.Go(
-				func() error {
-					return verifier.insertDocumentRecheckTasks(egCtx, tasksClone)
-				},
-			)
-
-			totalInserts++
+			addInsertRequest(tasksClone)
 		}
 
 		verifier.logger.Debug().
@@ -439,11 +443,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	}
 
 	if len(curTasks) > 0 {
-		eg.Go(
-			func() error {
-				return verifier.insertDocumentRecheckTasks(egCtx, curTasks)
-			},
-		)
+		addInsertRequest(curTasks)
 	}
 
 	err = eg.Wait()
