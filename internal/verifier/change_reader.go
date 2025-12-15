@@ -45,6 +45,7 @@ func (rp readerCurrentTimes) Lag() time.Duration {
 type changeReader interface {
 	getWhichCluster() whichCluster
 	getReadChannel() <-chan changeEventBatch
+	getEventRecorder() *EventRecorder
 	getStartTimestamp() bson.Timestamp
 	getLastSeenClusterTime() option.Option[bson.Timestamp]
 	getEventsPerSecond() option.Option[float64]
@@ -67,6 +68,8 @@ type ChangeReaderCommon struct {
 	watcherClient *mongo.Client
 	clusterInfo   util.ClusterInfo
 
+	eventRecorder *EventRecorder
+
 	resumeTokenTSExtractor func(bson.Raw) (bson.Timestamp, error)
 
 	running              bool
@@ -88,6 +91,7 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 	return ChangeReaderCommon{
 		readerType:           clusterName,
 		changeEventBatchChan: make(chan changeEventBatch, batchChanBufferSize),
+		eventRecorder:        NewEventRecorder(),
 		writesOffTs:          util.NewEventual[bson.Timestamp](),
 		currentTimes:         msync.NewTypedAtomic(option.None[readerCurrentTimes]()),
 		lastChangeEventTime:  msync.NewTypedAtomic(option.None[bson.Timestamp]()),
@@ -102,6 +106,10 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 
 func (rc *ChangeReaderCommon) getWhichCluster() whichCluster {
 	return rc.readerType
+}
+
+func (rc *ChangeReaderCommon) getEventRecorder() *EventRecorder {
+	return rc.eventRecorder
 }
 
 func (rc *ChangeReaderCommon) getStartTimestamp() bson.Timestamp {
