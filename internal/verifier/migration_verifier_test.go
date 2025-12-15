@@ -599,26 +599,10 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 
 			suite.Require().Len(mismatches, 2)
 
-			suite.Assert().Equal(firstMismatchTime, mismatches[0].Detail.MismatchHistory.First)
-			suite.Require().NotZero(mismatches[0].Detail.MismatchHistory.DurationMS)
-
-			suite.Assert().True(
-				mismatches[1].Detail.MismatchHistory.First.Time().After(
-					firstMismatchTime.Time(),
-				),
-				"2nd mismatch’s first-seen time should postdate the first’s",
-			)
-
-			suite.Assert().Greater(
-				mismatches[0].Detail.MismatchHistory.DurationMS,
-				mismatches[1].Detail.MismatchHistory.DurationMS,
-				"2nd mismatch should be less long-lived",
-			)
-
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(mismatches[0].Task),
+				mslices.Of(tasks[0].PrimaryKey),
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -631,7 +615,20 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 				},
 				reportData.Counts,
 			)
-			suite.Assert().Equal(reportData.MissingOnDst, mismatches)
+			suite.Assert().ElementsMatch(reportData.MissingOnDst, mismatches)
+
+			suite.Assert().True(
+				mismatches[1].Detail.MismatchHistory.First.Time().After(
+					firstMismatchTime.Time(),
+				),
+				"2nd mismatch’s first-seen time should postdate the first’s",
+			)
+
+			suite.Assert().Greater(
+				reportData.MissingOnDst[0].Detail.MismatchHistory.DurationMS,
+				reportData.MissingOnDst[1].Detail.MismatchHistory.DurationMS,
+				"2nd reported mismatch should be less long-lived",
+			)
 		},
 	)
 
@@ -669,13 +666,10 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			suite.Require().NoError(cur.All(ctx, &mismatches))
 			suite.Require().Len(mismatches, 2)
 
-			suite.Assert().Equal(firstMismatchTime, mismatches[0].Detail.MismatchHistory.First)
-			suite.Require().GreaterOrEqual(mismatches[0].Detail.MismatchHistory.DurationMS, lastMismatchDuration)
-
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(mismatches[0].Task),
+				mslices.Of(tasks[0].PrimaryKey),
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -688,7 +682,18 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 				},
 				reportData.Counts,
 			)
-			suite.Assert().Equal(reportData.MissingOnDst, mismatches)
+			suite.Assert().ElementsMatch(reportData.MissingOnDst, mismatches)
+
+			suite.Assert().Equal(
+				firstMismatchTime,
+				reportData.MissingOnDst[0].Detail.MismatchHistory.First,
+				"mismatches should be sorted by descending duration: %+v",
+				reportData.MissingOnDst,
+			)
+			suite.Require().GreaterOrEqual(
+				reportData.MissingOnDst[0].Detail.MismatchHistory.DurationMS,
+				lastMismatchDuration,
+			)
 		},
 	)
 
