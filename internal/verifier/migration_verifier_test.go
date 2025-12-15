@@ -618,7 +618,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			suite.Assert().ElementsMatch(reportData.MissingOnDst, mismatches)
 
 			suite.Assert().True(
-				mismatches[1].Detail.MismatchHistory.First.Time().After(
+				reportData.MissingOnDst[1].Detail.MismatchHistory.First.Time().After(
 					firstMismatchTime.Time(),
 				),
 				"2nd mismatch’s first-seen time should postdate the first’s",
