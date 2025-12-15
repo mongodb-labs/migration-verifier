@@ -147,20 +147,6 @@ func (rc *ChangeReaderCommon) getCurrentTimes() option.Option[readerCurrentTimes
 	return rc.currentTimes.Load()
 }
 
-/*
-// getLag returns the observed change stream lag (i.e., the delta between
-// cluster time and the most-recently-seen change event).
-func (rc *ChangeReaderCommon) getLag() option.Option[time.Duration] {
-	if prog, has := rc.progress.Load().Get(); has {
-		return option.Some(
-			time.Duration(int(prog.lastClusterTime.T)-int(prog.lastResumeTime.T)) * time.Second,
-		)
-	}
-
-	return option.None[time.Duration]()
-}
-*/
-
 // getEventsPerSecond returns the number of change events per second we’ve been
 // seeing “recently”. (See implementation for the actual period over which we
 // compile this metric.)
