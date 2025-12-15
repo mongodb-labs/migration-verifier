@@ -48,7 +48,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	dataSizes []int32,
 	firstMismatchTimes []bson.DateTime,
 ) error {
-	if firstMismatchTimes == nil {
+	if len(firstMismatchTimes) == 0 {
 		panic("mismatch recheck must have first-mismatch times!")
 	}
 
@@ -150,7 +150,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	curRechecks := make([]bson.Raw, 0, recheckBatchCountLimit)
 	curBatchBytes := 0
 	for i, dbName := range dbNames {
-		if firstMismatchTimes != nil {
+		if len(firstMismatchTimes) > 0 {
 			firstMismatchTime = option.Some(firstMismatchTimes[i])
 		}
 
