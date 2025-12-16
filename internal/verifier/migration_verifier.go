@@ -99,9 +99,6 @@ type Verifier struct {
 	numWorkers         int
 	failureDisplaySize int64
 
-	srcEventRecorder *EventRecorder
-	dstEventRecorder *EventRecorder
-
 	changeHandlingErr *util.Eventual[error]
 
 	// Used only with generation 0 to defer the first
@@ -186,11 +183,6 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		failureDisplaySize:   DefaultFailureDisplaySize,
 
 		readConcernSetting: readConcern,
-
-		// This will get recreated once gen0 starts, but we want it
-		// here in case the change readers get an event before then.
-		srcEventRecorder: NewEventRecorder(),
-		dstEventRecorder: NewEventRecorder(),
 
 		workerTracker: NewWorkerTracker(NumWorkers),
 

@@ -555,14 +555,13 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 	fmt.Fprint(builder, "\n")
 
 	for _, cluster := range []struct {
-		title         string
-		eventRecorder *EventRecorder
-		csReader      changeReader
+		title    string
+		csReader changeReader
 	}{
-		{"Source", verifier.srcEventRecorder, verifier.srcChangeReader},
-		{"Destination", verifier.dstEventRecorder, verifier.dstChangeReader},
+		{"Source", verifier.srcChangeReader},
+		{"Destination", verifier.dstChangeReader},
 	} {
-		nsStats := cluster.eventRecorder.Read()
+		nsStats := cluster.csReader.getEventRecorder().Read()
 
 		activeNamespacesCount := len(nsStats)
 
@@ -587,10 +586,10 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 		if eventsPerSec, has := cluster.csReader.getEventsPerSecond().Get(); has {
 			var lagNote string
 
-			lag, hasLag := cluster.csReader.getLag().Get()
+			prog, hasProg := cluster.csReader.getCurrentTimes().Get()
 
-			if hasLag {
-				lagNote = fmt.Sprintf("lag: %s; ", reportutils.DurationToHMS(lag))
+			if hasProg {
+				lagNote = fmt.Sprintf("lag: %s; ", reportutils.DurationToHMS(prog.Lag()))
 			}
 
 			saturation := cluster.csReader.getBufferSaturation()
@@ -604,7 +603,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) {
 				reportutils.FmtReal(100*saturation),
 			)
 
-			if hasLag && lag > lagWarnThreshold {
+			if hasProg && prog.Lag() > lagWarnThreshold {
 				fmt.Fprint(
 					builder,
 					"⚠️ Lag is excessive. Verification may fail. See documentation.\n",

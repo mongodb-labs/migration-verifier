@@ -246,6 +246,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	if err != nil {
 		return err
 	}
+
+	verifier.generationStartTime = time.Now()
+
 	// Now enter the multi-generational steady check state
 	for {
 		err = retry.New().WithCallback(
@@ -260,10 +263,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 			return errors.Wrapf(err, "failed to persist generation (%d)", verifier.generation)
 		}
 		verifier.mux.Unlock()
-
-		verifier.generationStartTime = time.Now()
-		verifier.srcEventRecorder.Reset()
-		verifier.dstEventRecorder.Reset()
 
 		err := verifier.CheckWorker(ctx)
 		if err != nil {
@@ -335,6 +334,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// on enqueued rechecks. Meanwhile, generaiton 3’s recheck tasks will
 		// derive from rechecks enqueued during generation 2.
 		verifier.generation++
+		verifier.generationStartTime = time.Now()
+		verifier.srcChangeReader.getEventRecorder().Reset()
+		verifier.dstChangeReader.getEventRecorder().Reset()
 		verifier.mux.Unlock()
 
 		// Generation of recheck tasks can partial-fail. The following will
