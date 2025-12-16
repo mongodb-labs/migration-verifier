@@ -211,12 +211,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		}
 	}
 
-	verifier.logger.Info().Msg("Starting change readers.")
-
 	// Now that we’ve initialized verifier.generation we can
 	// start the change readers.
 	verifier.initializeChangeReaders()
-	verifier.mux.Unlock()
 
 	err = retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
@@ -241,26 +238,8 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 
 	verifier.logger.Debug().Msg("Starting Check")
 
-	verifier.phase = Check
-	defer func() {
-		verifier.phase = Idle
-	}()
-
 	if err := verifier.startChangeHandling(ctx); err != nil {
 		return err
-	}
-
-	// Log the verification status when initially booting up so it's easy to see the current state
-	verificationStatus, err := verifier.GetVerificationStatus(ctx)
-	if err != nil {
-		return errors.Wrapf(
-			err,
-			"failed to retrieve verification status",
-		)
-	} else {
-		verifier.logger.Debug().
-			Any("status", verificationStatus).
-			Msg("Initial verification phase.")
 	}
 
 	err = verifier.CreateInitialTasksIfNeeded(ctx)
@@ -272,7 +251,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 
 	// Now enter the multi-generational steady check state
 	for {
-		verifier.mux.Lock()
 		err = retry.New().WithCallback(
 			func(ctx context.Context, _ *retry.FuncInfo) error {
 				return verifier.persistGenerationWhileLocked(ctx)
@@ -359,7 +337,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		verifier.generationStartTime = time.Now()
 		verifier.srcChangeReader.getEventRecorder().Reset()
 		verifier.dstChangeReader.getEventRecorder().Reset()
-		verifier.phase = Recheck
 		verifier.mux.Unlock()
 
 		// Generation of recheck tasks can partial-fail. The following will
@@ -381,6 +358,8 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				Err(err).
 				Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
 		}
+
+		verifier.mux.Lock()
 	}
 }
 
@@ -608,6 +587,9 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 }
 
 func (v *Verifier) initializeChangeReaders() {
+
+	v.logger.Info().Msg("Starting change readers.")
+
 	v.srcChangeReader = v.newChangeStreamReader(
 		v.srcNamespaces,
 		src,
