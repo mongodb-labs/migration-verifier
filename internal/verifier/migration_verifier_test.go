@@ -29,7 +29,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/option"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -497,6 +496,240 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	}
 }
 
+func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
+	ctx := suite.Context()
+
+	collName := "c"
+
+	suite.Require().NoError(
+		suite.dstMongoClient.Database(suite.DBNameForTest()).CreateCollection(
+			ctx,
+			collName,
+		),
+	)
+
+	_, err := suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection(collName).
+		InsertOne(ctx, bson.D{{"_id", "a"}})
+	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	var tasks []VerificationTask
+	var mismatches []MismatchInfo
+
+	mmColl := verifier.verificationDatabase().Collection(mismatchesCollectionName)
+
+	suite.Run(
+		"generation 0",
+		func() {
+			status, err := verifier.GetVerificationStatus(ctx)
+			suite.Require().NoError(err)
+			suite.Require().Equal(1, status.FailedTasks)
+
+			cur, err := mmColl.Find(ctx, bson.D{})
+			suite.Require().NoError(err)
+			suite.Require().NoError(cur.All(ctx, &mismatches))
+			suite.Require().Len(mismatches, 1)
+
+			suite.Require().NotZero(mismatches[0].Detail.MismatchHistory.First)
+			suite.Require().Zero(mismatches[0].Detail.MismatchHistory.DurationMS)
+
+			reportData, err := getDocumentMismatchReportData(
+				ctx,
+				verifier.verificationDatabase(),
+				mslices.Of(mismatches[0].Task),
+				verifier.failureDisplaySize,
+			)
+			suite.Require().NoError(err)
+
+			suite.Assert().Empty(reportData.ContentDiffers)
+			suite.Assert().Empty(reportData.ExtraOnDst)
+			suite.Assert().Equal(
+				mismatchCountsPerType{
+					MissingOnDst: 1,
+				},
+				reportData.Counts,
+			)
+			suite.Assert().Equal(reportData.MissingOnDst, mismatches)
+		},
+	)
+
+	firstMismatchTime := mismatches[0].Detail.MismatchHistory.First
+
+	_, err = suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection(collName).
+		InsertOne(ctx, bson.D{{"_id", "z"}})
+	suite.Require().NoError(err)
+
+	suite.Run(
+		"add 2nd mismatch",
+		func() {
+			for len(mismatches) == 1 {
+				suite.Require().NoError(runner.StartNextGeneration())
+				suite.Require().NoError(runner.AwaitGenerationEnd())
+				cur, err := verifier.verificationTaskCollection().Find(
+					ctx,
+					bson.D{
+						{"generation", verifier.generation},
+						{"type", verificationTaskVerifyDocuments},
+					},
+				)
+				suite.Require().NoError(err)
+				suite.Require().NoError(cur.All(ctx, &tasks))
+				suite.Require().Len(tasks, 1)
+				suite.Require().Contains(tasks[0].FirstMismatchTime, int32(0))
+
+				suite.Assert().Equal(
+					firstMismatchTime,
+					tasks[0].FirstMismatchTime[0],
+					"task in new gen should have the old gen’s mismatch’s first mismatch time",
+				)
+
+				cur, err = mmColl.Find(ctx, bson.D{
+					{"task", tasks[0].PrimaryKey},
+				})
+				suite.Require().NoError(err)
+				suite.Require().NoError(cur.All(ctx, &mismatches))
+			}
+
+			suite.Require().Len(mismatches, 2)
+
+			reportData, err := getDocumentMismatchReportData(
+				ctx,
+				verifier.verificationDatabase(),
+				mslices.Of(tasks[0].PrimaryKey),
+				verifier.failureDisplaySize,
+			)
+			suite.Require().NoError(err)
+
+			suite.Assert().Empty(reportData.ContentDiffers)
+			suite.Assert().Empty(reportData.ExtraOnDst)
+			suite.Assert().Equal(
+				mismatchCountsPerType{
+					MissingOnDst: 2,
+				},
+				reportData.Counts,
+			)
+			suite.Assert().ElementsMatch(reportData.MissingOnDst, mismatches)
+
+			suite.Assert().True(
+				reportData.MissingOnDst[1].Detail.MismatchHistory.First.Time().After(
+					firstMismatchTime.Time(),
+				),
+				"2nd mismatch’s first-seen time should postdate the first’s",
+			)
+
+			suite.Assert().Greater(
+				reportData.MissingOnDst[0].Detail.MismatchHistory.DurationMS,
+				reportData.MissingOnDst[1].Detail.MismatchHistory.DurationMS,
+				"2nd reported mismatch should be less long-lived",
+			)
+		},
+	)
+
+	// Now let another generation go by.
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	suite.Run(
+		"generation 2 or later",
+		func() {
+			cur, err := verifier.verificationTaskCollection().Find(
+				ctx,
+				bson.D{
+					{"generation", verifier.generation},
+					{"type", verificationTaskVerifyDocuments},
+				},
+			)
+			suite.Require().NoError(err)
+			suite.Require().NoError(cur.All(ctx, &tasks))
+			suite.Require().Len(tasks, 1)
+			suite.Require().Contains(tasks[0].FirstMismatchTime, int32(0))
+
+			suite.Assert().Equal(
+				firstMismatchTime,
+				tasks[0].FirstMismatchTime[0],
+				"task in new gen should have the original first mismatch time",
+			)
+
+			lastMismatchDuration := mismatches[0].Detail.MismatchHistory.DurationMS
+
+			cur, err = mmColl.Find(ctx, bson.D{
+				{"task", tasks[0].PrimaryKey},
+			})
+			suite.Require().NoError(err)
+			suite.Require().NoError(cur.All(ctx, &mismatches))
+			suite.Require().Len(mismatches, 2)
+
+			reportData, err := getDocumentMismatchReportData(
+				ctx,
+				verifier.verificationDatabase(),
+				mslices.Of(tasks[0].PrimaryKey),
+				verifier.failureDisplaySize,
+			)
+			suite.Require().NoError(err)
+
+			suite.Assert().Empty(reportData.ContentDiffers)
+			suite.Assert().Empty(reportData.ExtraOnDst)
+			suite.Assert().Equal(
+				mismatchCountsPerType{
+					MissingOnDst: 2,
+				},
+				reportData.Counts,
+			)
+			suite.Assert().ElementsMatch(reportData.MissingOnDst, mismatches)
+
+			suite.Assert().Equal(
+				firstMismatchTime,
+				reportData.MissingOnDst[0].Detail.MismatchHistory.First,
+				"mismatches should be sorted by descending duration: %+v",
+				reportData.MissingOnDst,
+			)
+			suite.Require().GreaterOrEqual(
+				reportData.MissingOnDst[0].Detail.MismatchHistory.DurationMS,
+				lastMismatchDuration,
+			)
+		},
+	)
+
+	_, err = suite.dstMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection(collName).
+		InsertOne(ctx, bson.D{{"_id", "a"}, {"extra", "field"}})
+	suite.Require().NoError(err)
+
+	suite.Require().Eventually(
+		func() bool {
+			// Now let another generation go by.
+			suite.Require().NoError(runner.StartNextGeneration())
+			suite.Require().NoError(runner.AwaitGenerationEnd())
+
+			cur, err := verifier.verificationTaskCollection().Find(
+				ctx,
+				bson.D{
+					{"generation", verifier.generation},
+					{"type", verificationTaskVerifyDocuments},
+				},
+			)
+			suite.Require().NoError(err)
+			suite.Require().NoError(cur.All(ctx, &tasks))
+			suite.Require().Len(tasks, 1)
+			suite.Require().Contains(tasks[0].FirstMismatchTime, int32(0))
+
+			return firstMismatchTime != tasks[0].FirstMismatchTime[0]
+		},
+		time.Minute,
+		10*time.Millisecond,
+		"change event on document should reset the first-mismatch time",
+	)
+}
+
 func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	ctx := suite.Context()
 
@@ -713,7 +946,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 				},
 			}},
 		},
-		src,
+		verifier.srcChangeReader,
 	)
 	suite.Require().NoError(err)
 
@@ -729,7 +962,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 				},
 			}},
 		},
-		src,
+		verifier.srcChangeReader,
 	)
 	suite.Require().NoError(err)
 
@@ -959,6 +1192,9 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		"foo.bar",
 		mslices.Of(mbson.ToRawValue(42)),
 		[]int32{100},
+		mslices.Of(
+			bson.NewDateTimeFromTime(time.Now()),
+		),
 	)
 	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs(
@@ -966,6 +1202,10 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		"foo.bar",
 		mslices.Of(mbson.ToRawValue(43), mbson.ToRawValue(44)),
 		[]int32{100, 100},
+		mslices.Of(
+			bson.NewDateTimeFromTime(time.Now()),
+			bson.NewDateTimeFromTime(time.Now()),
+		),
 	)
 	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs(
@@ -973,6 +1213,9 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		"foo.bar2",
 		mslices.Of(mbson.ToRawValue(42)),
 		[]int32{100},
+		mslices.Of(
+			bson.NewDateTimeFromTime(time.Now()),
+		),
 	)
 	suite.Require().NoError(err)
 
@@ -992,23 +1235,23 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		events: mslices.Of(event),
 	}
 
-	err = verifier.PersistChangeEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 
 	event.OpType = "insert"
-	err = verifier.PersistChangeEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 	event.OpType = "replace"
-	err = verifier.PersistChangeEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 	event.OpType = "update"
-	err = verifier.PersistChangeEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 
 	batch.events[0].OpType = "flibbity"
 	suite.Assert().Panics(
 		func() {
-			_ = verifier.PersistChangeEvents(ctx, batch, src)
+			_ = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 		},
 		"PersistChangeEvents should panic if it gets an unknown optype",
 	)
@@ -1275,11 +1518,10 @@ func (suite *IntegrationTestSuite) getFailuresForTask(
 		suite.Context(),
 		verifier.verificationDatabase(),
 		mslices.Of(taskID),
-		option.None[bson.D](),
-		option.None[int64](),
 	)
 
 	require.NoError(suite.T(), err)
+	require.NotEmpty(suite.T(), discrepancies)
 
 	return slices.Collect(maps.Values(discrepancies))[0]
 }

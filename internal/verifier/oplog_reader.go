@@ -375,7 +375,7 @@ func (o *OplogReader) readAndHandleOneBatch(
 	sess := mongo.SessionFromContext(sctx)
 	resumeToken := oplog.ResumeToken{latestTS}.MarshalToBSON()
 
-	o.updateLag(sess, resumeToken)
+	o.updateTimes(sess, resumeToken)
 
 	// NB: events can legitimately be empty here because we might only have
 	// gotten op=n oplog entries, which we just use to advance the reader.

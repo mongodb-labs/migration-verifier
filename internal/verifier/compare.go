@@ -12,9 +12,11 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/option"
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -118,6 +120,11 @@ func (verifier *Verifier) compareDocsFromChannels(
 	srcCache := map[string]docWithTs{}
 	dstCache := map[string]docWithTs{}
 
+	firstMismatchTimeLookup := firstMismatchTimeLookup{
+		task:             task,
+		docCompareMethod: verifier.docCompareMethod,
+	}
+
 	// This is the core document-handling logic. It either:
 	//
 	// a) caches the new document if its mapKey is unseen, or
@@ -173,16 +180,24 @@ func (verifier *Verifier) compareDocsFromChannels(
 			dstDoc = curDocWithTs
 		}
 
+		defer pool.Put(srcDoc.doc)
+		defer pool.Put(dstDoc.doc)
+
 		// Finally we compare the documents and save any mismatch report(s).
 		mismatches, err := verifier.compareOneDocument(srcDoc.doc, dstDoc.doc, namespace)
+
 		if err != nil {
 			return errors.Wrap(err, "failed to compare documents")
 		}
 
-		pool.Put(srcDoc.doc)
-		pool.Put(dstDoc.doc)
+		if len(mismatches) == 0 {
+			return nil
+		}
+
+		firstMismatchTime := firstMismatchTimeLookup.get(srcDoc.doc)
 
 		for i := range mismatches {
+			mismatches[i].MismatchHistory = createMismatchTimes(firstMismatchTime)
 			mismatches[i].SrcTimestamp = option.Some(srcDoc.ts)
 			mismatches[i].DstTimestamp = option.Some(dstDoc.ts)
 		}
@@ -315,6 +330,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 	results = slices.Grow(results, len(srcCache)+len(dstCache))
 
 	for _, docWithTs := range srcCache {
+		firstMismatchTime := firstMismatchTimeLookup.get(docWithTs.doc)
+
 		results = append(
 			results,
 			VerificationResult{
@@ -322,11 +339,12 @@ func (verifier *Verifier) compareDocsFromChannels(
 					verifier.docCompareMethod,
 					docWithTs.doc,
 				),
-				Details:      Missing,
-				Cluster:      ClusterTarget,
-				NameSpace:    namespace,
-				dataSize:     int32(len(docWithTs.doc)),
-				SrcTimestamp: option.Some(docWithTs.ts),
+				Details:         Missing,
+				Cluster:         ClusterTarget,
+				NameSpace:       namespace,
+				dataSize:        int32(len(docWithTs.doc)),
+				SrcTimestamp:    option.Some(docWithTs.ts),
+				MismatchHistory: createMismatchTimes(firstMismatchTime),
 			},
 		)
 
@@ -334,6 +352,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 	}
 
 	for _, docWithTs := range dstCache {
+		firstMismatchTime := firstMismatchTimeLookup.get(docWithTs.doc)
+
 		results = append(
 			results,
 			VerificationResult{
@@ -344,8 +364,10 @@ func (verifier *Verifier) compareDocsFromChannels(
 				Details:      Missing,
 				Cluster:      ClusterSource,
 				NameSpace:    namespace,
-				dataSize:     int32(len(docWithTs.doc)),
 				DstTimestamp: option.Some(docWithTs.ts),
+
+				dataSize:        int32(len(docWithTs.doc)),
+				MismatchHistory: createMismatchTimes(firstMismatchTime),
 			},
 		)
 
@@ -353,6 +375,19 @@ func (verifier *Verifier) compareDocsFromChannels(
 	}
 
 	return results, srcDocCount, srcByteCount, nil
+}
+
+func createMismatchTimes(firstDateTime option.Option[bson.DateTime]) recheck.MismatchHistory {
+	if fdt, has := firstDateTime.Get(); has {
+		return recheck.MismatchHistory{
+			First:      fdt,
+			DurationMS: time.Since(fdt.Time()).Milliseconds(),
+		}
+	}
+
+	return recheck.MismatchHistory{
+		First: bson.NewDateTimeFromTime(time.Now()),
+	}
 }
 
 func getDocIdFromComparison(
@@ -363,9 +398,9 @@ func getDocIdFromComparison(
 
 	switch docCompareMethod {
 	case DocCompareBinary, DocCompareIgnoreOrder:
-		docID = doc.Lookup("_id")
+		docID = lo.Must(doc.LookupErr("_id"))
 	case DocCompareToHashedIndexKey:
-		docID = doc.Lookup(docKeyInHashedCompare, "_id")
+		docID = lo.Must(doc.LookupErr(docKeyInHashedCompare, "_id"))
 	default:
 		panic("bad doc compare method: " + docCompareMethod)
 	}
@@ -569,14 +604,12 @@ func iterateCursorToChannel(
 }
 
 func getMapKey(docKeyValues []bson.RawValue) string {
-	var keyBuffer bytes.Buffer
+	var buf []byte
 	for _, value := range docKeyValues {
-		keyBuffer.Grow(1 + len(value.Value))
-		keyBuffer.WriteByte(byte(value.Type))
-		keyBuffer.Write(value.Value)
+		buf = rvToMapKey(buf, value)
 	}
 
-	return keyBuffer.String()
+	return string(buf)
 }
 
 func (verifier *Verifier) getDocumentsCursor(

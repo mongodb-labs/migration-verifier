@@ -229,8 +229,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	}
 
 	sess := mongo.SessionFromContext(sctx)
-
-	csr.updateLag(sess, cs.ResumeToken())
+	csr.updateTimes(sess, cs.ResumeToken())
 
 	if eventsRead == 0 {
 		ri.NoteSuccess("received an empty change stream response")

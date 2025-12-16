@@ -4,21 +4,34 @@
 // - auto-completion (i.e., via gopls)
 //
 // Guiding principles are:
-// - Prefer [1]any for unary operators (e.g., `$bsonSize`).
-// - Prefer struct types for operators with named parameters.
-// - Use functions sparingly, e.g., for “tuple” operators like `$in`.
+//   - Prefer [1]any for 1-arg operators (e.g., `$bsonSize`).
+//   - Prefer [2]any for binary operators whose arguments don’t benefit
+//     from naming. (e.g., $eq)
+//   - Prefer struct types for operators with named parameters.
+//   - Prefer struct types for operators whose documentation gives names,
+//     even if those names aren’t sent to the server.
+//   - Use functions sparingly, e.g., for “tuple” operators like `$in`.
+//   - Use Go type `any` for generic expressions.
 package agg
 
 import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-type Eq []any
+type Eq [2]any
 
 var _ bson.Marshaler = Eq{}
 
 func (e Eq) MarshalBSON() ([]byte, error) {
-	return bson.Marshal(bson.D{{"$eq", []any(e)}})
+	return bson.Marshal(bson.D{{"$eq", [2]any(e)}})
+}
+
+// ---------------------------------------------
+
+type Gt [2]any
+
+func (g Gt) MarshalBSON() ([]byte, error) {
+	return bson.Marshal(bson.D{{"$gt", [2]any(g)}})
 }
 
 // ---------------------------------------------
@@ -51,7 +64,7 @@ func (t Type) MarshalBSON() ([]byte, error) {
 
 type Not [1]any
 
-var _ bson.Marshaler = Type{}
+var _ bson.Marshaler = Not{}
 
 func (n Not) MarshalBSON() ([]byte, error) {
 	return bson.Marshal(bson.D{{"$not", n[0]}})
@@ -91,6 +104,25 @@ func (m MergeObjects) MarshalBSON() ([]byte, error) {
 	return bson.Marshal(bson.D{
 		{"$mergeObjects", []any(m)},
 	})
+}
+
+// ---------------------------------------------
+
+type GetField struct {
+	Input, Field any
+}
+
+var _ bson.Marshaler = GetField{}
+
+func (gf GetField) MarshalBSON() ([]byte, error) {
+	return bson.Marshal(
+		bson.D{
+			{"$getField", bson.D{
+				{"input", gf.Input},
+				{"field", gf.Field},
+			}},
+		},
+	)
 }
 
 // ---------------------------------------------
@@ -138,26 +170,6 @@ func (s Switch) D() bson.D {
 
 func (s Switch) MarshalBSON() ([]byte, error) {
 	return bson.Marshal(s.D())
-}
-
-// ---------------------------------------------
-
-type ArrayElemAt struct {
-	Array any
-	Index int
-}
-
-var _ bson.Marshaler = ArrayElemAt{}
-
-func (a ArrayElemAt) D() bson.D {
-	return bson.D{{"$arrayElemAt", bson.A{
-		a.Array,
-		a.Index,
-	}}}
-}
-
-func (a ArrayElemAt) MarshalBSON() ([]byte, error) {
-	return bson.Marshal(a.D())
 }
 
 // ---------------------------------------------

@@ -63,9 +63,10 @@ const (
 
 	DefaultFailureDisplaySize = 20
 
-	okSymbol    = "\u2705" // white heavy check mark
-	infoSymbol  = "\u24d8" // circled Latin small letter I
-	notOkSymbol = "\u2757" // heavy exclamation mark symbol
+	okSymbol      = "\u2705" // white heavy check mark
+	infoSymbol    = "\u24d8" // circled Latin small letter I
+	maybeOkSymbol = "\u2753" // heavy question mark symbol
+	notOkSymbol   = "\u2757" // heavy exclamation mark symbol
 
 	clientAppName = "Migration Verifier"
 
@@ -89,7 +90,6 @@ type Verifier struct {
 	lastGeneration     bool
 	running            bool
 	generation         int
-	phase              string
 	port               int
 	metaURI            string
 	metaClient         *mongo.Client
@@ -99,9 +99,6 @@ type Verifier struct {
 	dstClusterInfo     *util.ClusterInfo
 	numWorkers         int
 	failureDisplaySize int64
-
-	srcEventRecorder *EventRecorder
-	dstEventRecorder *EventRecorder
 
 	srcChangeReaderMethod string
 	dstChangeReaderMethod string
@@ -184,18 +181,12 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		logger: logger,
 		writer: logWriter,
 
-		phase:                Idle,
 		numWorkers:           NumWorkers,
 		readPreference:       readpref.Primary(),
 		partitionSizeInBytes: 400 * 1024 * 1024,
 		failureDisplaySize:   DefaultFailureDisplaySize,
 
 		readConcernSetting: readConcern,
-
-		// This will get recreated once gen0 starts, but we want it
-		// here in case the change readers get an event before then.
-		srcEventRecorder: NewEventRecorder(),
-		dstEventRecorder: NewEventRecorder(),
 
 		workerTracker: NewWorkerTracker(NumWorkers),
 
@@ -479,14 +470,7 @@ func (verifier *Verifier) getGeneration() (generation int, lastGeneration bool) 
 }
 
 func (verifier *Verifier) getGenerationWhileLocked() (int, bool) {
-
-	// As long as no other goroutine has locked the mux this will
-	// usefully panic if the caller neglected the lock.
-	wasUnlocked := verifier.mux.TryLock()
-	if wasUnlocked {
-		verifier.mux.Unlock()
-		panic("getGenerationWhileLocked() while unlocked")
-	}
+	verifier.assertLocked()
 
 	return verifier.generation, verifier.lastGeneration
 }
@@ -612,19 +596,21 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 				Msg("Discrepancies found. Will recheck in the next generation.")
 
 			dataSizes := make([]int32, 0, len(problems))
+			firstMismatchTimes := make([]bson.DateTime, 0, len(problems))
 
 			// This stores all IDs for the next generation to check.
 			// Its length should equal len(mismatches) + len(missingIds).
 			idsToRecheck := make([]bson.RawValue, 0, len(problems))
 
-			for _, mismatch := range problems {
-				idsToRecheck = append(idsToRecheck, mismatch.ID)
-				dataSizes = append(dataSizes, mismatch.dataSize)
+			for _, problem := range problems {
+				idsToRecheck = append(idsToRecheck, problem.ID)
+				dataSizes = append(dataSizes, problem.dataSize)
+				firstMismatchTimes = append(firstMismatchTimes, problem.MismatchHistory.First)
 			}
 
 			// Create a task for the next generation to recheck the
 			// mismatched & missing docs.
-			err := verifier.InsertFailedCompareRecheckDocs(ctx, task.QueryFilter.Namespace, idsToRecheck, dataSizes)
+			err := verifier.InsertFailedCompareRecheckDocs(ctx, task.QueryFilter.Namespace, idsToRecheck, dataSizes, firstMismatchTimes)
 			if err != nil {
 				return errors.Wrapf(
 					err,
@@ -1294,8 +1280,16 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 }
 
 func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*VerificationStatus, error) {
-	taskCollection := verifier.verificationTaskCollection()
 	generation, _ := verifier.getGeneration()
+
+	return verifier.getVerificationStatusForGeneration(ctx, generation)
+}
+
+func (verifier *Verifier) getVerificationStatusForGeneration(
+	ctx context.Context,
+	generation int,
+) (*VerificationStatus, error) {
+	taskCollection := verifier.verificationTaskCollection()
 
 	var results []bson.Raw
 
@@ -1435,18 +1429,6 @@ func (verifier *Verifier) StartServer() error {
 	return server.Run(context.Background())
 }
 
-func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
-	status, err := verifier.GetVerificationStatus(ctx)
-	if err != nil {
-		return Progress{Error: err}, err
-	}
-	return Progress{
-		Phase:      verifier.phase,
-		Generation: verifier.generation,
-		Status:     status,
-	}, nil
-}
-
 // Returned boolean indicates that namespaces are cached, and
 // whatever needs them can proceed.
 func (verifier *Verifier) ensureNamespaces(ctx context.Context) bool {
@@ -1505,6 +1487,18 @@ func startReport() *strings.Builder {
 	return strBuilder
 }
 
+func (verifier *Verifier) logIfNotContextErr(
+	err error,
+	template string,
+	vars ...any,
+) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+
+	verifier.logger.Err(err).Msgf(template, vars...)
+}
+
 func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatus GenerationStatus) {
 	if !verifier.ensureNamespaces(ctx) {
 		return
@@ -1539,7 +1533,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 
 	metadataMismatches, anyCollsIncomplete, err := verifier.reportCollectionMetadataMismatches(ctx, strBuilder)
 	if err != nil {
-		verifier.logger.Err(err).Msgf("Failed to report collection metadata mismatches")
+		verifier.logIfNotContextErr(err, "Failed to report collection metadata mismatches.")
 		return
 	}
 
@@ -1556,11 +1550,11 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	}
 
 	if err != nil {
-		verifier.logger.Err(err).Msgf("Failed to report per-namespace statistics")
+		verifier.logIfNotContextErr(err, "Failed to report per-namespace statistics")
 		return
 	}
 
-	verifier.printChangeEventStatistics(strBuilder)
+	changeEvents := verifier.printChangeEventStatistics(strBuilder)
 
 	// Only print the worker status table if debug logging is enabled.
 	if verifier.logger.Debug().Enabled() {
@@ -1573,20 +1567,35 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	var statusLine string
 
 	if hasTasks {
-		docMismatches, anyPartitionsIncomplete, err := verifier.reportDocumentMismatches(ctx, strBuilder)
+		longestLivedMismatch, anyPartitionsIncomplete, err := verifier.reportDocumentMismatches(ctx, strBuilder)
 		if err != nil {
-			verifier.logger.Err(err).Msgf("Failed to report document mismatches")
+			verifier.logIfNotContextErr(err, "Failed to report document mismatches.")
 			return
 		}
 
-		if metadataMismatches || docMismatches {
-			verifier.printMismatchInvestigationNotes(strBuilder)
-
-			statusLine = fmt.Sprintf(notOkSymbol + " Mismatches found.")
+		if mismatchDuration, hasDocMismatch := longestLivedMismatch.Get(); hasDocMismatch {
+			if verifier.writesOff {
+				statusLine = notOkSymbol + " Document mismatches found. Investigate them.\n"
+				statusLine += "See the verifier’s documentation for details."
+			} else if mismatchDuration > 0 {
+				statusLine = maybeOkSymbol + " Recurrent document mismatches found. If any mismatch durations exceed the\n"
+				statusLine += "replicator’s lag, investigate those. See the verifier’s documentation for details."
+			} else {
+				statusLine = maybeOkSymbol + " New document mismatches found. The replicator may fix them.\n"
+				statusLine += "The verifier will recheck them in the next generation."
+			}
+		} else if metadataMismatches {
+			if verifier.writesOff {
+				statusLine = notOkSymbol + " Metadata mismatches found. These may be fixable."
+			} else {
+				statusLine = maybeOkSymbol + " Metadata mismatches found. The replicator may correct these later."
+			}
 		} else if anyCollsIncomplete || anyPartitionsIncomplete {
-			statusLine = fmt.Sprintf(infoSymbol + " No mismatches found yet, but verification is still in progress.")
+			statusLine = infoSymbol + " No mismatches found yet, but verification is still in progress."
+		} else if changeEvents > 0 {
+			statusLine = infoSymbol + " No mismatches found, but some documents have changed and so will be rechecked."
 		} else {
-			statusLine = fmt.Sprintf(okSymbol + " No mismatches found. Source & destination completely match!")
+			statusLine = okSymbol + " No mismatches found, and no documents have changed."
 		}
 	} else {
 		switch genstatus {
@@ -1609,7 +1618,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	if elapsed > progressReportTimeWarnThreshold {
 		verifier.logger.Warn().
 			Stringer("elapsed", elapsed).
-			Msg("Report generation took longer than expected. The metadata database may be under excess load.")
+			Msg("Report generation took longer than ideal. The metadata database may be under excess load.")
 	}
 
 	verifier.writeStringBuilder(strBuilder)
