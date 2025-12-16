@@ -358,6 +358,18 @@ func (o *OplogReader) readAndHandleOneBatch(
 		return nil
 	}
 
+	if o.logger.Trace().Enabled() {
+		o.logger.Trace().
+			Str("changeReader", string(o.getWhichCluster())).
+			Strs("events", mslices.Map1(
+				o.curDocs,
+				bson.Raw.String,
+			)).
+			Int("batchEvents", len(o.curDocs)).
+			Int("batchBytes", len(o.scratch)).
+			Msg("Received a batch of oplog events.")
+	}
+
 	var latestTS bson.Timestamp
 
 	events := make([]ParsedEvent, 0, len(o.curDocs))

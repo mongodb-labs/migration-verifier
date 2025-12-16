@@ -497,6 +497,9 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 }
 
 func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	defer zerolog.SetGlobalLevel(zerolog.DebugLevel)
+
 	ctx := suite.Context()
 
 	collName := "c"
@@ -513,6 +516,20 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 		Collection(collName).
 		InsertOne(ctx, bson.D{{"_id", "a"}})
 	suite.Require().NoError(err)
+
+	// So that the insert above isn’t the last thing in the oplog:
+	_, err = suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection(collName).
+		InsertOne(ctx, bson.D{{"_id", "qwe"}})
+	suite.Require().NoError(err)
+	_, err = suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection(collName).
+		DeleteOne(ctx, bson.D{{"_id", "qwe"}})
+	suite.Require().NoError(err)
+
+	testutil.KillTransactions(ctx, suite.T(), suite.srcMongoClient)
 
 	verifier := suite.BuildVerifier()
 	verifier.SetVerifyAll(true)
@@ -583,7 +600,11 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 				suite.Require().NoError(err)
 				suite.Require().NoError(cur.All(ctx, &tasks))
 				suite.Require().Len(tasks, 1)
-				suite.Require().Contains(tasks[0].FirstMismatchTime, int32(0))
+				suite.Require().Contains(
+					tasks[0].FirstMismatchTime,
+					int32(0),
+					"tasks[0].first-mismatch-time map (task: %+v)", tasks[0],
+				)
 
 				suite.Assert().Equal(
 					firstMismatchTime,
@@ -655,7 +676,8 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			suite.Assert().Equal(
 				firstMismatchTime,
 				tasks[0].FirstMismatchTime[0],
-				"task in new gen should have the original first mismatch time",
+				"task in new gen should have the original first mismatch time (task: %+v)",
+				tasks[0],
 			)
 
 			lastMismatchDuration := mismatches[0].Detail.MismatchHistory.DurationMS

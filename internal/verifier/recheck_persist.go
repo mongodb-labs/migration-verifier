@@ -69,7 +69,8 @@ HandlerLoop:
 			verifier.logger.Trace().
 				Str("changeReader", string(clusterName)).
 				Int("batchSize", len(batch.events)).
-				Any("batch", batch).
+				Any("batch", batch.events).
+				Stringer("resumeToken", batch.resumeToken).
 				Msg("Handling change event batch.")
 
 			err = errors.Wrap(
