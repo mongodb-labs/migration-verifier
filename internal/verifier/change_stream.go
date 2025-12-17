@@ -227,15 +227,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	csr.updateTimes(sess, cs.ResumeToken())
 
-	// Record even empty batches since this helps to compute events per second.
-	csr.batchSizeHistory.Add(eventsRead)
-
-	if eventsRead == 0 {
-		ri.NoteSuccess("received an empty change stream response")
-
-		return nil
-	}
-
 	if event, has := latestEvent.Get(); has {
 		csr.logger.Trace().
 			Stringer("changeStreamReader", csr).
@@ -245,12 +236,13 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	ri.NoteSuccess("parsed %d-event batch", len(changeEvents))
 
+	// NB: We send even “empty” batches to the persistor thread because
+	// even with 0 events there is still a new resume token.
 	select {
 	case <-ctx.Done():
 		return util.WrapCtxErrWithCause(ctx)
 	case csr.changeEventBatchChan <- changeEventBatch{
-		events: changeEvents,
-
+		events:      changeEvents,
 		resumeToken: cs.ResumeToken(),
 	}:
 	}

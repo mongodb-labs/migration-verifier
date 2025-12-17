@@ -62,16 +62,21 @@ HandlerLoop:
 				break HandlerLoop
 			}
 
+			// Record even empty batches since this helps to compute events per second.
+			reader.noteBatchSize(len(batch.events))
+
 			verifier.logger.Trace().
 				Str("changeReader", string(clusterName)).
 				Int("batchSize", len(batch.events)).
 				Any("batch", batch).
 				Msg("Handling change event batch.")
 
-			err = errors.Wrap(
-				verifier.PersistChangeEvents(ctx, batch, reader),
-				"failed to handle change stream events",
-			)
+			if len(batch.events) > 0 {
+				err = errors.Wrap(
+					verifier.PersistChangeEvents(ctx, batch, reader),
+					"failed to handle change stream events",
+				)
+			}
 
 			if err == nil && batch.resumeToken != nil {
 				persistResumeTokenIfNeeded(ctx, batch.resumeToken)

@@ -51,6 +51,7 @@ type changeReader interface {
 	getEventsPerSecond() option.Option[float64]
 	getCurrentTimes() option.Option[readerCurrentTimes]
 	getBufferSaturation() float64
+	noteBatchSize(int)
 	setWritesOff(bson.Timestamp)
 	start(context.Context, *errgroup.Group) error
 	persistResumeToken(context.Context, bson.Raw) error
@@ -171,6 +172,10 @@ func (rc *ChangeReaderCommon) getEventsPerSecond() option.Option[float64] {
 	}
 
 	return option.None[float64]()
+}
+
+func (rc *ChangeReaderCommon) noteBatchSize(size int) {
+	rc.batchSizeHistory.Add(size)
 }
 
 func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson.Raw) error {
