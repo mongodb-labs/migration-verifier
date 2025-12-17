@@ -18,14 +18,16 @@ func GetTailingStartTimes(
 	ctx context.Context,
 	client *mongo.Client,
 ) (OpTime, OpTime, error) {
-	oldestTxn, err := getOldestTransactionTime(ctx, client)
-	if err != nil {
-		return OpTime{}, OpTime{}, errors.Wrapf(err, "finding oldest txn")
-	}
-
+	// IMPORTANT: Fetch the latest time before getting the oldest transaction
+	// to avoid the race condition described in TOOLS-4015.
 	latestTime, err := getLatestVisibleOplogOpTime(ctx, client)
 	if err != nil {
 		return OpTime{}, OpTime{}, errors.Wrapf(err, "finding latest optime")
+	}
+
+	oldestTxn, err := getOldestTransactionTime(ctx, client)
+	if err != nil {
+		return OpTime{}, OpTime{}, errors.Wrapf(err, "finding oldest txn")
 	}
 
 	if oldestTime, has := oldestTxn.Get(); has {
