@@ -231,14 +231,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	sess := mongo.SessionFromContext(sctx)
 	csr.updateTimes(sess, cs.ResumeToken())
 
-	if eventsRead == 0 {
-		ri.NoteSuccess("received an empty change stream response")
-
-		return nil
-	}
-
-	csr.batchSizeHistory.Add(eventsRead)
-
 	if event, has := latestEvent.Get(); has {
 		csr.logger.Trace().
 			Stringer("changeStreamReader", csr).
@@ -248,6 +240,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	ri.NoteSuccess("parsed %d-event batch", len(changeEvents))
 
+	// NB: We send even “empty” batches to the persistor thread because
+	// even with 0 events there is still a new resume token.
 	select {
 	case <-sctx.Done():
 		return util.WrapCtxErrWithCause(sctx)
