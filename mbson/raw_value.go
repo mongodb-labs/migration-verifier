@@ -10,8 +10,8 @@ import (
 )
 
 type bsonCastRecipient interface {
-	bson.Raw | bson.Timestamp | bson.ObjectID | bson.DateTime |
-		string | int32 | int64 | time.Time
+	bson.Raw | bson.RawArray | bson.Timestamp | bson.ObjectID | bson.DateTime |
+		string | int32 | int64 | float64 | time.Time
 }
 
 type bsonSourceTypes interface {
@@ -38,6 +38,10 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 		if doc, isDoc := in.DocumentOK(); isDoc {
 			return any(doc).(T), nil
 		}
+	case bson.RawArray:
+		if arr, ok := in.ArrayOK(); ok {
+			return any(arr).(T), nil
+		}
 	case bson.Timestamp:
 		if t, i, ok := in.TimestampOK(); ok {
 			return any(bson.Timestamp{t, i}).(T), nil
@@ -56,6 +60,10 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 		}
 	case int32:
 		if val, ok := in.Int32OK(); ok {
+			return any(val).(T), nil
+		}
+	case float64:
+		if val, ok := in.DoubleOK(); ok {
 			return any(val).(T), nil
 		}
 	case int64:

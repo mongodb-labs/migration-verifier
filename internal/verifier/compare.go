@@ -571,6 +571,9 @@ func iterateCursorToChannel(
 	defer close(writer)
 
 	sess := mongo.SessionFromContext(sctx)
+	if sess == nil {
+		panic("need a session")
+	}
 
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
@@ -610,7 +613,7 @@ func getMapKey(docKeyValues []bson.RawValue) string {
 }
 
 func (verifier *Verifier) getDocumentsCursor(
-	ctx context.Context,
+	sctx context.Context,
 	collection *mongo.Collection,
 	clusterInfo *util.ClusterInfo,
 	readConcernTS bson.Timestamp,
@@ -696,7 +699,7 @@ func (verifier *Verifier) getDocumentsCursor(
 		)
 	}
 
-	sess := mongo.SessionFromContext(ctx)
+	sess := mongo.SessionFromContext(sctx)
 
 	if sess == nil {
 		panic("No session?!?")
@@ -718,6 +721,7 @@ func (verifier *Verifier) getDocumentsCursor(
 	// quite long.
 	if !task.IsRecheck() {
 		if verifier.logger.Trace().Enabled() {
+
 			evt := verifier.logger.Trace().
 				Any("task", task.PrimaryKey)
 
@@ -730,10 +734,15 @@ func (verifier *Verifier) getDocumentsCursor(
 				Str("cmd", string(cmdStr)).
 				Str("options", fmt.Sprintf("%v", *runCommandOptions)).
 				Msg("getDocuments command.")
+
 		}
 	}
 
-	return collection.Database().RunCommandCursor(ctx, cmd, runCommandOptions)
+	return collection.Database().RunCommandCursor(
+		sctx,
+		cmd,
+		runCommandOptions,
+	)
 }
 
 func transformPipelineForToHashedIndexKey(

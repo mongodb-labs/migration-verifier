@@ -143,6 +143,8 @@ The verifier will now check to completion to make sure that there are no inconsi
 | `--dstNamespace <namespaces>`           | destination namespaces to check                                                                                                                                                             |
 | `--metaDBName <name>`                   | name of the database in which to store verification metadata (default: "migration_verification_metadata")                                                                                   |
 | `--docCompareMethod`                    | How to compare documents. See below for details.                                                                                                                                        |
+| `--srcChangeReader`                     | How to read changes from the source. See below for details.             |
+| `--dstChangeReader`                     | How to read changes from the destination. See below for details.        |
 | `--start`                               | Start checking documents right away rather than waiting for a `/check` API request. |
 | `--verifyAll`                           | If set, verify all user namespaces                                                                                                                                                          |
 | `--clean`                               | If set, drop all previous verification metadata before starting                                                                                                                             |
@@ -195,8 +197,6 @@ connection strings in the following environment variables:
 # How the Verifier Works
 
 The migration-verifier has two steps:
-
-
 
 1. The initial check
     1. The verifier partitions up the data into 400MB (configurable) chunks and spins up many worker goroutines (threads) to read from both the source and destination.
@@ -389,6 +389,19 @@ The above are all **highly** unlikely in real-world migrations.
 Full-document verification methods allow migration-verifier to diagnose mismatches, e.g., by identifying specific changed fields. The only such detail that `toHashedIndexKey` can discern, though, is a change in document length.
 
 Additionally, because the amount of data sent to migration-verifier doesn’t actually reflect the documents’ size, no meaningful statistics are shown concerning the collection data size. Document counts, of course, are still shown.
+
+# Change reading methods
+
+NB: If the verifier restarts, it **MUST** use the same change reader options
+as before, or it will fail immediately.
+
+## `changeStream`
+
+The default. The verifier will read a change stream, which works seamlessly on sharded or unsharded clusters.
+
+## `tailOplog`
+
+The verifier will read the oplog continually instead of reading a change stream. This is generally faster, but it only works when connecting to a replica set (i.e., not a mongos).
 
 # Known Issues
 
