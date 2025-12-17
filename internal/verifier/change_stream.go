@@ -227,13 +227,14 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 	csr.updateTimes(sess, cs.ResumeToken())
 
+	// Record even empty batches since this helps to compute events per second.
+	csr.batchSizeHistory.Add(eventsRead)
+
 	if eventsRead == 0 {
 		ri.NoteSuccess("received an empty change stream response")
 
 		return nil
 	}
-
-	csr.batchSizeHistory.Add(eventsRead)
 
 	if event, has := latestEvent.Get(); has {
 		csr.logger.Trace().

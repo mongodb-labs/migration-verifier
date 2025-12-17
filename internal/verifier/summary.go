@@ -600,8 +600,6 @@ func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, st
 func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 	var eventsTable *tablewriter.Table
 
-	fmt.Fprint(builder, "\n")
-
 	totalEventsForBothClusters := 0
 
 	for _, cluster := range []struct {
@@ -611,6 +609,8 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 		{"Source", verifier.srcChangeReader},
 		{"Destination", verifier.dstChangeReader},
 	} {
+		fmt.Fprint(builder, "\n")
+
 		nsStats := cluster.csReader.getEventRecorder().Read()
 
 		activeNamespacesCount := len(nsStats)
@@ -633,45 +633,67 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 		totalEventsForBothClusters += totalEvents
 
-		fmt.Fprintf(builder, "%s change events this generation: %s\n", cluster.title, eventsDescr)
+		logPieces := []string{}
 
-		if eventsPerSec, has := cluster.csReader.getEventsPerSecond().Get(); has {
-			var lagNote string
-
-			prog, hasProg := cluster.csReader.getCurrentTimes().Get()
-
-			if hasProg {
-				lagNote = fmt.Sprintf("lag: %s; ", reportutils.DurationToHMS(prog.Lag()))
-			}
-
-			saturation := cluster.csReader.getBufferSaturation()
-
-			fmt.Fprintf(
-				builder,
-				"%s: %s writes per second (%sbuffer %s%% full)\n",
-				cluster.title,
-				reportutils.FmtReal(eventsPerSec),
-				lagNote,
-				reportutils.FmtReal(100*saturation),
+		if eps, has := cluster.csReader.getEventsPerSecond().Get(); has {
+			logPieces = append(
+				logPieces,
+				fmt.Sprintf(
+					"%s writes/sec",
+					reportutils.FmtReal(eps),
+				),
 			)
-
-			if hasProg && prog.Lag() > lagWarnThreshold {
-				fmt.Fprint(
-					builder,
-					"⚠️ Lag is excessive. Verification may fail. See documentation.\n",
-				)
-			}
-
-			if saturation > saturationWarnThreshold {
-				fmt.Fprint(
-					builder,
-					"⚠️ Buffer almost full. Metadata writes are too slow. See documentation.\n",
-				)
-			}
 		}
 
-		if cluster.csReader == verifier.srcChangeReader {
-			fmt.Fprint(builder, "\n")
+		times, hasTimes := cluster.csReader.getCurrentTimes().Get()
+
+		if hasTimes {
+			logPieces = append(
+				logPieces,
+				fmt.Sprintf(
+					"lagging by %s",
+					reportutils.DurationToHMS(times.Lag()),
+				),
+			)
+		}
+
+		saturation := cluster.csReader.getBufferSaturation()
+
+		logPieces = append(
+			logPieces,
+			fmt.Sprintf(
+				"buffer %s%% full",
+				reportutils.FmtReal(100*saturation),
+			),
+		)
+
+		fmt.Fprintf(
+			builder,
+			"%s: %s\n",
+			cluster.title,
+			strings.Join(logPieces, "; "),
+		)
+
+		fmt.Fprintf(
+			builder,
+			"    Writes this generation: %s\n",
+			eventsDescr,
+		)
+
+		if hasTimes {
+			fmt.Fprintf(
+				builder,
+				"    Last-handled optime: %d/%d\n",
+				times.LastHandledTime.T,
+				times.LastHandledTime.I,
+			)
+		}
+
+		if hasTimes && times.Lag() > lagWarnThreshold {
+			fmt.Fprint(
+				builder,
+				"    ⚠️ Lag is excessive. Verification may fail. See documentation.\n",
+			)
 		}
 
 		// We only print event breakdowns for the source because we assume that
@@ -708,8 +730,6 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 				)
 			}
 		}
-
-		fmt.Fprint(builder, "\n")
 	}
 
 	if eventsTable != nil {
