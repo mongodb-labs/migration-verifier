@@ -648,11 +648,17 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 		times, hasTimes := cluster.csReader.getCurrentTimes().Get()
 
 		if hasTimes {
+			lag := times.Lag()
+
 			logPieces = append(
 				logPieces,
-				fmt.Sprintf(
-					"lagging by %s",
-					reportutils.DurationToHMS(times.Lag()),
+				lo.Ternary(
+					lag == 0,
+					"no lag",
+					fmt.Sprintf(
+						"lagging by %s",
+						reportutils.DurationToHMS(lag),
+					),
 				),
 			)
 		}
@@ -661,15 +667,19 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 		logPieces = append(
 			logPieces,
-			fmt.Sprintf(
-				"buffer %s%% full",
-				reportutils.FmtReal(100*saturation),
+			lo.Ternary(
+				saturation == 0,
+				"buffer is empty",
+				fmt.Sprintf(
+					"buffer %s%% full",
+					reportutils.FmtReal(100*saturation),
+				),
 			),
 		)
 
 		fmt.Fprintf(
 			builder,
-			"%s: %s\n",
+			"%s reader: %s\n",
 			cluster.title,
 			strings.Join(logPieces, "; "),
 		)
