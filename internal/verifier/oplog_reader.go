@@ -1,5 +1,16 @@
 package verifier
 
+// ------------------------------------------------------------------
+// NOTE: The oplog reader sometimes triggers “extra” rechecks:
+// - The first events may reflect writes that were already finalized
+//   when verification started
+// - If a multi-statement transaction aborts, the oplog reader will
+//   still broadcast change events for the relevant documents.
+//
+// This is OK, of course, because extra rechecks pose no durability concerns;
+// at worse, they’re just inefficient--and, we assume, trivially so.
+// ------------------------------------------------------------------
+
 import (
 	"context"
 	"fmt"
@@ -704,7 +715,6 @@ func getOplogDocLenExpr(docroot string) any {
 }
 
 func getOplogDocIDExpr(docroot string) any {
-	// $switch was new in MongoDB 4.4, so use $cond instead.
 	return agg.Switch{
 		Branches: []agg.SwitchCase{
 			{

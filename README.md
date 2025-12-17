@@ -401,7 +401,7 @@ The default. The verifier will read a change stream, which works seamlessly on s
 
 ## `tailOplog`
 
-The verifier will read the oplog continually instead of reading a change stream. This is generally faster, but it doesn’t work in sharded clusters.
+The verifier will read the oplog continually instead of reading a change stream. This is generally faster, but in sharded clusters it requires verifying shard-to-shard. (This also requires that the data migrate shard-to-shard.)
 
 # Known Issues
 
