@@ -706,6 +706,13 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			)
 		}
 
+		if saturation > saturationWarnThreshold {
+			fmt.Fprint(
+				builder,
+				"    ⚠️ Buffer almost full. Metadata writes are too slow. See documentation.\n",
+			)
+		}
+
 		// We only print event breakdowns for the source because we assume that
 		// events on the destination will largely mirror the source’s.
 		if totalEvents > 0 && cluster.csReader == verifier.srcChangeReader {
