@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/10gen/migration-verifier/option"
+	"github.com/samber/lo"
 )
 
 // This package complements the Go standard library’s package of the
@@ -64,4 +65,20 @@ func FindFirstDupe[T comparable](items []T) option.Option[T] {
 	}
 
 	return option.None[T]()
+}
+
+// Map1 is like lo.Map, but the callback accepts only a single parameter.
+// This facilitates a lot of syntactic niceties that lo.Map makes difficult.
+// For example, you can stringify a slice of `fmt.Stringer`s thus:
+//
+//	strings := Map1( items, theType.String )
+//
+// … which, with lo.Map, requires a wrapper callback.
+func Map1[T any, V any](s []T, cb func(T) V) []V {
+	return lo.Map(
+		s,
+		func(d T, _ int) V {
+			return cb(d)
+		},
+	)
 }

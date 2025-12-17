@@ -100,6 +100,9 @@ type Verifier struct {
 	numWorkers         int
 	failureDisplaySize int64
 
+	srcChangeReaderMethod string
+	dstChangeReaderMethod string
+
 	changeHandlingErr *util.Eventual[error]
 
 	// Used only with generation 0 to defer the first
@@ -236,7 +239,7 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 		}
 		verifier.writesOff = true
 
-		verifier.logger.Debug().Msg("Signalling that writes are done.")
+		verifier.logger.Debug().Msg("Signaling that writes are done.")
 
 		srcFinalTs, err = GetNewClusterTime(
 			ctx,
@@ -367,6 +370,42 @@ func (verifier *Verifier) SetMetaDBName(arg string) {
 
 func (verifier *Verifier) SetDocCompareMethod(method DocCompareMethod) {
 	verifier.docCompareMethod = method
+}
+
+func (verifier *Verifier) SetSrcChangeReaderMethod(method string) error {
+	err := validateChangeReaderOpt(method, *verifier.srcClusterInfo)
+	if err != nil {
+		return errors.Wrap(err, "setting source change reader method")
+	}
+
+	verifier.srcChangeReaderMethod = method
+
+	return nil
+}
+
+func (verifier *Verifier) SetDstChangeReaderMethod(method string) error {
+	err := validateChangeReaderOpt(method, *verifier.dstClusterInfo)
+	if err != nil {
+		return errors.Wrap(err, "setting source change reader method")
+	}
+
+	verifier.dstChangeReaderMethod = method
+
+	return nil
+}
+
+func validateChangeReaderOpt(
+	method string,
+	clusterInfo util.ClusterInfo,
+) error {
+	switch method {
+	case ChangeReaderOptOplog:
+		if clusterInfo.Topology == util.TopologySharded {
+			return fmt.Errorf("cannot read oplog from sharded cluster")
+		}
+	}
+
+	return nil
 }
 
 func (verifier *Verifier) SetVerifyAll(arg bool) {

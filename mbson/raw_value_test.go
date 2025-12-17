@@ -7,6 +7,7 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -109,6 +110,29 @@ func TestRaw(t *testing.T) {
 		viaMarshal := MustConvertToRawValue(cur)
 
 		assert.Equal(t, cur, lo.Must(CastRawValue[bson.Raw](viaMarshal)))
+	}
+}
+
+func TestRawArray(t *testing.T) {
+	vals := lo.Map(
+		[]bson.RawArray{
+			lo.Must(bson.Marshal(bson.D{})),
+			lo.Must(bson.Marshal(bson.D{{"0", nil}})),
+			lo.Must(bson.Marshal(bson.D{{"0", 1.2}, {"1", "abc"}})),
+		},
+		func(ra bson.RawArray, _ int) bson.RawValue {
+			return bson.RawValue{
+				Type:  bson.TypeArray,
+				Value: []byte(ra),
+			}
+		},
+	)
+
+	for _, cur := range vals {
+		ra, err := CastRawValue[bson.RawArray](cur)
+		require.NoError(t, err)
+
+		assert.Equal(t, cur.Value, []byte(ra), "expect same bytes")
 	}
 }
 
