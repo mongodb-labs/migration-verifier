@@ -612,8 +612,8 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 	})
 
 	for _, cluster := range []struct {
-		title             string
-		csReader          changeReader
+		title               string
+		csReader            changeReader
 		lastRecheckedOpTime bson.Timestamp
 	}{
 		{"Source", verifier.srcChangeReader, lastSrcOpTime},
