@@ -48,7 +48,7 @@ func (verifier *Verifier) NoteCompareOfOptime(
 	case src:
 		db = verifier.lastProcessedSrcOptime
 	case dst:
-		db = verifier.lastProcessedSrcOptime
+		db = verifier.lastProcessedDstOptime
 	default:
 		panic("bad cluster: " + cluster)
 	}
@@ -219,7 +219,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 			verifier.NoteCompareOfOptime(src, ot)
 		}
 
-		if ot, has := docMetaLookup.getDstChangeOpTime(srcDoc.doc).Get(); has {
+		if ot, has := docMetaLookup.getDstChangeOpTime(dstDoc.doc).Get(); has {
 			verifier.NoteCompareOfOptime(dst, ot)
 		}
 
@@ -381,6 +381,10 @@ func (verifier *Verifier) compareDocsFromChannels(
 			},
 		)
 
+		if ot, has := docMetaLookup.getSrcChangeOpTime(docWithTs.doc).Get(); has {
+			verifier.NoteCompareOfOptime(src, ot)
+		}
+
 		pool.Put(docWithTs.doc)
 	}
 
@@ -403,6 +407,10 @@ func (verifier *Verifier) compareDocsFromChannels(
 				MismatchHistory: createMismatchTimes(firstMismatchTime),
 			},
 		)
+
+		if ot, has := docMetaLookup.getDstChangeOpTime(docWithTs.doc).Get(); has {
+			verifier.NoteCompareOfOptime(dst, ot)
+		}
 
 		pool.Put(docWithTs.doc)
 	}

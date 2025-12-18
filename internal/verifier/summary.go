@@ -697,7 +697,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 		if !cluster.lastRecheckedOpTime.IsZero() {
 			fmt.Fprintf(
 				builder,
-				"    Latest rechecked change optime: %d/%d",
+				"    Latest rechecked write’s timestamp: %d/%d\n",
 				cluster.lastRecheckedOpTime.T,
 				cluster.lastRecheckedOpTime.I,
 			)

@@ -467,29 +467,48 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			clear(dstChangeOpTime)
 		}
 
-		// A document can be enqueued for recheck for multiple reasons:
-		// - changed on source
-		// - changed on destination
-		// - mismatch seen
-		//
-		// We’re iterating the rechecks in order such that, if the same doc
-		// gets enqueued from multiple sources, we’ll see those records
-		// consecutively. We can deduplicate here, then, by checking to see if
-		// the doc ID has changed. (NB: At this point we know the namespace
-		// has *not* changed because we just checked for that.)
-		if idRaw.Equal(lastIDRaw) {
+		// This is the index for storing info about the doc in metadata.
+		metadataIndex := int32(len(idAccum))
 
-			if doc.FirstMismatchTime.IsNone() {
-				// A non-mismatch recheck means the document changed. In that
-				// case we want to clear the mismatch count. This way a document
-				// that changes over & over won’t seem persistently mismatched
-				// merely because the replicator hasn’t kept up with the rate
-				// of change.
-				lastIDIndex := len(idAccum) - 1
+		// If we’ve already seen this ID, then we don’t re-add it. We may,
+		// though, still want to incorporate the duplicate into the task’s
+		// document metadata.
+		isSameDoc := idRaw.Equal(lastIDRaw)
+		if isSameDoc {
+			// We’re not going to add this ID to the idAccum slice because it’s
+			// already in that slice. But we still may need to record metadata
+			// about the document. Since the document’s ID is the most recent
+			// one in idAccum, we just decrement the index to refer to that.
+			metadataIndex -= 1
+		}
 
-				delete(firstMismatchTime, int32(lastIDIndex))
+		if optime, has := doc.ChangeOpTime.Get(); has {
+			// A recheck should either be for a change/write or a mismatch.
+			// Never both.
+			if doc.FirstMismatchTime.IsSome() {
+				panic("should not see change optime with a first-mismatch time")
 			}
 
+			if doc.FromDst {
+				dstChangeOpTime[metadataIndex] = newerTimestamp(
+					dstChangeOpTime[metadataIndex],
+					optime,
+				)
+			} else {
+				srcChangeOpTime[metadataIndex] = newerTimestamp(
+					srcChangeOpTime[metadataIndex],
+					optime,
+				)
+			}
+
+			delete(firstMismatchTime, int32(metadataIndex))
+		} else if fmt, has := doc.FirstMismatchTime.Get(); has {
+			if !isSameDoc {
+				firstMismatchTime[metadataIndex] = fmt
+			}
+		}
+
+		if isSameDoc {
 			continue
 		}
 
@@ -497,17 +516,6 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
-
-		if fmt, has := doc.FirstMismatchTime.Get(); has {
-			firstMismatchTime[int32(len(idAccum))] = fmt
-		}
-		if optime, has := doc.ChangeOpTime.Get(); has {
-			if doc.FromDst {
-				dstChangeOpTime[int32(len(idAccum))] = optime
-			} else {
-				srcChangeOpTime[int32(len(idAccum))] = optime
-			}
-		}
 
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 

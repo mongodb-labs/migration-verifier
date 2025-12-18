@@ -232,7 +232,7 @@ func (rd Doc) MarshalToBSON() []byte {
 	doc = bsoncore.AppendInt32Element(doc, "dataSize", int32(rd.DataSize))
 
 	if cot, has := rd.ChangeOpTime.Get(); has {
-		doc = bsoncore.AppendTimestampElement(doc, "ChangeOpTime", cot.T, cot.I)
+		doc = bsoncore.AppendTimestampElement(doc, "changeOpTime", cot.T, cot.I)
 	}
 
 	if rd.FromDst {
@@ -301,6 +301,8 @@ func (rd *Doc) UnmarshalFromBSON(in []byte) error {
 			}
 
 			rd.FirstMismatchTime = option.Some(fmt)
+		default:
+			return fmt.Errorf("unrecognized BSON field name for Go %T: %#q", *rd, key)
 		}
 	}
 
