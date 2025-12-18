@@ -156,6 +156,7 @@ func (o Option[T]) IsSome() bool {
 // non-empty value from one type to another.
 //
 // Example usage:
+//
 //	var maybeStringer Option[stringerType]
 //	maybeString := option.Map(maybeStringer, stringerType.String)
 func Map[T any, V any](in Option[T], cb func(T) V) Option[V] {
