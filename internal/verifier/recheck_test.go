@@ -362,11 +362,14 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 			SrcCollectionName: "testColl",
 			DocumentID:        mbson.ToRawValue(id1),
 		},
+		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
 	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
+	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 	d3 := d1
 	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
+	d3.ChangeOpTime = option.Some(bson.Timestamp{123, 2})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
@@ -398,12 +401,20 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 		SourceDocumentCount: 2,
 		SourceByteCount:     1126400,
 		FirstMismatchTime:   map[int32]bson.DateTime{},
+		SrcChangeOpTime: map[int32]bson.Timestamp{
+			0: {123, 0},
+			1: {123, 1},
+		},
+		DstChangeOpTime: map[int32]bson.Timestamp{},
 	}
 
 	t2 := t1
 	t2.Ids = mslices.Of(mbson.ToRawValue(id3))
 	t2.SourceDocumentCount = 1
 	t2.SourceByteCount = 1024
+	t2.SrcChangeOpTime = map[int32]bson.Timestamp{
+		0: {123, 2},
+	}
 
 	suite.ElementsMatch([]VerificationTask{t1, t2}, actualTasks)
 }
@@ -480,9 +491,11 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 			SrcCollectionName: "testColl",
 			DocumentID:        mbson.ToRawValue(id1),
 		},
+		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
 	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
+	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.Assert().ElementsMatch([]any{d1, d2}, results)
