@@ -31,9 +31,9 @@ Between generations MV reads its recheck queue (i.e., its “notes to self”).
 From this it creates recheck tasks, each of which contains a list of IDs of
 documents to recheck.
 
-Each recheck task records, for each document ID, the first-mismatch time
-or the change event cluster times. (Only the latest timestamps for either
-cluster are stored.)
+Each recheck task records each document ID’s, the first-mismatch time.
+It also stores the latest source & destination change timestamps seen among
+the rechecks.
 
 Of particular note: the same document can have rechecks enqueued from both
 a mismatch _and_ change events. When this happens, MV “resets” the
@@ -53,8 +53,7 @@ to both source & destination clusters. It then matches up the results by
 document ID (binary equivalence).
 
 If both clusters returned a document, then we compare them. If they mismatch,
-a mismatch recheck is enqueued as described above. Verifier also looks for
-change event timestamps and, if such exist, updates its internal cache of
-the relevant cluster’s latest-handled change timestamp. Verifier can then
-report that timestamp as the latest fully-verified timestamp in the cluster’s
-oplog.
+a mismatch recheck is enqueued as described above.
+
+Once all documents are compared, verifier reads the task’s source &
+destination timestamps then updates its internal last-compared timestamps.

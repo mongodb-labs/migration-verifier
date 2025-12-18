@@ -38,30 +38,6 @@ type docWithTs struct {
 	ts  bson.Timestamp
 }
 
-func (verifier *Verifier) NoteCompareOfOptime(
-	cluster whichCluster,
-	optime bson.Timestamp,
-) {
-	var db *msync.DataGuard[bson.Timestamp]
-
-	switch cluster {
-	case src:
-		db = verifier.lastProcessedSrcOptime
-	case dst:
-		db = verifier.lastProcessedDstOptime
-	default:
-		panic("bad cluster: " + cluster)
-	}
-
-	db.Store(func(t bson.Timestamp) bson.Timestamp {
-		if optime.After(t) {
-			return optime
-		}
-
-		return t
-	})
-}
-
 func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
 	workerNum int,
@@ -119,7 +95,40 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 			"comparing documents",
 		).Run(givenCtx, verifier.logger)
 
+	if err != nil {
+		if ts, has := task.SrcTimestamp.Get(); has {
+			verifier.NoteCompareOfOptime(src, ts)
+		}
+
+		if ts, has := task.DstTimestamp.Get(); has {
+			verifier.NoteCompareOfOptime(dst, ts)
+		}
+	}
+
 	return results, docCount, byteCount, err
+}
+
+func (verifier *Verifier) NoteCompareOfOptime(
+	cluster whichCluster,
+	optime bson.Timestamp,
+) {
+	var db *msync.DataGuard[bson.Timestamp]
+
+	switch cluster {
+	case src:
+		db = verifier.lastProcessedSrcOptime
+	case dst:
+		db = verifier.lastProcessedDstOptime
+	default:
+		panic("bad cluster: " + cluster)
+	}
+
+	db.Store(func(t bson.Timestamp) bson.Timestamp {
+		if optime.After(t) {
+			return optime
+		}
+		return t
+	})
 }
 
 func (verifier *Verifier) compareDocsFromChannels(
@@ -145,7 +154,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	srcCache := map[string]docWithTs{}
 	dstCache := map[string]docWithTs{}
 
-	docMetaLookup := docMetadataLookup{
+	firstMismatchTimeLookup := firstMismatchTimeLookup{
 		task:             task,
 		docCompareMethod: verifier.docCompareMethod,
 	}
@@ -215,19 +224,11 @@ func (verifier *Verifier) compareDocsFromChannels(
 			return errors.Wrap(err, "failed to compare documents")
 		}
 
-		if ot, has := docMetaLookup.getSrcChangeOpTime(srcDoc.doc).Get(); has {
-			verifier.NoteCompareOfOptime(src, ot)
-		}
-
-		if ot, has := docMetaLookup.getDstChangeOpTime(dstDoc.doc).Get(); has {
-			verifier.NoteCompareOfOptime(dst, ot)
-		}
-
 		if len(mismatches) == 0 {
 			return nil
 		}
 
-		firstMismatchTime := docMetaLookup.getFirstMismatchTime(srcDoc.doc)
+		firstMismatchTime := firstMismatchTimeLookup.get(srcDoc.doc)
 
 		for i := range mismatches {
 			mismatches[i].MismatchHistory = createMismatchTimes(firstMismatchTime)
@@ -363,7 +364,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	results = slices.Grow(results, len(srcCache)+len(dstCache))
 
 	for _, docWithTs := range srcCache {
-		firstMismatchTime := docMetaLookup.getFirstMismatchTime(docWithTs.doc)
+		firstMismatchTime := firstMismatchTimeLookup.get(docWithTs.doc)
 
 		results = append(
 			results,
@@ -381,15 +382,11 @@ func (verifier *Verifier) compareDocsFromChannels(
 			},
 		)
 
-		if ot, has := docMetaLookup.getSrcChangeOpTime(docWithTs.doc).Get(); has {
-			verifier.NoteCompareOfOptime(src, ot)
-		}
-
 		pool.Put(docWithTs.doc)
 	}
 
 	for _, docWithTs := range dstCache {
-		firstMismatchTime := docMetaLookup.getFirstMismatchTime(docWithTs.doc)
+		firstMismatchTime := firstMismatchTimeLookup.get(docWithTs.doc)
 
 		results = append(
 			results,
@@ -407,10 +404,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 				MismatchHistory: createMismatchTimes(firstMismatchTime),
 			},
 		)
-
-		if ot, has := docMetaLookup.getDstChangeOpTime(docWithTs.doc).Get(); has {
-			verifier.NoteCompareOfOptime(dst, ot)
-		}
 
 		pool.Put(docWithTs.doc)
 	}

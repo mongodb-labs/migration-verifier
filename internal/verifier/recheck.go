@@ -333,8 +333,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 	// These are indexed by idAccum index:
 	firstMismatchTime := map[int32]bson.DateTime{}
-	srcChangeOpTime := map[int32]bson.Timestamp{}
-	dstChangeOpTime := map[int32]bson.Timestamp{}
+	var latestSrcTimestamp, latestDstTimestamp bson.Timestamp
 
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
@@ -382,8 +381,8 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		task, err := verifier.createDocumentRecheckTask(
 			idAccum,
 			firstMismatchTime,
-			srcChangeOpTime,
-			dstChangeOpTime,
+			option.IfNotZero(latestSrcTimestamp),
+			option.IfNotZero(latestDstTimestamp),
 			types.ByteCount(dataSizeAccum),
 			namespace,
 		)
@@ -463,8 +462,8 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			idAccum = idAccum[:0]
 			lastIDRaw = bson.RawValue{}
 			clear(firstMismatchTime)
-			clear(srcChangeOpTime)
-			clear(dstChangeOpTime)
+			latestSrcTimestamp = bson.Timestamp{}
+			latestDstTimestamp = bson.Timestamp{}
 		}
 
 		// This is the index for storing info about the doc in metadata.
@@ -490,15 +489,9 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			}
 
 			if doc.FromDst {
-				dstChangeOpTime[metadataIndex] = newerTimestamp(
-					dstChangeOpTime[metadataIndex],
-					optime,
-				)
+				latestDstTimestamp = newerTimestamp(latestDstTimestamp, optime)
 			} else {
-				srcChangeOpTime[metadataIndex] = newerTimestamp(
-					srcChangeOpTime[metadataIndex],
-					optime,
-				)
+				latestSrcTimestamp = newerTimestamp(latestSrcTimestamp, optime)
 			}
 
 			delete(firstMismatchTime, int32(metadataIndex))

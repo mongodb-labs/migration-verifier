@@ -285,8 +285,8 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 			tasks := fetchVerifierCurrentTasks(ctx, suite.T(), verifier)
 			suite.Require().Len(tasks, 1)
 			suite.Assert().NotEmpty(tasks[0].FirstMismatchTime)
-			suite.Assert().Empty(tasks[0].SrcChangeOpTime)
-			suite.Assert().Empty(tasks[0].DstChangeOpTime)
+			suite.Assert().Zero(tasks[0].SrcTimestamp)
+			suite.Assert().Zero(tasks[0].DstTimestamp)
 		},
 	)
 
@@ -350,12 +350,12 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 			suite.Require().Len(tasks, 1)
 			suite.Assert().Empty(tasks[0].FirstMismatchTime)
 			suite.Assert().Equal(
-				map[int32]bson.Timestamp{0: {345, 456}},
-				tasks[0].SrcChangeOpTime,
+				option.Some(bson.Timestamp{345, 456}),
+				tasks[0].SrcTimestamp,
 			)
 			suite.Assert().Equal(
-				map[int32]bson.Timestamp{0: {345, 456}},
-				tasks[0].DstChangeOpTime,
+				option.Some(bson.Timestamp{345, 456}),
+				tasks[0].DstTimestamp,
 			)
 		},
 	)
@@ -440,17 +440,16 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 		SourceDocumentCount: 1,
 		SourceByteCount:     types.ByteCount(overlyLarge),
 		FirstMismatchTime:   map[int32]bson.DateTime{},
-		SrcChangeOpTime:     map[int32]bson.Timestamp{0: {123, 0}},
-		DstChangeOpTime:     map[int32]bson.Timestamp{},
+		SrcTimestamp:        option.Some(bson.Timestamp{123, 0}),
 	}
 
 	t2 := t1
 	t2.Ids = mslices.Of(mbson.ToRawValue(id2))
-	t2.SrcChangeOpTime = map[int32]bson.Timestamp{0: {123, 1}}
+	t2.SrcTimestamp = option.Some(bson.Timestamp{123, 1})
 
 	t3 := t1
 	t3.Ids = mslices.Of(mbson.ToRawValue(id3))
-	t3.SrcChangeOpTime = map[int32]bson.Timestamp{0: {123, 2}}
+	t3.SrcTimestamp = option.Some(bson.Timestamp{123, 2})
 
 	suite.ElementsMatch([]VerificationTask{t1, t2, t3}, foundTasks)
 }
@@ -528,20 +527,14 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 		SourceDocumentCount: 2,
 		SourceByteCount:     1126400,
 		FirstMismatchTime:   map[int32]bson.DateTime{},
-		SrcChangeOpTime: map[int32]bson.Timestamp{
-			0: {123, 0},
-			1: {123, 1},
-		},
-		DstChangeOpTime: map[int32]bson.Timestamp{},
+		SrcTimestamp:        option.Some(bson.Timestamp{123, 1}),
 	}
 
 	t2 := t1
 	t2.Ids = mslices.Of(mbson.ToRawValue(id3))
 	t2.SourceDocumentCount = 1
 	t2.SourceByteCount = 1024
-	t2.SrcChangeOpTime = map[int32]bson.Timestamp{
-		0: {123, 2},
-	}
+	t2.SrcTimestamp = option.Some(bson.Timestamp{123, 2})
 
 	suite.ElementsMatch([]VerificationTask{t1, t2}, actualTasks)
 }

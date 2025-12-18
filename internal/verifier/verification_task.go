@@ -93,12 +93,12 @@ type VerificationTask struct {
 	// this document was first seen to mismatch.
 	FirstMismatchTime map[int32]bson.DateTime
 
-	// SrcChangeOpTime records the optime of the change event on the source
-	// that triggered this recheck.
-	SrcChangeOpTime map[int32]bson.Timestamp
+	// SrcTimestamp records the optime of the latest source change event that
+	// caused this (recheck) task to exist.
+	SrcTimestamp option.Option[bson.Timestamp]
 
-	// DstChangeOpTime is like SrcChangeOpTime but for the destination.
-	DstChangeOpTime map[int32]bson.Timestamp
+	// DstTimestamp is like SrcChangeOpTime but for the destination.
+	DstTimestamp option.Option[bson.Timestamp]
 }
 
 func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
@@ -213,8 +213,8 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 func (verifier *Verifier) createDocumentRecheckTask(
 	ids []bson.RawValue,
 	firstMismatchTime map[int32]bson.DateTime,
-	srcChangeOpTime map[int32]bson.Timestamp,
-	dstChangeOpTime map[int32]bson.Timestamp,
+	srcTimestamp option.Option[bson.Timestamp],
+	dstTimestamp option.Option[bson.Timestamp],
 	dataSize types.ByteCount,
 	srcNamespace string,
 ) (*VerificationTask, error) {
@@ -240,8 +240,8 @@ func (verifier *Verifier) createDocumentRecheckTask(
 		SourceDocumentCount: types.DocumentCount(len(ids)),
 		SourceByteCount:     dataSize,
 		FirstMismatchTime:   firstMismatchTime,
-		SrcChangeOpTime:     srcChangeOpTime,
-		DstChangeOpTime:     dstChangeOpTime,
+		SrcTimestamp:        srcTimestamp,
+		DstTimestamp:        dstTimestamp,
 	}, nil
 }
 

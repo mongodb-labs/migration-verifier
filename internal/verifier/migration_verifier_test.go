@@ -29,6 +29,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -750,6 +751,28 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 		10*time.Millisecond,
 		"change event on document should reset the first-mismatch time",
 	)
+}
+
+func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+
+	id := rand.Intn(1000)
+
+	task := &VerificationTask{
+		PrimaryKey: bson.NewObjectID(),
+		Generation: 1,
+		Ids: mslices.Of(
+			mbson.ToRawValue(id),
+			mbson.ToRawValue(id+1),
+		),
+		SrcTimestamp: option.Some(bson.Timestamp{123, 234}),
+	}
+
+	_, _, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
+	suite.Require().NoError(err)
+
 }
 
 func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
