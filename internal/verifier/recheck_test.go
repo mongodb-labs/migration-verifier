@@ -2,8 +2,8 @@ package verifier
 
 import (
 	"context"
-	"os"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/testutil"
@@ -15,6 +15,8 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
+	"github.com/samber/lo/mutable"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -253,11 +255,113 @@ func (suite *IntegrationTestSuite) TestDuplicateRecheck() {
 	suite.Require().NoError(err, "should insert the second time")
 }
 
-func (suite *IntegrationTestSuite) TestManyManyRechecks() {
-	if len(os.Getenv("CI")) > 0 {
-		suite.T().Skip("Skipping this test in CI. (It causes GitHub Action to self-terminate.)")
-	}
+func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
+	ctx := suite.Context()
+	dbName := suite.DBNameForTest()
+	collName := "mycoll"
+	docID := mbson.ToRawValue("heyhey")
 
+	verifier := suite.BuildVerifier()
+
+	suite.Run(
+		"mismatch only",
+		func() {
+			err := verifier.insertRecheckDocs(
+				ctx,
+				mslices.Of(dbName),
+				mslices.Of(collName),
+				mslices.Of(docID),
+				mslices.Of(int32(123)),
+				mslices.Of(bson.NewDateTimeFromTime(time.Now())),
+				option.None[whichCluster](),
+				nil,
+			)
+			suite.Require().NoError(err)
+
+			verifier.generation++
+			err = verifier.GenerateRecheckTasks(ctx)
+			suite.Require().NoError(err)
+
+			tasks := fetchVerifierCurrentTasks(ctx, suite.T(), verifier)
+			suite.Require().Len(tasks, 1)
+			suite.Assert().NotEmpty(tasks[0].FirstMismatchTime)
+			suite.Assert().Empty(tasks[0].SrcChangeOpTime)
+			suite.Assert().Empty(tasks[0].DstChangeOpTime)
+		},
+	)
+
+	suite.Run(
+		"mismatch and change events",
+		func() {
+			timestamps := []bson.Timestamp{
+				{123, 234},
+				{234, 345},
+				{345, 456},
+			}
+			mutable.Shuffle(timestamps)
+
+			mismatchTime := bson.NewDateTimeFromTime(time.Now())
+
+			insertCallbacks := mslices.Of(
+				func() {
+					err := verifier.insertRecheckDocs(
+						ctx,
+						mslices.Of(dbName),
+						mslices.Of(collName),
+						mslices.Of(docID),
+						mslices.Of(int32(123)),
+						mslices.Of(mismatchTime),
+						option.None[whichCluster](),
+						nil,
+					)
+					suite.Require().NoError(err)
+				},
+			)
+
+			for _, cluster := range mslices.Of(src, dst) {
+				insertCallbacks = append(
+					insertCallbacks,
+					func() {
+						err := verifier.insertRecheckDocs(
+							ctx,
+							mslices.Of(dbName, dbName, dbName),
+							mslices.Of(collName, collName, collName),
+							mslices.Of(docID, docID, docID),
+							mslices.Of(int32(123), int32(123), int32(123)),
+							nil,
+							option.Some(cluster),
+							timestamps,
+						)
+						suite.Require().NoError(err)
+					},
+				)
+			}
+
+			mutable.Shuffle(insertCallbacks)
+			for _, cb := range insertCallbacks {
+				cb()
+			}
+
+			verifier.generation++
+			err := verifier.GenerateRecheckTasks(ctx)
+			suite.Require().NoError(err)
+
+			tasks := fetchVerifierCurrentTasks(ctx, suite.T(), verifier)
+			suite.Require().Len(tasks, 1)
+			suite.Assert().Empty(tasks[0].FirstMismatchTime)
+			suite.Assert().Equal(
+				map[int32]bson.Timestamp{0: {345, 456}},
+				tasks[0].SrcChangeOpTime,
+			)
+			suite.Assert().Equal(
+				map[int32]bson.Timestamp{0: {345, 456}},
+				tasks[0].DstChangeOpTime,
+			)
+		},
+	)
+}
+
+func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	verifier := suite.BuildVerifier()
 	verifier.SetNumWorkers(10)
 	ctx := suite.Context()
@@ -349,6 +453,22 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	t3.SrcChangeOpTime = map[int32]bson.Timestamp{0: {123, 2}}
 
 	suite.ElementsMatch([]VerificationTask{t1, t2, t3}, foundTasks)
+}
+
+func fetchVerifierCurrentTasks(
+	ctx context.Context,
+	t *testing.T,
+	verifier *Verifier,
+) []VerificationTask {
+	taskColl := verifier.metaClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
+
+	cursor, err := taskColl.Find(ctx, bson.D{{"generation", verifier.generation}})
+	require.NoError(t, err)
+	var actualTasks []VerificationTask
+	err = cursor.All(ctx, &actualTasks)
+	require.NoError(t, err)
+
+	return actualTasks
 }
 
 func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
