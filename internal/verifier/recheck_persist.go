@@ -10,10 +10,14 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-type changeEventBatch struct {
+type eventBatch struct {
 	events      []ParsedEvent
 	resumeToken bson.Raw
 }
+
+const (
+	minResumeTokenPersistInterval = 10 * time.Second
+)
 
 // RunChangeEventPersistor persists rechecks from change event batches.
 // It needs to be started after the reader starts and should run in its own
@@ -30,7 +34,7 @@ func (verifier *Verifier) RunChangeEventPersistor(
 
 	var lastPersistedTime time.Time
 	persistResumeTokenIfNeeded := func(ctx context.Context, token bson.Raw) {
-		if time.Since(lastPersistedTime) >= minChangeStreamPersistInterval {
+		if time.Since(lastPersistedTime) >= minResumeTokenPersistInterval {
 			persistErr := persistCallback(ctx, token)
 			if persistErr != nil {
 				verifier.logger.Warn().
@@ -62,16 +66,22 @@ HandlerLoop:
 				break HandlerLoop
 			}
 
+			// Record even empty batches since this helps to compute events per second.
+			reader.noteBatchSize(len(batch.events))
+
 			verifier.logger.Trace().
 				Str("changeReader", string(clusterName)).
 				Int("batchSize", len(batch.events)).
-				Any("batch", batch).
+				Any("batch", batch.events).
+				Stringer("resumeToken", batch.resumeToken).
 				Msg("Handling change event batch.")
 
-			err = errors.Wrap(
-				verifier.PersistChangeEvents(ctx, batch, clusterName),
-				"failed to handle change stream events",
-			)
+			if len(batch.events) > 0 {
+				err = errors.Wrap(
+					verifier.PersistChangeEvents(ctx, batch, reader),
+					"persisting rechecks for change events",
+				)
+			}
 
 			if err == nil && batch.resumeToken != nil {
 				persistResumeTokenIfNeeded(ctx, batch.resumeToken)
@@ -83,19 +93,21 @@ HandlerLoop:
 }
 
 // PersistChangeEvents performs the necessary work for change events after receiving a batch.
-func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeEventBatch, eventOrigin whichCluster) error {
+func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBatch, reader changeReader) error {
 	if len(batch.events) == 0 {
 		return nil
 	}
 
-	dbNames := make([]string, len(batch.events))
-	collNames := make([]string, len(batch.events))
-	docIDs := make([]bson.RawValue, len(batch.events))
-	dataSizes := make([]int32, len(batch.events))
+	dbNames := make([]string, 0, len(batch.events))
+	collNames := make([]string, 0, len(batch.events))
+	docIDs := make([]bson.RawValue, 0, len(batch.events))
+	dataSizes := make([]int32, 0, len(batch.events))
 
 	latestTimestamp := bson.Timestamp{}
 
-	for i, changeEvent := range batch.events {
+	eventOrigin := reader.getWhichCluster()
+
+	for _, changeEvent := range batch.events {
 		if !supportedEventOpTypes.Contains(changeEvent.OpType) {
 			panic(fmt.Sprintf("Unsupported optype in event; should have failed already! event=%+v", changeEvent))
 		}
@@ -110,51 +122,52 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch changeE
 
 		var srcDBName, srcCollName string
 
-		var eventRecorder EventRecorder
-
 		// Recheck Docs are keyed by source namespaces.
 		// We need to retrieve the source namespaces if change events are from the destination.
 		switch eventOrigin {
 		case dst:
-			eventRecorder = *verifier.dstEventRecorder
-
 			if verifier.nsMap.Len() == 0 {
 				// Namespace is not remapped. Source namespace is the same as the destination.
 				srcDBName = changeEvent.Ns.DB
 				srcCollName = changeEvent.Ns.Coll
 			} else {
+				if changeEvent.Ns.DB == verifier.metaDBName {
+					continue
+				}
+
 				dstNs := fmt.Sprintf("%s.%s", changeEvent.Ns.DB, changeEvent.Ns.Coll)
 				srcNs, exist := verifier.nsMap.GetSrcNamespace(dstNs)
 				if !exist {
-					return errors.Errorf("no source namespace corresponding to the destination namepsace %s", dstNs)
+					return errors.Errorf("no source namespace matches the destination namepsace %#q", dstNs)
 				}
 				srcDBName, srcCollName = SplitNamespace(srcNs)
 			}
 		case src:
-			eventRecorder = *verifier.srcEventRecorder
-
 			srcDBName = changeEvent.Ns.DB
 			srcCollName = changeEvent.Ns.Coll
 		default:
 			panic(fmt.Sprintf("unknown event origin: %s", eventOrigin))
 		}
 
-		dbNames[i] = srcDBName
-		collNames[i] = srcCollName
-		docIDs[i] = changeEvent.DocID
+		dbNames = append(dbNames, srcDBName)
+		collNames = append(collNames, srcCollName)
+		docIDs = append(docIDs, changeEvent.DocID)
 
+		var dataSize int32
 		if changeEvent.FullDocLen.OrZero() > 0 {
-			dataSizes[i] = int32(changeEvent.FullDocLen.OrZero())
+			dataSize = int32(changeEvent.FullDocLen.OrZero())
 		} else if changeEvent.FullDocument == nil {
 			// This happens for deletes and for some updates.
 			// The document is probably, but not necessarily, deleted.
-			dataSizes[i] = fauxDocSizeForDeleteEvents
+			dataSize = defaultUserDocumentSize
 		} else {
 			// This happens for inserts, replaces, and most updates.
-			dataSizes[i] = int32(len(changeEvent.FullDocument))
+			dataSize = int32(len(changeEvent.FullDocument))
 		}
 
-		if err := eventRecorder.AddEvent(&changeEvent); err != nil {
+		dataSizes = append(dataSizes, dataSize)
+
+		if err := reader.getEventRecorder().AddEvent(&changeEvent); err != nil {
 			return errors.Wrapf(
 				err,
 				"failed to augment stats with %s change event (%+v)",

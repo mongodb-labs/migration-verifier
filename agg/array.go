@@ -25,6 +25,26 @@ func (s Slice) MarshalBSON() ([]byte, error) {
 
 // ---------------------------------------------
 
+type ArrayElemAt struct {
+	Array any
+	Index any
+}
+
+var _ bson.Marshaler = ArrayElemAt{}
+
+func (a ArrayElemAt) D() bson.D {
+	return bson.D{{"$arrayElemAt", bson.A{
+		a.Array,
+		a.Index,
+	}}}
+}
+
+func (a ArrayElemAt) MarshalBSON() ([]byte, error) {
+	return bson.Marshal(a.D())
+}
+
+// ---------------------------------------------
+
 type Size [1]any
 
 var _ bson.Marshaler = Size{}
@@ -102,22 +122,4 @@ func (r Range) MarshalBSON() ([]byte, error) {
 	}
 
 	return bson.Marshal(bson.D{{"$range", args}})
-}
-
-type ArrayElemAt struct {
-	Array any
-	Index any
-}
-
-var _ bson.Marshaler = ArrayElemAt{}
-
-func (a ArrayElemAt) D() bson.D {
-	return bson.D{{"$arrayElemAt", bson.A{
-		a.Array,
-		a.Index,
-	}}}
-}
-
-func (a ArrayElemAt) MarshalBSON() ([]byte, error) {
-	return bson.Marshal(a.D())
 }

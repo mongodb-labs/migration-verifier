@@ -5,33 +5,12 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-)
-
-const (
-	// ExcludedSystemCollPrefix is the prefix of system collections,
-	// which we ignore.
-	ExcludedSystemCollPrefix = "system."
-
-	// MongoDBInternalDBPrefix is the prefix for MongoDB-internal databases.
-	// (e.g., Atlas’s availability canary)
-	MongoDBInternalDBPrefix = "__mdb_internal"
-)
-
-var (
-	ExcludedDBPrefixes = mslices.Of(
-		// mongosync metadata:
-		"mongosync_internal_",
-		"mongosync_reserved_",
-		MongoDBInternalDBPrefix,
-	)
-
-	// ExcludedSystemDBs are system databases that are excluded from verification.
-	ExcludedSystemDBs = []string{"admin", "config", "local"}
 )
 
 // ListAllUserNamespaces lists all the user collections on a cluster,
@@ -48,7 +27,7 @@ func ListAllUserNamespaces(
 ) ([]string, error) {
 	excludedDBs := []string{}
 	excludedDBs = append(excludedDBs, additionalExcludedDBs...)
-	excludedDBs = append(excludedDBs, ExcludedSystemDBs...)
+	excludedDBs = append(excludedDBs, namespaces.ExcludedSystemDBs...)
 
 	var excluded []any
 	for _, e := range excludedDBs {
@@ -58,7 +37,7 @@ func ListAllUserNamespaces(
 	dbNames, err := client.ListDatabaseNames(ctx, bson.D{
 		{"$and", []bson.D{
 			{{"name", bson.D{{"$nin", excluded}}}},
-			util.ExcludePrefixesQuery("name", ExcludedDBPrefixes),
+			util.ExcludePrefixesQuery("name", namespaces.ExcludedDBPrefixes),
 		}},
 	})
 
@@ -77,7 +56,7 @@ func ListAllUserNamespaces(
 			{"$or", []bson.D{
 				util.ExcludePrefixesQuery(
 					"name",
-					mslices.Of(ExcludedSystemCollPrefix),
+					mslices.Of(namespaces.ExcludedSystemCollPrefix),
 				),
 				{
 					{"$expr", mmongo.StartsWithAgg("$name", timeseriesBucketsPrefix)},

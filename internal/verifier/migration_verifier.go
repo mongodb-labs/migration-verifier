@@ -100,8 +100,8 @@ type Verifier struct {
 	numWorkers         int
 	failureDisplaySize int64
 
-	srcEventRecorder *EventRecorder
-	dstEventRecorder *EventRecorder
+	srcChangeReaderMethod string
+	dstChangeReaderMethod string
 
 	changeHandlingErr *util.Eventual[error]
 
@@ -188,11 +188,6 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 
 		readConcernSetting: readConcern,
 
-		// This will get recreated once gen0 starts, but we want it
-		// here in case the change readers get an event before then.
-		srcEventRecorder: NewEventRecorder(),
-		dstEventRecorder: NewEventRecorder(),
-
 		workerTracker: NewWorkerTracker(NumWorkers),
 
 		verificationStatusCheckInterval: 2 * time.Second,
@@ -244,7 +239,7 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 		}
 		verifier.writesOff = true
 
-		verifier.logger.Debug().Msg("Signalling that writes are done.")
+		verifier.logger.Debug().Msg("Signaling that writes are done.")
 
 		srcFinalTs, err = GetNewClusterTime(
 			ctx,
@@ -377,6 +372,42 @@ func (verifier *Verifier) SetDocCompareMethod(method DocCompareMethod) {
 	verifier.docCompareMethod = method
 }
 
+func (verifier *Verifier) SetSrcChangeReaderMethod(method string) error {
+	err := validateChangeReaderOpt(method, *verifier.srcClusterInfo)
+	if err != nil {
+		return errors.Wrap(err, "setting source change reader method")
+	}
+
+	verifier.srcChangeReaderMethod = method
+
+	return nil
+}
+
+func (verifier *Verifier) SetDstChangeReaderMethod(method string) error {
+	err := validateChangeReaderOpt(method, *verifier.dstClusterInfo)
+	if err != nil {
+		return errors.Wrap(err, "setting source change reader method")
+	}
+
+	verifier.dstChangeReaderMethod = method
+
+	return nil
+}
+
+func validateChangeReaderOpt(
+	method string,
+	clusterInfo util.ClusterInfo,
+) error {
+	switch method {
+	case ChangeReaderOptOplog:
+		if clusterInfo.Topology == util.TopologySharded {
+			return fmt.Errorf("cannot read oplog from sharded cluster")
+		}
+	}
+
+	return nil
+}
+
 func (verifier *Verifier) SetVerifyAll(arg bool) {
 	verifier.verifyAll = arg
 }
@@ -439,14 +470,7 @@ func (verifier *Verifier) getGeneration() (generation int, lastGeneration bool) 
 }
 
 func (verifier *Verifier) getGenerationWhileLocked() (int, bool) {
-
-	// As long as no other goroutine has locked the mux this will
-	// usefully panic if the caller neglected the lock.
-	wasUnlocked := verifier.mux.TryLock()
-	if wasUnlocked {
-		verifier.mux.Unlock()
-		panic("getGenerationWhileLocked() while unlocked")
-	}
+	verifier.assertLocked()
 
 	return verifier.generation, verifier.lastGeneration
 }

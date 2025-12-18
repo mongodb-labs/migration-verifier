@@ -33,6 +33,8 @@ const (
 	logPath               = "logPath"
 	srcNamespace          = "srcNamespace"
 	dstNamespace          = "dstNamespace"
+	srcChangeReader       = "srcChangeReader"
+	dstChangeReader       = "dstChangeReader"
 	metaDBName            = "metaDBName"
 	docCompareMethod      = "docCompareMethod"
 	verifyAll             = "verifyAll"
@@ -125,6 +127,22 @@ func main() {
 		altsrc.NewStringSliceFlag(cli.StringSliceFlag{
 			Name:  dstNamespace,
 			Usage: "destination `namespaces` to check",
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  srcChangeReader,
+			Value: verifier.ChangeReaderOptChangeStream,
+			Usage: "How to read changes from the source. One of: " + strings.Join(
+				verifier.ChangeReaderOpts,
+				", ",
+			),
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  dstChangeReader,
+			Value: verifier.ChangeReaderOptChangeStream,
+			Usage: "How to read changes from the destination. One of: " + strings.Join(
+				verifier.ChangeReaderOpts,
+				", ",
+			),
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  metaDBName,
@@ -344,9 +362,27 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 	v.SetMetaDBName(cCtx.String(metaDBName))
 
+	srcChangeReaderVal := cCtx.String(srcChangeReader)
+	if !slices.Contains(verifier.ChangeReaderOpts, srcChangeReaderVal) {
+		return nil, errors.Errorf("invalid %#q (%s); valid values are: %#q", srcChangeReader, srcChangeReaderVal, verifier.ChangeReaderOpts)
+	}
+	err = v.SetSrcChangeReaderMethod(srcChangeReaderVal)
+	if err != nil {
+		return nil, err
+	}
+
+	dstChangeReaderVal := cCtx.String(dstChangeReader)
+	if !slices.Contains(verifier.ChangeReaderOpts, dstChangeReaderVal) {
+		return nil, errors.Errorf("invalid %#q (%s); valid values are: %#q", dstChangeReader, dstChangeReaderVal, verifier.ChangeReaderOpts)
+	}
+	err = v.SetDstChangeReaderMethod(srcChangeReaderVal)
+	if err != nil {
+		return nil, err
+	}
+
 	docCompareMethod := verifier.DocCompareMethod(cCtx.String(docCompareMethod))
 	if !slices.Contains(verifier.DocCompareMethods, docCompareMethod) {
-		return nil, errors.Errorf("invalid doc compare method (%s); valid value are: %v", docCompareMethod, verifier.DocCompareMethods)
+		return nil, errors.Errorf("invalid doc compare method (%s); valid values are: %#q", docCompareMethod, verifier.DocCompareMethods)
 	}
 	v.SetDocCompareMethod(docCompareMethod)
 

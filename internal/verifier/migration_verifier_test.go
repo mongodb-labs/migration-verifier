@@ -25,6 +25,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
@@ -496,6 +497,9 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 }
 
 func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	defer zerolog.SetGlobalLevel(zerolog.DebugLevel)
+
 	ctx := suite.Context()
 
 	collName := "c"
@@ -512,6 +516,20 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 		Collection(collName).
 		InsertOne(ctx, bson.D{{"_id", "a"}})
 	suite.Require().NoError(err)
+
+	// So that the insert above isn’t the last thing in the oplog:
+	_, err = suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection(collName).
+		InsertOne(ctx, bson.D{{"_id", "qwe"}})
+	suite.Require().NoError(err)
+	_, err = suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection(collName).
+		DeleteOne(ctx, bson.D{{"_id", "qwe"}})
+	suite.Require().NoError(err)
+
+	testutil.KillTransactions(ctx, suite.T(), suite.srcMongoClient)
 
 	verifier := suite.BuildVerifier()
 	verifier.SetVerifyAll(true)
@@ -560,45 +578,53 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 
 	firstMismatchTime := mismatches[0].Detail.MismatchHistory.First
 
-	// Now let another generation go by.
-	suite.Require().NoError(runner.StartNextGeneration())
-	suite.Require().NoError(runner.AwaitGenerationEnd())
+	_, err = suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection(collName).
+		InsertOne(ctx, bson.D{{"_id", "z"}})
+	suite.Require().NoError(err)
 
 	suite.Run(
-		"generation 1",
+		"add 2nd mismatch",
 		func() {
-			cur, err := verifier.verificationTaskCollection().Find(
-				ctx,
-				bson.D{
-					{"generation", verifier.generation},
-					{"type", verificationTaskVerifyDocuments},
-				},
-			)
-			suite.Require().NoError(err)
-			suite.Require().NoError(cur.All(ctx, &tasks))
-			suite.Require().Len(tasks, 1)
-			suite.Require().Contains(tasks[0].FirstMismatchTime, int32(0))
+			for len(mismatches) == 1 {
+				suite.Require().NoError(runner.StartNextGeneration())
+				suite.Require().NoError(runner.AwaitGenerationEnd())
+				cur, err := verifier.verificationTaskCollection().Find(
+					ctx,
+					bson.D{
+						{"generation", verifier.generation},
+						{"type", verificationTaskVerifyDocuments},
+					},
+				)
+				suite.Require().NoError(err)
+				suite.Require().NoError(cur.All(ctx, &tasks))
+				suite.Require().Len(tasks, 1)
+				suite.Require().Contains(
+					tasks[0].FirstMismatchTime,
+					int32(0),
+					"tasks[0].first-mismatch-time map (task: %+v)", tasks[0],
+				)
 
-			suite.Assert().Equal(
-				firstMismatchTime,
-				tasks[0].FirstMismatchTime[0],
-				"task in new gen should have the old gen’s mismatch’s first mismatch time",
-			)
+				suite.Assert().Equal(
+					firstMismatchTime,
+					tasks[0].FirstMismatchTime[0],
+					"task in new gen should have the old gen’s mismatch’s first mismatch time",
+				)
 
-			cur, err = mmColl.Find(ctx, bson.D{
-				{"task", tasks[0].PrimaryKey},
-			})
-			suite.Require().NoError(err)
-			suite.Require().NoError(cur.All(ctx, &mismatches))
-			suite.Require().Len(mismatches, 1)
+				cur, err = mmColl.Find(ctx, bson.D{
+					{"task", tasks[0].PrimaryKey},
+				})
+				suite.Require().NoError(err)
+				suite.Require().NoError(cur.All(ctx, &mismatches))
+			}
 
-			suite.Assert().Equal(firstMismatchTime, mismatches[0].Detail.MismatchHistory.First)
-			suite.Require().NotZero(mismatches[0].Detail.MismatchHistory.DurationMS)
+			suite.Require().Len(mismatches, 2)
 
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(mismatches[0].Task),
+				mslices.Of(tasks[0].PrimaryKey),
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -607,11 +633,24 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			suite.Assert().Empty(reportData.ExtraOnDst)
 			suite.Assert().Equal(
 				mismatchCountsPerType{
-					MissingOnDst: 1,
+					MissingOnDst: 2,
 				},
 				reportData.Counts,
 			)
-			suite.Assert().Equal(reportData.MissingOnDst, mismatches)
+			suite.Assert().ElementsMatch(reportData.MissingOnDst, mismatches)
+
+			suite.Assert().True(
+				reportData.MissingOnDst[1].Detail.MismatchHistory.First.Time().After(
+					firstMismatchTime.Time(),
+				),
+				"2nd mismatch’s first-seen time should postdate the first’s",
+			)
+
+			suite.Assert().Greater(
+				reportData.MissingOnDst[0].Detail.MismatchHistory.DurationMS,
+				reportData.MissingOnDst[1].Detail.MismatchHistory.DurationMS,
+				"2nd reported mismatch should be less long-lived",
+			)
 		},
 	)
 
@@ -620,7 +659,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
 	suite.Run(
-		"generation 2",
+		"generation 2 or later",
 		func() {
 			cur, err := verifier.verificationTaskCollection().Find(
 				ctx,
@@ -637,7 +676,8 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			suite.Assert().Equal(
 				firstMismatchTime,
 				tasks[0].FirstMismatchTime[0],
-				"task in new gen should have the original first mismatch time",
+				"task in new gen should have the original first mismatch time (task: %+v)",
+				tasks[0],
 			)
 
 			lastMismatchDuration := mismatches[0].Detail.MismatchHistory.DurationMS
@@ -647,15 +687,12 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			})
 			suite.Require().NoError(err)
 			suite.Require().NoError(cur.All(ctx, &mismatches))
-			suite.Require().Len(mismatches, 1)
-
-			suite.Assert().Equal(firstMismatchTime, mismatches[0].Detail.MismatchHistory.First)
-			suite.Require().GreaterOrEqual(mismatches[0].Detail.MismatchHistory.DurationMS, lastMismatchDuration)
+			suite.Require().Len(mismatches, 2)
 
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(mismatches[0].Task),
+				mslices.Of(tasks[0].PrimaryKey),
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -664,11 +701,22 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			suite.Assert().Empty(reportData.ExtraOnDst)
 			suite.Assert().Equal(
 				mismatchCountsPerType{
-					MissingOnDst: 1,
+					MissingOnDst: 2,
 				},
 				reportData.Counts,
 			)
-			suite.Assert().Equal(reportData.MissingOnDst, mismatches)
+			suite.Assert().ElementsMatch(reportData.MissingOnDst, mismatches)
+
+			suite.Assert().Equal(
+				firstMismatchTime,
+				reportData.MissingOnDst[0].Detail.MismatchHistory.First,
+				"mismatches should be sorted by descending duration: %+v",
+				reportData.MissingOnDst,
+			)
+			suite.Require().GreaterOrEqual(
+				reportData.MissingOnDst[0].Detail.MismatchHistory.DurationMS,
+				lastMismatchDuration,
+			)
 		},
 	)
 
@@ -910,7 +958,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 
 	err := verifier.PersistChangeEvents(
 		ctx,
-		changeEventBatch{
+		eventBatch{
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
@@ -920,13 +968,13 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 				},
 			}},
 		},
-		src,
+		verifier.srcChangeReader,
 	)
 	suite.Require().NoError(err)
 
 	err = verifier.PersistChangeEvents(
 		ctx,
-		changeEventBatch{
+		eventBatch{
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
@@ -936,7 +984,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 				},
 			}},
 		},
-		src,
+		verifier.srcChangeReader,
 	)
 	suite.Require().NoError(err)
 
@@ -1205,27 +1253,27 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		},
 	}
 
-	batch := changeEventBatch{
+	batch := eventBatch{
 		events: mslices.Of(event),
 	}
 
-	err = verifier.PersistChangeEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 
 	event.OpType = "insert"
-	err = verifier.PersistChangeEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 	event.OpType = "replace"
-	err = verifier.PersistChangeEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 	event.OpType = "update"
-	err = verifier.PersistChangeEvents(ctx, batch, src)
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 
 	batch.events[0].OpType = "flibbity"
 	suite.Assert().Panics(
 		func() {
-			_ = verifier.PersistChangeEvents(ctx, batch, src)
+			_ = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 		},
 		"PersistChangeEvents should panic if it gets an unknown optype",
 	)
@@ -1921,19 +1969,21 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	ctx := suite.Context()
 
+	dbName := suite.DBNameForTest()
+
 	suite.Require().NoError(
 		suite.srcMongoClient.
-			Database("test").
+			Database(dbName).
 			Collection("coll").Drop(ctx),
 	)
 	suite.Require().NoError(
 		suite.dstMongoClient.
-			Database("test").
+			Database(dbName).
 			Collection("coll").Drop(ctx),
 	)
 
 	_, err := suite.srcMongoClient.
-		Database("test").
+		Database(dbName).
 		Collection("coll").
 		InsertMany(
 			ctx,
@@ -1952,7 +2002,7 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	// The first has a mismatched `foo` value,
 	// and the 2nd lacks `foo` entirely.
 	_, err = suite.dstMongoClient.
-		Database("test").
+		Database(dbName).
 		Collection("coll").
 		InsertMany(ctx, lo.ToAnySlice([]bson.D{
 			{{"_id", 100000}, {"foo", 1}},
@@ -1963,7 +2013,7 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	verifier := suite.BuildVerifier()
 	verifier.failureDisplaySize = 10
 
-	ns := "test.coll"
+	ns := dbName + ".coll"
 	verifier.SetSrcNamespaces([]string{ns})
 	verifier.SetDstNamespaces([]string{ns})
 	verifier.SetNamespaceMap()
@@ -2293,13 +2343,6 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	srcColl := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("coll")
 	dstColl := suite.dstMongoClient.Database(suite.DBNameForTest()).Collection("coll")
 
-	verifier := suite.BuildVerifier()
-
-	ns := srcColl.Database().Name() + "." + srcColl.Name()
-	verifier.SetSrcNamespaces([]string{ns})
-	verifier.SetDstNamespaces([]string{ns})
-	verifier.SetNamespaceMap()
-
 	for _, coll := range mslices.Of(srcColl, dstColl) {
 		_, err := coll.InsertOne(ctx, bson.M{"_id": 1, "x": 42})
 		suite.Require().NoError(err)
@@ -2312,6 +2355,13 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 		},
 	)
 	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+
+	ns := srcColl.Database().Name() + "." + srcColl.Name()
+	verifier.SetSrcNamespaces([]string{ns})
+	verifier.SetDstNamespaces([]string{ns})
+	verifier.SetNamespaceMap()
 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
@@ -2341,23 +2391,37 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	suite.Require().Equal(verificationTaskVerifyCollection, tasks[1].Type)
 	suite.Require().Equal(verificationTaskMetadataMismatch, tasks[1].Status)
 
-	suite.Require().NoError(runner.StartNextGeneration())
-	suite.Require().NoError(runner.AwaitGenerationEnd())
+	// When tailing the oplog sometimes the verifier starts up “in the past”,
+	// which can cause extra rechecks that we wouldn’t normally expect. This
+	// waits for any of those to clear out.
+	suite.Require().Eventually(
+		func() bool {
+			suite.Require().NoError(runner.StartNextGeneration())
+			suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	cursor, err = verifier.verificationTaskCollection().Aggregate(
-		ctx,
-		append(
-			mongo.Pipeline{
-				bson.D{{"$match", bson.D{{"generation", 1}}}},
-			},
-			testutil.SortByListAgg("type", sortedTaskTypes)...,
-		),
+			cursor, err = verifier.verificationTaskCollection().Aggregate(
+				ctx,
+				append(
+					mongo.Pipeline{
+						bson.D{{"$match", bson.D{{"generation", verifier.generation}}}},
+					},
+					testutil.SortByListAgg("type", sortedTaskTypes)...,
+				),
+			)
+			suite.Require().NoError(err)
+
+			suite.Require().NoError(cursor.All(ctx, &tasks))
+
+			suite.Require().GreaterOrEqual(len(tasks), 1, "we always expect >=1 task")
+
+			return len(tasks) == 1
+		},
+		time.Minute,
+		time.Millisecond,
+		"wait until verifier has caught up with itself",
 	)
-	suite.Require().NoError(err)
 
-	suite.Require().NoError(cursor.All(ctx, &tasks))
-
-	suite.Require().Len(tasks, 1, "generation 1 should only have done 1 task")
+	suite.Require().Len(tasks, 1, "should eventually only have 1 task; tasks=%+v", tasks)
 	suite.Require().Equal(verificationTaskVerifyCollection, tasks[0].Type)
 	suite.Require().Equal(verificationTaskMetadataMismatch, tasks[0].Status)
 }
@@ -2466,7 +2530,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 func (suite *IntegrationTestSuite) TestMongoDBInternalDB() {
 	ctx := suite.Context()
 
-	dbName := MongoDBInternalDBPrefix + "internalDBTest"
+	dbName := namespaces.MongoDBInternalDBPrefix + "internalDBTest"
 
 	_, err := suite.srcMongoClient.
 		Database(dbName).
@@ -2506,21 +2570,14 @@ func (suite *IntegrationTestSuite) TestMongoDBInternalDB() {
 }
 
 func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
+	ctx := suite.Context()
+
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
 	dbname1 := suite.DBNameForTest("1")
 	dbname2 := suite.DBNameForTest("2")
 
 	filter := bson.D{{"inFilter", bson.M{"$ne": false}}}
-	verifier := suite.BuildVerifier()
-	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
-	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})
-	verifier.SetNamespaceMap()
-	verifier.SetDocCompareMethod(DocCompareIgnoreOrder)
-	// Set this value low to test the verifier with multiple partitions.
-	verifier.partitionSizeInBytes = 50
-
-	ctx := suite.Context()
 
 	srcColl := suite.srcMongoClient.Database(dbname1).Collection("testColl1")
 	dstColl := suite.dstMongoClient.Database(dbname2).Collection("testColl3")
@@ -2542,6 +2599,14 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	}
 	_, err = srcColl.InsertMany(ctx, docs)
 	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
+	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})
+	verifier.SetNamespaceMap()
+	verifier.SetDocCompareMethod(DocCompareIgnoreOrder)
+	// Set this value low to test the verifier with multiple partitions.
+	verifier.partitionSizeInBytes = 50
 
 	checkDoneChan := make(chan struct{})
 	checkContinueChan := make(chan struct{})
@@ -2571,9 +2636,28 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	// Wait for one generation to finish.
 	<-checkDoneChan
 	status := waitForTasks()
+
 	suite.Require().Greater(status.CompletedTasks, 1)
 	suite.Require().Greater(status.TotalTasks, 1)
 	suite.Require().Zero(status.FailedTasks, "there should be no failed tasks")
+
+	// When reading the oplog, verifier often sees the “near past”.
+	// Wait for it to do initial checks before continuing.
+	suite.Require().Eventually(
+		func() bool {
+			suite.T().Logf("Checking whether verifier has caught up to itself …")
+
+			checkContinueChan <- struct{}{}
+			<-checkDoneChan
+			status, err = verifier.GetVerificationStatus(ctx)
+			suite.Require().NoError(err)
+
+			return status.TotalTasks == 0
+		},
+		time.Minute,
+		time.Millisecond,
+		"verifier must reach stasis before continuing",
+	)
 
 	// Insert another document that is not in the filter.
 	// This should trigger a recheck despite being outside the filter.
@@ -2595,15 +2679,23 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 201, "x": 201, "inFilter": true})
 	suite.Require().NoError(err)
 
-	// Tell check to start the next generation.
-	checkContinueChan <- struct{}{}
+	suite.Require().Eventually(
+		func() bool {
+			suite.T().Log("checking to see if a failure was found yet")
 
-	// Wait for one generation to finish.
-	<-checkDoneChan
-	status = waitForTasks()
+			// Tell check to start the next generation.
+			checkContinueChan <- struct{}{}
 
-	// There should be a failure from the src insert of a document in the filter.
-	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+			// Wait for one generation to finish.
+			<-checkDoneChan
+			status = waitForTasks()
+
+			return *status == VerificationStatus{TotalTasks: 1, FailedTasks: 1}
+		},
+		time.Minute,
+		time.Second,
+		"we should see a failure from the src insert of a document in the filter.",
+	)
 
 	// Now patch up the destination.
 	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 201, "x": 201, "inFilter": true})
@@ -2618,6 +2710,8 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 
 	// There should be no failures now, since they are equivalent at this point in time.
 	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+
+	suite.T().Log("Finalizing test")
 
 	// Turn writes off.
 	suite.Require().NoError(verifier.WritesOff(ctx))

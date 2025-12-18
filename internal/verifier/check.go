@@ -31,6 +31,11 @@ var (
 		verificationTaskFailed,
 		verificationTaskMetadataMismatch,
 	)
+
+	ChangeReaderOpts = mslices.Of(
+		ChangeReaderOptChangeStream,
+		ChangeReaderOptOplog,
+	)
 )
 
 // Check is the asynchronous entry point to Check, should only be called by the web server. Use
@@ -211,12 +216,13 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		}
 	}
 
-	verifier.logger.Info().Msg("Starting change readers.")
-
 	// Now that we’ve initialized verifier.generation we can
 	// start the change readers.
-	verifier.initializeChangeReaders()
-	//verifier.mux.Unlock()
+	err = verifier.initializeChangeReaders()
+
+	if err != nil {
+		return err
+	}
 
 	err = retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
@@ -245,26 +251,15 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		return err
 	}
 
-	// Log the verification status when initially booting up so it's easy to see the current state
-	verificationStatus, err := verifier.getVerificationStatusForGeneration(ctx, verifier.generation)
-	if err != nil {
-		return errors.Wrapf(
-			err,
-			"failed to retrieve verification status",
-		)
-	} else {
-		verifier.logger.Debug().
-			Any("status", verificationStatus).
-			Msg("Initial verification phase.")
-	}
-
 	err = verifier.CreateInitialTasksIfNeeded(ctx)
 	if err != nil {
 		return err
 	}
+
+	verifier.generationStartTime = time.Now()
+
 	// Now enter the multi-generational steady check state
 	for {
-		//verifier.mux.Lock()
 		err = retry.New().WithCallback(
 			func(ctx context.Context, _ *retry.FuncInfo) error {
 				return verifier.persistGenerationWhileLocked(ctx)
@@ -276,12 +271,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 			verifier.mux.Unlock()
 			return errors.Wrapf(err, "failed to persist generation (%d)", verifier.generation)
 		}
-
-		verifier.generationStartTime = time.Now()
-		verifier.srcEventRecorder.Reset()
-		verifier.dstEventRecorder.Reset()
-
-		verifier.mux.Unlock()
 
 		err := verifier.CheckWorker(ctx)
 		if err != nil {
@@ -324,7 +313,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// caught again on the next iteration.
 		if verifier.writesOff {
 			verifier.logger.Debug().
-				Msg("Waiting for change readers to end.")
+				Msg("Waiting for change handling to finish.")
 
 			// It's necessary to wait for the change reader to finish before incrementing the
 			// generation number, or the last changes will not be checked.
@@ -353,6 +342,9 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// on enqueued rechecks. Meanwhile, generaiton 3’s recheck tasks will
 		// derive from rechecks enqueued during generation 2.
 		verifier.generation++
+		verifier.generationStartTime = time.Now()
+		verifier.srcChangeReader.getEventRecorder().Reset()
+		verifier.dstChangeReader.getEventRecorder().Reset()
 		verifier.mux.Unlock()
 
 		// Generation of recheck tasks can partial-fail. The following will
@@ -602,18 +594,46 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 	}
 }
 
-func (v *Verifier) initializeChangeReaders() {
-	v.srcChangeReader = v.newChangeStreamReader(
-		v.srcNamespaces,
-		src,
-		v.srcClient,
-		*v.srcClusterInfo,
-	)
+func (v *Verifier) initializeChangeReaders() error {
+	v.logger.Info().Msg("Starting change readers.")
 
-	v.dstChangeReader = v.newChangeStreamReader(
-		v.dstNamespaces,
-		dst,
-		v.dstClient,
-		*v.dstClusterInfo,
-	)
+	switch v.srcChangeReaderMethod {
+	case ChangeReaderOptOplog:
+		v.srcChangeReader = v.newOplogReader(
+			v.srcNamespaces,
+			src,
+			v.srcClient,
+			*v.srcClusterInfo,
+		)
+	case ChangeReaderOptChangeStream:
+		v.srcChangeReader = v.newChangeStreamReader(
+			v.srcNamespaces,
+			src,
+			v.srcClient,
+			*v.srcClusterInfo,
+		)
+	default:
+		return fmt.Errorf("bad source change reader: %#q", v.srcChangeReaderMethod)
+	}
+
+	switch v.dstChangeReaderMethod {
+	case ChangeReaderOptOplog:
+		v.dstChangeReader = v.newOplogReader(
+			v.dstNamespaces,
+			dst,
+			v.dstClient,
+			*v.dstClusterInfo,
+		)
+	case ChangeReaderOptChangeStream:
+		v.dstChangeReader = v.newChangeStreamReader(
+			v.dstNamespaces,
+			dst,
+			v.dstClient,
+			*v.dstClusterInfo,
+		)
+	default:
+		return fmt.Errorf("bad destination change reader: %#q", v.srcChangeReaderMethod)
+	}
+
+	return nil
 }

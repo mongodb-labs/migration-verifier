@@ -76,11 +76,12 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 					{"task", 1},
 				},
 			},
-			// This index is a descending index because we care most about
-			// long-lived mismatches.
+
+			// This index supports mismatch reports.
 			{
 				Keys: bson.D{
 					{"detail.mismatchHistory.durationMS", -1},
+					{"detail.id", 1},
 				},
 			},
 		},
@@ -292,10 +293,18 @@ func (mct mismatchCountsPerType) Total() int64 {
 }
 
 type mismatchReportData struct {
+	// ContentDiffers shows the most long-lived content-differing mismatches.
 	ContentDiffers []MismatchInfo
-	MissingOnDst   []MismatchInfo
-	ExtraOnDst     []MismatchInfo
 
+	// MissingOnDst is like ContentDiffers but for mismatches where the
+	// destination lacks the document.
+	MissingOnDst []MismatchInfo
+
+	// ExtraOnDst is like ContentDiffers but for mismatches where the
+	// document exists on the destination but not the source.
+	ExtraOnDst []MismatchInfo
+
+	// Counts tallies up all mismatches, however long-lived.
 	Counts mismatchCountsPerType
 }
 

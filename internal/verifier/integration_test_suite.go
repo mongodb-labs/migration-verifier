@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"cmp"
 	"context"
 	"os"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
@@ -117,6 +119,9 @@ func (suite *IntegrationTestSuite) SetupTest() {
 			suite.initialDbNames.Add(dbName)
 		}
 	}
+
+	testutil.KillTransactions(ctx, suite.T(), suite.srcMongoClient)
+	testutil.KillTransactions(ctx, suite.T(), suite.dstMongoClient)
 }
 
 func (suite *IntegrationTestSuite) TearDownTest() {
@@ -191,11 +196,26 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		"should set metadata connection string",
 	)
 	verifier.SetMetaDBName(metaDBName)
-	verifier.initializeChangeReaders()
+
+	envSrcChangeReader := cmp.Or(
+		os.Getenv("MVTEST_SRC_CHANGE_READER"),
+		ChangeReaderOptChangeStream,
+	)
+	suite.Require().NoError(verifier.SetSrcChangeReaderMethod(envSrcChangeReader))
+
+	envDstChangeReader := cmp.Or(
+		os.Getenv("MVTEST_DST_CHANGE_READER"),
+		ChangeReaderOptChangeStream,
+	)
+
+	suite.Require().NoError(verifier.SetDstChangeReaderMethod(envDstChangeReader))
+
+	suite.Require().NoError(verifier.initializeChangeReaders())
 
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))
 	suite.Require().NoError(verifier.dstClientCollection(&task).Drop(ctx))
 	suite.Require().NoError(verifier.AddMetaIndexes(ctx))
+
 	return verifier
 }
 

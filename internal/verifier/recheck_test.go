@@ -69,8 +69,8 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 
 	err := verifier.PersistChangeEvents(
 		ctx,
-		changeEventBatch{events: mslices.Of(event)},
-		src,
+		eventBatch{events: mslices.Of(event)},
+		verifier.srcChangeReader,
 	)
 	suite.Require().NoError(err)
 

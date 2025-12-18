@@ -51,7 +51,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	dataSizes []int32,
 	firstMismatchTimes []bson.DateTime,
 ) error {
-	if firstMismatchTimes == nil {
+	if len(firstMismatchTimes) == 0 {
 		panic("mismatch recheck must have first-mismatch times!")
 	}
 
@@ -236,7 +236,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	curRechecks := make([]bson.Raw, 0, recheckBatchCountLimit)
 	curBatchBytes := 0
 	for i, dbName := range dbNames {
-		if firstMismatchTimes != nil {
+		if len(firstMismatchTimes) > 0 {
 			firstMismatchTime = option.Some(firstMismatchTimes[i])
 		}
 
@@ -412,12 +412,25 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	}
 	defer cursor.Close(ctx)
 
-	var curTasks []bson.Raw
-	var curTasksBytes int
+	var (
+		curTasks      []bson.Raw
+		curTasksBytes int
+		totalTasks    int
+		totalInserts  int
+	)
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
 
-	var totalTasks, totalInserts int
+	addInsertRequest := func(tasks []bson.Raw) {
+		eg.Go(
+			func() error {
+				return verifier.insertDocumentRecheckTasks(egCtx, tasks)
+			},
+		)
+
+		totalInserts++
+	}
+
 	persistBufferedRechecks := func() error {
 		if len(idAccum) == 0 {
 			return nil
@@ -457,13 +470,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			tasksClone := slices.Clone(curTasks)
 			curTasks = curTasks[:0]
 
-			eg.Go(
-				func() error {
-					return verifier.insertDocumentRecheckTasks(egCtx, tasksClone)
-				},
-			)
-
-			totalInserts++
+			addInsertRequest(tasksClone)
 		}
 
 		verifier.logger.Debug().
@@ -565,11 +572,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	}
 
 	if len(curTasks) > 0 {
-		eg.Go(
-			func() error {
-				return verifier.insertDocumentRecheckTasks(egCtx, curTasks)
-			},
-		)
+		addInsertRequest(curTasks)
 	}
 
 	err = eg.Wait()
