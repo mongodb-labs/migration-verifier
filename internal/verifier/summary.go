@@ -614,7 +614,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 	for _, cluster := range []struct {
 		title             string
 		csReader          changeReader
-		lastHandledOpTime bson.Timestamp
+		lastRecheckedOpTime bson.Timestamp
 	}{
 		{"Source", verifier.srcChangeReader, lastSrcOpTime},
 		{"Destination", verifier.dstChangeReader, lastDstOpTime},
@@ -694,19 +694,12 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			strings.Join(logPieces, "; "),
 		)
 
-		if !cluster.lastHandledOpTime.IsZero() {
-			optimeStrs := mslices.Of(
-				fmt.Sprintf(
-					"%d/%d",
-					cluster.lastHandledOpTime.T,
-					cluster.lastHandledOpTime.I,
-				),
-			)
-
+		if !cluster.lastRecheckedOpTime.IsZero() {
 			fmt.Fprintf(
 				builder,
-				"    Last-handled optime: %s",
-				strings.Join(optimeStrs, " "),
+				"    Latest rechecked change optime: %d/%d",
+				cluster.lastRecheckedOpTime.T,
+				cluster.lastRecheckedOpTime.I,
 			)
 		}
 
@@ -715,15 +708,6 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			"    Writes this generation: %s\n",
 			eventsDescr,
 		)
-
-		if hasTimes {
-			fmt.Fprintf(
-				builder,
-				"    Last-handled optime: %d/%d\n",
-				times.LastHandledTime.T,
-				times.LastHandledTime.I,
-			)
-		}
 
 		if hasTimes && times.Lag() > lagWarnThreshold {
 			fmt.Fprint(
