@@ -65,7 +65,16 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		Int("count", len(documentIDs)).
 		Msg("Persisting rechecks for mismatched or missing documents.")
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes, firstMismatchTimes)
+	return verifier.insertRecheckDocs(
+		ctx,
+		dbNames,
+		collNames,
+		documentIDs,
+		dataSizes,
+		firstMismatchTimes,
+		option.None[whichCluster](),
+		nil,
+	)
 }
 
 func (verifier *Verifier) insertRecheckDocs(
@@ -75,7 +84,13 @@ func (verifier *Verifier) insertRecheckDocs(
 	documentIDs []bson.RawValue,
 	dataSizes []int32,
 	firstMismatchTimes []bson.DateTime,
+	changeOrigin option.Option[whichCluster],
+	changeOpTimes []bson.Timestamp,
 ) error {
+	if (len(firstMismatchTimes) == 0) == (len(changeOpTimes) == 0) {
+		panic("Expect either mismatch times or optimes, not both/neither.")
+	}
+
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
 
@@ -147,11 +162,18 @@ func (verifier *Verifier) insertRecheckDocs(
 	}
 
 	var firstMismatchTime option.Option[bson.DateTime]
+	var opTime option.Option[bson.Timestamp]
+
+	fromDst := changeOrigin.OrZero() == dst
+
 	curRechecks := make([]bson.Raw, 0, recheckBatchCountLimit)
 	curBatchBytes := 0
 	for i, dbName := range dbNames {
 		if len(firstMismatchTimes) > 0 {
 			firstMismatchTime = option.Some(firstMismatchTimes[i])
+		}
+		if len(changeOpTimes) > 0 {
+			opTime = option.Some(changeOpTimes[i])
 		}
 
 		recheckDoc := recheck.Doc{
@@ -162,6 +184,8 @@ func (verifier *Verifier) insertRecheckDocs(
 				Rand:              rand.Int32(),
 			},
 			DataSize:          dataSizes[i],
+			ChangeOpTime:      opTime,
+			FromDst:           fromDst,
 			FirstMismatchTime: firstMismatchTime,
 		}
 
@@ -307,7 +331,10 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	var totalDocs types.DocumentCount
 	var dataSizeAccum, totalRecheckData int64
 
+	// These are indexed by idAccum index:
 	firstMismatchTime := map[int32]bson.DateTime{}
+	srcChangeOpTime := map[int32]bson.Timestamp{}
+	dstChangeOpTime := map[int32]bson.Timestamp{}
 
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
@@ -355,6 +382,8 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		task, err := verifier.createDocumentRecheckTask(
 			idAccum,
 			firstMismatchTime,
+			srcChangeOpTime,
+			dstChangeOpTime,
 			types.ByteCount(dataSizeAccum),
 			namespace,
 		)
@@ -434,6 +463,8 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			idAccum = idAccum[:0]
 			lastIDRaw = bson.RawValue{}
 			clear(firstMismatchTime)
+			clear(srcChangeOpTime)
+			clear(dstChangeOpTime)
 		}
 
 		// A document can be enqueued for recheck for multiple reasons:
@@ -466,9 +497,18 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
+
 		if fmt, has := doc.FirstMismatchTime.Get(); has {
 			firstMismatchTime[int32(len(idAccum))] = fmt
 		}
+		if optime, has := doc.ChangeOpTime.Get(); has {
+			if doc.FromDst {
+				dstChangeOpTime[int32(len(idAccum))] = optime
+			} else {
+				srcChangeOpTime[int32(len(idAccum))] = optime
+			}
+		}
+
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 
 		totalRecheckData += int64(doc.DataSize)

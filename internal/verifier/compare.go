@@ -13,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
+	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/pkg/errors"
@@ -35,6 +36,30 @@ const (
 type docWithTs struct {
 	doc bson.Raw
 	ts  bson.Timestamp
+}
+
+func (verifier *Verifier) NoteCompareOfOptime(
+	cluster whichCluster,
+	optime bson.Timestamp,
+) {
+	var db *msync.DataGuard[bson.Timestamp]
+
+	switch cluster {
+	case src:
+		db = verifier.lastProcessedSrcOptime
+	case dst:
+		db = verifier.lastProcessedSrcOptime
+	default:
+		panic("bad cluster: " + cluster)
+	}
+
+	db.Store(func(t bson.Timestamp) bson.Timestamp {
+		if optime.After(t) {
+			return optime
+		}
+
+		return t
+	})
 }
 
 func (verifier *Verifier) FetchAndCompareDocuments(
@@ -120,7 +145,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	srcCache := map[string]docWithTs{}
 	dstCache := map[string]docWithTs{}
 
-	firstMismatchTimeLookup := firstMismatchTimeLookup{
+	docMetaLookup := docMetadataLookup{
 		task:             task,
 		docCompareMethod: verifier.docCompareMethod,
 	}
@@ -190,11 +215,19 @@ func (verifier *Verifier) compareDocsFromChannels(
 			return errors.Wrap(err, "failed to compare documents")
 		}
 
+		if ot, has := docMetaLookup.getSrcChangeOpTime(srcDoc.doc).Get(); has {
+			verifier.NoteCompareOfOptime(src, ot)
+		}
+
+		if ot, has := docMetaLookup.getDstChangeOpTime(srcDoc.doc).Get(); has {
+			verifier.NoteCompareOfOptime(dst, ot)
+		}
+
 		if len(mismatches) == 0 {
 			return nil
 		}
 
-		firstMismatchTime := firstMismatchTimeLookup.get(srcDoc.doc)
+		firstMismatchTime := docMetaLookup.getFirstMismatchTime(srcDoc.doc)
 
 		for i := range mismatches {
 			mismatches[i].MismatchHistory = createMismatchTimes(firstMismatchTime)
@@ -330,7 +363,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	results = slices.Grow(results, len(srcCache)+len(dstCache))
 
 	for _, docWithTs := range srcCache {
-		firstMismatchTime := firstMismatchTimeLookup.get(docWithTs.doc)
+		firstMismatchTime := docMetaLookup.getFirstMismatchTime(docWithTs.doc)
 
 		results = append(
 			results,
@@ -352,7 +385,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	}
 
 	for _, docWithTs := range dstCache {
-		firstMismatchTime := firstMismatchTimeLookup.get(docWithTs.doc)
+		firstMismatchTime := docMetaLookup.getFirstMismatchTime(docWithTs.doc)
 
 		results = append(
 			results,

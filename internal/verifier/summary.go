@@ -602,12 +602,22 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 	totalEventsForBothClusters := 0
 
+	var lastSrcOpTime, lastDstOpTime bson.Timestamp
+
+	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+		lastSrcOpTime = t
+	})
+	verifier.lastProcessedDstOptime.Load(func(t bson.Timestamp) {
+		lastDstOpTime = t
+	})
+
 	for _, cluster := range []struct {
-		title    string
-		csReader changeReader
+		title             string
+		csReader          changeReader
+		lastHandledOpTime bson.Timestamp
 	}{
-		{"Source", verifier.srcChangeReader},
-		{"Destination", verifier.dstChangeReader},
+		{"Source", verifier.srcChangeReader, lastSrcOpTime},
+		{"Destination", verifier.dstChangeReader, lastDstOpTime},
 	} {
 		fmt.Fprint(builder, "\n")
 
@@ -683,6 +693,33 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			cluster.title,
 			strings.Join(logPieces, "; "),
 		)
+
+		if !cluster.lastHandledOpTime.IsZero() {
+			optimeStrs := mslices.Of(
+				fmt.Sprintf(
+					"rechecked: %d/%d",
+					cluster.lastHandledOpTime.T,
+					cluster.lastHandledOpTime.I,
+				),
+			)
+
+			if hasTimes {
+				optimeStrs = append(
+					optimeStrs,
+					fmt.Sprintf(
+						"(last enqueued: %d/%d)",
+						times.LastHandledTime.T,
+						times.LastHandledTime.I,
+					),
+				)
+			}
+
+			fmt.Fprintf(
+				builder,
+				"    Last-rechecked optime: %s",
+				strings.Join(optimeStrs, " "),
+			)
+		}
 
 		fmt.Fprintf(
 			builder,

@@ -191,6 +191,9 @@ type Doc struct {
 	// is enqueued multiple times for the same document in the same generation.
 	DataSize int32 `bson:"dataSize"`
 
+	ChangeOpTime option.Option[bson.Timestamp]
+	FromDst      bool `bson:",omitempty"`
+
 	// FirstMismatchTime records when this doc was seen mismatched.
 	FirstMismatchTime option.Option[bson.DateTime] `bson:"firstMismatchTime"`
 }
@@ -210,6 +213,16 @@ func (rd Doc) MarshalToBSON() []byte {
 	// This document’s nonvariable parts comprise 24 bytes.
 	expectedLen := 24 + len(keyRaw)
 
+	if rd.ChangeOpTime.IsSome() {
+		expectedLen += 1 + len("changeOpTime") + 1 + 8
+	} else if rd.FromDst {
+		panic("Can’t be from destination without an optime!")
+	}
+
+	if rd.FromDst {
+		expectedLen += 1 + len("fromDst") + 1 + 1
+	}
+
 	if rd.FirstMismatchTime.IsSome() {
 		expectedLen += 1 + len("firstMismatchTime") + 1 + 8
 	}
@@ -217,6 +230,14 @@ func (rd Doc) MarshalToBSON() []byte {
 	doc := make(bson.Raw, 4, expectedLen)
 	doc = bsoncore.AppendDocumentElement(doc, "_id", keyRaw)
 	doc = bsoncore.AppendInt32Element(doc, "dataSize", int32(rd.DataSize))
+
+	if cot, has := rd.ChangeOpTime.Get(); has {
+		doc = bsoncore.AppendTimestampElement(doc, "ChangeOpTime", cot.T, cot.I)
+	}
+
+	if rd.FromDst {
+		doc = bsoncore.AppendBooleanElement(doc, "fromDst", rd.FromDst)
+	}
 
 	if fmt, has := rd.FirstMismatchTime.Get(); has {
 		doc = bsoncore.AppendDateTimeElement(doc, "firstMismatchTime", int64(fmt))
@@ -260,6 +281,17 @@ func (rd *Doc) UnmarshalFromBSON(in []byte) error {
 			}
 		case "dataSize":
 			if err := mbson.UnmarshalElementValue(el, &rd.DataSize); err != nil {
+				return err
+			}
+		case "changeOpTime":
+			var ts bson.Timestamp
+			if err := mbson.UnmarshalElementValue(el, &ts); err != nil {
+				return err
+			}
+
+			rd.ChangeOpTime = option.Some(ts)
+		case "fromDst":
+			if err := mbson.UnmarshalElementValue(el, &rd.FromDst); err != nil {
 				return err
 			}
 		case "firstMismatchTime":

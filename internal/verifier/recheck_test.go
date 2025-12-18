@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -533,5 +534,12 @@ func insertRecheckDocs(
 		rawIDs,
 		dataSizes,
 		nil,
+		option.None[whichCluster](),
+		lo.RepeatBy(
+			len(dbNames),
+			func(index int) bson.Timestamp {
+				return bson.Timestamp{123, uint32(index)}
+			},
+		),
 	)
 }

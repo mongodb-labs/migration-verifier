@@ -21,6 +21,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/dustin/go-humanize"
 	"github.com/olekukonko/tablewriter"
@@ -102,6 +103,9 @@ type Verifier struct {
 
 	srcChangeReaderMethod string
 	dstChangeReaderMethod string
+
+	lastProcessedSrcOptime *msync.DataGuard[bson.Timestamp]
+	lastProcessedDstOptime *msync.DataGuard[bson.Timestamp]
 
 	changeHandlingErr *util.Eventual[error]
 
@@ -194,6 +198,9 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		nsMap:                           NewNSMap(),
 
 		changeHandlingErr: util.NewEventual[error](),
+
+		lastProcessedSrcOptime: msync.NewDataGuard(bson.Timestamp{}),
+		lastProcessedDstOptime: msync.NewDataGuard(bson.Timestamp{}),
 	}
 }
 
