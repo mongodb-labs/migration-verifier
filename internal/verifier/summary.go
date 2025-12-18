@@ -697,26 +697,15 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 		if !cluster.lastHandledOpTime.IsZero() {
 			optimeStrs := mslices.Of(
 				fmt.Sprintf(
-					"rechecked: %d/%d",
+					"%d/%d",
 					cluster.lastHandledOpTime.T,
 					cluster.lastHandledOpTime.I,
 				),
 			)
 
-			if hasTimes {
-				optimeStrs = append(
-					optimeStrs,
-					fmt.Sprintf(
-						"(last enqueued: %d/%d)",
-						times.LastHandledTime.T,
-						times.LastHandledTime.I,
-					),
-				)
-			}
-
 			fmt.Fprintf(
 				builder,
-				"    Last-rechecked optime: %s",
+				"    Last-handled optime: %s",
 				strings.Join(optimeStrs, " "),
 			)
 		}
