@@ -302,14 +302,17 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 			SrcCollectionName: "testColl",
 			DocumentID:        mbson.ToRawValue(id1),
 		},
+		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
 	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
+	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 	d3 := d1
 	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
+	d3.ChangeOpTime = option.Some(bson.Timestamp{123, 2})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
-	suite.ElementsMatch([]any{d1, d2, d3}, results)
+	suite.Assert().ElementsMatch([]any{d1, d2, d3}, results)
 
 	verifier.generation++
 	err = verifier.GenerateRecheckTasks(ctx)
@@ -333,13 +336,17 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 		SourceDocumentCount: 1,
 		SourceByteCount:     types.ByteCount(overlyLarge),
 		FirstMismatchTime:   map[int32]bson.DateTime{},
+		SrcChangeOpTime:     map[int32]bson.Timestamp{0: {123, 0}},
+		DstChangeOpTime:     map[int32]bson.Timestamp{},
 	}
 
 	t2 := t1
 	t2.Ids = mslices.Of(mbson.ToRawValue(id2))
+	t2.SrcChangeOpTime = map[int32]bson.Timestamp{0: {123, 1}}
 
 	t3 := t1
 	t3.Ids = mslices.Of(mbson.ToRawValue(id3))
+	t3.SrcChangeOpTime = map[int32]bson.Timestamp{0: {123, 2}}
 
 	suite.ElementsMatch([]VerificationTask{t1, t2, t3}, foundTasks)
 }
