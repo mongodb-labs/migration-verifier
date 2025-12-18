@@ -95,7 +95,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 			"comparing documents",
 		).Run(givenCtx, verifier.logger)
 
-	if err != nil {
+	if err == nil {
 		if ts, has := task.SrcTimestamp.Get(); has {
 			verifier.NoteCompareOfOptime(src, ts)
 		}
