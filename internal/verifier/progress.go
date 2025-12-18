@@ -8,7 +8,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 )
 
 func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
@@ -139,11 +138,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 	}
 
 	return Progress{
-		Phase: lo.Ternary(
-			verifier.running,
-			lo.Ternary(generation > 0, Recheck, Check),
-			Idle,
-		),
+		Phase:           verifier.getPhaseWhileLocked(),
 		Generation:      verifier.generation,
 		GenerationStats: genStats,
 		SrcChangeStats: ProgressChangeStats{
@@ -159,4 +154,18 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 		Status: vStatus,
 	}, nil
 
+}
+
+func (verifier *Verifier) getPhaseWhileLocked() string {
+	verifier.assertLocked()
+
+	if !verifier.running {
+		return Idle
+	}
+
+	if verifier.generation > 0 {
+		return Recheck
+	}
+
+	return Check
 }
