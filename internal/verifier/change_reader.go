@@ -96,12 +96,12 @@ type ChangeReaderCommon struct {
 func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 	return ChangeReaderCommon{
 		readerType:          clusterName,
+		eventBatchChan:      make(chan eventBatch, batchChanBufferSize),
+		eventRecorder:       NewEventRecorder(),
 		writesOffTs:         util.NewEventual[bson.Timestamp](),
 		currentTimes:        msync.NewTypedAtomic(option.None[readerCurrentTimes]()),
 		lastChangeEventTime: msync.NewTypedAtomic(option.None[bson.Timestamp]()),
 		batchSizeHistory:    history.New[int](time.Minute),
-		eventBatchChan:      make(chan eventBatch, batchChanBufferSize),
-		eventRecorder:       NewEventRecorder(),
 		onDDLEvent: lo.Ternary(
 			clusterName == dst,
 			onDDLEventAllow,

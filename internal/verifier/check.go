@@ -271,6 +271,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 			verifier.mux.Unlock()
 			return errors.Wrapf(err, "failed to persist generation (%d)", verifier.generation)
 		}
+		verifier.mux.Unlock()
 
 		err := verifier.CheckWorker(ctx)
 		if err != nil {

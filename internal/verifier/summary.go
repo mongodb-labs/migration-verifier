@@ -635,6 +635,16 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 		logPieces := []string{}
 
+		if eps, has := cluster.csReader.getEventsPerSecond().Get(); has {
+			logPieces = append(
+				logPieces,
+				fmt.Sprintf(
+					"%s writes/sec",
+					reportutils.FmtReal(eps),
+				),
+			)
+		}
+
 		times, hasTimes := cluster.csReader.getCurrentTimes().Get()
 
 		if hasTimes {
