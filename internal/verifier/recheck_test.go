@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -362,6 +363,10 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 }
 
 func (suite *IntegrationTestSuite) TestManyManyRechecks() {
+	if len(os.Getenv("CI")) > 0 {
+		suite.T().Skip("Skipping this test in CI. (It causes GitHub Action to self-terminate.)")
+	}
+
 	verifier := suite.BuildVerifier()
 	verifier.SetNumWorkers(10)
 	ctx := suite.Context()
@@ -583,6 +588,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 		SourceDocumentCount: 3,
 		SourceByteCount:     3000,
 		FirstMismatchTime:   map[int32]bson.DateTime{},
+		SrcTimestamp:        option.Some(bson.Timestamp{123, 2}),
 	}
 	t2, t3, t4 := t1, t1, t1
 	t2.QueryFilter.Namespace = "testDB2.testColl1"
