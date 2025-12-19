@@ -11,20 +11,19 @@ import (
 
 type bsonCastRecipient interface {
 	bson.Raw | bson.RawArray | bson.Timestamp | bson.ObjectID | bson.DateTime |
-		string | int32 | int64 | float64 | time.Time
+		string | int32 | int64 | float64 | bool | time.Time
 }
 
 type bsonSourceTypes interface {
 	string | int | int32 | int64 | bson.ObjectID
 }
 
-type cannotCastErr struct {
+type cannotCastErr[T any] struct {
 	gotBSONType bson.Type
-	toGoType    any
 }
 
-func (ce cannotCastErr) Error() string {
-	return fmt.Sprintf("cannot cast BSON %s to %T", ce.gotBSONType, ce.toGoType)
+func (ce cannotCastErr[T]) Error() string {
+	return fmt.Sprintf("cannot cast BSON %s to %T", ce.gotBSONType, *new(T))
 }
 
 // CastRawValue is a “one-stop-shop” interface around bson.RawValue’s various
@@ -33,7 +32,9 @@ func (ce cannotCastErr) Error() string {
 //
 // Augment bsonCastRecipient if you find a type here that’s missing.
 func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
-	switch any(*new(T)).(type) {
+	var zero T
+
+	switch any(zero).(type) {
 	case bson.Raw:
 		if doc, isDoc := in.DocumentOK(); isDoc {
 			return any(doc).(T), nil
@@ -70,6 +71,10 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 		if val, ok := in.Int64OK(); ok {
 			return any(val).(T), nil
 		}
+	case bool:
+		if val, ok := in.BooleanOK(); ok {
+			return any(val).(T), nil
+		}
 	case time.Time:
 		if val, ok := in.DateTimeOK(); ok {
 			return any(bson.DateTime(val).Time()).(T), nil
@@ -78,7 +83,7 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 		panic(fmt.Sprintf("Unrecognized Go type: %T (maybe augment bsonType?)", in))
 	}
 
-	return *new(T), cannotCastErr{in.Type, any(in)}
+	return zero, cannotCastErr[T]{in.Type}
 }
 
 // Lookup fetches a value from a BSON document, casts it to the appropriate

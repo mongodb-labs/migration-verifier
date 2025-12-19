@@ -14,32 +14,46 @@ Both of these contain the first time that the document was seen to mismatch.
 The mismatch additionally contains the length of time since a) that first time,
 and b) the most recent time the mismatch was seen.
 
-## New generations
+# Change Events
+
+Every time a document changes, either on the source or destination, MV
+enqueues a recheck for that document. Unlike with mismatches, though,
+such rechecks _do not_ contain a first-mismatch time. Instead, these rechecks
+contain a) the change event’s ClusterTime, and b) an indicator of which
+cluster had the change (currently implemented as a boolean).
+
+The cluster time & cluster indicator allow MV to track the latest change
+event it has fully rechecked. (See below.)
+
+# New generations
 
 Between generations MV reads its recheck queue (i.e., its “notes to self”).
 From this it creates recheck tasks, each of which contains a list of IDs of
 documents to recheck.
 
-MV also copies each document’s first mismatch time into the recheck tasks.
-When those documents get rechecked, hopefully there is no more mismatch!
-If there is, though, then we create another recheck & another mismatch,
-populated as above.
-
-# Change Events
-
-Every time a document changes, either on the source or destination, MV
-enqueues a recheck for that document. Unlike with mismatches, though,
-such rechecks _do not_ contain a first-mismatch time. When MV turns such
-rechecks into verifier tasks, there is no first-mismatch time for these in
-the task.
+Each recheck task records each document ID’s, the first-mismatch time.
+It also stores the latest source & destination change timestamps seen among
+the rechecks.
 
 Of particular note: the same document can have rechecks enqueued from both
-a mismatch _and_ a change event. When this happens, MV “resets” the
+a mismatch _and_ change events. When this happens, MV “resets” the
 document’s first-mismatch time by omitting it from the new generation’s
-recheck task that contains the document’s ID.
+recheck task.
 
 For example: assume MV has seen a document mismatch for 1 minute. Then a
 change event arrives at the same time that MV sees the mismatch again.
 In the new generation, hopefully there is no more mismatch! If there is,
 though, it will get a new first-mismatch time in the resulting recheck
 & mismatch documents.
+
+# Recheck task processing
+
+When MV processes recheck tasks, it sends a big `{_id: {$in: [...]}}` query
+to both source & destination clusters. It then matches up the results by
+document ID (binary equivalence).
+
+If both clusters returned a document, then we compare them. If they mismatch,
+a mismatch recheck is enqueued as described above.
+
+Once all documents are compared, verifier reads the task’s source &
+destination timestamps then updates its internal last-compared timestamps.

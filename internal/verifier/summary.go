@@ -602,12 +602,22 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 	totalEventsForBothClusters := 0
 
+	var lastSrcOpTime, lastDstOpTime bson.Timestamp
+
+	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+		lastSrcOpTime = t
+	})
+	verifier.lastProcessedDstOptime.Load(func(t bson.Timestamp) {
+		lastDstOpTime = t
+	})
+
 	for _, cluster := range []struct {
-		title    string
-		csReader changeReader
+		title               string
+		csReader            changeReader
+		lastRecheckedOpTime bson.Timestamp
 	}{
-		{"Source", verifier.srcChangeReader},
-		{"Destination", verifier.dstChangeReader},
+		{"Source", verifier.srcChangeReader, lastSrcOpTime},
+		{"Destination", verifier.dstChangeReader, lastDstOpTime},
 	} {
 		fmt.Fprint(builder, "\n")
 
@@ -684,20 +694,20 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			strings.Join(logPieces, "; "),
 		)
 
+		if !cluster.lastRecheckedOpTime.IsZero() {
+			fmt.Fprintf(
+				builder,
+				"    Latest rechecked write’s timestamp: %d/%d\n",
+				cluster.lastRecheckedOpTime.T,
+				cluster.lastRecheckedOpTime.I,
+			)
+		}
+
 		fmt.Fprintf(
 			builder,
 			"    Writes this generation: %s\n",
 			eventsDescr,
 		)
-
-		if hasTimes {
-			fmt.Fprintf(
-				builder,
-				"    Last-handled optime: %d/%d\n",
-				times.LastHandledTime.T,
-				times.LastHandledTime.I,
-			)
-		}
 
 		if hasTimes && times.Lag() > lagWarnThreshold {
 			fmt.Fprint(

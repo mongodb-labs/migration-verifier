@@ -13,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
+	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/pkg/errors"
@@ -94,7 +95,40 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 			"comparing documents",
 		).Run(givenCtx, verifier.logger)
 
+	if err == nil {
+		if ts, has := task.SrcTimestamp.Get(); has {
+			verifier.NoteCompareOfOptime(src, ts)
+		}
+
+		if ts, has := task.DstTimestamp.Get(); has {
+			verifier.NoteCompareOfOptime(dst, ts)
+		}
+	}
+
 	return results, docCount, byteCount, err
+}
+
+func (verifier *Verifier) NoteCompareOfOptime(
+	cluster whichCluster,
+	optime bson.Timestamp,
+) {
+	var dg *msync.DataGuard[bson.Timestamp]
+
+	switch cluster {
+	case src:
+		dg = verifier.lastProcessedSrcOptime
+	case dst:
+		dg = verifier.lastProcessedDstOptime
+	default:
+		panic("bad cluster: " + cluster)
+	}
+
+	dg.Store(func(t bson.Timestamp) bson.Timestamp {
+		if optime.After(t) {
+			return optime
+		}
+		return t
+	})
 }
 
 func (verifier *Verifier) compareDocsFromChannels(

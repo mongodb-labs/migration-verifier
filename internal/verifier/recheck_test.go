@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/testutil"
@@ -12,8 +13,11 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
+	"github.com/samber/lo/mutable"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -252,6 +256,112 @@ func (suite *IntegrationTestSuite) TestDuplicateRecheck() {
 	suite.Require().NoError(err, "should insert the second time")
 }
 
+func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
+	ctx := suite.Context()
+	dbName := suite.DBNameForTest()
+	collName := "mycoll"
+	docID := mbson.ToRawValue("heyhey")
+
+	verifier := suite.BuildVerifier()
+
+	suite.Run(
+		"mismatch only",
+		func() {
+			err := verifier.insertRecheckDocs(
+				ctx,
+				mslices.Of(dbName),
+				mslices.Of(collName),
+				mslices.Of(docID),
+				mslices.Of(int32(123)),
+				mslices.Of(bson.NewDateTimeFromTime(time.Now())),
+				option.None[whichCluster](),
+				nil,
+			)
+			suite.Require().NoError(err)
+
+			verifier.generation++
+			err = verifier.GenerateRecheckTasks(ctx)
+			suite.Require().NoError(err)
+
+			tasks := fetchVerifierCurrentTasks(ctx, suite.T(), verifier)
+			suite.Require().Len(tasks, 1)
+			suite.Assert().NotEmpty(tasks[0].FirstMismatchTime)
+			suite.Assert().Zero(tasks[0].SrcTimestamp)
+			suite.Assert().Zero(tasks[0].DstTimestamp)
+		},
+	)
+
+	suite.Run(
+		"mismatch and change events",
+		func() {
+			timestamps := []bson.Timestamp{
+				{123, 234},
+				{234, 345},
+				{345, 456},
+			}
+			mutable.Shuffle(timestamps)
+
+			mismatchTime := bson.NewDateTimeFromTime(time.Now())
+
+			insertCallbacks := mslices.Of(
+				func() {
+					err := verifier.insertRecheckDocs(
+						ctx,
+						mslices.Of(dbName),
+						mslices.Of(collName),
+						mslices.Of(docID),
+						mslices.Of(int32(123)),
+						mslices.Of(mismatchTime),
+						option.None[whichCluster](),
+						nil,
+					)
+					suite.Require().NoError(err)
+				},
+			)
+
+			for _, cluster := range mslices.Of(src, dst) {
+				insertCallbacks = append(
+					insertCallbacks,
+					func() {
+						err := verifier.insertRecheckDocs(
+							ctx,
+							mslices.Of(dbName, dbName, dbName),
+							mslices.Of(collName, collName, collName),
+							mslices.Of(docID, docID, docID),
+							mslices.Of(int32(123), int32(123), int32(123)),
+							nil,
+							option.Some(cluster),
+							timestamps,
+						)
+						suite.Require().NoError(err)
+					},
+				)
+			}
+
+			mutable.Shuffle(insertCallbacks)
+			for _, cb := range insertCallbacks {
+				cb()
+			}
+
+			verifier.generation++
+			err := verifier.GenerateRecheckTasks(ctx)
+			suite.Require().NoError(err)
+
+			tasks := fetchVerifierCurrentTasks(ctx, suite.T(), verifier)
+			suite.Require().Len(tasks, 1)
+			suite.Assert().Empty(tasks[0].FirstMismatchTime)
+			suite.Assert().Equal(
+				option.Some(bson.Timestamp{345, 456}),
+				tasks[0].SrcTimestamp,
+			)
+			suite.Assert().Equal(
+				option.Some(bson.Timestamp{345, 456}),
+				tasks[0].DstTimestamp,
+			)
+		},
+	)
+}
+
 func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	if len(os.Getenv("CI")) > 0 {
 		suite.T().Skip("Skipping this test in CI. (It causes GitHub Action to self-terminate.)")
@@ -301,14 +411,17 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 			SrcCollectionName: "testColl",
 			DocumentID:        mbson.ToRawValue(id1),
 		},
+		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
 	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
+	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 	d3 := d1
 	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
+	d3.ChangeOpTime = option.Some(bson.Timestamp{123, 2})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
-	suite.ElementsMatch([]any{d1, d2, d3}, results)
+	suite.Assert().ElementsMatch([]any{d1, d2, d3}, results)
 
 	verifier.generation++
 	err = verifier.GenerateRecheckTasks(ctx)
@@ -332,15 +445,35 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 		SourceDocumentCount: 1,
 		SourceByteCount:     types.ByteCount(overlyLarge),
 		FirstMismatchTime:   map[int32]bson.DateTime{},
+		SrcTimestamp:        option.Some(bson.Timestamp{123, 0}),
 	}
 
 	t2 := t1
 	t2.Ids = mslices.Of(mbson.ToRawValue(id2))
+	t2.SrcTimestamp = option.Some(bson.Timestamp{123, 1})
 
 	t3 := t1
 	t3.Ids = mslices.Of(mbson.ToRawValue(id3))
+	t3.SrcTimestamp = option.Some(bson.Timestamp{123, 2})
 
 	suite.ElementsMatch([]VerificationTask{t1, t2, t3}, foundTasks)
+}
+
+func fetchVerifierCurrentTasks(
+	ctx context.Context,
+	t *testing.T,
+	verifier *Verifier,
+) []VerificationTask {
+	taskColl := verifier.metaClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
+
+	cursor, err := taskColl.Find(ctx, bson.D{{"generation", verifier.generation}})
+	require.NoError(t, err)
+
+	var actualTasks []VerificationTask
+	err = cursor.All(ctx, &actualTasks)
+	require.NoError(t, err)
+
+	return actualTasks
 }
 
 func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
@@ -361,11 +494,14 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 			SrcCollectionName: "testColl",
 			DocumentID:        mbson.ToRawValue(id1),
 		},
+		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
 	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
+	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 	d3 := d1
 	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
+	d3.ChangeOpTime = option.Some(bson.Timestamp{123, 2})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
@@ -397,12 +533,14 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 		SourceDocumentCount: 2,
 		SourceByteCount:     1126400,
 		FirstMismatchTime:   map[int32]bson.DateTime{},
+		SrcTimestamp:        option.Some(bson.Timestamp{123, 1}),
 	}
 
 	t2 := t1
 	t2.Ids = mslices.Of(mbson.ToRawValue(id3))
 	t2.SourceDocumentCount = 1
 	t2.SourceByteCount = 1024
+	t2.SrcTimestamp = option.Some(bson.Timestamp{123, 2})
 
 	suite.ElementsMatch([]VerificationTask{t1, t2}, actualTasks)
 }
@@ -451,6 +589,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 		SourceDocumentCount: 3,
 		SourceByteCount:     3000,
 		FirstMismatchTime:   map[int32]bson.DateTime{},
+		SrcTimestamp:        option.Some(bson.Timestamp{123, 2}),
 	}
 	t2, t3, t4 := t1, t1, t1
 	t2.QueryFilter.Namespace = "testDB2.testColl1"
@@ -479,9 +618,11 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 			SrcCollectionName: "testColl",
 			DocumentID:        mbson.ToRawValue(id1),
 		},
+		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
 	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
+	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.Assert().ElementsMatch([]any{d1, d2}, results)
@@ -533,5 +674,12 @@ func insertRecheckDocs(
 		rawIDs,
 		dataSizes,
 		nil,
+		option.None[whichCluster](),
+		lo.RepeatBy(
+			len(dbNames),
+			func(index int) bson.Timestamp {
+				return bson.Timestamp{123, uint32(index)}
+			},
+		),
 	)
 }
