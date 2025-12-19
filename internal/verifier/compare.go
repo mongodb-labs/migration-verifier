@@ -112,18 +112,18 @@ func (verifier *Verifier) NoteCompareOfOptime(
 	cluster whichCluster,
 	optime bson.Timestamp,
 ) {
-	var db *msync.DataGuard[bson.Timestamp]
+	var dg *msync.DataGuard[bson.Timestamp]
 
 	switch cluster {
 	case src:
-		db = verifier.lastProcessedSrcOptime
+		dg = verifier.lastProcessedSrcOptime
 	case dst:
-		db = verifier.lastProcessedDstOptime
+		dg = verifier.lastProcessedDstOptime
 	default:
 		panic("bad cluster: " + cluster)
 	}
 
-	db.Store(func(t bson.Timestamp) bson.Timestamp {
+	dg.Store(func(t bson.Timestamp) bson.Timestamp {
 		if optime.After(t) {
 			return optime
 		}
