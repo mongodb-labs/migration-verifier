@@ -70,14 +70,18 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 			enqueuedRecheckCounts, err := verifier.countEnqueuedRechecksWhileLocked(ctx)
 
 			if err != nil {
-				return errors.Wrap(err, "analyzing rechecks enqueued for next generation")
+				return errors.Wrap(err, "counting enqueued rechecks")
 			}
 
-			genStats.NextGenerationRechecks = ProgressRechecks{
-				Changes:    enqueuedRecheckCounts.Changed,
-				Mismatches: enqueuedRecheckCounts.Mismatched,
-				Total:      option.Some(enqueuedRecheckCounts.Changed + enqueuedRecheckCounts.Mismatched - enqueuedRecheckCounts.ChangedAndMismatched),
-			}
+			genStats.NextGenerationRechecks = enqueuedRecheckCounts
+
+			/*
+				genStats.NextGenerationRechecks = ProgressRechecks{
+					Changes:    enqueuedRecheckCounts.Changed,
+					Mismatches: enqueuedRecheckCounts.Mismatched,
+					Total:      option.Some(enqueuedRecheckCounts.Changed + enqueuedRecheckCounts.Mismatched - enqueuedRecheckCounts.ChangedAndMismatched),
+				}
+			*/
 
 			return nil
 		},

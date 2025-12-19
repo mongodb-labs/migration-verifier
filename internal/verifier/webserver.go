@@ -266,7 +266,7 @@ type ProgressGenerationStats struct {
 	TotalSrcBytes    types.ByteCount `json:"totalSrcBytes,omitempty"`
 
 	CurrentGenerationRechecks option.Option[ProgressRechecks] `json:"currentGenerationRechecks"`
-	NextGenerationRechecks    ProgressRechecks                `json:"nextGenerationRechecks"`
+	NextGenerationRechecks    int64                           `json:"nextGenerationRechecks"`
 	MismatchesFound           int64                           `json:"mismatchesFound"`
 	MaxMismatchDuration       option.Option[string]           `json:"maxMismatchDuration"`
 }
