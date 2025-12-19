@@ -195,7 +195,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 		partitionsCount++
 
-		fi.NoteSuccess("inserted partition #", partitionsCount)
+		fi.NoteSuccess("inserted partition #%d", partitionsCount)
 
 		return nil
 	}
