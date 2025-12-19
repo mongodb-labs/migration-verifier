@@ -352,8 +352,8 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// cause a full redo in that case, which is inefficient but simple.
 		// Such failures seem unlikely anyhow.
 		err = retry.New().WithCallback(
-			func(ctx context.Context, _ *retry.FuncInfo) error {
-				return verifier.GenerateRecheckTasks(ctx)
+			func(ctx context.Context, fi *retry.FuncInfo) error {
+				return verifier.GenerateRecheckTasks(ctx, fi)
 			},
 			"generating recheck tasks",
 		).Run(ctx, verifier.logger)
