@@ -29,6 +29,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/cespare/permute/v2"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -750,6 +751,64 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 		10*time.Millisecond,
 		"change event on document should reset the first-mismatch time",
 	)
+}
+
+func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
+
+	id := rand.Intn(1000)
+
+	namespace := suite.DBNameForTest() + ".coll"
+
+	task := &VerificationTask{
+		PrimaryKey: bson.NewObjectID(),
+		Generation: 1,
+		Ids: mslices.Of(
+			mbson.ToRawValue(id),
+			mbson.ToRawValue(id+1),
+		),
+		QueryFilter: QueryFilter{
+			Namespace: namespace,
+			To:        namespace,
+		},
+		SrcTimestamp: option.Some(bson.Timestamp{123, 234}),
+		DstTimestamp: option.Some(bson.Timestamp{234, 345}),
+	}
+
+	_, _, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
+	suite.Require().NoError(err)
+
+	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+		suite.Assert().Equal(
+			task.SrcTimestamp.MustGet(),
+			t,
+			"src timestamp should be published",
+		)
+	})
+
+	verifier.lastProcessedDstOptime.Load(func(t bson.Timestamp) {
+		suite.Assert().Equal(
+			task.DstTimestamp.MustGet(),
+			t,
+			"dst timestamp should be published",
+		)
+	})
+
+	task.SrcTimestamp = option.Some(bson.Timestamp{1, 2})
+
+	_, _, _, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
+	suite.Require().NoError(err)
+
+	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+		suite.Assert().Equal(
+			bson.Timestamp{123, 234},
+			t,
+			"earlier src timestamp in task should not clobber newer in verifier",
+		)
+	})
 }
 
 func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {

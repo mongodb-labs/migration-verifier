@@ -139,3 +139,11 @@ func (qf QueryFilter) GetDocKeyFields() []string {
 		qf.ShardKeys...,
 	)
 }
+
+func newerTimestamp(a bson.Timestamp, b bson.Timestamp) bson.Timestamp {
+	if a.After(b) {
+		return a
+	}
+
+	return b
+}

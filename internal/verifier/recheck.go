@@ -65,7 +65,16 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		Int("count", len(documentIDs)).
 		Msg("Persisting rechecks for mismatched or missing documents.")
 
-	return verifier.insertRecheckDocs(ctx, dbNames, collNames, documentIDs, dataSizes, firstMismatchTimes)
+	return verifier.insertRecheckDocs(
+		ctx,
+		dbNames,
+		collNames,
+		documentIDs,
+		dataSizes,
+		firstMismatchTimes,
+		option.None[whichCluster](),
+		nil,
+	)
 }
 
 func (verifier *Verifier) insertRecheckDocs(
@@ -75,7 +84,13 @@ func (verifier *Verifier) insertRecheckDocs(
 	documentIDs []bson.RawValue,
 	dataSizes []int32,
 	firstMismatchTimes []bson.DateTime,
+	changeOrigin option.Option[whichCluster],
+	changeOpTimes []bson.Timestamp,
 ) error {
+	if (len(firstMismatchTimes) == 0) == (len(changeOpTimes) == 0) {
+		panic("Expect either mismatch times or optimes, not both/neither.")
+	}
+
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
 
@@ -147,11 +162,18 @@ func (verifier *Verifier) insertRecheckDocs(
 	}
 
 	var firstMismatchTime option.Option[bson.DateTime]
+	var opTime option.Option[bson.Timestamp]
+
+	fromDst := changeOrigin.OrZero() == dst
+
 	curRechecks := make([]bson.Raw, 0, recheckBatchCountLimit)
 	curBatchBytes := 0
 	for i, dbName := range dbNames {
 		if len(firstMismatchTimes) > 0 {
 			firstMismatchTime = option.Some(firstMismatchTimes[i])
+		}
+		if len(changeOpTimes) > 0 {
+			opTime = option.Some(changeOpTimes[i])
 		}
 
 		recheckDoc := recheck.Doc{
@@ -162,6 +184,8 @@ func (verifier *Verifier) insertRecheckDocs(
 				Rand:              rand.Int32(),
 			},
 			DataSize:          dataSizes[i],
+			ChangeOpTime:      opTime,
+			FromDst:           fromDst,
 			FirstMismatchTime: firstMismatchTime,
 		}
 
@@ -307,7 +331,9 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	var totalDocs types.DocumentCount
 	var dataSizeAccum, totalRecheckData int64
 
+	// These are indexed by idAccum index:
 	firstMismatchTime := map[int32]bson.DateTime{}
+	var latestSrcTimestamp, latestDstTimestamp bson.Timestamp
 
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
@@ -355,6 +381,8 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 		task, err := verifier.createDocumentRecheckTask(
 			idAccum,
 			firstMismatchTime,
+			option.IfNotZero(latestSrcTimestamp),
+			option.IfNotZero(latestDstTimestamp),
 			types.ByteCount(dataSizeAccum),
 			namespace,
 		)
@@ -434,31 +462,46 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 			idAccum = idAccum[:0]
 			lastIDRaw = bson.RawValue{}
 			clear(firstMismatchTime)
+			latestSrcTimestamp = bson.Timestamp{}
+			latestDstTimestamp = bson.Timestamp{}
 		}
 
-		// A document can be enqueued for recheck for multiple reasons:
-		// - changed on source
-		// - changed on destination
-		// - mismatch seen
-		//
-		// We’re iterating the rechecks in order such that, if the same doc
-		// gets enqueued from multiple sources, we’ll see those records
-		// consecutively. We can deduplicate here, then, by checking to see if
-		// the doc ID has changed. (NB: At this point we know the namespace
-		// has *not* changed because we just checked for that.)
-		if idRaw.Equal(lastIDRaw) {
+		// This is the index for storing info about the doc in metadata.
+		metadataIndex := int32(len(idAccum))
 
-			if doc.FirstMismatchTime.IsNone() {
-				// A non-mismatch recheck means the document changed. In that
-				// case we want to clear the mismatch count. This way a document
-				// that changes over & over won’t seem persistently mismatched
-				// merely because the replicator hasn’t kept up with the rate
-				// of change.
-				lastIDIndex := len(idAccum) - 1
+		// If we’ve already seen this ID, then we don’t re-add it. We may,
+		// though, still want to incorporate the duplicate into the task’s
+		// document metadata.
+		isSameDoc := idRaw.Equal(lastIDRaw)
+		if isSameDoc {
+			// We’re not going to add this ID to the idAccum slice because it’s
+			// already in that slice. But we still may need to record metadata
+			// about the document. Since the document’s ID is the most recent
+			// one in idAccum, we just decrement the index to refer to that.
+			metadataIndex -= 1
+		}
 
-				delete(firstMismatchTime, int32(lastIDIndex))
+		if optime, has := doc.ChangeOpTime.Get(); has {
+			// A recheck should either be for a change/write or a mismatch.
+			// Never both.
+			if doc.FirstMismatchTime.IsSome() {
+				panic("should not see change optime with a first-mismatch time")
 			}
 
+			if doc.FromDst {
+				latestDstTimestamp = newerTimestamp(latestDstTimestamp, optime)
+			} else {
+				latestSrcTimestamp = newerTimestamp(latestSrcTimestamp, optime)
+			}
+
+			delete(firstMismatchTime, int32(metadataIndex))
+		} else if fmt, has := doc.FirstMismatchTime.Get(); has {
+			if !isSameDoc {
+				firstMismatchTime[metadataIndex] = fmt
+			}
+		}
+
+		if isSameDoc {
 			continue
 		}
 
@@ -466,9 +509,7 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 
 		idsSizer.Add(idRaw)
 		dataSizeAccum += int64(doc.DataSize)
-		if fmt, has := doc.FirstMismatchTime.Get(); has {
-			firstMismatchTime[int32(len(idAccum))] = fmt
-		}
+
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 
 		totalRecheckData += int64(doc.DataSize)
