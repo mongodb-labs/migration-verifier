@@ -468,6 +468,7 @@ func fetchVerifierCurrentTasks(
 
 	cursor, err := taskColl.Find(ctx, bson.D{{"generation", verifier.generation}})
 	require.NoError(t, err)
+
 	var actualTasks []VerificationTask
 	err = cursor.All(ctx, &actualTasks)
 	require.NoError(t, err)
