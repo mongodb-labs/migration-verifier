@@ -49,7 +49,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	error,
 ) {
 	var srcChannel, dstChannel <-chan docWithTs
-	var readSrcCallback, readDstCallback func(context.Context, *retry.FuncInfo) error
+	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
 	results := []VerificationResult{}
 	var docCount types.DocumentCount
@@ -134,7 +134,7 @@ func (verifier *Verifier) NoteCompareOfOptime(
 func (verifier *Verifier) compareDocsFromChannels(
 	ctx context.Context,
 	workerNum int,
-	fi *retry.FuncInfo,
+	fi retry.SuccessNotifier,
 	task *VerificationTask,
 	srcChannel, dstChannel <-chan docWithTs,
 ) (
@@ -512,13 +512,13 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 ) (
 	<-chan docWithTs,
 	<-chan docWithTs,
-	func(context.Context, *retry.FuncInfo) error,
-	func(context.Context, *retry.FuncInfo) error,
+	func(context.Context, retry.SuccessNotifier) error,
+	func(context.Context, retry.SuccessNotifier) error,
 ) {
 	srcChannel := make(chan docWithTs)
 	dstChannel := make(chan docWithTs)
 
-	readSrcCallback := func(ctx context.Context, state *retry.FuncInfo) error {
+	readSrcCallback := func(ctx context.Context, state retry.SuccessNotifier) error {
 		// We open a session here so that we can read the session’s cluster
 		// time, which we store along with any document mismatches we may see.
 		//
@@ -558,7 +558,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 		return err
 	}
 
-	readDstCallback := func(ctx context.Context, state *retry.FuncInfo) error {
+	readDstCallback := func(ctx context.Context, state retry.SuccessNotifier) error {
 		sess, err := verifier.dstClient.StartSession()
 		if err != nil {
 			return errors.Wrapf(err, "starting session")
@@ -598,7 +598,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 
 func iterateCursorToChannel(
 	sctx context.Context,
-	state *retry.FuncInfo,
+	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
 	writer chan<- docWithTs,
 ) error {

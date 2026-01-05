@@ -310,7 +310,10 @@ func (verifier *Verifier) DropCurrentGenRecheckQueue(ctx context.Context) error 
 //
 // Note that this function DOES NOT retry on failure, so callers should wrap
 // calls to this function in a retryer.
-func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
+func (verifier *Verifier) GenerateRecheckTasks(
+	ctx context.Context,
+	fi retry.SuccessNotifier,
+) error {
 	generation, _ := verifier.getGeneration()
 
 	recheckColl := verifier.getRecheckQueueCollection(generation)
@@ -364,7 +367,13 @@ func (verifier *Verifier) GenerateRecheckTasks(ctx context.Context) error {
 	addInsertRequest := func(tasks []bson.Raw) {
 		eg.Go(
 			func() error {
-				return verifier.insertDocumentRecheckTasks(egCtx, tasks)
+				err := verifier.insertDocumentRecheckTasks(egCtx, tasks)
+
+				if err == nil {
+					fi.NoteSuccess("added %d recheck task(s)", len(tasks))
+				}
+
+				return err
 			},
 		)
 

@@ -151,7 +151,7 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 // shouldn’t really happen anyway by definition.
 func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	sctx context.Context,
-	ri *retry.FuncInfo,
+	ri retry.SuccessNotifier,
 	cs *mongo.ChangeStream,
 ) error {
 	eventsRead := 0
@@ -258,7 +258,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 func (csr *ChangeStreamReader) iterateChangeStream(
 	ctx context.Context,
-	ri *retry.FuncInfo,
+	ri retry.SuccessNotifier,
 	sess *mongo.Session,
 ) error {
 	sctx := mongo.NewSessionContext(ctx, sess)
