@@ -149,36 +149,6 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		panic("No failed tasks, but no mismatches at all?!?")
 	}
 
-	// First present summaries of failures based on present/missing and differing content
-	countsTable := tablewriter.NewWriter(strBuilder)
-
-	countsHeaders := []string{"Mismatch Type", "Count"}
-
-	countsTable.SetHeader(countsHeaders)
-
-	if reportData.Counts.ContentDiffers > 0 {
-		countsTable.Append([]string{
-			"Differing Content",
-			reportutils.FmtReal(reportData.Counts.ContentDiffers),
-		})
-	}
-
-	if reportData.Counts.MissingOnDst > 0 {
-		countsTable.Append([]string{
-			"Missing on Destination",
-			reportutils.FmtReal(reportData.Counts.MissingOnDst),
-		})
-	}
-
-	if reportData.Counts.ExtraOnDst > 0 {
-		countsTable.Append([]string{
-			"Extra on Destination",
-			reportutils.FmtReal(reportData.Counts.ExtraOnDst),
-		})
-	}
-
-	countsTable.Render()
-
 	showMismatchDuration := generation > 0
 
 	if len(reportData.ContentDiffers) > 0 {
@@ -224,15 +194,17 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 		strBuilder.WriteString("\n")
 		if tableIsComplete {
-			fmt.Fprint(
+			fmt.Fprintf(
 				strBuilder,
-				"All documents found with differing content:\n",
+				"All %s documents found with differing content:\n",
+				reportutils.FmtReal(reportData.Counts.ContentDiffers),
 			)
 		} else {
 			fmt.Fprintf(
 				strBuilder,
-				"First %d documents found with differing content:\n",
-				verifier.failureDisplaySize,
+				"First %s of %s documents found with differing content:\n",
+				reportutils.FmtReal(verifier.failureDisplaySize),
+				reportutils.FmtReal(reportData.Counts.ContentDiffers),
 			)
 		}
 
@@ -280,15 +252,17 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		strBuilder.WriteString("\n")
 
 		if tableIsComplete {
-			fmt.Fprint(
+			fmt.Fprintf(
 				strBuilder,
-				"All documents found missing on the destination:\n",
+				"All %s documents found missing on the destination:\n",
+				reportutils.FmtReal(reportData.Counts.MissingOnDst),
 			)
 		} else {
 			fmt.Fprintf(
 				strBuilder,
-				"First %d documents found missing on the destination:\n",
-				verifier.failureDisplaySize,
+				"First %s of %s documents found missing on the destination:\n",
+				reportutils.FmtReal(verifier.failureDisplaySize),
+				reportutils.FmtReal(reportData.Counts.MissingOnDst),
 			)
 		}
 
@@ -336,15 +310,17 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		strBuilder.WriteString("\n")
 
 		if tableIsComplete {
-			fmt.Fprint(
+			fmt.Fprintf(
 				strBuilder,
-				"All documents found only on the destination:\n",
+				"All %s documents found only on the destination:\n",
+				reportutils.FmtReal(reportData.Counts.ExtraOnDst),
 			)
 		} else {
 			fmt.Fprintf(
 				strBuilder,
-				"First %d documents found only on the destination:\n",
-				verifier.failureDisplaySize,
+				"First %s of %s documents found only on the destination:\n",
+				reportutils.FmtReal(verifier.failureDisplaySize),
+				reportutils.FmtReal(reportData.Counts.ExtraOnDst),
 			)
 		}
 
