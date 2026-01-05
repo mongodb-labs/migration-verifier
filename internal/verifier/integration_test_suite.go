@@ -10,6 +10,7 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -232,6 +233,8 @@ func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {
 type MockSuccessNotifier struct {
 	messages []string
 }
+
+var _ retry.SuccessNotifier = &MockSuccessNotifier
 
 func (m *MockSuccessNotifier) NoteSuccess(tmpl string, args ...any) {
 	m.messages = append(m.messages, fmt.Sprintf(tmpl, args...))

@@ -109,7 +109,8 @@ func (i *FuncInfo) GetDescriptions() []string {
 	return descriptions
 }
 
-// SuccessNotifier abstracts FuncInfo for testing.
+// SuccessNotifier abstracts FuncInfo for testing that a given function
+// notifies the retryer of its successes.
 type SuccessNotifier interface {
 	NoteSuccess(string, ...any)
 }
