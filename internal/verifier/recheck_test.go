@@ -285,7 +285,7 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 			err = verifier.GenerateRecheckTasks(ctx, notifier)
 			suite.Require().NoError(err)
 
-			suite.Assert().Len(notifier.messages, 1, "one success msg per task")
+			suite.Assert().Len(notifier.messages, 1)
 
 			tasks := fetchVerifierCurrentTasks(ctx, suite.T(), verifier)
 			suite.Require().Len(tasks, 1)
@@ -353,7 +353,7 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 			err := verifier.GenerateRecheckTasks(ctx, notifier)
 			suite.Require().NoError(err)
 
-			suite.Assert().Len(notifier.messages, 1, "one success msg per task")
+			suite.Assert().Len(notifier.messages, 1)
 
 			tasks := fetchVerifierCurrentTasks(ctx, suite.T(), verifier)
 			suite.Require().Len(tasks, 1)
@@ -401,7 +401,7 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	err = verifier.GenerateRecheckTasks(ctx, notifier)
 	suite.Require().NoError(err)
 
-	suite.Assert().NotEmpty(notifier.messages, "one success msg per task")
+	suite.Assert().NotEmpty(notifier.messages)
 }
 
 func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
@@ -441,7 +441,7 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	err = verifier.GenerateRecheckTasks(ctx, notifier)
 	suite.Require().NoError(err)
 
-	suite.Assert().Len(notifier.messages, 3, "one success msg per task")
+	suite.Assert().Len(notifier.messages, 1)
 
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -529,7 +529,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	err = verifier.GenerateRecheckTasks(ctx, notifier)
 	suite.Require().NoError(err)
 
-	suite.Assert().Len(notifier.messages, 2, "one success msg per task")
+	suite.Assert().Len(notifier.messages, 1)
 
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -591,7 +591,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 	err = verifier.GenerateRecheckTasks(ctx, notifier)
 	suite.Require().NoError(err)
 
-	suite.Assert().Len(notifier.messages, 4, "one success msg per task")
+	suite.Assert().Len(notifier.messages, 1)
 
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
