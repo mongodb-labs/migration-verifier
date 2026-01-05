@@ -441,7 +441,8 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	err = verifier.GenerateRecheckTasks(ctx, notifier)
 	suite.Require().NoError(err)
 
-	suite.Assert().Len(notifier.messages, 1)
+	// Here we expect each task to be inserted separately due to size.
+	suite.Assert().Len(notifier.messages, 3)
 
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
