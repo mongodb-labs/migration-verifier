@@ -3,6 +3,7 @@ package verifier
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -226,4 +227,12 @@ func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {
 		".",
 		"-",
 	) + strings.Join(suffixes, "")
+}
+
+type MockSuccessNotifier struct {
+	messages []string
+}
+
+func (m *MockSuccessNotifier) NoteSuccess(tmpl string, args ...any) {
+	m.messages = append(m.messages, fmt.Sprintf(tmpl, args...))
 }

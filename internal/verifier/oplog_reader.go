@@ -277,7 +277,7 @@ func (o *OplogReader) ddlAllowanceDocID() string {
 
 func (o *OplogReader) iterateCursor(
 	ctx context.Context,
-	_ *retry.FuncInfo,
+	sn retry.SuccessNotifier,
 	sess *mongo.Session,
 ) error {
 	sctx := mongo.NewSessionContext(ctx, sess)
@@ -303,6 +303,8 @@ CursorLoop:
 			if err != nil {
 				return err
 			}
+
+			sn.NoteSuccess("handled batch of ops")
 		}
 	}
 

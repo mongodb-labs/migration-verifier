@@ -312,7 +312,7 @@ func (verifier *Verifier) DropCurrentGenRecheckQueue(ctx context.Context) error 
 // calls to this function in a retryer.
 func (verifier *Verifier) GenerateRecheckTasks(
 	ctx context.Context,
-	fi *retry.FuncInfo,
+	fi retry.SuccessNotifier,
 ) error {
 	generation, _ := verifier.getGeneration()
 

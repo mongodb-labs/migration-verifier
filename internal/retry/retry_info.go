@@ -108,3 +108,10 @@ func (i *FuncInfo) GetDescriptions() []string {
 
 	return descriptions
 }
+
+// SuccessNotifier abstracts FuncInfo for testing.
+type SuccessNotifier interface {
+	NoteSuccess(string, ...any)
+}
+
+var _ SuccessNotifier = &FuncInfo{}
