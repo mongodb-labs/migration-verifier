@@ -149,15 +149,22 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		panic("No failed tasks, but no mismatches at all?!?")
 	}
 
+	showMismatchDuration := generation > 0
+
 	if len(reportData.ContentDiffers) > 0 {
 		mismatchedDocsTable := tablewriter.NewWriter(strBuilder)
-		mismatchedDocsTable.SetHeader([]string{
+
+		headers := mslices.Of(
 			"Src NS",
 			"Doc ID",
 			"Field",
 			"Details",
-			"Duration",
-		})
+		)
+
+		if showMismatchDuration {
+			headers = append(headers, "Duration")
+		}
+		mismatchedDocsTable.SetHeader(headers)
 
 		tableIsComplete := reportData.Counts.ContentDiffers == int64(len(reportData.ContentDiffers))
 
@@ -168,16 +175,21 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 			task := failedTaskMap[m.Task]
 
-			times := m.Detail.MismatchHistory
-			duration := time.Duration(times.DurationMS) * time.Millisecond
-
-			mismatchedDocsTable.Append([]string{
+			cells := mslices.Of(
 				task.QueryFilter.Namespace,
-				fmt.Sprintf("%v", m.Detail.ID),
+				fmt.Sprint(m.Detail.ID),
 				m.Detail.Field,
 				m.Detail.Details,
-				reportutils.DurationToHMS(duration),
-			})
+			)
+
+			if showMismatchDuration {
+				times := m.Detail.MismatchHistory
+				duration := time.Duration(times.DurationMS) * time.Millisecond
+
+				cells = append(cells, reportutils.DurationToHMS(duration))
+			}
+
+			mismatchedDocsTable.Append(cells)
 		}
 
 		strBuilder.WriteString("\n")
@@ -201,11 +213,17 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	if len(reportData.MissingOnDst) > 0 {
 		missingDocsTable := tablewriter.NewWriter(strBuilder)
-		missingDocsTable.SetHeader([]string{
+
+		headers := mslices.Of(
 			"Src NS",
 			"Doc ID",
-			"Duration",
-		})
+		)
+
+		if showMismatchDuration {
+			headers = append(headers, "Duration")
+		}
+
+		missingDocsTable.SetHeader(headers)
 
 		tableIsComplete := reportData.Counts.MissingOnDst == int64(len(reportData.MissingOnDst))
 
@@ -216,14 +234,19 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 			task := failedTaskMap[d.Task]
 
-			times := d.Detail.MismatchHistory
-			duration := time.Duration(times.DurationMS) * time.Millisecond
-
-			missingDocsTable.Append([]string{
+			cells := mslices.Of(
 				task.QueryFilter.Namespace,
-				fmt.Sprintf("%v", d.Detail.ID),
-				reportutils.DurationToHMS(duration),
-			})
+				fmt.Sprint(d.Detail.ID),
+			)
+
+			if showMismatchDuration {
+				times := d.Detail.MismatchHistory
+				duration := time.Duration(times.DurationMS) * time.Millisecond
+
+				cells = append(cells, reportutils.DurationToHMS(duration))
+			}
+
+			missingDocsTable.Append(cells)
 		}
 
 		strBuilder.WriteString("\n")
@@ -248,11 +271,17 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	if len(reportData.ExtraOnDst) > 0 {
 		extraDocsTable := tablewriter.NewWriter(strBuilder)
-		extraDocsTable.SetHeader([]string{
+
+		headers := mslices.Of(
 			"Src NS",
 			"Doc ID",
-			"Duration",
-		})
+		)
+
+		if showMismatchDuration {
+			headers = append(headers, "Duration")
+		}
+
+		extraDocsTable.SetHeader(headers)
 
 		tableIsComplete := reportData.Counts.ExtraOnDst == int64(len(reportData.ExtraOnDst))
 
@@ -263,14 +292,19 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 			task := failedTaskMap[d.Task]
 
-			times := d.Detail.MismatchHistory
-			duration := time.Duration(times.DurationMS) * time.Millisecond
-
-			extraDocsTable.Append([]string{
+			cells := mslices.Of(
 				task.QueryFilter.Namespace,
-				fmt.Sprintf("%v", d.Detail.ID),
-				reportutils.DurationToHMS(duration),
-			})
+				fmt.Sprint(d.Detail.ID),
+			)
+
+			if showMismatchDuration {
+				times := d.Detail.MismatchHistory
+				duration := time.Duration(times.DurationMS) * time.Millisecond
+
+				cells = append(cells, reportutils.DurationToHMS(duration))
+			}
+
+			extraDocsTable.Append(cells)
 		}
 
 		strBuilder.WriteString("\n")
