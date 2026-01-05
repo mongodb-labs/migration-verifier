@@ -64,7 +64,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 		func(ctx context.Context, fi *retry.FuncInfo) error {
 			var err error
 
-			partitionsCount, docCount, byteCount, err = verifier.createPartitionTasksWithSampleRateRetryable(ctx, task)
+			partitionsCount, docCount, byteCount, err = verifier.createPartitionTasksWithSampleRateRetryable(ctx, task, fi)
 
 			return err
 		},
@@ -78,6 +78,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	ctx context.Context,
 	task *VerificationTask,
+	fi *retry.FuncInfo,
 ) (int, types.DocumentCount, types.ByteCount, error) {
 	srcColl := verifier.srcClientCollection(task)
 	srcNs := FullName(srcColl)
@@ -193,6 +194,8 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		}
 
 		partitionsCount++
+
+		fi.NoteSuccess("inserted partition #%d", partitionsCount)
 
 		return nil
 	}
