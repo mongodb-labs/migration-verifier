@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
@@ -232,10 +233,14 @@ func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {
 
 type MockSuccessNotifier struct {
 	messages []string
+	mu       sync.Mutex
 }
 
-var _ retry.SuccessNotifier = &MockSuccessNotifier
+var _ retry.SuccessNotifier = &MockSuccessNotifier{}
 
 func (m *MockSuccessNotifier) NoteSuccess(tmpl string, args ...any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.messages = append(m.messages, fmt.Sprintf(tmpl, args...))
 }
