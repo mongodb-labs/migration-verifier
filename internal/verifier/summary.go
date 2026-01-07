@@ -614,10 +614,10 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 	var lastSrcOpTime, lastDstOpTime bson.Timestamp
 
-	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+	verifier.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
 		lastSrcOpTime = t
 	})
-	verifier.lastProcessedDstOptime.Load(func(t bson.Timestamp) {
+	verifier.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
 		lastDstOpTime = t
 	})
 

@@ -143,20 +143,20 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 		return Progress{Error: err}, err
 	}
 
-	var srcLastProcessedTS, dstLastProcessedTS bson.Timestamp
+	var srcLastRecheckedTS, dstLastRecheckedTS option.Option[bson.Timestamp]
 
-	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
-		srcLastProcessedTS = t
+	verifier.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
+		srcLastRecheckedTS = option.Some(t)
 	})
-	verifier.lastProcessedDstOptime.Load(func(t bson.Timestamp) {
-		dstLastProcessedTS = t
+	verifier.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
+		dstLastRecheckedTS = option.Some(t)
 	})
 
-	if generation == 0 && (!srcLastProcessedTS.IsZero() || !dstLastProcessedTS.IsZero()) {
+	if generation == 0 && (!srcLastRecheckedTS.IsSome() || !dstLastRecheckedTS.IsSome()) {
 		panic(fmt.Sprintf(
 			"gen = 0 but nonzero last-processed tss: %v %v",
-			srcLastProcessedTS,
-			dstLastProcessedTS,
+			srcLastRecheckedTS,
+			dstLastRecheckedTS,
 		))
 	}
 
@@ -164,8 +164,8 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 		Phase:              verifier.getPhaseWhileLocked(),
 		Generation:         verifier.generation,
 		GenerationStats:    genStats,
-		SrcLastProcessedTS: srcLastProcessedTS,
-		DstLastProcessedTS: dstLastProcessedTS,
+		SrcLastRecheckedTS: srcLastRecheckedTS,
+		DstLastRecheckedTS: dstLastRecheckedTS,
 		SrcChangeStats: ProgressChangeStats{
 			EventsPerSecond:   verifier.srcChangeReader.getEventsPerSecond(),
 			CurrentTimestamps: verifier.srcChangeReader.getCurrentTimestamps(),
