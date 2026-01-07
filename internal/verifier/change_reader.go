@@ -33,14 +33,14 @@ const (
 	changeReaderCollectionName = "changeReader"
 )
 
-type readerCurrentTimes struct {
-	LastHandledTime   bson.Timestamp `json:"lastHandledTime"`
-	LastOperationTime bson.Timestamp `json:"lastOperationTime"`
+type readerCurrentTSs struct {
+	LastHandledTS   bson.Timestamp `json:"lastHandledTS"`
+	LastOperationTS bson.Timestamp `json:"lastOperationTS"`
 }
 
-func (rp readerCurrentTimes) Lag() time.Duration {
+func (rp readerCurrentTSs) Lag() time.Duration {
 	return time.Second * time.Duration(
-		int(rp.LastOperationTime.T)-int(rp.LastHandledTime.T),
+		int(rp.LastOperationTS.T)-int(rp.LastHandledTS.T),
 	)
 }
 
@@ -51,7 +51,7 @@ type changeReader interface {
 	getStartTimestamp() bson.Timestamp
 	getLastSeenClusterTime() option.Option[bson.Timestamp]
 	getEventsPerSecond() option.Option[float64]
-	getCurrentTimes() option.Option[readerCurrentTimes]
+	getCurrentTSs() option.Option[readerCurrentTSs]
 	getBufferSaturation() float64
 	noteBatchSize(int)
 	setWritesOff(bson.Timestamp)
@@ -81,7 +81,7 @@ type ChangeReaderCommon struct {
 
 	lastChangeEventTime *msync.TypedAtomic[option.Option[bson.Timestamp]]
 
-	currentTimes *msync.TypedAtomic[option.Option[readerCurrentTimes]]
+	currentTimes *msync.TypedAtomic[option.Option[readerCurrentTSs]]
 
 	startAtTs *bson.Timestamp
 
@@ -99,7 +99,7 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 		eventBatchChan:      make(chan eventBatch, batchChanBufferSize),
 		eventRecorder:       NewEventRecorder(),
 		writesOffTs:         util.NewEventual[bson.Timestamp](),
-		currentTimes:        msync.NewTypedAtomic(option.None[readerCurrentTimes]()),
+		currentTimes:        msync.NewTypedAtomic(option.None[readerCurrentTSs]()),
 		lastChangeEventTime: msync.NewTypedAtomic(option.None[bson.Timestamp]()),
 		batchSizeHistory:    history.New[int](time.Minute),
 		onDDLEvent: lo.Ternary(
@@ -149,7 +149,7 @@ func (rc *ChangeReaderCommon) getBufferSaturation() float64 {
 	return util.DivideToF64(len(rc.eventBatchChan), cap(rc.eventBatchChan))
 }
 
-func (rc *ChangeReaderCommon) getCurrentTimes() option.Option[readerCurrentTimes] {
+func (rc *ChangeReaderCommon) getCurrentTSs() option.Option[readerCurrentTSs] {
 	return rc.currentTimes.Load()
 }
 
@@ -353,9 +353,9 @@ func (rc *ChangeReaderCommon) updateTimes(sess *mongo.Session, token bson.Raw) {
 			panic("session operationTime is nil … did this get called prematurely?")
 		}
 
-		rc.currentTimes.Store(option.Some(readerCurrentTimes{
-			LastHandledTime:   tokenTs,
-			LastOperationTime: *opTime,
+		rc.currentTimes.Store(option.Some(readerCurrentTSs{
+			LastHandledTS:   tokenTs,
+			LastOperationTS: *opTime,
 		}))
 	} else {
 		rc.logger.Warn().

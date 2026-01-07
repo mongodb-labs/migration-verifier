@@ -2,12 +2,14 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
@@ -141,19 +143,38 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 		return Progress{Error: err}, err
 	}
 
+	var srcLastProcessedTS, dstLastProcessedTS bson.Timestamp
+
+	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+		srcLastProcessedTS = t
+	})
+	verifier.lastProcessedDstOptime.Load(func(t bson.Timestamp) {
+		dstLastProcessedTS = t
+	})
+
+	if generation == 0 && (!srcLastProcessedTS.IsZero() || !dstLastProcessedTS.IsZero()) {
+		panic(fmt.Sprintf(
+			"gen = 0 but nonzero last-processed tss: %v %v",
+			srcLastProcessedTS,
+			dstLastProcessedTS,
+		))
+	}
+
 	return Progress{
-		Phase:           verifier.getPhaseWhileLocked(),
-		Generation:      verifier.generation,
-		GenerationStats: genStats,
+		Phase:              verifier.getPhaseWhileLocked(),
+		Generation:         verifier.generation,
+		GenerationStats:    genStats,
+		SrcLastProcessedTS: srcLastProcessedTS,
+		DstLastProcessedTS: dstLastProcessedTS,
 		SrcChangeStats: ProgressChangeStats{
-			EventsPerSecond:  verifier.srcChangeReader.getEventsPerSecond(),
-			CurrentTimes:     verifier.srcChangeReader.getCurrentTimes(),
-			BufferSaturation: verifier.srcChangeReader.getBufferSaturation(),
+			EventsPerSecond:   verifier.srcChangeReader.getEventsPerSecond(),
+			CurrentTimestamps: verifier.srcChangeReader.getCurrentTSs(),
+			BufferSaturation:  verifier.srcChangeReader.getBufferSaturation(),
 		},
 		DstChangeStats: ProgressChangeStats{
-			EventsPerSecond:  verifier.dstChangeReader.getEventsPerSecond(),
-			CurrentTimes:     verifier.dstChangeReader.getCurrentTimes(),
-			BufferSaturation: verifier.dstChangeReader.getBufferSaturation(),
+			EventsPerSecond:   verifier.dstChangeReader.getEventsPerSecond(),
+			CurrentTimestamps: verifier.dstChangeReader.getCurrentTSs(),
+			BufferSaturation:  verifier.dstChangeReader.getBufferSaturation(),
 		},
 		Status: vStatus,
 	}, nil
