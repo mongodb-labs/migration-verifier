@@ -437,7 +437,7 @@ func getDocumentMismatchReportData(
 		// By default the server will traverse the detail index
 		// due to SERVER-12923. It’s much more efficient for this query
 		// to use the type index.
-		options.Aggregate().SetHint(bson.D{{"type", 1}}),
+		options.Aggregate().SetHint(bson.D{{"task", 1}}),
 	)
 
 	if err != nil {
