@@ -81,7 +81,7 @@ type ChangeReaderCommon struct {
 
 	lastChangeEventTime *msync.TypedAtomic[option.Option[bson.Timestamp]]
 
-	currentTimes *msync.TypedAtomic[option.Option[readerCurrentTimestamps]]
+	currentTimestamps *msync.TypedAtomic[option.Option[readerCurrentTimestamps]]
 
 	startAtTs *bson.Timestamp
 
@@ -99,7 +99,7 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 		eventBatchChan:      make(chan eventBatch, batchChanBufferSize),
 		eventRecorder:       NewEventRecorder(),
 		writesOffTs:         util.NewEventual[bson.Timestamp](),
-		currentTimes:        msync.NewTypedAtomic(option.None[readerCurrentTimestamps]()),
+		currentTimestamps:   msync.NewTypedAtomic(option.None[readerCurrentTimestamps]()),
 		lastChangeEventTime: msync.NewTypedAtomic(option.None[bson.Timestamp]()),
 		batchSizeHistory:    history.New[int](time.Minute),
 		onDDLEvent: lo.Ternary(
@@ -150,7 +150,7 @@ func (rc *ChangeReaderCommon) getBufferSaturation() float64 {
 }
 
 func (rc *ChangeReaderCommon) getCurrentTimestamps() option.Option[readerCurrentTimestamps] {
-	return rc.currentTimes.Load()
+	return rc.currentTimestamps.Load()
 }
 
 // getEventsPerSecond returns the number of change events per second we’ve been
@@ -353,7 +353,7 @@ func (rc *ChangeReaderCommon) updateTimes(sess *mongo.Session, token bson.Raw) {
 			panic("session operationTime is nil … did this get called prematurely?")
 		}
 
-		rc.currentTimes.Store(option.Some(readerCurrentTimestamps{
+		rc.currentTimestamps.Store(option.Some(readerCurrentTimestamps{
 			LastHandledTS:   tokenTs,
 			LastOperationTS: *opTime,
 		}))
