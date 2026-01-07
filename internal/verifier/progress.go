@@ -168,12 +168,12 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 		DstLastProcessedTS: dstLastProcessedTS,
 		SrcChangeStats: ProgressChangeStats{
 			EventsPerSecond:   verifier.srcChangeReader.getEventsPerSecond(),
-			CurrentTimestamps: verifier.srcChangeReader.getCurrentTSs(),
+			CurrentTimestamps: verifier.srcChangeReader.getCurrentTimestamps(),
 			BufferSaturation:  verifier.srcChangeReader.getBufferSaturation(),
 		},
 		DstChangeStats: ProgressChangeStats{
 			EventsPerSecond:   verifier.dstChangeReader.getEventsPerSecond(),
-			CurrentTimestamps: verifier.dstChangeReader.getCurrentTSs(),
+			CurrentTimestamps: verifier.dstChangeReader.getCurrentTimestamps(),
 			BufferSaturation:  verifier.dstChangeReader.getBufferSaturation(),
 		},
 		Status: vStatus,

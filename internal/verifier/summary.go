@@ -665,7 +665,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			)
 		}
 
-		times, hasTimes := cluster.csReader.getCurrentTSs().Get()
+		times, hasTimes := cluster.csReader.getCurrentTimestamps().Get()
 
 		if hasTimes {
 			lag := times.Lag()

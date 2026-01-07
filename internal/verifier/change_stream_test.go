@@ -641,7 +641,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 				verifierRunner.AwaitGenerationEnd(),
 			)
 
-			return verifier.srcChangeReader.getCurrentTSs().IsSome()
+			return verifier.srcChangeReader.getCurrentTimestamps().IsSome()
 		},
 		time.Minute,
 		100*time.Millisecond,
@@ -650,7 +650,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 	// NB: The lag will include whatever time elapsed above before
 	// verifier read the event, so it can be several seconds.
 	suite.Assert().Less(
-		verifier.srcChangeReader.getCurrentTSs().MustGet().Lag(),
+		verifier.srcChangeReader.getCurrentTimestamps().MustGet().Lag(),
 		10*time.Minute,
 		"verifier lag is as expected",
 	)

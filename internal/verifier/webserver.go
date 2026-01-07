@@ -272,9 +272,9 @@ type ProgressGenerationStats struct {
 }
 
 type ProgressChangeStats struct {
-	EventsPerSecond   option.Option[float64]          `json:"eventsPerSecond"`
-	CurrentTimestamps option.Option[readerCurrentTSs] `json:"currentTimestamps"`
-	BufferSaturation  float64                         `json:"bufferSaturation"`
+	EventsPerSecond   option.Option[float64]                 `json:"eventsPerSecond"`
+	CurrentTimestamps option.Option[readerCurrentTimestamps] `json:"currentTimestamps"`
+	BufferSaturation  float64                                `json:"bufferSaturation"`
 }
 
 // Progress represents the structure of the JSON response from the Progress end point.
