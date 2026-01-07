@@ -88,7 +88,7 @@ type ChangeReaderCommon struct {
 	batchSizeHistory *history.History[int]
 
 	createIteratorCb func(context.Context, *mongo.Session) (bson.Timestamp, error)
-	iterateCb        func(context.Context, *retry.FuncInfo, *mongo.Session) error
+	iterateCb        func(context.Context, retry.SuccessNotifier, *mongo.Session) error
 
 	onDDLEvent ddlEventHandling
 }
