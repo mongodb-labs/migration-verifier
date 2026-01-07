@@ -12,6 +12,7 @@ import (
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
@@ -239,7 +240,15 @@ func getDocumentMismatchReportData(
 		}}},
 	}
 
-	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(ctx, pl)
+	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(
+		ctx,
+		pl,
+
+		// By default the server will traverse the detail index
+		// due to SERVER-12923. It’s much more efficient for this query
+		// to use the type index.
+		options.Aggregate().SetHint(bson.D{{"task", 1}}),
+	)
 
 	if err != nil {
 		return mismatchReportData{}, errors.Wrapf(err, "fetching %d tasks' discrepancies", len(taskIDs))
