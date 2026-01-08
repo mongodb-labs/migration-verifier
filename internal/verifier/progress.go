@@ -154,9 +154,9 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 		dstLastRecheckedTS = option.IfNotZero(t)
 	})
 
-	if generation == 0 && (!srcLastRecheckedTS.IsSome() || !dstLastRecheckedTS.IsSome()) {
+	if generation == 0 && (srcLastRecheckedTS.IsSome() || dstLastRecheckedTS.IsSome()) {
 		panic(fmt.Sprintf(
-			"gen = 0 but nonzero last-processed tss: %v %v",
+			"gen = 0 but nonzero last-rechecked tss: %v %v",
 			srcLastRecheckedTS,
 			dstLastRecheckedTS,
 		))
