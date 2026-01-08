@@ -284,8 +284,8 @@ type Progress struct {
 	Generation      int                     `json:"generation"`
 	GenerationStats ProgressGenerationStats `json:"generationStats"`
 
-	SrcLastRecheckedTS option.Option[bson.Timestamp] `json:"srcLastProcessedTS"`
-	DstLastRecheckedTS option.Option[bson.Timestamp] `json:"dstLastProcessedTS"`
+	SrcLastRecheckedTS option.Option[bson.Timestamp] `json:"srcLastRecheckedTS"`
+	DstLastRecheckedTS option.Option[bson.Timestamp] `json:"dstLastRecheckedTS"`
 
 	SrcChangeStats ProgressChangeStats `json:"srcChangeStats"`
 	DstChangeStats ProgressChangeStats `json:"dstChangeStats"`
