@@ -146,10 +146,10 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 	var srcLastRecheckedTS, dstLastRecheckedTS option.Option[bson.Timestamp]
 
 	verifier.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
-		srcLastRecheckedTS = option.Some(t)
+		srcLastRecheckedTS = option.IfNotZero(t)
 	})
 	verifier.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
-		dstLastRecheckedTS = option.Some(t)
+		dstLastRecheckedTS = option.IfNotZero(t)
 	})
 
 	if generation == 0 && (!srcLastRecheckedTS.IsSome() || !dstLastRecheckedTS.IsSome()) {
