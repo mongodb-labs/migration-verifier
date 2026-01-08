@@ -8,7 +8,6 @@ import (
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
-	"github.com/10gen/migration-verifier/agg/helpers"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -75,6 +74,11 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 			{
 				Keys: bson.D{
 					{"task", 1},
+
+					// This is here so that $lookup against this collection
+					// to determine longest duration can avoid fetching
+					// documents and instead examine just the index.
+					{"detail.mismatchHistory.durationMS", 1},
 				},
 			},
 
@@ -166,31 +170,33 @@ func countRechecksForGeneration(
 					Then: 0,
 					Else: agg.Size{"$_ids"},
 				}},
-				{"rechecksFromChange", agg.Cond{
-					If: agg.Or{
-						agg.Eq{0, "$generation"},
-						agg.Eq{generation - 1, "$generation"},
-					},
-					Then: 0,
+				/*
+					{"rechecksFromChange", agg.Cond{
+						If: agg.Or{
+							agg.Eq{0, "$generation"},
+							agg.Eq{generation - 1, "$generation"},
+						},
+						Then: 0,
 
-					// _ids is the array of document IDs to recheck.
-					// mismatch_first_seen_at maps indexes of that array to
-					// the document’s first mismatch time. It only contains
-					// entries for documents that mismatched without a change
-					// event. Thus, any _ids member whose index is *not* in
-					// mismatch_first_seen_at was enqueued from a change event.
-					Else: agg.Size{agg.Filter{
-						// This gives us all the array indices.
-						Input: agg.Range{End: agg.Size{"$_ids"}},
-						As:    "idx",
-						Cond: agg.Not{helpers.Exists{
-							agg.GetField{
-								Input: "$mismatch_first_seen_at",
-								Field: agg.ToString{"$$idx"},
-							},
+						// _ids is the array of document IDs to recheck.
+						// mismatch_first_seen_at maps indexes of that array to
+						// the document’s first mismatch time. It only contains
+						// entries for documents that mismatched without a change
+						// event. Thus, any _ids member whose index is *not* in
+						// mismatch_first_seen_at was enqueued from a change event.
+						Else: agg.Size{agg.Filter{
+							// This gives us all the array indices.
+							Input: agg.Range{End: agg.Size{"$_ids"}},
+							As:    "idx",
+							Cond: agg.Not{helpers.Exists{
+								agg.GetField{
+									Input: "$mismatch_first_seen_at",
+									Field: agg.ToString{"$$idx"},
+								},
+							}},
 						}},
 					}},
-				}},
+				*/
 			}}},
 			{{"$group", bson.D{
 				{"_id", nil},
@@ -201,20 +207,24 @@ func countRechecksForGeneration(
 						Else: 0,
 					},
 				}},
-				{"rechecksFromMismatch", accum.Sum{
-					agg.Cond{
-						If:   agg.Eq{"$generation", generation - 1},
-						Then: "$mismatches.count",
-						Else: 0,
-					},
-				}},
-				{"rechecksFromChange", accum.Sum{
-					agg.Cond{
-						If:   agg.Eq{"$generation", generation},
-						Then: "$rechecksFromChange",
-						Else: 0,
-					},
-				}},
+				/*
+					{"rechecksFromMismatch", accum.Sum{
+						agg.Cond{
+							If:   agg.Eq{"$generation", generation - 1},
+							Then: "$mismatches.count",
+							Else: 0,
+						},
+					}},
+				*/
+				/*
+					{"rechecksFromChange", accum.Sum{
+						agg.Cond{
+							If:   agg.Eq{"$generation", generation},
+							Then: "$rechecksFromChange",
+							Else: 0,
+						},
+					}},
+				*/
 				{"newMismatches", accum.Sum{
 					agg.Cond{
 						If:   agg.Eq{"$generation", generation},
@@ -242,9 +252,9 @@ func countRechecksForGeneration(
 	}
 
 	result := struct {
-		AllRechecks           int64
-		RechecksFromMismatch  int64
-		RechecksFromChange    int64
+		AllRechecks int64
+		//RechecksFromMismatch int64
+		//RechecksFromChange    int64
 		NewMismatches         int64
 		MaxMismatchDurationMS option.Option[int64]
 	}{}
@@ -270,9 +280,9 @@ func countRechecksForGeneration(
 	*/
 
 	return recheckCounts{
-		Total:         result.AllRechecks,
-		FromMismatch:  result.RechecksFromMismatch,
-		FromChange:    result.RechecksFromChange,
+		Total: result.AllRechecks,
+		//FromMismatch: result.RechecksFromMismatch,
+		//FromChange:    result.RechecksFromChange,
 		NewMismatches: result.NewMismatches,
 		MaxMismatchDuration: option.Map(
 			result.MaxMismatchDurationMS,

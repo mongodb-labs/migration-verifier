@@ -50,12 +50,14 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 				return errors.Wrapf(err, "counting mismatches seen during generation %d", generation)
 			}
 
-			if generation > 0 {
-				genStats.CurrentGenerationRechecks = option.Some(ProgressRechecks{
-					Changes:    recheckStats.FromChange,
-					Mismatches: recheckStats.FromMismatch,
-				})
-			}
+			/*
+				if generation > 0 {
+					genStats.CurrentGenerationRechecks = option.Some(ProgressRechecks{
+						Changes:    recheckStats.FromChange,
+						Mismatches: recheckStats.FromMismatch,
+					})
+				}
+			*/
 
 			genStats.MismatchesFound = recheckStats.NewMismatches
 			genStats.MaxMismatchDuration = option.Map(
@@ -164,8 +166,8 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 		Phase:              verifier.getPhaseWhileLocked(),
 		Generation:         verifier.generation,
 		GenerationStats:    genStats,
-		SrcLastRecheckedTS: srcLastRecheckedTS,
-		DstLastRecheckedTS: dstLastRecheckedTS,
+		SrcLastRecheckedTS: srcLastRecheckedTS.ToPointer(),
+		DstLastRecheckedTS: dstLastRecheckedTS.ToPointer(),
 		SrcChangeStats: ProgressChangeStats{
 			EventsPerSecond:   verifier.srcChangeReader.getEventsPerSecond(),
 			CurrentTimestamps: verifier.srcChangeReader.getCurrentTimestamps(),
