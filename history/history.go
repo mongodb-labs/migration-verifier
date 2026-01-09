@@ -80,8 +80,8 @@ type realNumber interface {
 	constraints.Integer | constraints.Float
 }
 
-type Logs[T realNumber] []Log[T]
-
+// SumLogs adds up each log’s Datum & returns the result.
+// (This only works, of course, for real number types.)
 func SumLogs[T realNumber](l []Log[T]) T {
 	var sum T
 
