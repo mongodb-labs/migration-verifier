@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/reportutils"
@@ -150,7 +151,9 @@ type Verifier struct {
 
 	pprofInterval time.Duration
 
-	workerTracker *WorkerTracker
+	workerTracker        *WorkerTracker
+	docsComparedHistory  *history.History[types.DocumentCount]
+	bytesComparedHistory *history.History[types.ByteCount]
 
 	verificationStatusCheckInterval time.Duration
 }
@@ -192,7 +195,9 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 
 		readConcernSetting: readConcern,
 
-		workerTracker: NewWorkerTracker(NumWorkers),
+		workerTracker:        NewWorkerTracker(NumWorkers),
+		docsComparedHistory:  history.New[types.DocumentCount](time.Minute),
+		bytesComparedHistory: history.New[types.ByteCount](time.Minute),
 
 		verificationStatusCheckInterval: 2 * time.Second,
 		nsMap:                           NewNSMap(),
@@ -1549,7 +1554,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	case Gen0MetadataAnalysisComplete:
 		fallthrough
 	case GenerationInProgress:
-		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder, reportGenStartTime)
+		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder)
 	case GenerationComplete:
 		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder, reportGenStartTime)
 	default:
