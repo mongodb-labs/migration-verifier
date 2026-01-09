@@ -307,7 +307,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 						verifier.bytesComparedHistory.Add(curHistoryByteCount)
 
 						curHistoryDocCount = 0
-						curHistoryDocCount = 0
+						curHistoryByteCount = 0
 					}
 				}
 
