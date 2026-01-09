@@ -31,6 +31,9 @@ const (
 	// embedded document. This is the name of the field that stores the
 	// document key.
 	docKeyInHashedCompare = "k"
+
+	// Every (this many) docs, add stats to the doc & byte count histories.
+	comparisonHistoryThreshold = 500
 )
 
 type docWithTs struct {
@@ -144,8 +147,17 @@ func (verifier *Verifier) compareDocsFromChannels(
 	error,
 ) {
 	results := []VerificationResult{}
-	var srcDocCount types.DocumentCount
-	var srcByteCount types.ByteCount
+
+	// Document & byte counts for both the task and a batch of docs to tally
+	// for the Verifier’s relevant History structs to track those figures.
+	// (We don’t want to report each individual doc in the history because that
+	// could be very big.)
+	var taskSrcDocCount, curHistoryDocCount types.DocumentCount
+	var taskSrcByteCount, curHistoryByteCount types.ByteCount
+
+	// Add these so that the very first logs will be meaningful.
+	verifier.docsComparedHistory.Add(0)
+	verifier.bytesComparedHistory.Add(0)
 
 	mapKeyFieldNames := task.QueryFilter.GetDocKeyFields()
 
@@ -279,13 +291,24 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 					fi.NoteSuccess("received document from source")
 
-					srcDocCount++
-					srcByteCount += types.ByteCount(len(srcDocWithTs.doc))
+					taskSrcDocCount++
+					taskSrcByteCount += types.ByteCount(len(srcDocWithTs.doc))
+
 					verifier.workerTracker.SetSrcCounts(
 						workerNum,
-						srcDocCount,
-						srcByteCount,
+						taskSrcDocCount,
+						taskSrcByteCount,
 					)
+
+					curHistoryDocCount++
+					curHistoryByteCount += types.ByteCount(len(srcDocWithTs.doc))
+					if curHistoryDocCount >= comparisonHistoryThreshold {
+						verifier.docsComparedHistory.Add(curHistoryDocCount)
+						verifier.bytesComparedHistory.Add(curHistoryByteCount)
+
+						curHistoryDocCount = 0
+						curHistoryDocCount = 0
+					}
 				}
 
 				return nil
@@ -408,7 +431,10 @@ func (verifier *Verifier) compareDocsFromChannels(
 		pool.Put(docWithTs.doc)
 	}
 
-	return results, srcDocCount, srcByteCount, nil
+	verifier.docsComparedHistory.Add(curHistoryDocCount)
+	verifier.bytesComparedHistory.Add(curHistoryByteCount)
+
+	return results, taskSrcDocCount, taskSrcByteCount, nil
 }
 
 func createMismatchTimes(firstDateTime option.Option[bson.DateTime]) recheck.MismatchHistory {
