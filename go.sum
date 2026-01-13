@@ -82,6 +82,8 @@ github.com/modern-go/reflect2 v1.0.2 h1:xBagoLtFs94CBntxluKeaWgTMpvLxC4ur3nMaC9G
 github.com/modern-go/reflect2 v1.0.2/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=
 github.com/mongodb-labs/migration-tools v0.0.0-20260113160023-96795b655ae6 h1:gev0/5hDf/uBBGbDtQ5azJ5Gh3Dk+FkRJlXS34pMM9M=
 github.com/mongodb-labs/migration-tools v0.0.0-20260113160023-96795b655ae6/go.mod h1:0rIY6CqzI4S1hrM2GiFr8v84aqv+1Jjf4jmUDzVETXo=
+github.com/mongodb-labs/migration-tools v0.0.0-20260113170835-3d5bbec67c6e h1:Rq4Wy3qkfxODi/9/qb47e7v8IULtpAAiyz1aSOTcwHw=
+github.com/mongodb-labs/migration-tools v0.0.0-20260113170835-3d5bbec67c6e/go.mod h1:0rIY6CqzI4S1hrM2GiFr8v84aqv+1Jjf4jmUDzVETXo=
 github.com/olekukonko/tablewriter v0.0.5 h1:P2Ga83D34wi1o9J6Wh1mRuqd4mF/x/lgBS7N7AbDhec=
 github.com/olekukonko/tablewriter v0.0.5/go.mod h1:hPp6KlRPjbx+hW8ykQs1w3UBbZlj6HuIJcUGPhkA7kY=
 github.com/pelletier/go-toml/v2 v2.2.3 h1:YmeHyLY8mFWbdkNWwpr+qIL2bEqT0o95WSdkNHvL12M=
