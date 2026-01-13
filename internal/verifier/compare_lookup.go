@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -16,7 +17,7 @@ import (
 // there was a change event, which invalidates the document’s stored
 // first-mismatch time.
 type firstMismatchTimeLookup struct {
-	task             *VerificationTask
+	task             *tasks.Task
 	docCompareMethod DocCompareMethod
 
 	// a cache:
@@ -36,7 +37,7 @@ func (fl *firstMismatchTimeLookup) get(doc bson.Raw) option.Option[bson.DateTime
 	return option.IfNotZero(fl.idToFirstMismatchTime[string(mapKeyBytes)])
 }
 
-func createIDToFirstMismatchTime(task *VerificationTask) map[string]bson.DateTime {
+func createIDToFirstMismatchTime(task *tasks.Task) map[string]bson.DateTime {
 	idToFirstMismatchTime := map[string]bson.DateTime{}
 
 	for i, id := range task.Ids {

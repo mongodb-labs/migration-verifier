@@ -13,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	pool "github.com/libp2p/go-buffer-pool"
@@ -44,7 +45,7 @@ type docWithTs struct {
 func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
 	workerNum int,
-	task *VerificationTask,
+	task *tasks.Task,
 ) (
 	[]VerificationResult,
 	types.DocumentCount,
@@ -138,7 +139,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	ctx context.Context,
 	workerNum int,
 	fi retry.SuccessNotifier,
-	task *VerificationTask,
+	task *tasks.Task,
 	srcChannel, dstChannel <-chan docWithTs,
 ) (
 	[]VerificationResult,
@@ -534,7 +535,7 @@ func simpleTimerReset(t *time.Timer, dur time.Duration) {
 }
 
 func (verifier *Verifier) getFetcherChannelsAndCallbacks(
-	task *VerificationTask,
+	task *tasks.Task,
 ) (
 	<-chan docWithTs,
 	<-chan docWithTs,
@@ -677,7 +678,7 @@ func (verifier *Verifier) getDocumentsCursor(
 	collection *mongo.Collection,
 	clusterInfo *util.ClusterInfo,
 	readConcernTS bson.Timestamp,
-	task *VerificationTask,
+	task *tasks.Task,
 ) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	var andPredicates bson.A
@@ -760,7 +761,7 @@ func (verifier *Verifier) getDocumentsCursor(
 	)
 }
 
-func getHashedIndexKeyProjection(task *VerificationTask) bson.D {
+func getHashedIndexKeyProjection(task *tasks.Task) bson.D {
 	return bson.D{
 		{"_id", 0},
 

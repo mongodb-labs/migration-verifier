@@ -14,6 +14,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -164,8 +165,8 @@ func (suite *IntegrationTestSuite) GetTopology(client *mongo.Client) util.Cluste
 }
 
 func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
-	qfilter := QueryFilter{Namespace: "keyhole.dealers"}
-	task := VerificationTask{QueryFilter: qfilter}
+	qfilter := tasks.QueryFilter{Namespace: "keyhole.dealers"}
+	task := tasks.Task{QueryFilter: qfilter}
 
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	//verifier.SetStartClean(true)

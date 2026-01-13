@@ -14,6 +14,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
@@ -745,7 +746,9 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 
 	suite.Assert().False(
 		startAtTs.Before(*postEventsSessionTime),
-		"verifier.srcStartAtTs should now be at least at the session timestamp",
+		"verifier.srcStartAtTs (%v) should now be at least at the session timestamp (%v)",
+		startAtTs,
+		postEventsSessionTime,
 	)
 }
 
@@ -892,7 +895,7 @@ func (suite *IntegrationTestSuite) TestCursorKilledResilience() {
 		ctx,
 		verifier.logger,
 		verifier.verificationTaskCollection(),
-		verificationTaskVerifyDocuments,
+		tasks.VerifyDocuments,
 		verifier.generation,
 	)
 	suite.Require().NoError(err)
@@ -942,7 +945,7 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 		ctx,
 		verifier.logger,
 		verifier.verificationTaskCollection(),
-		verificationTaskVerifyDocuments,
+		tasks.VerifyDocuments,
 		generation,
 	)
 	suite.Require().NoError(err)
@@ -951,7 +954,7 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 
 	totalFailed := lo.Reduce(
 		failedTasks,
-		func(sofar int, task VerificationTask, _ int) int {
+		func(sofar int, task tasks.Task, _ int) int {
 			return sofar + len(task.Ids)
 		},
 		0,

@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -24,7 +25,7 @@ func (verifier *Verifier) findLatestPartitionUpperBound(
 		ctx,
 		bson.D{
 			{"generation", 0},
-			{"type", verificationTaskVerifyDocuments},
+			{"type", tasks.VerifyDocuments},
 			{"query_filter.namespace", srcNs},
 		},
 		options.FindOne().
@@ -33,7 +34,7 @@ func (verifier *Verifier) findLatestPartitionUpperBound(
 			}),
 	)
 
-	task := VerificationTask{}
+	task := tasks.Task{}
 	if err := result.Decode(&task); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return option.None[any](), nil
@@ -51,7 +52,7 @@ func (verifier *Verifier) findLatestPartitionUpperBound(
 
 func (verifier *Verifier) createPartitionTasksWithSampleRate(
 	ctx context.Context,
-	task *VerificationTask,
+	task *tasks.Task,
 ) (int, types.DocumentCount, types.ByteCount, error) {
 	srcColl := verifier.srcClientCollection(task)
 	srcNs := FullName(srcColl)
@@ -77,7 +78,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 
 func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	ctx context.Context,
-	task *VerificationTask,
+	task *tasks.Task,
 	fi *retry.FuncInfo,
 ) (int, types.DocumentCount, types.ByteCount, error) {
 	srcColl := verifier.srcClientCollection(task)
