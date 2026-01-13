@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/verifier"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
@@ -153,14 +154,14 @@ func main() {
 			Name: docCompareMethod,
 			Usage: "Method to compare documents. One of: " + strings.Join(
 				lo.Map(
-					verifier.DocCompareMethods,
-					func(dcm verifier.DocCompareMethod, _ int) string {
+					compare.Methods,
+					func(dcm compare.Method, _ int) string {
 						return string(dcm)
 					},
 				),
 				", ",
 			),
-			Value: string(verifier.DocCompareDefault),
+			Value: string(compare.Default),
 		}),
 		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  startClean,
@@ -380,9 +381,9 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		return nil, err
 	}
 
-	docCompareMethod := verifier.DocCompareMethod(cCtx.String(docCompareMethod))
-	if !slices.Contains(verifier.DocCompareMethods, docCompareMethod) {
-		return nil, errors.Errorf("invalid doc compare method (%s); valid values are: %#q", docCompareMethod, verifier.DocCompareMethods)
+	docCompareMethod := compare.Method(cCtx.String(docCompareMethod))
+	if !slices.Contains(compare.Methods, docCompareMethod) {
+		return nil, errors.Errorf("invalid doc compare method (%s); valid values are: %#q", docCompareMethod, compare.Methods)
 	}
 	v.SetDocCompareMethod(docCompareMethod)
 

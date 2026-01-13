@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/msync"
@@ -452,15 +453,15 @@ func createMismatchTimes(firstDateTime option.Option[bson.DateTime]) recheck.Mis
 }
 
 func getDocIdFromComparison(
-	docCompareMethod DocCompareMethod,
+	docCompareMethod compare.Method,
 	doc bson.Raw,
 ) bson.RawValue {
 	var docID bson.RawValue
 
 	switch docCompareMethod {
-	case DocCompareBinary, DocCompareIgnoreOrder:
+	case compare.Binary, compare.IgnoreOrder:
 		docID = lo.Must(doc.LookupErr("_id"))
-	case DocCompareToHashedIndexKey:
+	case compare.ToHashedIndexKey:
 		docID = lo.Must(doc.LookupErr(docKeyInHashedCompare, "_id"))
 	default:
 		panic("bad doc compare method: " + docCompareMethod)
@@ -473,21 +474,21 @@ func getDocIdFromComparison(
 }
 
 func getDocKeyValues(
-	docCompareMethod DocCompareMethod,
+	docCompareMethod compare.Method,
 	doc bson.Raw,
 	fieldNames []string,
 ) ([]bson.RawValue, error) {
 	var docKey bson.Raw
 
 	switch docCompareMethod {
-	case DocCompareBinary, DocCompareIgnoreOrder:
+	case compare.Binary, compare.IgnoreOrder:
 		// If we have the full document, create the document key manually:
 		var err error
 		docKey, err = dockey.ExtractTrueDocKeyFromDoc(fieldNames, doc)
 		if err != nil {
 			return nil, err
 		}
-	case DocCompareToHashedIndexKey:
+	case compare.ToHashedIndexKey:
 		// If we have a hash, then the aggregation should have extracted the
 		// document key for us.
 		docKeyVal, err := doc.LookupErr(docKeyInHashedCompare)
@@ -708,7 +709,7 @@ func (verifier *Verifier) getDocumentsCursor(
 		findOptions...,
 	)
 
-	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
+	if verifier.docCompareMethod == compare.ToHashedIndexKey {
 		cmd = append(
 			cmd,
 			bson.E{"projection", getHashedIndexKeyProjection(task)},
@@ -790,7 +791,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 
 	docID := getDocIdFromComparison(verifier.docCompareMethod, srcClientDoc)
 
-	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
+	if verifier.docCompareMethod == compare.ToHashedIndexKey {
 		// With hash comparison, mismatches are opaque.
 		return []VerificationResult{{
 			ID:        docID,

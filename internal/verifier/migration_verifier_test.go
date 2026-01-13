@@ -25,6 +25,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
@@ -1374,7 +1375,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 func TestVerifierCompareDocs(t *testing.T) {
 	id := rand.Intn(1000)
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
-	verifier.SetDocCompareMethod(DocCompareIgnoreOrder)
+	verifier.SetDocCompareMethod(compare.IgnoreOrder)
 
 	type compareTest struct {
 		label       string
@@ -1517,8 +1518,8 @@ func TestVerifierCompareDocs(t *testing.T) {
 		verifier.SetDocCompareMethod(
 			lo.Ternary(
 				!curTest.checkOrder,
-				DocCompareIgnoreOrder,
-				DocCompareBinary,
+				compare.IgnoreOrder,
+				compare.Binary,
 			),
 		)
 
@@ -2672,7 +2673,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
 	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})
 	verifier.SetNamespaceMap()
-	verifier.SetDocCompareMethod(DocCompareIgnoreOrder)
+	verifier.SetDocCompareMethod(compare.IgnoreOrder)
 	// Set this value low to test the verifier with multiple partitions.
 	verifier.partitionSizeInBytes = 50
 
