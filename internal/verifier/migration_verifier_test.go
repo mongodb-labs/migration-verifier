@@ -32,6 +32,7 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/cespare/permute/v2"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"github.com/samber/lo/mutable"
@@ -140,9 +141,9 @@ func (suite *IntegrationTestSuite) TestProcessVerifyTask_Failure() {
 		QueryFilter: tasks.QueryFilter{
 			Partition: &partitions.Partition{
 				Key: partitions.PartitionKey{
-					Lower: 123,
+					Lower: bsontools.ToRawValue(123),
 				},
-				Upper: 234,
+				Upper: bsontools.ToRawValue(234),
 			},
 			Namespace: namespace,
 			To:        namespace,
@@ -298,9 +299,9 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 			),
 			Partition: &partitions.Partition{
 				Key: partitions.PartitionKey{
-					Lower: bson.MinKey{},
+					Lower: bsontools.ToRawValue(bson.MinKey{}),
 				},
-				Upper: bson.MaxKey{},
+				Upper: bsontools.ToRawValue(bson.MaxKey{}),
 			},
 		},
 	}
@@ -401,9 +402,9 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 			To:        "keyhole.dealers",
 			Partition: &partitions.Partition{
 				Key: partitions.PartitionKey{
-					Lower: bson.MinKey{},
+					Lower: bsontools.ToRawValue(bson.MinKey{}),
 				},
-				Upper: int32(999),
+				Upper: bsontools.ToRawValue(int32(999)),
 			},
 		},
 	}
@@ -424,51 +425,51 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 
 	cases := []struct {
 		label                 string
-		lower, upper          any
+		lower, upper          bson.RawValue
 		docsCount, mismatches int
 	}{
 		{
 			label:     "MinKey to int 999",
-			lower:     bson.MinKey{},
-			upper:     int32(999),
+			lower:     bsontools.ToRawValue(bson.MinKey{}),
+			upper:     bsontools.ToRawValue(int32(999)),
 			docsCount: 2,
 		},
 		{
 			label:     "between numeric types",
-			lower:     int64(123),
-			upper:     float64(9999),
+			lower:     bsontools.ToRawValue(int64(123)),
+			upper:     bsontools.ToRawValue(float64(9999)),
 			docsCount: 1,
 		},
 		{
 			label:     "between adjacent types",
-			lower:     int64(1),
-			upper:     "hey",
+			lower:     bsontools.ToRawValue(int64(1)),
+			upper:     bsontools.ToRawValue("hey"),
 			docsCount: 1,
 		},
 		{
 			label:      "between non-adjacent types, including type of upper",
-			lower:      bson.Null{},
-			upper:      "zzzz",
+			lower:      bsontools.ToRawValue(bson.Null{}),
+			upper:      bsontools.ToRawValue("zzzz"),
 			docsCount:  3,
 			mismatches: 2,
 		},
 		{
 			label:     "between non-adjacent types, excluding type of upper",
-			lower:     bson.Null{},
-			upper:     "aaa",
+			lower:     bsontools.ToRawValue(bson.Null{}),
+			upper:     bsontools.ToRawValue("aaa"),
 			docsCount: 2,
 		},
 		{
 			label:      "0 to MaxKey",
-			lower:      0,
-			upper:      bson.MaxKey{},
+			lower:      bsontools.ToRawValue(0),
+			upper:      bsontools.ToRawValue(bson.MaxKey{}),
 			docsCount:  2,
 			mismatches: 2,
 		},
 		{
 			label:      "long 999 to MaxKey",
-			lower:      int64(999),
-			upper:      bson.MaxKey{},
+			lower:      bsontools.ToRawValue(int64(999)),
+			upper:      bsontools.ToRawValue(bson.MaxKey{}),
 			docsCount:  1,
 			mismatches: 2,
 		},
@@ -3005,11 +3006,11 @@ func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 
 	// Check that each partition have bounds in the filter.
 	for _, partition := range partitions {
-		if _, isMinKey := partition.Key.Lower.(bson.MinKey); !isMinKey {
-			suite.Require().GreaterOrEqual(partition.Key.Lower.(bson.RawValue).AsInt64(), int64(0))
+		if partition.Key.Lower.Type != bson.TypeMinKey {
+			suite.Require().GreaterOrEqual(partition.Key.Lower.AsInt64(), int64(0))
 		}
-		if _, isMaxKey := partition.Upper.(bson.MaxKey); !isMaxKey {
-			suite.Require().Less(partition.Upper.(bson.RawValue).AsInt64(), int64(30))
+		if partition.Upper.Type != bson.TypeMaxKey {
+			suite.Require().Less(partition.Upper.AsInt64(), int64(30))
 		}
 	}
 }

@@ -1,6 +1,6 @@
 module github.com/10gen/migration-verifier
 
-go 1.24.0
+go 1.25.4
 
 require (
 	github.com/cespare/permute/v2 v2.0.0-beta2
@@ -18,7 +18,7 @@ require (
 	github.com/rs/zerolog v1.34.0
 	github.com/samber/lo v1.52.0
 	github.com/samber/mo v1.13.0
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli v1.22.9
 
 	// NB: This is the last driver version that supported 4.0.
@@ -52,6 +52,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.9 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/mongodb-labs/migration-tools v0.0.0-20260113160023-96795b655ae6 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect

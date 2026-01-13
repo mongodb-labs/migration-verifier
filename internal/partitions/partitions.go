@@ -194,7 +194,7 @@ func partitionCollectionWithParameters(
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	if minIDBound == nil {
+	if minIDBound.IsZero() {
 		subLogger.Info().
 			Str("namespace", uuidEntry.DBName+"."+uuidEntry.CollName).
 			Msg("No minimum _id found for collection; will not perform collection copy for this collection.")
@@ -207,7 +207,7 @@ func partitionCollectionWithParameters(
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	if maxIDBound == nil {
+	if maxIDBound.IsZero() {
 		subLogger.Info().
 			Str("namespace", uuidEntry.DBName+"."+uuidEntry.CollName).
 			Msg("No maximum _id found for collection; will not perform collection copy for this collection.")
@@ -235,14 +235,14 @@ func partitionCollectionWithParameters(
 	}
 
 	// Prepend the lower bound and append the upper bound to any intermediate bounds.
-	allIDBounds := make([]any, 0, numPartitions+1)
+	allIDBounds := make([]bson.RawValue, 0, numPartitions+1)
 	allIDBounds = append(allIDBounds, minIDBound)
 
 	// The intermediate bounds for the collection (i.e. all bounds apart from the lower and upper bounds).
 	// It's okay for these bounds to be nil, since we already have the lower and upper bounds from which
 	// to make at least one partition.
 	var (
-		midIDBounds   []any
+		midIDBounds   []bson.RawValue
 		collDropped   bool
 		prevSampleErr error
 	)
@@ -492,7 +492,7 @@ func getOuterIDBound(
 	srcDB *mongo.Database,
 	collName string,
 	globalFilter bson.D,
-) (any, error) {
+) (bson.RawValue, error) {
 	// Choose a sort direction based on the minOrMaxBound.
 	var sortDirection int
 	switch minOrMaxBound {
@@ -501,10 +501,10 @@ func getOuterIDBound(
 	case maxBound:
 		sortDirection = -1
 	default:
-		return nil, errors.Errorf("unknown minOrMaxBound parameter '%v' when getting outer _id bound", minOrMaxBound)
+		return bson.RawValue{}, errors.Errorf("unknown minOrMaxBound parameter '%v' when getting outer _id bound", minOrMaxBound)
 	}
 
-	var docID any
+	var docID bson.RawValue
 
 	var pipeline mongo.Pipeline
 	if len(globalFilter) > 0 {
@@ -548,7 +548,7 @@ func getOuterIDBound(
 	).Run(ctx, subLogger)
 
 	if err != nil {
-		return nil, errors.Wrapf(err, "could not get %s _id bound for source collection '%s.%s'", minOrMaxBound, srcDB.Name(), collName)
+		return bson.RawValue{}, errors.Wrapf(err, "could not get %s _id bound for source collection '%s.%s'", minOrMaxBound, srcDB.Name(), collName)
 	}
 
 	return docID, nil
@@ -568,7 +568,7 @@ func getMidIDBounds(
 	numPartitions, sampleMinNumDocs int,
 	sampleRate float64,
 	globalFilter bson.D,
-) ([]any, bool, error) {
+) ([]bson.RawValue, bool, error) {
 	// We entirely avoid sampling for mid bounds if we don't meet the criteria for the number of documents or partitions.
 	if collDocCount < int64(sampleMinNumDocs) || numPartitions < 2 {
 		return nil, false, nil
@@ -612,7 +612,7 @@ func getMidIDBounds(
 	}...)
 
 	// Get a cursor for the $sample and $bucketAuto aggregation.
-	var midIDBounds []any
+	var midIDBounds []bson.RawValue
 	agRetryer := retry.New()
 	err := agRetryer.
 		WithCallback(
@@ -639,7 +639,7 @@ func getMidIDBounds(
 				//   },
 				//   "count" : ...
 				// }
-				midIDBounds = make([]any, 0, numPartitions)
+				midIDBounds = make([]bson.RawValue, 0, numPartitions)
 				for cursor.Next(ctx) {
 					// Get a mid _id bound using the $bucketAuto document's max value.
 					bucketAutoDoc := make(bson.Raw, len(cursor.Current))

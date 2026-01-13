@@ -32,8 +32,8 @@ func ForPartitionAggregation(coll *mongo.Collection) *mongo.Collection {
 
 // PartitionKey represents the _id of a partition document stored in the destination.
 type PartitionKey struct {
-	SourceUUID util.UUID `bson:"srcUUID"`
-	Lower      any       `bson:"lowerBound"`
+	SourceUUID util.UUID     `bson:"srcUUID"`
+	Lower      bson.RawValue `bson:"lowerBound"`
 }
 
 // Namespace stores the database and collection name of the namespace being copied.
@@ -50,7 +50,7 @@ type Partition struct {
 	Ns  *Namespace   `bson:"namespace"`
 
 	// The upper index key bound for the partition.
-	Upper any `bson:"upperBound"`
+	Upper bson.RawValue `bson:"upperBound"`
 
 	// Set to true if the partition is for a capped collection. If so, this partition's
 	// upper/lower bounds should be set to the minKey and maxKey of the collection.

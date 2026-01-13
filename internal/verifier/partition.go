@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -20,7 +21,7 @@ import (
 func (verifier *Verifier) findLatestPartitionUpperBound(
 	ctx context.Context,
 	srcNs string,
-) (option.Option[any], error) {
+) (option.Option[bson.RawValue], error) {
 	result := verifier.verificationTaskCollection().FindOne(
 		ctx,
 		bson.D{
@@ -37,14 +38,14 @@ func (verifier *Verifier) findLatestPartitionUpperBound(
 	task := tasks.Task{}
 	if err := result.Decode(&task); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return option.None[any](), nil
+			return option.None[bson.RawValue](), nil
 		}
 
-		return option.None[any](), errors.Wrap(err, "finding latest partition")
+		return option.None[bson.RawValue](), errors.Wrap(err, "finding latest partition")
 	}
 
 	if task.QueryFilter.Partition == nil {
-		return option.None[any](), fmt.Errorf("nil partition … shouldn’t happen?!? task=%+v", task)
+		return option.None[bson.RawValue](), fmt.Errorf("nil partition … shouldn’t happen?!? task=%+v", task)
 	}
 
 	return option.FromPointer(&task.QueryFilter.Partition.Upper), nil
@@ -164,9 +165,9 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 	partitionsCount := 0
 
-	lowerBound := lowerBoundOpt.OrElse(bson.MinKey{})
+	lowerBound := lowerBoundOpt.OrElse(bsontools.ToRawValue(bson.MinKey{}))
 
-	createAndInsertPartition := func(lowerBound, upperBound any) error {
+	createAndInsertPartition := func(lowerBound, upperBound bson.RawValue) error {
 		partition := partitions.Partition{
 			Key: partitions.PartitionKey{
 				SourceUUID: namespaceAndUUID.UUID,
@@ -254,7 +255,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		}
 	}
 
-	err = createAndInsertPartition(lowerBound, bson.MaxKey{})
+	err = createAndInsertPartition(lowerBound, bsontools.ToRawValue(bson.MaxKey{}))
 	if err != nil {
 		return 0, 0, 0, err
 	}

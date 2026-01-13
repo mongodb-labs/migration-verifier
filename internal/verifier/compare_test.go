@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -42,9 +43,9 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 			Namespace: s.DBNameForTest() + ".stuff",
 			Partition: &partitions.Partition{
 				Key: partitions.PartitionKey{
-					Lower: bson.MinKey{},
+					Lower: bsontools.ToRawValue(bson.MinKey{}),
 				},
-				Upper: bson.MaxKey{},
+				Upper: bsontools.ToRawValue(bson.MaxKey{}),
 			},
 		},
 	}
