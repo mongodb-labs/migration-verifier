@@ -5,6 +5,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -53,7 +54,7 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	collTask, err := verifier.InsertCollectionVerificationTask(ctx, ns1)
 	suite.Require().NoError(err)
 
-	collTask.Status = verificationTaskProcessing
+	collTask.Status = tasks.Processing
 
 	suite.Require().NoError(
 		verifier.UpdateVerificationTask(ctx, collTask),
@@ -63,15 +64,15 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	// collection-verification task (status=[added, processing, completed]),
 	// and another for a different namespace that’s completed.
 	for _, taskParts := range []struct {
-		Status    verificationTaskStatus
+		Status    tasks.Status
 		Namespace string
 	}{
-		{verificationTaskAdded, ns1},
-		{verificationTaskProcessing, ns1},
-		{verificationTaskCompleted, ns1},
-		{verificationTaskAdded, ns2},
-		{verificationTaskProcessing, ns2},
-		{verificationTaskCompleted, ns2},
+		{tasks.Added, ns1},
+		{tasks.Processing, ns1},
+		{tasks.Completed, ns1},
+		{tasks.Added, ns2},
+		{tasks.Processing, ns2},
+		{tasks.Completed, ns2},
 	} {
 		task, err := verifier.InsertPartitionVerificationTask(
 			ctx,
@@ -97,9 +98,9 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	suite.Require().NoError(err)
 
 	orderedTypes := mslices.Of(
-		verificationTaskPrimary,
-		verificationTaskVerifyDocuments,
-		verificationTaskVerifyCollection,
+		tasks.Primary,
+		tasks.VerifyDocuments,
+		tasks.VerifyCollection,
 	)
 
 	// Contents should just be the primary task and
@@ -126,7 +127,7 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	)
 	suite.Require().NoError(err)
 
-	var taskDocs []VerificationTask
+	var taskDocs []tasks.Task
 	suite.Require().NoError(cursor.All(ctx, &taskDocs))
 
 	suite.Require().Len(taskDocs, 5)
@@ -135,17 +136,17 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 
 	// the primary (completed)
 	suite.Assert().Equal(
-		verificationTaskPrimary,
+		tasks.Primary,
 		taskDocs[0].Type,
 	)
 
 	// the 2 ns2 partition tasks that weren’t completed (both “added”)
 	suite.Assert().Equal(
-		verificationTaskVerifyDocuments,
+		tasks.VerifyDocuments,
 		taskDocs[1].Type,
 	)
 	suite.Assert().Equal(
-		verificationTaskAdded,
+		tasks.Added,
 		taskDocs[1].Status,
 	)
 	suite.Assert().Equal(
@@ -154,11 +155,11 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	)
 
 	suite.Assert().Equal(
-		verificationTaskVerifyDocuments,
+		tasks.VerifyDocuments,
 		taskDocs[2].Type,
 	)
 	suite.Assert().Equal(
-		verificationTaskAdded,
+		tasks.Added,
 		taskDocs[2].Status,
 	)
 	suite.Assert().Equal(
@@ -168,11 +169,11 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 
 	// the ns2 partition task that *was* completed
 	suite.Assert().Equal(
-		verificationTaskVerifyDocuments,
+		tasks.VerifyDocuments,
 		taskDocs[3].Type,
 	)
 	suite.Assert().Equal(
-		verificationTaskCompleted,
+		tasks.Completed,
 		taskDocs[3].Status,
 	)
 	suite.Assert().Equal(
@@ -182,11 +183,11 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 
 	// ns1’s verify-collection task (added state)
 	suite.Assert().Equal(
-		verificationTaskVerifyCollection,
+		tasks.VerifyCollection,
 		taskDocs[4].Type,
 	)
 	suite.Assert().Equal(
-		verificationTaskAdded,
+		tasks.Added,
 		taskDocs[4].Status,
 	)
 	suite.Assert().Equal(

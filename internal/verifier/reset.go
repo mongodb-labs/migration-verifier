@@ -3,12 +3,13 @@ package verifier
 import (
 	"context"
 
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 var defaultTaskUpdate = bson.M{
-	"$set":   bson.M{"status": verificationTaskAdded},
+	"$set":   bson.M{"status": tasks.Added},
 	"$unset": bson.M{"begin_time": 1},
 }
 
@@ -47,18 +48,18 @@ func (verifier *Verifier) handleIncompletePrimary(ctx context.Context) (bool, er
 	cursor, err := taskColl.Find(
 		ctx,
 		bson.M{
-			"type":   verificationTaskPrimary,
-			"status": bson.M{"$ne": verificationTaskCompleted},
+			"type":   tasks.Primary,
+			"status": bson.M{"$ne": tasks.Completed},
 		},
 	)
 	if err != nil {
-		return false, errors.Wrapf(err, "failed to fetch incomplete %#q task", verificationTaskPrimary)
+		return false, errors.Wrapf(err, "failed to fetch incomplete %#q task", tasks.Primary)
 	}
 
-	var incompletePrimaries []VerificationTask
+	var incompletePrimaries []tasks.Task
 	err = cursor.All(ctx, &incompletePrimaries)
 	if err != nil {
-		return false, errors.Wrapf(err, "failed to read incomplete %#q task", verificationTaskPrimary)
+		return false, errors.Wrapf(err, "failed to read incomplete %#q task", tasks.Primary)
 	}
 
 	switch len(incompletePrimaries) {
@@ -66,7 +67,7 @@ func (verifier *Verifier) handleIncompletePrimary(ctx context.Context) (bool, er
 		// Nothing to do.
 	case 1:
 		// Invariant: task status should be “added”.
-		if incompletePrimaries[0].Status != verificationTaskAdded {
+		if incompletePrimaries[0].Status != tasks.Added {
 			verifier.logger.Panic().
 				Any("task", incompletePrimaries[0]).
 				Msg("Primary task status has invalid state.")
@@ -79,12 +80,12 @@ func (verifier *Verifier) handleIncompletePrimary(ctx context.Context) (bool, er
 			ctx,
 			bson.M{
 				"type": bson.M{
-					"$ne": verificationTaskPrimary,
+					"$ne": tasks.Primary,
 				},
 			},
 		)
 		if err != nil {
-			return false, errors.Wrapf(err, "failed to delete non-%#q tasks", verificationTaskPrimary)
+			return false, errors.Wrapf(err, "failed to delete non-%#q tasks", tasks.Primary)
 		}
 
 		verifier.logger.Info().
@@ -107,17 +108,17 @@ func (verifier *Verifier) resetCollectionTasksIfNeeded(ctx context.Context) erro
 	cursor, err := taskColl.Find(
 		ctx,
 		bson.M{
-			"type":   verificationTaskVerifyCollection,
-			"status": verificationTaskProcessing,
+			"type":   tasks.VerifyCollection,
+			"status": tasks.Processing,
 		},
 	)
 	if err != nil {
-		return errors.Wrapf(err, "failed to find incomplete %#q tasks", verificationTaskVerifyCollection)
+		return errors.Wrapf(err, "failed to find incomplete %#q tasks", tasks.VerifyCollection)
 	}
-	var incompleteCollTasks []VerificationTask
+	var incompleteCollTasks []tasks.Task
 	err = cursor.All(ctx, &incompleteCollTasks)
 	if err != nil {
-		return errors.Wrapf(err, "failed to read incomplete %#q tasks", verificationTaskVerifyCollection)
+		return errors.Wrapf(err, "failed to read incomplete %#q tasks", tasks.VerifyCollection)
 	}
 
 	if len(incompleteCollTasks) > 0 {
@@ -130,24 +131,24 @@ func (verifier *Verifier) resetCollectionTasksIfNeeded(ctx context.Context) erro
 		_, err := taskColl.DeleteMany(
 			ctx,
 			bson.M{
-				"type":                   verificationTaskVerifyDocuments,
+				"type":                   tasks.VerifyDocuments,
 				"query_filter.namespace": task.QueryFilter.Namespace,
 			},
 		)
 		if err != nil {
-			return errors.Wrapf(err, "failed to delete namespace %#q's %#q tasks", task.QueryFilter.Namespace, verificationTaskVerifyDocuments)
+			return errors.Wrapf(err, "failed to delete namespace %#q's %#q tasks", task.QueryFilter.Namespace, tasks.VerifyDocuments)
 		}
 
 		_, err = taskColl.UpdateOne(
 			ctx,
 			bson.M{
-				"type":                   verificationTaskVerifyCollection,
+				"type":                   tasks.VerifyCollection,
 				"query_filter.namespace": task.QueryFilter.Namespace,
 			},
 			defaultTaskUpdate,
 		)
 		if err != nil {
-			return errors.Wrapf(err, "failed to reset namespace %#q's %#q task", task.QueryFilter.Namespace, verificationTaskVerifyCollection)
+			return errors.Wrapf(err, "failed to reset namespace %#q's %#q task", task.QueryFilter.Namespace, tasks.VerifyCollection)
 		}
 	}
 
@@ -160,13 +161,13 @@ func (verifier *Verifier) resetPartitionTasksIfNeeded(ctx context.Context) error
 	_, err := taskColl.UpdateMany(
 		ctx,
 		bson.M{
-			"type":   verificationTaskVerifyDocuments,
-			"status": verificationTaskProcessing,
+			"type":   tasks.VerifyDocuments,
+			"status": tasks.Processing,
 		},
 		defaultTaskUpdate,
 	)
 	if err != nil {
-		return errors.Wrapf(err, "failed to reset in-progress %#q tasks", verificationTaskVerifyDocuments)
+		return errors.Wrapf(err, "failed to reset in-progress %#q tasks", tasks.VerifyDocuments)
 	}
 
 	return nil

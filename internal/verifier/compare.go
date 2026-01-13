@@ -13,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	pool "github.com/libp2p/go-buffer-pool"
@@ -44,7 +45,7 @@ type docWithTs struct {
 func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
 	workerNum int,
-	task *VerificationTask,
+	task *tasks.Task,
 ) (
 	[]VerificationResult,
 	types.DocumentCount,
@@ -138,7 +139,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	ctx context.Context,
 	workerNum int,
 	fi retry.SuccessNotifier,
-	task *VerificationTask,
+	task *tasks.Task,
 	srcChannel, dstChannel <-chan docWithTs,
 ) (
 	[]VerificationResult,
@@ -534,7 +535,7 @@ func simpleTimerReset(t *time.Timer, dur time.Duration) {
 }
 
 func (verifier *Verifier) getFetcherChannelsAndCallbacks(
-	task *VerificationTask,
+	task *tasks.Task,
 ) (
 	<-chan docWithTs,
 	<-chan docWithTs,
@@ -577,7 +578,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 		} else {
 			err = errors.Wrap(
 				err,
-				"failed to find source documents",
+				"opening source documents cursor",
 			)
 		}
 
@@ -677,32 +678,18 @@ func (verifier *Verifier) getDocumentsCursor(
 	collection *mongo.Collection,
 	clusterInfo *util.ClusterInfo,
 	readConcernTS bson.Timestamp,
-	task *VerificationTask,
+	task *tasks.Task,
 ) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	var andPredicates bson.A
 
-	var aggOptions bson.D
-
-	if task.IsRecheck() {
+	if task.Ids != nil {
 		andPredicates = append(andPredicates, bson.D{{"_id", bson.M{"$in": task.Ids}}})
 		andPredicates = verifier.maybeAppendGlobalFilterToPredicates(andPredicates)
 		filter := bson.D{{"$and", andPredicates}}
 
-		switch verifier.docCompareMethod.QueryFunction() {
-		case DocQueryFunctionFind:
-			findOptions = bson.D{
-				bson.E{"filter", filter},
-			}
-		case DocQueryFunctionAggregate:
-			aggOptions = bson.D{
-				{"pipeline", transformPipelineForToHashedIndexKey(
-					mongo.Pipeline{{{"$match", filter}}},
-					task,
-				)},
-			}
-		default:
-			panic("bad doc compare query func: " + verifier.docCompareMethod.QueryFunction())
+		findOptions = bson.D{
+			bson.E{"filter", filter},
 		}
 	} else {
 		pqp, err := task.QueryFilter.Partition.GetQueryParameters(
@@ -713,49 +700,18 @@ func (verifier *Verifier) getDocumentsCursor(
 			return nil, errors.Wrapf(err, "getting query parameters for task: %+v", task)
 		}
 
-		switch verifier.docCompareMethod.QueryFunction() {
-		case DocQueryFunctionFind:
-			findOptions = pqp.ToFindOptions()
-		case DocQueryFunctionAggregate:
-			aggOptions = pqp.ToAggOptions()
-
-			if verifier.docCompareMethod != DocCompareToHashedIndexKey {
-				panic("unknown aggregate compare method: " + verifier.docCompareMethod)
-			}
-
-			for i, el := range aggOptions {
-				if el.Key != "pipeline" {
-					continue
-				}
-
-				aggOptions[i].Value = transformPipelineForToHashedIndexKey(
-					aggOptions[i].Value.(mongo.Pipeline),
-					task,
-				)
-
-				break
-			}
-
-		default:
-			panic("bad doc compare query func: " + verifier.docCompareMethod.QueryFunction())
-		}
+		findOptions = pqp.ToFindOptions()
 	}
 
-	var cmd bson.D
+	cmd := append(
+		bson.D{{"find", collection.Name()}},
+		findOptions...,
+	)
 
-	switch verifier.docCompareMethod.QueryFunction() {
-	case DocQueryFunctionFind:
+	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
 		cmd = append(
-			bson.D{{"find", collection.Name()}},
-			findOptions...,
-		)
-	case DocQueryFunctionAggregate:
-		cmd = append(
-			bson.D{
-				{"aggregate", collection.Name()},
-				{"cursor", bson.D{}},
-			},
-			aggOptions...,
+			cmd,
+			bson.E{"projection", getHashedIndexKeyProjection(task)},
 		)
 	}
 
@@ -779,7 +735,7 @@ func (verifier *Verifier) getDocumentsCursor(
 
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
-	if !task.IsRecheck() {
+	if task.Ids == nil {
 		if verifier.logger.Trace().Enabled() {
 
 			evt := verifier.logger.Trace().
@@ -805,28 +761,24 @@ func (verifier *Verifier) getDocumentsCursor(
 	)
 }
 
-func transformPipelineForToHashedIndexKey(
-	in mongo.Pipeline,
-	task *VerificationTask,
-) mongo.Pipeline {
-	return append(
-		slices.Clone(in),
-		bson.D{{"$replaceWith", bson.D{
-			// Single-letter field names minimize the document size.
-			{docKeyInHashedCompare, dockey.ExtractTrueDocKeyAgg(
-				task.QueryFilter.GetDocKeyFields(),
-				"$$ROOT",
-			)},
-			{"h", bson.D{
-				{"$toHashedIndexKey", bson.D{
-					{"$_internalKeyStringValue", bson.D{
-						{"input", "$$ROOT"},
-					}},
+func getHashedIndexKeyProjection(task *tasks.Task) bson.D {
+	return bson.D{
+		{"_id", 0},
+
+		// Single-letter field names minimize the document size.
+		{docKeyInHashedCompare, dockey.ExtractTrueDocKeyAgg(
+			task.QueryFilter.GetDocKeyFields(),
+			"$$ROOT",
+		)},
+		{"h", bson.D{
+			{"$toHashedIndexKey", bson.D{
+				{"$_internalKeyStringValue", bson.D{
+					{"input", "$$ROOT"},
 				}},
 			}},
-			{"s", bson.D{{"$bsonSize", "$$ROOT"}}},
-		}}},
-	)
+		}},
+		{"s", bson.D{{"$bsonSize", "$$ROOT"}}},
+	}
 }
 
 func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {

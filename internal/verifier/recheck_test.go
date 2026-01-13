@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
@@ -447,16 +448,16 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
 	suite.Require().NoError(err)
-	var foundTasks []VerificationTask
+	var foundTasks []tasks.Task
 	err = cursor.All(ctx, &foundTasks)
 	suite.Require().NoError(err)
 
-	t1 := VerificationTask{
+	t1 := tasks.Task{
 		Generation: 1,
 		Ids:        mslices.Of(mbson.ToRawValue(id1)),
-		Status:     verificationTaskAdded,
-		Type:       verificationTaskVerifyDocuments,
-		QueryFilter: QueryFilter{
+		Status:     tasks.Added,
+		Type:       tasks.VerifyDocuments,
+		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDB.testColl",
 			To:        "testDB.testColl",
 		},
@@ -474,20 +475,20 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	t3.Ids = mslices.Of(mbson.ToRawValue(id3))
 	t3.SrcTimestamp = option.Some(bson.Timestamp{123, 2})
 
-	suite.ElementsMatch([]VerificationTask{t1, t2, t3}, foundTasks)
+	suite.ElementsMatch([]tasks.Task{t1, t2, t3}, foundTasks)
 }
 
 func fetchVerifierCurrentTasks(
 	ctx context.Context,
 	t *testing.T,
 	verifier *Verifier,
-) []VerificationTask {
+) []tasks.Task {
 	taskColl := verifier.metaClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 
 	cursor, err := taskColl.Find(ctx, bson.D{{"generation", verifier.generation}})
 	require.NoError(t, err)
 
-	var actualTasks []VerificationTask
+	var actualTasks []tasks.Task
 	err = cursor.All(ctx, &actualTasks)
 	require.NoError(t, err)
 
@@ -535,21 +536,21 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
 	suite.Require().NoError(err)
-	var actualTasks []VerificationTask
+	var actualTasks []tasks.Task
 	err = cursor.All(ctx, &actualTasks)
 	suite.Require().NoError(err)
 
 	suite.Require().Len(actualTasks, 2, "actualTasks: %+v", actualTasks)
 
-	t1 := VerificationTask{
+	t1 := tasks.Task{
 		Generation: 1,
 		Ids: mslices.Of(
 			mbson.ToRawValue(id1),
 			mbson.ToRawValue(id2),
 		),
-		Status: verificationTaskAdded,
-		Type:   verificationTaskVerifyDocuments,
-		QueryFilter: QueryFilter{
+		Status: tasks.Added,
+		Type:   tasks.VerifyDocuments,
+		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDB.testColl",
 			To:        "testDB.testColl",
 		},
@@ -565,7 +566,7 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	t2.SourceByteCount = 1024
 	t2.SrcTimestamp = option.Some(bson.Timestamp{123, 2})
 
-	suite.ElementsMatch([]VerificationTask{t1, t2}, actualTasks)
+	suite.ElementsMatch([]tasks.Task{t1, t2}, actualTasks)
 }
 
 func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
@@ -597,20 +598,20 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
 	suite.Require().NoError(err)
-	var actualTasks []VerificationTask
+	var actualTasks []tasks.Task
 	err = cursor.All(ctx, &actualTasks)
 	suite.Require().NoError(err)
 
-	t1 := VerificationTask{
+	t1 := tasks.Task{
 		Generation: 1,
 		Ids: mslices.Of(
 			mbson.ToRawValue(id1),
 			mbson.ToRawValue(id2),
 			mbson.ToRawValue(id3),
 		),
-		Status: verificationTaskAdded,
-		Type:   verificationTaskVerifyDocuments,
-		QueryFilter: QueryFilter{
+		Status: tasks.Added,
+		Type:   tasks.VerifyDocuments,
+		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDB1.testColl1",
 			To:        "testDB1.testColl1",
 		},
@@ -626,7 +627,7 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 	t2.QueryFilter.To = "testDB2.testColl1"
 	t3.QueryFilter.Namespace = "testDB1.testColl2"
 	t4.QueryFilter.To = "testDB2.testColl2"
-	suite.ElementsMatch([]VerificationTask{t1, t2, t3, t4}, actualTasks)
+	suite.ElementsMatch([]tasks.Task{t1, t2, t3, t4}, actualTasks)
 }
 
 func (suite *IntegrationTestSuite) TestGenerationalClear() {

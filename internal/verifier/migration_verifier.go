@@ -21,6 +21,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
@@ -556,7 +557,7 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 	return
 }
 
-func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, task *VerificationTask) error {
+func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, task *tasks.Task) error {
 	start := time.Now()
 
 	debugLog := verifier.logger.Debug().
@@ -564,7 +565,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace)
 
-	task.augmentLogWithDetails(debugLog)
+	task.AugmentLogWithDetails(debugLog)
 
 	debugLog.Msg("Processing document comparison task.")
 
@@ -588,9 +589,9 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 	task.SourceByteCount = bytesCount
 
 	if len(problems) == 0 {
-		task.Status = verificationTaskCompleted
+		task.Status = tasks.Completed
 	} else {
-		task.Status = verificationTaskFailed
+		task.Status = tasks.Failed
 		// We know we won't change lastGeneration while verification tasks are running, so no mutex needed here.
 		if verifier.lastGeneration {
 			verifier.logger.Error().
@@ -916,7 +917,7 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec, dstSpe
 func (verifier *Verifier) ProcessCollectionVerificationTask(
 	ctx context.Context,
 	workerNum int,
-	task *VerificationTask,
+	task *tasks.Task,
 ) error {
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
@@ -1080,7 +1081,7 @@ func (verifier *Verifier) verifyIndexes(
 func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	ctx context.Context,
 	workerNum int,
-	task *VerificationTask,
+	task *tasks.Task,
 ) error {
 	srcColl := verifier.srcClientCollection(task)
 	dstColl := verifier.dstClientCollection(task)
@@ -1126,11 +1127,11 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 				Msg("Collection not present on either cluster.")
 
 			// This counts as success.
-			task.Status = verificationTaskCompleted
+			task.Status = tasks.Completed
 			return nil
 		}
 
-		task.Status = verificationTaskFailed
+		task.Status = tasks.Failed
 		// Fall through here; comparing the collection specifications will produce the correct
 		// failure output.
 	}
@@ -1159,17 +1160,17 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		}
 
 		if !verifyData {
-			task.Status = verificationTaskFailed
+			task.Status = tasks.Failed
 			return nil
 		}
-		task.Status = verificationTaskMetadataMismatch
+		task.Status = tasks.MetadataMismatch
 	}
 	if !verifyData {
 		// If the metadata mismatched and we're not checking the actual data, that's a complete failure.
-		if task.Status == verificationTaskMetadataMismatch {
-			task.Status = verificationTaskFailed
+		if task.Status == tasks.MetadataMismatch {
+			task.Status = tasks.Failed
 		} else {
-			task.Status = verificationTaskCompleted
+			task.Status = tasks.Completed
 		}
 		return nil
 	}
@@ -1201,7 +1202,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			return errors.Wrapf(err, "recording %#q index discrepancies", srcNs)
 		}
 
-		task.Status = verificationTaskMetadataMismatch
+		task.Status = tasks.MetadataMismatch
 	}
 
 	shardingProblems, err := verifier.verifyShardingIfNeeded(ctx, srcColl, dstColl)
@@ -1231,7 +1232,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			return errors.Wrapf(err, "recording %#q sharding discrepancies", srcNs)
 		}
 
-		task.Status = verificationTaskMetadataMismatch
+		task.Status = tasks.MetadataMismatch
 	}
 
 	// We’ve confirmed that the collection metadata (including indices)
@@ -1284,8 +1285,8 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		task.SourceByteCount = bytesCount
 	}
 
-	if task.Status == verificationTaskProcessing {
-		task.Status = verificationTaskCompleted
+	if task.Status == tasks.Processing {
+		task.Status = tasks.Completed
 	}
 
 	return nil
@@ -1353,16 +1354,16 @@ func (verifier *Verifier) getVerificationStatusForGeneration(
 
 		count := int(result.Lookup("count").Int32())
 		verificationStatus.TotalTasks += int(count)
-		switch verificationTaskStatus(status) {
-		case verificationTaskAdded:
+		switch tasks.Status(status) {
+		case tasks.Added:
 			verificationStatus.AddedTasks = count
-		case verificationTaskProcessing:
+		case tasks.Processing:
 			verificationStatus.ProcessingTasks = count
-		case verificationTaskFailed:
+		case tasks.Failed:
 			verificationStatus.FailedTasks = count
-		case verificationTaskMetadataMismatch:
+		case tasks.MetadataMismatch:
 			verificationStatus.MetadataMismatchTasks = count
-		case verificationTaskCompleted:
+		case tasks.Completed:
 			verificationStatus.CompletedTasks = count
 		default:
 			verifier.logger.Info().Msgf("Unknown task status %s", status)
@@ -1412,7 +1413,7 @@ func (verifier *Verifier) dstClientDatabase(dbName string) *mongo.Database {
 	return db
 }
 
-func (verifier *Verifier) srcClientCollection(task *VerificationTask) *mongo.Collection {
+func (verifier *Verifier) srcClientCollection(task *tasks.Task) *mongo.Collection {
 	if task != nil {
 		dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
 		return verifier.srcClientDatabase(dbName).Collection(collName)
@@ -1420,7 +1421,7 @@ func (verifier *Verifier) srcClientCollection(task *VerificationTask) *mongo.Col
 	return nil
 }
 
-func (verifier *Verifier) dstClientCollection(task *VerificationTask) *mongo.Collection {
+func (verifier *Verifier) dstClientCollection(task *tasks.Task) *mongo.Collection {
 	if task != nil {
 		if task.QueryFilter.To != "" {
 			return verifier.dstClientCollectionByNameSpace(task.QueryFilter.To)
