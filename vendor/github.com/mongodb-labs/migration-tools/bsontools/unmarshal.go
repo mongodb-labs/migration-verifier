@@ -87,9 +87,9 @@ func UnmarshalArray(raw bson.RawArray) (bson.A, error) {
 func unmarshalValue(val bson.RawValue) (any, error) {
 	switch val.Type {
 	case bson.TypeDouble:
-		return val.Double(), nil
+		return RawValueTo[float64](val)
 	case bson.TypeString:
-		return val.StringValue(), nil
+		return RawValueTo[string](val)
 	case bson.TypeEmbeddedDocument:
 		tVal, err := UnmarshalRaw(val.Value)
 		if err != nil {
@@ -105,43 +105,35 @@ func unmarshalValue(val bson.RawValue) (any, error) {
 
 		return tVal, nil
 	case bson.TypeBinary:
-		subtype, bin := val.Binary()
-		return bson.Binary{subtype, bin}, nil
+		return RawValueTo[bson.Binary](val)
 	case bson.TypeUndefined:
 		return bson.Undefined{}, nil
 	case bson.TypeObjectID:
-		return val.ObjectID(), nil
+		return RawValueTo[bson.ObjectID](val)
 	case bson.TypeBoolean:
-		return val.Boolean(), nil
+		return RawValueTo[bool](val)
 	case bson.TypeDateTime:
-		return bson.DateTime(val.DateTime()), nil
+		return RawValueTo[bson.DateTime](val)
 	case bson.TypeNull:
 		return nil, nil
 	case bson.TypeRegex:
-		pattern, opts := val.Regex()
-		return bson.Regex{pattern, opts}, nil
+		return RawValueTo[bson.Regex](val)
 	case bson.TypeDBPointer:
-		db, ptr := val.DBPointer()
-		return bson.DBPointer{DB: db, Pointer: ptr}, nil
+		return RawValueTo[bson.DBPointer](val)
 	case bson.TypeJavaScript:
-		return bson.JavaScript(val.JavaScript()), nil
+		return RawValueTo[bson.JavaScript](val)
 	case bson.TypeSymbol:
-		return bson.Symbol(val.Symbol()), nil
+		return RawValueTo[bson.Symbol](val)
 	case bson.TypeCodeWithScope:
-		code, scope := val.CodeWithScope()
-		return bson.CodeWithScope{
-			Code:  bson.JavaScript(code),
-			Scope: scope,
-		}, nil
+		return RawValueTo[bson.CodeWithScope](val)
 	case bson.TypeInt32:
-		return val.Int32(), nil
+		return RawValueTo[int32](val)
 	case bson.TypeTimestamp:
-		t, i := val.Timestamp()
-		return bson.Timestamp{t, i}, nil
+		return RawValueTo[bson.Timestamp](val)
 	case bson.TypeInt64:
-		return val.Int64(), nil
+		return RawValueTo[int64](val)
 	case bson.TypeDecimal128:
-		return val.Decimal128(), nil
+		return RawValueTo[bson.Decimal128](val)
 	case bson.TypeMaxKey:
 		return bson.MaxKey{}, nil
 	case bson.TypeMinKey:

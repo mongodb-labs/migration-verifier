@@ -16,7 +16,7 @@ type alwaysMarshalableTypes interface {
 		bson.Regex | bson.DBPointer | bson.JavaScript | bson.Symbol |
 
 		// This type includes an `any`, which can’t always be marshaled.
-		//bson.CodeWithScope |
+		// bson.CodeWithScope |
 
 		int32 | bson.Timestamp | int64 | bson.Decimal128 | bson.MinKey | bson.MaxKey |
 
@@ -35,12 +35,12 @@ type unmarshalTargets interface {
 		time.Time
 }
 
-type cannotCastErr struct {
+type cannotCastError struct {
 	gotBSONType bson.Type
 	toGoType    any
 }
 
-func (ce cannotCastErr) Error() string {
+func (ce cannotCastError) Error() string {
 	return fmt.Sprintf("cannot cast BSON %s to Go %T", ce.gotBSONType, ce.toGoType)
 }
 
@@ -76,7 +76,10 @@ func RawValueTo[T unmarshalTargets](in bson.RawValue) (T, error) {
 		}
 	case bson.Binary:
 		if subtype, buf, ok := in.BinaryOK(); ok {
-			return any(bson.Binary{subtype, buf}).(T), nil
+			return any(bson.Binary{
+				Subtype: subtype,
+				Data:    buf,
+			}).(T), nil
 		}
 	case bson.Undefined:
 		if in.Type == bson.TypeUndefined {
@@ -100,11 +103,17 @@ func RawValueTo[T unmarshalTargets](in bson.RawValue) (T, error) {
 		}
 	case bson.Regex:
 		if pattern, opts, ok := in.RegexOK(); ok {
-			return any(bson.Regex{pattern, opts}).(T), nil
+			return any(bson.Regex{
+				Pattern: pattern,
+				Options: opts,
+			}).(T), nil
 		}
 	case bson.DBPointer:
 		if db, ptr, ok := in.DBPointerOK(); ok {
-			return any(bson.DBPointer{db, ptr}).(T), nil
+			return any(bson.DBPointer{
+				DB:      db,
+				Pointer: ptr,
+			}).(T), nil
 		}
 	case bson.JavaScript:
 		if v, ok := in.JavaScriptOK(); ok {
@@ -116,7 +125,10 @@ func RawValueTo[T unmarshalTargets](in bson.RawValue) (T, error) {
 		}
 	case bson.CodeWithScope:
 		if code, scope, ok := in.CodeWithScopeOK(); ok {
-			return any(bson.CodeWithScope{bson.JavaScript(code), scope}).(T), nil
+			return any(bson.CodeWithScope{
+				Code:  bson.JavaScript(code),
+				Scope: scope,
+			}).(T), nil
 		}
 	case int32:
 		if val, ok := in.Int32OK(); ok {
@@ -124,7 +136,7 @@ func RawValueTo[T unmarshalTargets](in bson.RawValue) (T, error) {
 		}
 	case bson.Timestamp:
 		if t, i, ok := in.TimestampOK(); ok {
-			return any(bson.Timestamp{t, i}).(T), nil
+			return any(bson.Timestamp{T: t, I: i}).(T), nil
 		}
 	case int64:
 		if val, ok := in.Int64OK(); ok {
@@ -157,7 +169,7 @@ func RawValueTo[T unmarshalTargets](in bson.RawValue) (T, error) {
 		panic(fmt.Sprintf("Unrecognized Go type: %T (missing case?)", zero))
 	}
 
-	return zero, cannotCastErr{in.Type, zero}
+	return zero, cannotCastError{in.Type, zero}
 }
 
 // ToRawValue is a bit like bson.MarshalValue, but:
@@ -248,6 +260,7 @@ func ToRawValue[T alwaysMarshalableTypes](in T) bson.RawValue {
 		return i64ToRawValue(typedIn)
 	case bson.Decimal128:
 		h, l := typedIn.GetBytes()
+
 		return bson.RawValue{
 			Type:  bson.TypeDecimal128,
 			Value: bsoncore.AppendDecimal128(nil, h, l),
@@ -266,6 +279,7 @@ func ToRawValue[T alwaysMarshalableTypes](in T) bson.RawValue {
 		if typedIn < math.MinInt32 || typedIn > math.MaxInt32 {
 			return i64ToRawValue(int64(typedIn))
 		}
+
 		return i32ToRawValue(typedIn)
 	}
 
