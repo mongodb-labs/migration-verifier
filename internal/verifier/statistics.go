@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -25,7 +26,7 @@ type NamespaceStats struct {
 	// Byte sizes for the compared source documents
 	BytesCompared, TotalBytes types.ByteCount
 
-	// Number of partitions in the relevant verificationTaskStatus.
+	// Number of partitions in the relevant tasks.Status.
 	PartitionsAdded, PartitionsProcessing, PartitionsDone uint32
 }
 
@@ -194,13 +195,13 @@ func (verifier *Verifier) GetPersistedNamespaceStatistics(ctx context.Context) (
 		map[string]any{
 			"Generation": generation,
 
-			"VerifyDocsType": verificationTaskVerifyDocuments,
-			"VerifyCollType": verificationTaskVerifyCollection,
+			"VerifyDocsType": tasks.VerifyDocuments,
+			"VerifyCollType": tasks.VerifyCollection,
 
-			"AddedStatus":      verificationTaskAdded,
-			"ProcessingStatus": verificationTaskProcessing,
-			"CompletedStatus":  verificationTaskCompleted,
-			"FailedStatus":     verificationTaskFailed,
+			"AddedStatus":      tasks.Added,
+			"ProcessingStatus": tasks.Processing,
+			"CompletedStatus":  tasks.Completed,
+			"FailedStatus":     tasks.Failed,
 		},
 	)
 	if err != nil {

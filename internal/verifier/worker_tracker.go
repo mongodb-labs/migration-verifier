@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/msync"
 	"golang.org/x/exp/maps"
 )
@@ -23,7 +24,7 @@ type WorkerStatusMap = map[int]WorkerStatus
 type WorkerStatus struct {
 	TaskID       any
 	StartTime    time.Time
-	TaskType     verificationTaskType
+	TaskType     tasks.Type
 	Namespace    string
 	SrcDocCount  types.DocumentCount
 	SrcByteCount types.ByteCount
@@ -41,7 +42,7 @@ func NewWorkerTracker(workersCount int) *WorkerTracker {
 }
 
 // Set updates the worker’s state in the WorkerTracker.
-func (wt *WorkerTracker) Set(workerNum int, task VerificationTask) {
+func (wt *WorkerTracker) Set(workerNum int, task tasks.Task) {
 	wt.guard.Store(func(m WorkerStatusMap) WorkerStatusMap {
 		m[workerNum] = WorkerStatus{
 			TaskID:    task.PrimaryKey,

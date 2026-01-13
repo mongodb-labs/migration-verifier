@@ -18,6 +18,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/olekukonko/tablewriter"
@@ -46,7 +47,7 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		ctx,
 		verifier.logger,
 		verifier.verificationTaskCollection(),
-		verificationTaskVerifyCollection,
+		tasks.VerifyCollection,
 		generation,
 	)
 	if err != nil {
@@ -64,7 +65,7 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 			verifier.verificationDatabase(),
 			lo.Map(
 				failedTasks,
-				func(ft VerificationTask, _ int) bson.ObjectID {
+				func(ft tasks.Task, _ int) bson.ObjectID {
 					return ft.PrimaryKey
 				},
 			),
@@ -104,7 +105,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		ctx,
 		verifier.logger,
 		verifier.verificationTaskCollection(),
-		verificationTaskVerifyDocuments,
+		tasks.VerifyDocuments,
 		generation,
 	)
 
@@ -124,7 +125,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	failedTaskMap := lo.SliceToMap(
 		lo.Range(len(failedTasks)),
-		func(i int) (bson.ObjectID, VerificationTask) {
+		func(i int) (bson.ObjectID, tasks.Task) {
 			return failedTasks[i].PrimaryKey, failedTasks[i]
 		},
 	)
@@ -851,7 +852,7 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 		}
 
 		var detail string
-		if wsmap[w].TaskType == verificationTaskVerifyDocuments {
+		if wsmap[w].TaskType == tasks.VerifyDocuments {
 			detail = fmt.Sprintf(
 				"%s documents (%s)",
 				reportutils.FmtReal(wsmap[w].SrcDocCount),

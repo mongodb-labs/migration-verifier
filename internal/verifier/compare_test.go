@@ -8,6 +8,7 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -33,11 +34,11 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 		s.Require().NoError(err)
 	}
 
-	task := VerificationTask{
+	task := tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
-		Type:       verificationTaskVerifyDocuments,
-		Status:     verificationTaskProcessing,
-		QueryFilter: QueryFilter{
+		Type:       tasks.VerifyDocuments,
+		Status:     tasks.Processing,
+		QueryFilter: tasks.QueryFilter{
 			Namespace: s.DBNameForTest() + ".stuff",
 			Partition: &partitions.Partition{
 				Key: partitions.PartitionKey{
