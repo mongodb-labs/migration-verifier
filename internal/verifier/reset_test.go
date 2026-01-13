@@ -7,6 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
@@ -81,6 +82,10 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 					DB:   strings.Split(taskParts.Namespace, ".")[0],
 					Coll: strings.Split(taskParts.Namespace, ".")[1],
 				},
+				Key: partitions.PartitionKey{
+					Lower: bsontools.ToRawValue(bson.MinKey{}),
+				},
+				Upper: bsontools.ToRawValue(bson.MaxKey{}),
 			},
 			nil,
 			taskParts.Namespace,

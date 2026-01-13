@@ -111,15 +111,15 @@ func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
 	require.Equal(tasks.VerifyDocuments, foundTask.Type, "task type")
 	assert.Equal(
 		suite.T(),
-		bson.MinKey{},
-		foundTask.QueryFilter.Partition.Key.Lower,
+		bson.TypeMinKey,
+		foundTask.QueryFilter.Partition.Key.Lower.Type,
 		"min bound",
 	)
 
 	assert.Equal(
 		suite.T(),
-		bson.MaxKey{},
-		foundTask.QueryFilter.Partition.Upper,
+		bson.TypeMaxKey,
+		foundTask.QueryFilter.Partition.Upper.Type,
 		"max bound",
 	)
 }
@@ -1157,6 +1157,10 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 			ctx,
 			&partitions.Partition{
 				Ns: &partitions.Namespace{DB: "mydb", Coll: "coll1"},
+				Key: partitions.PartitionKey{
+					Lower: bsontools.ToRawValue(bson.MinKey{}),
+				},
+				Upper: bsontools.ToRawValue(bson.MaxKey{}),
 			},
 			[]string{},
 			"faux.dstnamespace",
