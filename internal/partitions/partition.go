@@ -106,28 +106,6 @@ func (pqp PartitionQueryParameters) ToFindOptions() bson.D {
 	return doc
 }
 
-/*
-func (pqp PartitionQueryParameters) ToAggOptions() bson.D {
-	pl := mongo.Pipeline{}
-
-	if theFilter, has := pqp.filter.Get(); has {
-		pl = append(pl, bson.D{{"$match", theFilter}})
-	}
-
-	if theSort, has := pqp.sortField.Get(); has {
-		pl = append(pl, bson.D{{"$sort", bson.D{{theSort, 1}}}})
-	}
-
-	doc := bson.D{
-		{"pipeline", pl},
-	}
-
-	pqp.addHintIfNeeded(&doc)
-
-	return doc
-}
-*/
-
 func (pqp PartitionQueryParameters) addHintIfNeeded(docRef *bson.D) {
 	if theHint, has := pqp.hint.Get(); has {
 		*docRef = append(*docRef, bson.E{"hint", theHint})
