@@ -106,6 +106,7 @@ func (pqp PartitionQueryParameters) ToFindOptions() bson.D {
 	return doc
 }
 
+/*
 func (pqp PartitionQueryParameters) ToAggOptions() bson.D {
 	pl := mongo.Pipeline{}
 
@@ -125,6 +126,7 @@ func (pqp PartitionQueryParameters) ToAggOptions() bson.D {
 
 	return doc
 }
+*/
 
 func (pqp PartitionQueryParameters) addHintIfNeeded(docRef *bson.D) {
 	if theHint, has := pqp.hint.Get(); has {

@@ -31,14 +31,3 @@ func (dcm DocCompareMethod) ShouldIgnoreFieldOrder() bool {
 func (dcm DocCompareMethod) ComparesFullDocuments() bool {
 	return dcm == DocCompareBinary || dcm == DocCompareIgnoreOrder
 }
-
-func (dcm DocCompareMethod) QueryFunction() DocQueryFunction {
-	switch dcm {
-	case DocCompareBinary, DocCompareIgnoreOrder:
-		return DocQueryFunctionFind
-	case DocCompareToHashedIndexKey:
-		return DocQueryFunctionAggregate
-	default:
-		panic("Unknown doc compare method: " + dcm)
-	}
-}
