@@ -746,7 +746,9 @@ func (suite *IntegrationTestSuite) TestStartAtTimeWithChanges() {
 
 	suite.Assert().False(
 		startAtTs.Before(*postEventsSessionTime),
-		"verifier.srcStartAtTs should now be at least at the session timestamp",
+		"verifier.srcStartAtTs (%v) should now be at least at the session timestamp (%v)",
+		startAtTs,
+		postEventsSessionTime,
 	)
 }
 
