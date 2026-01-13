@@ -1173,6 +1173,10 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 			ctx,
 			&partitions.Partition{
 				Ns: &partitions.Namespace{DB: "mydb", Coll: "coll2"},
+				Key: partitions.PartitionKey{
+					Lower: bsontools.ToRawValue(bson.MinKey{}),
+				},
+				Upper: bsontools.ToRawValue(bson.MaxKey{}),
 			},
 			[]string{},
 			"faux.dstnamespace",
