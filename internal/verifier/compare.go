@@ -577,7 +577,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 		} else {
 			err = errors.Wrap(
 				err,
-				"failed to find source documents",
+				"opening source documents cursor",
 			)
 		}
 
@@ -761,7 +761,9 @@ func (verifier *Verifier) getDocumentsCursor(
 }
 
 func getHashedIndexKeyProjection(task *VerificationTask) bson.D {
-	return bson.D{{"$replaceWith", bson.D{
+	return bson.D{
+		{"_id", 0},
+
 		// Single-letter field names minimize the document size.
 		{docKeyInHashedCompare, dockey.ExtractTrueDocKeyAgg(
 			task.QueryFilter.GetDocKeyFields(),
@@ -775,7 +777,7 @@ func getHashedIndexKeyProjection(task *VerificationTask) bson.D {
 			}},
 		}},
 		{"s", bson.D{{"$bsonSize", "$$ROOT"}}},
-	}}}
+	}
 }
 
 func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
