@@ -110,18 +110,16 @@ func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
 	require.True(gotTask, "should find task")
 
 	require.Equal(tasks.VerifyDocuments, foundTask.Type, "task type")
-	assert.Equal(
+	assert.Zero(
 		suite.T(),
-		bson.TypeMinKey,
-		foundTask.QueryFilter.Partition.Key.Lower.Type,
-		"min bound",
+		foundTask.QueryFilter.Partition.Key.Lower,
+		"min bound must be empty",
 	)
 
-	assert.Equal(
+	assert.Zero(
 		suite.T(),
-		bson.TypeMaxKey,
-		foundTask.QueryFilter.Partition.Upper.Type,
-		"max bound",
+		foundTask.QueryFilter.Partition.Upper,
+		"max bound must be empty",
 	)
 }
 
@@ -142,9 +140,9 @@ func (suite *IntegrationTestSuite) TestProcessVerifyTask_Failure() {
 		QueryFilter: tasks.QueryFilter{
 			Partition: &partitions.Partition{
 				Key: partitions.PartitionKey{
-					Lower: bsontools.ToRawValue(123),
+					Lower: option.Some(bsontools.ToRawValue(123)),
 				},
-				Upper: bsontools.ToRawValue(234),
+				Upper: option.Some(bsontools.ToRawValue(234)),
 			},
 			Namespace: namespace,
 			To:        namespace,
@@ -298,12 +296,6 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 					return el.Key
 				},
 			),
-			Partition: &partitions.Partition{
-				Key: partitions.PartitionKey{
-					Lower: bsontools.ToRawValue(bson.MinKey{}),
-				},
-				Upper: bsontools.ToRawValue(bson.MaxKey{}),
-			},
 		},
 	}
 
@@ -401,12 +393,7 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "keyhole.dealers",
 			To:        "keyhole.dealers",
-			Partition: &partitions.Partition{
-				Key: partitions.PartitionKey{
-					Lower: bsontools.ToRawValue(bson.MinKey{}),
-				},
-				Upper: bsontools.ToRawValue(int32(999)),
-			},
+			Partition: &partitions.Partition{},
 		},
 	}
 
@@ -426,51 +413,49 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 
 	cases := []struct {
 		label                 string
-		lower, upper          bson.RawValue
+		lower, upper          option.Option[bson.RawValue]
 		docsCount, mismatches int
 	}{
 		{
 			label:     "MinKey to int 999",
-			lower:     bsontools.ToRawValue(bson.MinKey{}),
-			upper:     bsontools.ToRawValue(int32(999)),
+			lower:     option.Some(bsontools.ToRawValue(bson.MinKey{})),
+			upper:     option.Some(bsontools.ToRawValue(int32(999))),
 			docsCount: 2,
 		},
 		{
 			label:     "between numeric types",
-			lower:     bsontools.ToRawValue(int64(123)),
-			upper:     bsontools.ToRawValue(float64(9999)),
+			lower:     option.Some(bsontools.ToRawValue(int64(123))),
+			upper:     option.Some(bsontools.ToRawValue(float64(9999))),
 			docsCount: 1,
 		},
 		{
 			label:     "between adjacent types",
-			lower:     bsontools.ToRawValue(int64(1)),
-			upper:     bsontools.ToRawValue("hey"),
+			lower:     option.Some(bsontools.ToRawValue(int64(1))),
+			upper:     option.Some(bsontools.ToRawValue("hey")),
 			docsCount: 1,
 		},
 		{
 			label:      "between non-adjacent types, including type of upper",
-			lower:      bsontools.ToRawValue(bson.Null{}),
-			upper:      bsontools.ToRawValue("zzzz"),
+			lower:      option.Some(bsontools.ToRawValue(bson.Null{})),
+			upper:      option.Some(bsontools.ToRawValue("zzzz")),
 			docsCount:  3,
 			mismatches: 2,
 		},
 		{
 			label:     "between non-adjacent types, excluding type of upper",
-			lower:     bsontools.ToRawValue(bson.Null{}),
-			upper:     bsontools.ToRawValue("aaa"),
+			lower:     option.Some(bsontools.ToRawValue(bson.Null{})),
+			upper:     option.Some(bsontools.ToRawValue("aaa")),
 			docsCount: 2,
 		},
 		{
 			label:      "0 to MaxKey",
-			lower:      bsontools.ToRawValue(0),
-			upper:      bsontools.ToRawValue(bson.MaxKey{}),
+			lower:      option.Some(bsontools.ToRawValue(0)),
 			docsCount:  2,
 			mismatches: 2,
 		},
 		{
 			label:      "long 999 to MaxKey",
-			lower:      bsontools.ToRawValue(int64(999)),
-			upper:      bsontools.ToRawValue(bson.MaxKey{}),
+			lower:      option.Some(bsontools.ToRawValue(int64(999))),
 			docsCount:  1,
 			mismatches: 2,
 		},
@@ -1158,10 +1143,6 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 			ctx,
 			&partitions.Partition{
 				Ns: &partitions.Namespace{DB: "mydb", Coll: "coll1"},
-				Key: partitions.PartitionKey{
-					Lower: bsontools.ToRawValue(bson.MinKey{}),
-				},
-				Upper: bsontools.ToRawValue(bson.MaxKey{}),
 			},
 			[]string{},
 			"faux.dstnamespace",
@@ -1174,10 +1155,6 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 			ctx,
 			&partitions.Partition{
 				Ns: &partitions.Namespace{DB: "mydb", Coll: "coll2"},
-				Key: partitions.PartitionKey{
-					Lower: bsontools.ToRawValue(bson.MinKey{}),
-				},
-				Upper: bsontools.ToRawValue(bson.MaxKey{}),
 			},
 			[]string{},
 			"faux.dstnamespace",
@@ -3015,11 +2992,12 @@ func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 
 	// Check that each partition have bounds in the filter.
 	for _, partition := range partitions {
-		if partition.Key.Lower.Type != bson.TypeMinKey {
-			suite.Require().GreaterOrEqual(partition.Key.Lower.AsInt64(), int64(0))
+		if lowerBound, has := partition.Key.Lower.Get(); has {
+			suite.Require().GreaterOrEqual(lowerBound.AsInt64(), int64(0))
 		}
-		if partition.Upper.Type != bson.TypeMaxKey {
-			suite.Require().Less(partition.Upper.AsInt64(), int64(30))
+
+		if upperBound, has := partition.Upper.Get(); has {
+			suite.Require().Less(upperBound.AsInt64(), int64(30))
 		}
 	}
 }

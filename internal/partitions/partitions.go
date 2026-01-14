@@ -11,7 +11,9 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -90,13 +92,6 @@ func (p *Partitions) AppendPartitions(partitions []*Partition) {
 func (p *Partitions) GetSlice() []*Partition {
 	return p.partitions
 }
-
-type minOrMaxBound string
-
-const (
-	minBound minOrMaxBound = "min"
-	maxBound minOrMaxBound = "max"
-)
 
 // PartitionCollectionWithSize splits the source collection into one or more
 // partitions. These partitions are expected to be somewhat similar in size,
@@ -189,32 +184,6 @@ func partitionCollectionWithParameters(
 		return nil, 0, 0, err
 	}
 
-	// The lower bound for the collection. There is no partitioning to do if the bound is nil.
-	minIDBound, err := getOuterIDBound(ctx, subLogger, minBound, srcDB, uuidEntry.CollName, globalFilter)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	if minIDBound.IsZero() {
-		subLogger.Info().
-			Str("namespace", uuidEntry.DBName+"."+uuidEntry.CollName).
-			Msg("No minimum _id found for collection; will not perform collection copy for this collection.")
-
-		return nil, 0, 0, nil
-	}
-
-	// The upper bound for the collection. There is no partitioning to do if the bound is nil.
-	maxIDBound, err := getOuterIDBound(ctx, subLogger, maxBound, srcDB, uuidEntry.CollName, globalFilter)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	if maxIDBound.IsZero() {
-		subLogger.Info().
-			Str("namespace", uuidEntry.DBName+"."+uuidEntry.CollName).
-			Msg("No maximum _id found for collection; will not perform collection copy for this collection.")
-
-		return nil, 0, 0, nil
-	}
-
 	// The total number of partitions needed for the collection. If it is a capped collection, we
 	// must only create one partition for the entire collection. Otherwise, calculate the
 	// appropriate number of partitions.
@@ -234,9 +203,8 @@ func partitionCollectionWithParameters(
 		}
 	}
 
-	// Prepend the lower bound and append the upper bound to any intermediate bounds.
-	allIDBounds := make([]bson.RawValue, 0, numPartitions+1)
-	allIDBounds = append(allIDBounds, minIDBound)
+	// The first & last “bounds” are empty, indicating no limit.
+	allIDBounds := make([]option.Option[bson.RawValue], 1, numPartitions+1)
 
 	// The intermediate bounds for the collection (i.e. all bounds apart from the lower and upper bounds).
 	// It's okay for these bounds to be nil, since we already have the lower and upper bounds from which
@@ -280,15 +248,18 @@ func partitionCollectionWithParameters(
 		// Skip this collection.
 		return nil, 0, 0, nil
 	}
-	if midIDBounds != nil {
-		allIDBounds = append(allIDBounds, midIDBounds...)
+
+	for _, bound := range midIDBounds {
+		allIDBounds = append(allIDBounds, option.Some(bound))
 	}
 
-	allIDBounds = append(allIDBounds, maxIDBound)
+	allIDBounds = append(allIDBounds, option.None[bson.RawValue]())
 
-	if len(allIDBounds) < 2 {
-		return nil, 0, 0, errors.Errorf("need at least 2 _id bounds to make a partition, but got %d _id bound(s)", len(allIDBounds))
-	}
+	lo.Assertf(
+		len(allIDBounds) >= 2,
+		"have have >= 2 _id bounds to make a partition (have: %v)",
+		allIDBounds,
+	)
 
 	// TODO (REP-552): Figure out what situations this occurs for, and whether or not it results from a bug.
 	if len(allIDBounds) != numPartitions+1 {
@@ -307,7 +278,7 @@ func partitionCollectionWithParameters(
 	// Create the partitions with the index key bounds.
 	partitions := make([]*Partition, 0, len(allIDBounds)-1)
 
-	for i := 0; i < len(allIDBounds)-1; i++ {
+	for i := range len(allIDBounds) - 1 {
 		partitionKey := PartitionKey{
 			SourceUUID: uuidEntry.UUID,
 			Lower:      allIDBounds[i],
@@ -481,78 +452,6 @@ func getNumPartitions(collSizeInBytes, partitionSizeInBytes int64, filteredRatio
 	// end up with 1000 MB / 2 partitions = 500 MB / partition. But if we instead take
 	// the ceiling, we'd end up with 1000 MB / 3 partitions = 333 MB / partition.
 	return int(numPartitions) + 1
-}
-
-// getOuterIDBound returns either the smallest or largest _id value in a collection. The minOrMaxBound parameter can be set to "min" or "max" to get either, respectively.
-// If a globalFilter is specified, getOuterIDBound returns the smallest or largest _id of documents within the filter.
-func getOuterIDBound(
-	ctx context.Context,
-	subLogger *logger.Logger,
-	minOrMaxBound minOrMaxBound,
-	srcDB *mongo.Database,
-	collName string,
-	globalFilter bson.D,
-) (bson.RawValue, error) {
-	// Choose a sort direction based on the minOrMaxBound.
-	var sortDirection int
-	switch minOrMaxBound {
-	case minBound:
-		sortDirection = 1
-	case maxBound:
-		sortDirection = -1
-	default:
-		return bson.RawValue{}, errors.Errorf("unknown minOrMaxBound parameter '%v' when getting outer _id bound", minOrMaxBound)
-	}
-
-	var docID bson.RawValue
-
-	var pipeline mongo.Pipeline
-	if len(globalFilter) > 0 {
-		pipeline = append(pipeline, bson.D{{"$match", globalFilter}})
-	}
-	pipeline = append(pipeline, []bson.D{
-		{{"$sort", bson.D{{"_id", sortDirection}}}},
-		{{"$project", bson.D{{"_id", 1}}}},
-		{{"$limit", 1}},
-	}...)
-
-	// Get one document containing only the smallest or largest _id value in the collection.
-	err := retry.New().WithCallback(
-		func(ctx context.Context, ri *retry.FuncInfo) error {
-			ri.Log(subLogger.Logger, "aggregate", "source", srcDB.Name(), collName, fmt.Sprintf("getting %s _id partition bound", minOrMaxBound))
-			cursor, cmdErr :=
-				srcDB.RunCommandCursor(ctx, bson.D{
-					{"aggregate", collName},
-					{"pipeline", pipeline},
-					{"hint", bson.D{{"_id", 1}}},
-					{"cursor", bson.D{}},
-				})
-
-			if cmdErr != nil {
-				return cmdErr
-			}
-
-			// If we don't have at least one document, the collection is either empty or was dropped.
-			defer cursor.Close(ctx)
-			if !cursor.Next(ctx) {
-				return nil
-			}
-
-			// Return the _id value from that document.
-			docID, cmdErr = cursor.Current.LookupErr("_id")
-			return cmdErr
-		},
-		"finding %#q's %s _id",
-		srcDB.Name()+"."+collName,
-		minOrMaxBound,
-	).Run(ctx, subLogger)
-
-	if err != nil {
-		return bson.RawValue{}, errors.Wrapf(err, "could not get %s _id bound for source collection '%s.%s'", minOrMaxBound, srcDB.Name(), collName)
-	}
-
-	return docID, nil
-
 }
 
 // getMidIDBounds performs a $sample and $bucketAuto aggregation on a collection and returns a slice of pseudo-randomly spaced out _id bounds.

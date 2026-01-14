@@ -4,7 +4,6 @@ import (
 	"slices"
 
 	"github.com/10gen/migration-verifier/mslices"
-	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -90,16 +89,16 @@ var bsonTypeString = map[bson.Type]string{
 // This is kind of like strings.Cut() but against the sort-ordered list of BSON
 // types, except that if the given value is a number or string-like, then other
 // “like” types will not be in the returned slices.
-func getTypeBracketExcludedBSONTypes(val any) ([]bson.Type, []bson.Type, error) {
-	bsonType, _, err := bson.MarshalValue(val)
-	if err != nil {
-		return nil, nil, errors.Wrapf(err, "marshaling min value (%v)", val)
-	}
+func getTypeBracketExcludedBSONTypes(val bson.RawValue) ([]bson.Type, []bson.Type) {
+	bsonType := val.Type
 
 	curSortOrder := slices.Index(bsonTypeSortOrder, bsonType)
-	if curSortOrder < 0 {
-		return nil, nil, errors.Errorf("go value (%T: %v) marshaled to BSON %s, which is invalid", val, val, bsonType)
-	}
+
+	lo.Assertf(
+		curSortOrder >= 0,
+		"raw value type (%s) must be known",
+		bsonType,
+	)
 
 	earlier := bsonTypeSortOrder[:curSortOrder]
 	later := bsonTypeSortOrder[1+curSortOrder:]
@@ -119,7 +118,7 @@ func getTypeBracketExcludedBSONTypes(val any) ([]bson.Type, []bson.Type, error) 
 		later = lo.Without(later, stringTypes...)
 	}
 
-	return earlier, later, nil
+	return earlier, later
 }
 
 func typesToStrings(in []bson.Type) []string {

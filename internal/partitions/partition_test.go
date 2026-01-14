@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -107,10 +108,10 @@ func (suite *UnitTestSuite) makeTestPartition() (Partition, bson.D) {
 	partition := Partition{
 		Key: PartitionKey{
 			SourceUUID: util.NewUUID(),
-			Lower:      bsontools.ToRawValue(bson.ObjectID([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})),
+			Lower:      option.Some(bsontools.ToRawValue(bson.ObjectID([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}))),
 		},
 		Ns:    &Namespace{DB: "testDB", Coll: "testColl"},
-		Upper: bsontools.ToRawValue(bson.ObjectID([12]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2})),
+		Upper: option.Some(bsontools.ToRawValue(bson.ObjectID([12]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2}))),
 	}
 	return partition, suite.makeExpectedFilter(partition.Key.Lower, partition.Upper)
 }

@@ -27,7 +27,6 @@ import (
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/dustin/go-humanize"
-	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -777,9 +776,7 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 				DB:   namespaceAndUUID.DBName,
 				Coll: namespaceAndUUID.CollName}}}
 	}
-	// Use "open" partitions, otherwise out-of-range keys on the destination might be missed
-	partitionList[0].Key.Lower = bsontools.ToRawValue(bson.MinKey{})
-	partitionList[len(partitionList)-1].Upper = bsontools.ToRawValue(bson.MaxKey{})
+
 	debugLog := verifier.logger.Debug()
 	if debugLog.Enabled() {
 		debugLog.Msgf("Partitions (%d):", len(partitionList))

@@ -85,6 +85,9 @@ func ConvertToRawValue(thing any) (bson.RawValue, error) {
 
 // MustConvertToRawValue is like ConvertToRawValue, but it panics if the
 // value can’t be marshaled. This is for use in tests only.
+//
+// See bsontools.ToRawValue for a more convenient (albeit more limited),
+// production-safe version of this.
 func MustConvertToRawValue(thing any) bson.RawValue {
 	val, err := ConvertToRawValue(thing)
 	if err != nil {

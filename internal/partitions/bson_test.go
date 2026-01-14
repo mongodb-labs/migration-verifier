@@ -4,19 +4,21 @@ import (
 	"slices"
 	"time"
 
+	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 	for _, tc := range []struct {
-		value  any
+		value  bson.RawValue
 		before []bson.Type
 		after  []bson.Type
 	}{
 		{
-			value:  bson.MinKey{},
+			value:  bsontools.ToRawValue(bson.MinKey{}),
 			before: []bson.Type{},
 			after: lo.Without(
 				bsonTypeSortOrder,
@@ -25,7 +27,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value:  bson.Null{},
+			value:  bsontools.ToRawValue(bson.Null{}),
 			before: mslices.Of(bson.TypeMinKey),
 			after: lo.Without(
 				bsonTypeSortOrder,
@@ -35,7 +37,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: int32(1),
+			value: bsontools.ToRawValue(int32(1)),
 			before: mslices.Of(
 				bson.TypeMinKey,
 				bson.TypeNull,
@@ -56,7 +58,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: int64(1),
+			value: bsontools.ToRawValue(int64(1)),
 			before: mslices.Of(
 				bson.TypeMinKey,
 				bson.TypeNull,
@@ -77,7 +79,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: float64(1),
+			value: bsontools.ToRawValue(float64(1)),
 			before: mslices.Of(
 				bson.TypeMinKey,
 				bson.TypeNull,
@@ -98,7 +100,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: bson.Decimal128{},
+			value: bsontools.ToRawValue(bson.Decimal128{}),
 			before: mslices.Of(
 				bson.TypeMinKey,
 				bson.TypeNull,
@@ -119,7 +121,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: "",
+			value: bsontools.ToRawValue(""),
 			before: append(
 				mslices.Of(
 					bson.TypeMinKey,
@@ -142,7 +144,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: bson.Symbol(""),
+			value: bsontools.ToRawValue(bson.Symbol("")),
 			before: append(
 				mslices.Of(
 					bson.TypeMinKey,
@@ -165,7 +167,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: bson.D{},
+			value: bsontools.ToRawValue(lo.Must(bsontools.MarshalD(nil, bson.D{}))),
 			before: lo.Flatten(mslices.Of(
 				mslices.Of(
 					bson.TypeMinKey,
@@ -188,7 +190,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: []byte{},
+			value: bsontools.ToRawValue(bson.Binary{}),
 			before: lo.Flatten(mslices.Of(
 				mslices.Of(
 					bson.TypeMinKey,
@@ -213,7 +215,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: bson.ObjectID{},
+			value: bsontools.ToRawValue(bson.ObjectID{}),
 			before: lo.Flatten(mslices.Of(
 				mslices.Of(
 					bson.TypeMinKey,
@@ -238,7 +240,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: true,
+			value: bsontools.ToRawValue(true),
 			before: lo.Flatten(mslices.Of(
 				mslices.Of(
 					bson.TypeMinKey,
@@ -263,7 +265,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: time.Now(),
+			value: bsontools.ToRawValue(bson.NewDateTimeFromTime(time.Now())),
 			before: lo.Flatten(mslices.Of(
 				mslices.Of(
 					bson.TypeMinKey,
@@ -288,7 +290,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: bson.Timestamp{},
+			value: bsontools.ToRawValue(bson.Timestamp{}),
 			before: lo.Flatten(mslices.Of(
 				mslices.Of(
 					bson.TypeMinKey,
@@ -313,7 +315,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: bson.DBPointer{},
+			value: bsontools.ToRawValue(bson.DBPointer{}),
 			before: lo.Flatten(mslices.Of(
 				mslices.Of(
 					bson.TypeMinKey,
@@ -339,7 +341,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: bson.JavaScript(""),
+			value: bsontools.ToRawValue(bson.JavaScript("")),
 			before: lo.Flatten(mslices.Of(
 				mslices.Of(
 					bson.TypeMinKey,
@@ -365,7 +367,8 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: bson.CodeWithScope{Scope: bson.D{}},
+			// ToRawValue() doesn’t work here.
+			value: mbson.MustConvertToRawValue(bson.CodeWithScope{Scope: bson.D{}}),
 			before: lo.Flatten(mslices.Of(
 				mslices.Of(
 					bson.TypeMinKey,
@@ -391,7 +394,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 		},
 
 		{
-			value: bson.MaxKey{},
+			value: bsontools.ToRawValue(bson.MaxKey{}),
 			before: lo.Flatten(mslices.Of(
 				mslices.Of(
 					bson.TypeMinKey,
@@ -415,8 +418,7 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 			after: []bson.Type{},
 		},
 	} {
-		before, after, err := getTypeBracketExcludedBSONTypes(tc.value)
-		suite.Require().NoError(err)
+		before, after := getTypeBracketExcludedBSONTypes(tc.value)
 
 		suite.Assert().ElementsMatch(
 			tc.before,

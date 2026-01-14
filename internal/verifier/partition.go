@@ -11,7 +11,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
-	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -48,7 +47,7 @@ func (verifier *Verifier) findLatestPartitionUpperBound(
 		return option.None[bson.RawValue](), fmt.Errorf("nil partition … shouldn’t happen?!? task=%+v", task)
 	}
 
-	return option.FromPointer(&task.QueryFilter.Partition.Upper), nil
+	return task.QueryFilter.Partition.Upper, nil
 }
 
 func (verifier *Verifier) createPartitionTasksWithSampleRate(
@@ -115,8 +114,8 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 		predicates, err := partitions.FilterIdBounds(
 			verifier.srcClusterInfo,
-			lowerBound,
-			bson.MaxKey{},
+			lowerBoundOpt,
+			option.None[bson.RawValue](),
 		)
 		if err != nil {
 			return 0, 0, 0, errors.Wrapf(err, "getting lower-bound filter predicate (%v)", lowerBound)
@@ -165,9 +164,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 	partitionsCount := 0
 
-	lowerBound := lowerBoundOpt.OrElse(bsontools.ToRawValue(bson.MinKey{}))
-
-	createAndInsertPartition := func(lowerBound, upperBound bson.RawValue) error {
+	createAndInsertPartition := func(lowerBound, upperBound option.Option[bson.RawValue]) error {
 		partition := partitions.Partition{
 			Key: partitions.PartitionKey{
 				SourceUUID: namespaceAndUUID.UUID,
@@ -203,6 +200,8 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	}
 
 	idealNumPartitions := util.DivideToF64(collBytes, idealPartitionBytes)
+
+	var lowerBound option.Option[bson.RawValue]
 
 	// We only want to go in here when the collection has enough data
 	// to justify partitioning.
@@ -242,12 +241,12 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 				return 0, 0, 0, errors.Wrapf(err, "fetching %#q from %#q’s sampling cursor", "_id", srcNs)
 			}
 
-			err = createAndInsertPartition(lowerBound, upperBound)
+			err = createAndInsertPartition(lowerBound, option.Some(upperBound))
 			if err != nil {
 				return 0, 0, 0, err
 			}
 
-			lowerBound = upperBound
+			lowerBound = option.Some(upperBound)
 		}
 
 		if cursor.Err() != nil {
@@ -255,7 +254,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		}
 	}
 
-	err = createAndInsertPartition(lowerBound, bsontools.ToRawValue(bson.MaxKey{}))
+	err = createAndInsertPartition(lowerBound, option.None[bson.RawValue]())
 	if err != nil {
 		return 0, 0, 0, err
 	}

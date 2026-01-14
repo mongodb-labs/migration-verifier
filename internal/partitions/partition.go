@@ -6,10 +6,9 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
-	"github.com/pkg/errors"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -32,8 +31,8 @@ func ForPartitionAggregation(coll *mongo.Collection) *mongo.Collection {
 
 // PartitionKey represents the _id of a partition document stored in the destination.
 type PartitionKey struct {
-	SourceUUID util.UUID     `bson:"srcUUID"`
-	Lower      bson.RawValue `bson:"lowerBound"`
+	SourceUUID util.UUID                    `bson:"srcUUID"`
+	Lower      option.Option[bson.RawValue] `bson:"lowerBound"`
 }
 
 // Namespace stores the database and collection name of the namespace being copied.
@@ -50,7 +49,7 @@ type Partition struct {
 	Ns  *Namespace   `bson:"namespace"`
 
 	// The upper index key bound for the partition.
-	Upper bson.RawValue `bson:"upperBound"`
+	Upper option.Option[bson.RawValue] `bson:"upperBound"`
 
 	// Set to true if the partition is for a capped collection. If so, this partition's
 	// upper/lower bounds should be set to the minKey and maxKey of the collection.
@@ -163,7 +162,7 @@ func (p *Partition) GetQueryParameters(clusterInfo *util.ClusterInfo, filterAndP
 // FilterIdBounds returns a slice of query predicates that, when ANDed together,
 // effect a non-type-bracketed query for all values between the given boundaries
 // (inclusive). The query will NOT require fetching full documents.
-func FilterIdBounds(clusterInfo *util.ClusterInfo, lower, upper any) ([]bson.D, error) {
+func FilterIdBounds(clusterInfo *util.ClusterInfo, lower, upper option.Option[bson.RawValue]) ([]bson.D, error) {
 	// For non-capped collections, the cursor should use the ID filter and the _id index.
 	// Get the bounded query filter from the partition to be used in the Find command.
 	useExprFind := true
@@ -180,17 +179,23 @@ func FilterIdBounds(clusterInfo *util.ClusterInfo, lower, upper any) ([]bson.D, 
 	return getPredicatesFunc(lower, upper)
 }
 
+var (
+	rawMinKey = bsontools.ToRawValue(bson.MinKey{})
+	rawMaxKey = bsontools.ToRawValue(bson.MaxKey{})
+)
+
 // This returns a range filter on _id to be used in a Find query for the
 // partition.  This filter will properly handle mixed-type _ids, but on server versions
 // < 5.0, will not use indexes and thus will be very slow.
-func getExprPredicates(lower, upper any) ([]bson.D, error) {
+func getExprPredicates(lower, upper option.Option[bson.RawValue]) ([]bson.D, error) {
+
 	// We use $expr to avoid type bracketing and allow comparison of different _id types,
 	// and $literal to avoid MQL injection from an _id's value.
 	predicates := []bson.D{{
 		{"$expr", bson.D{
 			{"$gte", bson.A{
 				"$_id",
-				bson.D{{"$literal", lower}},
+				bson.D{{"$literal", lower.OrElse(rawMinKey)}},
 			}},
 		}},
 	}}
@@ -201,7 +206,7 @@ func getExprPredicates(lower, upper any) ([]bson.D, error) {
 		bson.D{{"$expr", bson.D{
 			{"$lte", bson.A{
 				"$_id",
-				bson.D{{"$literal", upper}},
+				bson.D{{"$literal", upper.OrElse(rawMaxKey)}},
 			}},
 		}}},
 	)
@@ -212,33 +217,17 @@ func getExprPredicates(lower, upper any) ([]bson.D, error) {
 // getExplicitTypeCheckPredicates compensates for the server’s type bracketing
 // by matching _id types between the partition’s min & max boundaries.
 // It should yield the same result as getExprPredicates.
-func getExplicitTypeCheckPredicates(lower, upper any) ([]bson.D, error) {
-	_, betweenTypes, err := getTypeBracketExcludedBSONTypes(lower)
-	if err != nil {
-		return nil, errors.Wrapf(err, "getting types above lower bound (%T: %v)", lower, lower)
-	}
+func getExplicitTypeCheckPredicates(lowerOpt, upperOpt option.Option[bson.RawValue]) ([]bson.D, error) {
+	lowerRV := lowerOpt.OrElse(rawMinKey)
+	upperRV := upperOpt.OrElse(rawMaxKey)
+
+	_, betweenTypes := getTypeBracketExcludedBSONTypes(lowerRV)
 
 	var rangePredicate bson.D
 	var orPredicates []bson.D
 
-	lowerRV, err := mbson.ConvertToRawValue(lower)
-	if err != nil {
-		return nil, errors.Wrapf(err, "converting lower bound (%T: %v) to %T", lower, lower, lowerRV)
-	}
-	if lowerRV.Type != bson.TypeMinKey {
-		rangePredicate = bson.D{{"_id", bson.D{{"$gte", lower}}}}
-	}
-
-	upperRV, err := mbson.ConvertToRawValue(upper)
-	if err != nil {
-		return nil, errors.Wrapf(err, "converting upper bound (%T: %v) to %T", upper, upper, upperRV)
-	}
-
 	if upperRV.Type != bson.TypeMaxKey {
-		typesBelowUpper, typesAboveUpper, err := getTypeBracketExcludedBSONTypes(upper)
-		if err != nil {
-			return nil, errors.Wrapf(err, "getting types around upper bound (%T: %v)", upper, upper)
-		}
+		typesBelowUpper, typesAboveUpper := getTypeBracketExcludedBSONTypes(upperRV)
 
 		if slices.Contains(typesAboveUpper, lowerRV.Type) {
 			return nil, fmt.Errorf(
@@ -251,7 +240,7 @@ func getExplicitTypeCheckPredicates(lower, upper any) ([]bson.D, error) {
 		bothLimitsPredicate := mslices.Compact(
 			mslices.Of(
 				rangePredicate,
-				bson.D{{"_id", bson.D{{"$lte", upper}}}},
+				bson.D{{"_id", bson.D{{"$lte", upperRV}}}},
 			),
 		)
 

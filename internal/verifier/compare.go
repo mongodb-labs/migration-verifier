@@ -737,9 +737,9 @@ func (verifier *Verifier) getDocumentsCursor(
 	// Suppress this log for recheck tasks because the list of IDs can be
 	// quite long.
 	if task.Ids == nil {
-		if verifier.logger.Trace().Enabled() {
+		if verifier.logger.Debug().Enabled() {
 
-			evt := verifier.logger.Trace().
+			evt := verifier.logger.Debug().
 				Any("task", task.PrimaryKey)
 
 			cmdStr, err := bson.MarshalExtJSON(cmd, true, false)
