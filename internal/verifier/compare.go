@@ -8,7 +8,6 @@ import (
 
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
-	"github.com/10gen/migration-verifier/dockey"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -27,11 +26,6 @@ import (
 
 const (
 	readTimeout = 10 * time.Minute
-
-	// When comparing documents via hash, we store the document key as an
-	// embedded document. This is the name of the field that stores the
-	// document key.
-	docKeyInHashedCompare = "k"
 
 	// Every (this many) docs, add stats to the doc & byte count histories.
 	comparisonHistoryThreshold = 500
@@ -175,8 +169,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// b) compares the new doc against its previously-received, cached
 	//    counterpart and records any mismatch.
 	handleNewDoc := func(curDocWithTS compare.DocWithTS, isSrc bool) error {
-		docKeyValues, err := getDocKeyValues(
-			verifier.docCompareMethod,
+		docKeyValues, err := verifier.docCompareMethod.GetDocKeyValues(
 			curDocWithTS.Doc,
 			mapKeyFieldNames,
 		)
@@ -391,10 +384,9 @@ func (verifier *Verifier) compareDocsFromChannels(
 		results = append(
 			results,
 			VerificationResult{
-				ID: getDocIdFromComparison(
-					verifier.docCompareMethod,
+				ID: lo.Must(verifier.docCompareMethod.ClonedDocIDForComparison(
 					docWithTS.Doc,
-				),
+				)),
 				Details:         Missing,
 				Cluster:         ClusterTarget,
 				NameSpace:       namespace,
@@ -413,10 +405,9 @@ func (verifier *Verifier) compareDocsFromChannels(
 		results = append(
 			results,
 			VerificationResult{
-				ID: getDocIdFromComparison(
-					verifier.docCompareMethod,
+				ID: lo.Must(verifier.docCompareMethod.ClonedDocIDForComparison(
 					docWithTS.Doc,
-				),
+				)),
 				Details:      Missing,
 				Cluster:      ClusterSource,
 				NameSpace:    namespace,
@@ -447,81 +438,6 @@ func createMismatchTimes(firstDateTime option.Option[bson.DateTime]) recheck.Mis
 	return recheck.MismatchHistory{
 		First: bson.NewDateTimeFromTime(time.Now()),
 	}
-}
-
-func getDocIdFromComparison(
-	docCompareMethod compare.Method,
-	doc bson.Raw,
-) bson.RawValue {
-	var docID bson.RawValue
-
-	switch docCompareMethod {
-	case compare.Binary, compare.IgnoreOrder:
-		docID = lo.Must(doc.LookupErr("_id"))
-	case compare.ToHashedIndexKey:
-		docID = lo.Must(doc.LookupErr(docKeyInHashedCompare, "_id"))
-	default:
-		panic("bad doc compare method: " + docCompareMethod)
-	}
-
-	// We clone the value because the document might be from a pool.
-	docID.Value = slices.Clone(docID.Value)
-
-	return docID
-}
-
-func getDocKeyValues(
-	docCompareMethod compare.Method,
-	doc bson.Raw,
-	fieldNames []string,
-) ([]bson.RawValue, error) {
-	var docKey bson.Raw
-
-	switch docCompareMethod {
-	case compare.Binary, compare.IgnoreOrder:
-		// If we have the full document, create the document key manually:
-		var err error
-		docKey, err = dockey.ExtractTrueDocKeyFromDoc(fieldNames, doc)
-		if err != nil {
-			return nil, err
-		}
-	case compare.ToHashedIndexKey:
-		// If we have a hash, then the aggregation should have extracted the
-		// document key for us.
-		docKeyVal, err := doc.LookupErr(docKeyInHashedCompare)
-		if err != nil {
-			return nil, errors.Wrapf(err, "fetching %#q from doc %v", docKeyInHashedCompare, doc)
-		}
-
-		var isDoc bool
-		docKey, isDoc = docKeyVal.DocumentOK()
-		if !isDoc {
-			return nil, fmt.Errorf(
-				"%#q in doc %v is type %s but should be %s",
-				docKeyInHashedCompare,
-				doc,
-				docKeyVal.Type,
-				bson.TypeEmbeddedDocument,
-			)
-		}
-	}
-
-	var values []bson.RawValue
-	els, err := docKey.Elements()
-	if err != nil {
-		return nil, errors.Wrapf(err, "parsing doc key (%+v) of doc %+v", docKey, doc)
-	}
-
-	for _, el := range els {
-		val, err := el.ValueErr()
-		if err != nil {
-			return nil, errors.Wrapf(err, "parsing doc key element (%+v) of doc %+v", el, doc)
-		}
-
-		values = append(values, val)
-	}
-
-	return values, nil
 }
 
 func simpleTimerReset(t *time.Timer, dur time.Duration) {
@@ -703,7 +619,7 @@ func (verifier *Verifier) getDocumentsCursor(
 	if verifier.docCompareMethod == compare.ToHashedIndexKey {
 		cmd = append(
 			cmd,
-			bson.E{"projection", getHashedIndexKeyProjection(task)},
+			bson.E{"projection", compare.GetHashedIndexKeyProjection(task.QueryFilter)},
 		)
 	}
 
@@ -753,26 +669,6 @@ func (verifier *Verifier) getDocumentsCursor(
 	)
 }
 
-func getHashedIndexKeyProjection(task *tasks.Task) bson.D {
-	return bson.D{
-		{"_id", 0},
-
-		// Single-letter field names minimize the document size.
-		{docKeyInHashedCompare, dockey.ExtractTrueDocKeyAgg(
-			task.QueryFilter.GetDocKeyFields(),
-			"$$ROOT",
-		)},
-		{"h", bson.D{
-			{"$toHashedIndexKey", bson.D{
-				{"$_internalKeyStringValue", bson.D{
-					{"input", "$$ROOT"},
-				}},
-			}},
-		}},
-		{"s", bson.D{{"$bsonSize", "$$ROOT"}}},
-	}
-}
-
 func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
 	match := bytes.Equal(srcClientDoc, dstClientDoc)
 	if match {
@@ -780,7 +676,10 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 		return nil, nil
 	}
 
-	docID := getDocIdFromComparison(verifier.docCompareMethod, srcClientDoc)
+	docID, err := verifier.docCompareMethod.ClonedDocIDForComparison(srcClientDoc)
+	if err != nil {
+		return nil, errors.Wrapf(err, "extracting doc ID for comparison")
+	}
 
 	if verifier.docCompareMethod == compare.ToHashedIndexKey {
 		// With hash comparison, mismatches are opaque.
