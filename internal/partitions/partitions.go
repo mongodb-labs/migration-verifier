@@ -345,7 +345,7 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 				{"aggregate", collName},
 				{"pipeline", mongo.Pipeline{
 					{{"$collStats", bson.D{
-						{"storageStats", bson.E{"scale", 1}},
+						{"storageStats", bson.D{{"scale", 1}}},
 					}}},
 					// The "$group" here behaves as a project and rename when there's only one
 					// document (non-sharded case).  When there are multiple documents (one for
