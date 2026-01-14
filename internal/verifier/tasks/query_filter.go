@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"cmp"
 	"slices"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
@@ -23,4 +24,10 @@ func (qf QueryFilter) GetDocKeyFields() []string {
 		[]string{"_id"},
 		qf.ShardKeys...,
 	)
+}
+
+// DstNamespace gives the destination namespace. This incorporates
+// any namespace remapping that the filter may represent.
+func (qf QueryFilter) DstNamespace() string {
+	return cmp.Or(qf.To, qf.Namespace)
 }

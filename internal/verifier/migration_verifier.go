@@ -1425,12 +1425,9 @@ func (verifier *Verifier) srcClientCollection(task *tasks.Task) *mongo.Collectio
 
 func (verifier *Verifier) dstClientCollection(task *tasks.Task) *mongo.Collection {
 	if task != nil {
-		if task.QueryFilter.To != "" {
-			return verifier.dstClientCollectionByNameSpace(task.QueryFilter.To)
-		} else {
-			return verifier.dstClientCollectionByNameSpace(task.QueryFilter.Namespace)
-		}
+		return verifier.dstClientCollectionByNameSpace(task.QueryFilter.DstNamespace())
 	}
+
 	return nil
 }
 
