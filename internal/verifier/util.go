@@ -2,7 +2,6 @@ package verifier
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
@@ -28,15 +27,6 @@ const (
 	ErrorUpdateParentTask
 	ErrorUpdateTask
 )
-
-// SplitNamespace returns db, collection
-func SplitNamespace(namespace string) (string, string) {
-	dot := strings.Index(namespace, ".")
-	if dot < 0 {
-		return namespace, ""
-	}
-	return namespace[:dot], namespace[dot+1:]
-}
 
 // Returns full name of collection including database name
 func FullName(collection *mongo.Collection) string {

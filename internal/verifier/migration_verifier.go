@@ -24,6 +24,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/dustin/go-humanize"
@@ -461,7 +462,7 @@ func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []strin
 	table.SetHeader([]string{"Doc Count", "Database", "Collection"})
 
 	for _, n := range namespaces {
-		db, coll := SplitNamespace(n)
+		db, coll := mmongo.SplitNamespace(n)
 		if db != "" {
 			s, _ := client.Database(db).Collection(coll).EstimatedDocumentCount(ctx)
 			table.Append(
@@ -751,7 +752,7 @@ func (verifier *Verifier) getShardKeyFields(
 //  2. Fetch shard keys.
 //  3. Fetch the size: # of docs, and # of bytes.
 func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, namespace string) ([]*partitions.Partition, []string, types.DocumentCount, types.ByteCount, error) {
-	dbName, collName := SplitNamespace(namespace)
+	dbName, collName := mmongo.SplitNamespace(namespace)
 	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, verifier.logger,
 		verifier.srcClientDatabase(dbName), collName)
 	if err != nil {
@@ -1417,7 +1418,7 @@ func (verifier *Verifier) dstClientDatabase(dbName string) *mongo.Database {
 
 func (verifier *Verifier) srcClientCollection(task *tasks.Task) *mongo.Collection {
 	if task != nil {
-		dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
+		dbName, collName := mmongo.SplitNamespace(task.QueryFilter.Namespace)
 		return verifier.srcClientDatabase(dbName).Collection(collName)
 	}
 	return nil
@@ -1432,7 +1433,7 @@ func (verifier *Verifier) dstClientCollection(task *tasks.Task) *mongo.Collectio
 }
 
 func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mongo.Collection {
-	dbName, collName := SplitNamespace(namespace)
+	dbName, collName := mmongo.SplitNamespace(namespace)
 	return verifier.dstClientDatabase(dbName).Collection(collName)
 }
 

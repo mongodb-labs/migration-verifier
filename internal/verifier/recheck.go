@@ -15,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -52,7 +53,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		panic("mismatch recheck must have first-mismatch times!")
 	}
 
-	dbName, collName := SplitNamespace(namespace)
+	dbName, collName := mmongo.SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
 	collNames := make([]string, len(documentIDs))

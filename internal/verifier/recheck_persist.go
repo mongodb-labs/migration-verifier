@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -142,7 +143,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 				if !exist {
 					return errors.Errorf("no source namespace matches the destination namepsace %#q", dstNs)
 				}
-				srcDBName, srcCollName = SplitNamespace(srcNs)
+				srcDBName, srcCollName = mmongo.SplitNamespace(srcNs)
 			}
 		case src:
 			srcDBName = changeEvent.Ns.DB
