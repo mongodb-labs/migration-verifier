@@ -224,6 +224,11 @@ func getExplicitTypeCheckPredicates(lowerOpt, upperOpt option.Option[bson.RawVal
 	_, betweenTypes := getTypeBracketExcludedBSONTypes(lowerRV)
 
 	var rangePredicate bson.D
+
+	if lowerRV.Type != bson.TypeMinKey {
+		rangePredicate = bson.D{{"_id", bson.D{{"$gte", lowerRV}}}}
+	}
+
 	var orPredicates []bson.D
 
 	if upperRV.Type != bson.TypeMaxKey {
