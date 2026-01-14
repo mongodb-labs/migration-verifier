@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -18,7 +19,7 @@ import (
 // first-mismatch time.
 type firstMismatchTimeLookup struct {
 	task             *tasks.Task
-	docCompareMethod DocCompareMethod
+	docCompareMethod compare.Method
 
 	// a cache:
 	idToFirstMismatchTime map[string]bson.DateTime

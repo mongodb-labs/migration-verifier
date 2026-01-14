@@ -21,6 +21,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/msync"
@@ -120,7 +121,7 @@ type Verifier struct {
 	generationStartTime  time.Time
 	generationPauseDelay time.Duration
 	workerSleepDelay     time.Duration
-	docCompareMethod     DocCompareMethod
+	docCompareMethod     compare.Method
 	verifyAll            bool
 	startClean           bool
 
@@ -382,7 +383,7 @@ func (verifier *Verifier) SetMetaDBName(arg string) {
 	verifier.metaDBName = arg
 }
 
-func (verifier *Verifier) SetDocCompareMethod(method DocCompareMethod) {
+func (verifier *Verifier) SetDocCompareMethod(method compare.Method) {
 	verifier.docCompareMethod = method
 }
 

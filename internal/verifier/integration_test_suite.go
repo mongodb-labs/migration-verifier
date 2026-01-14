@@ -14,6 +14,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
@@ -176,10 +177,10 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 
 	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
 
-	docCompareMethod := DocCompareDefault
+	docCompareMethod := compare.Default
 	envDocCompareMethod := os.Getenv("MVTEST_DOC_COMPARE_METHOD")
 	if envDocCompareMethod != "" {
-		docCompareMethod = DocCompareMethod(envDocCompareMethod)
+		docCompareMethod = compare.Method(envDocCompareMethod)
 
 		// Forgo validation because the tested code should do that.
 	}
