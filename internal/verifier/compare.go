@@ -17,7 +17,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
-	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -38,11 +37,6 @@ const (
 	comparisonHistoryThreshold = 500
 )
 
-type docWithTS struct {
-	doc bson.Raw
-	ts  bson.Timestamp
-}
-
 func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
 	workerNum int,
@@ -53,7 +47,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	types.ByteCount,
 	error,
 ) {
-	var srcChannel, dstChannel <-chan docWithTS
+	var srcChannel, dstChannel <-chan compare.DocWithTS
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
 	results := []VerificationResult{}
@@ -141,7 +135,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	workerNum int,
 	fi retry.SuccessNotifier,
 	task *tasks.Task,
-	srcChannel, dstChannel <-chan docWithTS,
+	srcChannel, dstChannel <-chan compare.DocWithTS,
 ) (
 	[]VerificationResult,
 	types.DocumentCount,
@@ -165,8 +159,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 	namespace := task.QueryFilter.Namespace
 
-	srcCache := map[string]docWithTS{}
-	dstCache := map[string]docWithTS{}
+	srcCache := map[string]compare.DocWithTS{}
+	dstCache := map[string]compare.DocWithTS{}
 
 	firstMismatchTimeLookup := firstMismatchTimeLookup{
 		task:             task,
@@ -178,19 +172,19 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// a) caches the new document if its mapKey is unseen, or
 	// b) compares the new doc against its previously-received, cached
 	//    counterpart and records any mismatch.
-	handleNewDoc := func(curDocWithTS docWithTS, isSrc bool) error {
+	handleNewDoc := func(curDocWithTS compare.DocWithTS, isSrc bool) error {
 		docKeyValues, err := getDocKeyValues(
 			verifier.docCompareMethod,
-			curDocWithTS.doc,
+			curDocWithTS.Doc,
 			mapKeyFieldNames,
 		)
 		if err != nil {
-			return errors.Wrapf(err, "extracting doc key (fields: %v) values from doc %+v", mapKeyFieldNames, curDocWithTS.doc)
+			return errors.Wrapf(err, "extracting doc key (fields: %v) values from doc %+v", mapKeyFieldNames, curDocWithTS.Doc)
 		}
 
 		mapKey := getMapKey(docKeyValues)
 
-		var ourMap, theirMap map[string]docWithTS
+		var ourMap, theirMap map[string]compare.DocWithTS
 
 		if isSrc {
 			ourMap = srcCache
@@ -218,8 +212,12 @@ func (verifier *Verifier) compareDocsFromChannels(
 		// channels, which documents were missing on one side or the other.
 		delete(theirMap, mapKey)
 
+		// We can also schedule the release of the documents’ buffers.
+		defer curDocWithTS.Release()
+		defer theirDocWithTS.Release()
+
 		// Now we determine which document came from whom.
-		var srcDoc, dstDoc docWithTS
+		var srcDoc, dstDoc compare.DocWithTS
 		if isSrc {
 			srcDoc = curDocWithTS
 			dstDoc = theirDocWithTS
@@ -228,11 +226,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 			dstDoc = curDocWithTS
 		}
 
-		defer pool.Put(srcDoc.doc)
-		defer pool.Put(dstDoc.doc)
-
 		// Finally we compare the documents and save any mismatch report(s).
-		mismatches, err := verifier.compareOneDocument(srcDoc.doc, dstDoc.doc, namespace)
+		mismatches, err := verifier.compareOneDocument(srcDoc.Doc, dstDoc.Doc, namespace)
 
 		if err != nil {
 			return errors.Wrap(err, "failed to compare documents")
@@ -242,12 +237,12 @@ func (verifier *Verifier) compareDocsFromChannels(
 			return nil
 		}
 
-		firstMismatchTime := firstMismatchTimeLookup.get(srcDoc.doc)
+		firstMismatchTime := firstMismatchTimeLookup.get(srcDoc.Doc)
 
 		for i := range mismatches {
 			mismatches[i].MismatchHistory = createMismatchTimes(firstMismatchTime)
-			mismatches[i].SrcTimestamp = option.Some(srcDoc.ts)
-			mismatches[i].DstTimestamp = option.Some(dstDoc.ts)
+			mismatches[i].SrcTimestamp = option.Some(srcDoc.TS)
+			mismatches[i].DstTimestamp = option.Some(dstDoc.TS)
 		}
 
 		results = append(results, mismatches...)
@@ -270,7 +265,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	for !srcClosed || !dstClosed {
 		simpleTimerReset(readTimer, readTimeout)
 
-		var srcDocWithTS, dstDocWithTS docWithTS
+		var srcDocWithTS, dstDocWithTS compare.DocWithTS
 
 		eg, egCtx := contextplus.ErrGroup(ctx)
 
@@ -294,7 +289,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 					fi.NoteSuccess("received document from source")
 
 					taskSrcDocCount++
-					taskSrcByteCount += types.ByteCount(len(srcDocWithTS.doc))
+					taskSrcByteCount += types.ByteCount(len(srcDocWithTS.Doc))
 
 					verifier.workerTracker.SetSrcCounts(
 						workerNum,
@@ -303,7 +298,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 					)
 
 					curHistoryDocCount++
-					curHistoryByteCount += types.ByteCount(len(srcDocWithTS.doc))
+					curHistoryByteCount += types.ByteCount(len(srcDocWithTS.Doc))
 					if curHistoryDocCount >= comparisonHistoryThreshold {
 						verifier.docsComparedHistory.Add(curHistoryDocCount)
 						verifier.bytesComparedHistory.Add(curHistoryByteCount)
@@ -348,7 +343,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 			)
 		}
 
-		if srcDocWithTS.doc != nil {
+		if srcDocWithTS.Doc != nil {
 			err := handleNewDoc(srcDocWithTS, true)
 
 			if err != nil {
@@ -358,12 +353,12 @@ func (verifier *Verifier) compareDocsFromChannels(
 					"comparer thread failed to handle %#q's source doc (task: %s) with ID %v",
 					namespace,
 					task.PrimaryKey,
-					srcDocWithTS.doc.Lookup("_id"),
+					srcDocWithTS.Doc.Lookup("_id"),
 				)
 			}
 		}
 
-		if dstDocWithTS.doc != nil {
+		if dstDocWithTS.Doc != nil {
 			err := handleNewDoc(dstDocWithTS, false)
 
 			if err != nil {
@@ -372,7 +367,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 					"comparer thread failed to handle %#q's destination doc (task: %s) with ID %v",
 					namespace,
 					task.PrimaryKey,
-					dstDocWithTS.doc.Lookup("_id"),
+					dstDocWithTS.Doc.Lookup("_id"),
 				)
 			}
 		}
@@ -389,48 +384,48 @@ func (verifier *Verifier) compareDocsFromChannels(
 	results = slices.Grow(results, len(srcCache)+len(dstCache))
 
 	for _, docWithTS := range srcCache {
-		firstMismatchTime := firstMismatchTimeLookup.get(docWithTS.doc)
+		firstMismatchTime := firstMismatchTimeLookup.get(docWithTS.Doc)
 
 		results = append(
 			results,
 			VerificationResult{
 				ID: getDocIdFromComparison(
 					verifier.docCompareMethod,
-					docWithTS.doc,
+					docWithTS.Doc,
 				),
 				Details:         Missing,
 				Cluster:         ClusterTarget,
 				NameSpace:       namespace,
-				dataSize:        int32(len(docWithTS.doc)),
-				SrcTimestamp:    option.Some(docWithTS.ts),
+				dataSize:        int32(len(docWithTS.Doc)),
+				SrcTimestamp:    option.Some(docWithTS.TS),
 				MismatchHistory: createMismatchTimes(firstMismatchTime),
 			},
 		)
 
-		pool.Put(docWithTS.doc)
+		docWithTS.Release()
 	}
 
 	for _, docWithTS := range dstCache {
-		firstMismatchTime := firstMismatchTimeLookup.get(docWithTS.doc)
+		firstMismatchTime := firstMismatchTimeLookup.get(docWithTS.Doc)
 
 		results = append(
 			results,
 			VerificationResult{
 				ID: getDocIdFromComparison(
 					verifier.docCompareMethod,
-					docWithTS.doc,
+					docWithTS.Doc,
 				),
 				Details:      Missing,
 				Cluster:      ClusterSource,
 				NameSpace:    namespace,
-				DstTimestamp: option.Some(docWithTS.ts),
+				DstTimestamp: option.Some(docWithTS.TS),
 
-				dataSize:        int32(len(docWithTS.doc)),
+				dataSize:        int32(len(docWithTS.Doc)),
 				MismatchHistory: createMismatchTimes(firstMismatchTime),
 			},
 		)
 
-		pool.Put(docWithTS.doc)
+		docWithTS.Release()
 	}
 
 	verifier.docsComparedHistory.Add(curHistoryDocCount)
@@ -538,13 +533,13 @@ func simpleTimerReset(t *time.Timer, dur time.Duration) {
 func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 	task *tasks.Task,
 ) (
-	<-chan docWithTS,
-	<-chan docWithTS,
+	<-chan compare.DocWithTS,
+	<-chan compare.DocWithTS,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 ) {
-	srcChannel := make(chan docWithTS)
-	dstChannel := make(chan docWithTS)
+	srcChannel := make(chan compare.DocWithTS)
+	dstChannel := make(chan compare.DocWithTS)
 
 	readSrcCallback := func(ctx context.Context, state retry.SuccessNotifier) error {
 		// We open a session here so that we can read the session’s cluster
@@ -628,7 +623,7 @@ func iterateCursorToChannel(
 	sctx context.Context,
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
-	writer chan<- docWithTS,
+	writer chan<- compare.DocWithTS,
 ) error {
 	defer close(writer)
 
@@ -645,16 +640,10 @@ func iterateCursorToChannel(
 			return errors.Wrap(err, "reading cluster time from session")
 		}
 
-		buf := pool.Get(len(cursor.Current))
-		copy(buf, cursor.Current)
-
 		err = chanutil.WriteWithDoneCheck(
 			sctx,
 			writer,
-			docWithTS{
-				doc: buf,
-				ts:  clusterTime,
-			},
+			compare.NewDocWithTS(cursor.Current, clusterTime),
 		)
 
 		if err != nil {
