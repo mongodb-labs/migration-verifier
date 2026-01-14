@@ -1508,11 +1508,11 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	namespace := "testdb.testns"
 
-	makeDocChannel := func(docs []bson.D) <-chan docWithTs {
-		theChan := make(chan docWithTs, len(docs))
+	makeDocChannel := func(docs []bson.D) <-chan docWithTS {
+		theChan := make(chan docWithTS, len(docs))
 
 		for d, doc := range docs {
-			theChan <- docWithTs{
+			theChan <- docWithTS{
 				doc: testutil.MustMarshal(doc),
 				ts:  bson.Timestamp{1, uint32(d)},
 			}
