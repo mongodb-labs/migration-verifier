@@ -529,7 +529,7 @@ func getOuterIDBound(
 				})
 
 			if cmdErr != nil {
-				return cmdErr
+				return errors.Wrapf(cmdErr, "fetching %#q’s %s", collName, minOrMaxBound)
 			}
 
 			// If we don't have at least one document, the collection is either empty or was dropped.
@@ -540,7 +540,7 @@ func getOuterIDBound(
 
 			// Return the _id value from that document.
 			docID, cmdErr = cursor.Current.LookupErr("_id")
-			return cmdErr
+			return errors.Wrapf(cmdErr, "extracting %s _id", minOrMaxBound)
 		},
 		"finding %#q's %s _id",
 		srcDB.Name()+"."+collName,
