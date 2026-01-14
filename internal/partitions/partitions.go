@@ -351,7 +351,7 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 					// document (non-sharded case).  When there are multiple documents (one for
 					// each shard) it correctly sums the counts and sizes from each shard.
 					{{"$group", bson.D{
-						{"_id", "ns"},
+						{"_id", "$ns"},
 						{"count", bson.D{{"$sum", "$storageStats.count"}}},
 						{"size", bson.D{{"$sum", "$storageStats.size"}}},
 						{"capped", bson.D{{"$first", "$capped"}}}}}},
