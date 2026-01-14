@@ -61,8 +61,10 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	)
 
 	err := retryer.
-		WithBefore(func() {
+		WithBefore(func() error {
 			srcChannel, dstChannel, readSrcCallback, readDstCallback = verifier.getFetcherChannelsAndCallbacks(task)
+
+			return nil
 		}).
 		WithErrorCodes(util.CursorKilledErrCode).
 		WithCallback(

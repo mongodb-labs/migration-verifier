@@ -93,7 +93,11 @@ func (r *Retryer) runRetryLoop(
 		}
 
 		if beforeFunc, hasBefore := r.before.Get(); hasBefore {
-			beforeFunc()
+			err := beforeFunc()
+
+			if err != nil {
+				return errors.Wrapf(err, "before %#q", r.description.OrZero())
+			}
 		}
 
 		eg, egCtx := contextplus.ErrGroup(ctx)
