@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/verifier"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/mmongo"
@@ -341,13 +343,15 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 
 	partitionSizeMB := cCtx.Uint64(partitionSizeMB)
+
 	if partitionSizeMB != 0 {
 		if partitionSizeMB > math.MaxInt64 {
 			return nil, fmt.Errorf("%q may not exceed %d", partitionSizeMB, math.MaxInt64)
 		}
 
-		v.SetPartitionSizeMB(uint32(partitionSizeMB))
 	}
+
+	v.SetPartitionSizeMB(uint32(cmp.Or(partitionSizeMB, partitions.DefaultPartitionMiB)))
 
 	v.SetStartClean(cCtx.Bool(startClean))
 
