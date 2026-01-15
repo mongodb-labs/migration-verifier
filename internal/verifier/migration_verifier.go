@@ -1350,6 +1350,7 @@ func (verifier *Verifier) partitionCollection(
 	}
 
 	verifier.logger.Debug().
+		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
 		Str("namespace", FullName(srcColl)).
 		Int64("documentsCount", int64(docsCount)).
@@ -1394,9 +1395,10 @@ func (verifier *Verifier) partitionCollection(
 
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
+		Any("task", task.PrimaryKey).
 		Str("namespace", srcNs).
 		Int("partitionsCount", partitionsCount).
-		Msg("Divided collection into partitions.")
+		Msg("Done partitioning collection.")
 
 	return nil
 }
