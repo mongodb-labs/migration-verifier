@@ -19,7 +19,6 @@ import (
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func SetDirectHostInConnectionString(connstr, hostname string) (string, error) {
@@ -38,6 +37,10 @@ func SetDirectHostInConnectionString(connstr, hostname string) (string, error) {
 	return connstr, nil
 }
 
+func rvIsNonEmpty(rv bson.RawValue) bool {
+	return !rv.IsZero() && rv.Type != bson.TypeNull
+}
+
 // ReadNaturalPartitionFromSource queries a source collection according
 // to the given task and sends the relevant data to the destination
 // reader and compare channels. This function only returns when there are
@@ -51,7 +54,7 @@ func ReadNaturalPartitionFromSource(
 	ctx context.Context,
 	logger *logger.Logger,
 	retryState retry.SuccessNotifier,
-	uri string,
+	client *mongo.Client,
 	task *tasks.Task,
 	docFilter option.Option[bson.D],
 	compareMethod Method,
@@ -62,28 +65,11 @@ func ReadNaturalPartitionFromSource(
 	defer close(toDst)
 
 	lo.Assertf(
-		task.QueryFilter.Partition.NaturalHostname.IsSome(),
-		"natural partition requires persisted hostname",
+		task.QueryFilter.Partition.Natural,
+		"natural partition required",
 	)
 
 	lowerBoundRV := task.QueryFilter.Partition.Key.Lower
-
-	parsedCS, err := url.ParseRequestURI(uri)
-	if err != nil {
-		return errors.Wrapf(err, "parsing connection string")
-	}
-
-	lo.Assertf(
-		parsedCS.Host == task.QueryFilter.Partition.NaturalHostname.MustGet(),
-		"connstr hostname (%#q) must match partition’s (%#q)",
-		parsedCS.Host,
-		task.QueryFilter.Partition.NaturalHostname.MustGet(),
-	)
-
-	client, err := mongo.Connect(options.Client().ApplyURI(uri))
-	if err != nil {
-		return errors.Wrapf(err, "connecting to client for natural read")
-	}
 
 	upperRecordID := task.QueryFilter.Partition.Upper
 
@@ -102,8 +88,18 @@ func ReadNaturalPartitionFromSource(
 
 	var resumeTokenOpt option.Option[bson.RawValue]
 
-	if lowerBoundRV.Type != bson.TypeNull && !lowerBoundRV.IsZero() {
+	// If there are no (non-null) lower or upper bounds then we can forgo
+	// resume tokens entirely. This is useful for:
+	// - pre-4.4 sources
+	// - small collections that don’t need resumability
+	// - collections that we can’t resume (e.g., clustered on v6)
+	var useResumeTokens bool
+
+	if rvIsNonEmpty(lowerBoundRV) {
+		useResumeTokens = true
 		resumeTokenOpt = option.Some(lowerBoundRV)
+	} else {
+		useResumeTokens = rvIsNonEmpty(upperRecordID)
 	}
 
 	var canUseStartAt bool
@@ -121,8 +117,16 @@ func ReadNaturalPartitionFromSource(
 		cmd := bson.D{
 			{"find", coll.Name()},
 			{"hint", bson.D{{"$natural", 1}}},
-			{"showRecordId", true},
-			{"$_requestResumeToken", true},
+		}
+
+		if useResumeTokens {
+			cmd = append(
+				cmd,
+				bson.D{
+					{"showRecordId", true},
+					{"$_requestResumeToken", true},
+				}...,
+			)
 		}
 
 		if filter, has := docFilter.Get(); has {
@@ -143,11 +147,13 @@ func ReadNaturalPartitionFromSource(
 			{"_", docProjection},
 		}})
 
-		if startAt, has := resumeTokenOpt.Get(); has {
-			cmd = append(cmd, bson.E{
-				lo.Ternary(canUseStartAt, "$_startAt", "$_resumeAfter"),
-				startAt,
-			})
+		if useResumeTokens {
+			if startAt, has := resumeTokenOpt.Get(); has {
+				cmd = append(cmd, bson.E{
+					lo.Ternary(canUseStartAt, "$_startAt", "$_resumeAfter"),
+					startAt,
+				})
+			}
 		}
 
 		cursor, err = coll.Database().RunCommandCursor(sctx, cmd)
@@ -270,58 +276,60 @@ cursorLoop:
 			panic("session should have optime after reading a document")
 		}
 
-		recIDRV, err := cursor.Current.LookupErr("$recordId")
-		if err != nil {
-			return errors.Wrapf(err, "getting record ID")
-		}
-
-		switch upperRecordID.Type {
-
-		// To simplify testing we interpret empty RawValue here as equivalent
-		// to BSON null.
-		case 0, bson.TypeNull:
-			// No upper bound.
-		case bson.TypeInt64:
-			// A non-clustered collection:
-			recID, err := bsontools.RawValueTo[int64](recIDRV)
+		if useResumeTokens {
+			recIDRV, err := cursor.Current.LookupErr("$recordId")
 			if err != nil {
-				return errors.Wrapf(err, "parsing record ID")
+				return errors.Wrapf(err, "getting record ID")
 			}
 
-			bound, err := bsontools.RawValueTo[int64](upperRecordID)
-			if err != nil {
-				return errors.Wrapf(err, "parsing upper bound")
-			}
+			switch upperRecordID.Type {
 
-			if recID > bound {
-				break cursorLoop
-			}
-		case bson.TypeBinary:
-			// A clustered collection:
-			recID, err := bsontools.RawValueTo[bson.Binary](recIDRV)
-			if err != nil {
-				return errors.Wrapf(err, "parsing record ID")
-			}
+			// To simplify testing we interpret empty RawValue here as equivalent
+			// to BSON null.
+			case 0, bson.TypeNull:
+				// No upper bound.
+			case bson.TypeInt64:
+				// A non-clustered collection:
+				recID, err := bsontools.RawValueTo[int64](recIDRV)
+				if err != nil {
+					return errors.Wrapf(err, "parsing record ID")
+				}
 
-			bound, err := bsontools.RawValueTo[bson.Binary](upperRecordID)
-			if err != nil {
-				return errors.Wrapf(err, "parsing upper bound")
-			}
+				bound, err := bsontools.RawValueTo[int64](upperRecordID)
+				if err != nil {
+					return errors.Wrapf(err, "parsing upper bound")
+				}
 
-			if recID.Subtype != bound.Subtype {
-				return errors.Wrapf(
-					err,
-					"upper bound subtype is %d but record ID subtype is %d",
-					bound.Subtype,
-					recID.Subtype,
-				)
-			}
+				if recID > bound {
+					break cursorLoop
+				}
+			case bson.TypeBinary:
+				// A clustered collection:
+				recID, err := bsontools.RawValueTo[bson.Binary](recIDRV)
+				if err != nil {
+					return errors.Wrapf(err, "parsing record ID")
+				}
 
-			if bytes.Compare(recID.Data, bound.Data) > 0 {
-				break cursorLoop
+				bound, err := bsontools.RawValueTo[bson.Binary](upperRecordID)
+				if err != nil {
+					return errors.Wrapf(err, "parsing upper bound")
+				}
+
+				if recID.Subtype != bound.Subtype {
+					return errors.Wrapf(
+						err,
+						"upper bound subtype is %d but record ID subtype is %d",
+						bound.Subtype,
+						recID.Subtype,
+					)
+				}
+
+				if bytes.Compare(recID.Data, bound.Data) > 0 {
+					break cursorLoop
+				}
+			default:
+				panic(fmt.Sprintf("bad upper bound (%v) BSON type: %s", upperRecordID, upperRecordID.Type))
 			}
-		default:
-			panic(fmt.Sprintf("bad upper bound (%v) BSON type: %s", upperRecordID, upperRecordID.Type))
 		}
 
 		userDocRV, err := cursor.Current.LookupErr("_")

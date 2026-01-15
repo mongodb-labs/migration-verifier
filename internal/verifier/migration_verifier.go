@@ -1412,7 +1412,13 @@ func (verifier *Verifier) partitionCollection(
 	case partitions.PartitionByNatural:
 		err := mmongo.WhyFindCannotResume([2]int(verifier.srcClusterInfo.VersionArray))
 		if err != nil {
-			return fmt.Errorf("cannot use natural partitioning: %w", err)
+			return verifier.partitionSingleNatural(
+				ctx,
+				err,
+				srcNs,
+				shardKeyFields,
+				dstNs,
+			)
 		}
 
 		shardKeys, err := verifier.getShardKeyFields(
@@ -1435,6 +1441,16 @@ func (verifier *Verifier) partitionCollection(
 			verifier.globalFilter,
 		)
 		if err != nil {
+			if errors.As(err, &partitions.CannotResumeNaturalError{}) {
+				return verifier.partitionSingleNatural(
+					ctx,
+					err,
+					srcNs,
+					shardKeyFields,
+					dstNs,
+				)
+			}
+
 			return fmt.Errorf("starting natural partitioning: %w", err)
 		}
 
@@ -1478,6 +1494,36 @@ func (verifier *Verifier) partitionCollection(
 		Msg("Done partitioning collection.")
 
 	return nil
+}
+
+func (verifier *Verifier) partitionSingleNatural(
+	ctx context.Context,
+	why error,
+	srcNs string,
+	shardKeyFields []string,
+	dstNs string,
+) error {
+	if why != nil {
+		verifier.logger.Warn().
+			AnErr("reason", why).
+			Msg("Resumable natural scan is unavailable. Entire collection will be verified in a single worker. This collection’s verification will reset if unfinished before a restart.")
+	}
+
+	partition := partitions.CreateSingleNaturalOrderPartition(
+		mmongo.SplitNamespace(srcNs),
+	)
+
+	_, err := verifier.InsertPartitionVerificationTask(
+		ctx,
+		&partition,
+		shardKeyFields,
+		dstNs,
+	)
+	return errors.Wrapf(
+		err,
+		"inserting single natural-partition task for namespace %#q",
+		srcNs,
+	)
 }
 
 func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*VerificationStatus, error) {

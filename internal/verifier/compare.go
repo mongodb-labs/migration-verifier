@@ -461,7 +461,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
 ) {
-	if task.QueryFilter.Partition != nil && task.QueryFilter.Partition.NaturalHostname.IsSome() {
+	if task.QueryFilter.Partition != nil && task.QueryFilter.Partition.Natural {
 		return verifier.getFetcherChannelsAndCallbacksForNaturalPartition(task)
 	}
 
@@ -479,18 +479,23 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
 ) {
-	hostname, isNatural := task.QueryFilter.Partition.NaturalHostname.Get()
-	lo.Assertf(
-		isNatural,
-		"natural partition requires persisted hostname",
-	)
+	var client *mongo.Client
 
-	connstr, err := compare.SetDirectHostInConnectionString(
-		verifier.srcURI,
-		hostname,
-	)
-	if err != nil {
-		return nil, nil, nil, nil, errors.Wrapf(err, "setting source connstr to connect directly to %#q", hostname)
+	if hostname, has := task.QueryFilter.Partition.Hostname.Get(); has {
+		connstr, err := compare.SetDirectHostInConnectionString(
+			verifier.srcURI,
+			hostname,
+		)
+		if err != nil {
+			return nil, nil, nil, nil, errors.Wrapf(err, "setting source connstr to connect directly to %#q", hostname)
+		}
+
+		client, err = mongo.Connect(options.Client().ApplyURI(connstr))
+		if err != nil {
+			return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
+		}
+	} else {
+		client = verifier.srcClient
 	}
 
 	srcToCompareChannel := make(chan compare.DocWithTS)
@@ -509,7 +514,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			ctx,
 			verifier.logger,
 			state,
-			connstr,
+			client,
 			task,
 			option.IfNotZero(verifier.globalFilter),
 			verifier.docCompareMethod,

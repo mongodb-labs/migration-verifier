@@ -18,19 +18,35 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-type CannotPartitionNaturalError struct {
+// CannotResumeNaturalError indicates a collection that cannot be
+// partitioned naturally with resumability. These can be safely handled
+// in a single thread.
+type CannotResumeNaturalError struct {
 	ns  string
 	err error
 }
 
-var _ error = CannotPartitionNaturalError{}
+var _ error = CannotResumeNaturalError{}
 
-func (c CannotPartitionNaturalError) Error() string {
+func (c CannotResumeNaturalError) Error() string {
 	return c.Cause().Error()
 }
 
-func (c CannotPartitionNaturalError) Cause() error {
-	return fmt.Errorf("cannot partition %#q naturally: %v", c.ns, c.err)
+func (c CannotResumeNaturalError) Cause() error {
+	return fmt.Errorf("cannot resume %#q natural partitions: %v", c.ns, c.err)
+}
+
+func CreateSingleNaturalOrderPartition(
+	db, coll string,
+) Partition {
+	return Partition{
+		Natural: true,
+		Ns:      &Namespace{db, coll},
+		Key: PartitionKey{
+			Lower: bsontools.ToRawValue(bson.Null{}),
+		},
+		Upper: bsontools.ToRawValue(bson.Null{}),
+	}
 }
 
 // PartitionCollectionNaturalOrder spawns a goroutine that partitions the
@@ -106,14 +122,14 @@ func PartitionCollectionNaturalOrder(
 			}
 
 			if !mmongo.FindCanUseStartAt(version) {
-				return nil, CannotPartitionNaturalError{
+				return nil, CannotResumeNaturalError{
 					ns:  coll.Database().Name() + "." + coll.Name(),
 					err: fmt.Errorf("verification of clustered collection requires a newer source version"),
 				}
 			}
 		default:
 			// This likely indicates a new, unexpected collection type.
-			return nil, CannotPartitionNaturalError{
+			return nil, CannotResumeNaturalError{
 				ns:  coll.Database().Name() + "." + coll.Name(),
 				err: fmt.Errorf("unknown BSON type (%s) for record ID (%s)", recIDRV.Type, recIDRV),
 			}
@@ -163,8 +179,9 @@ func PartitionCollectionNaturalOrder(
 			}
 
 			partition := Partition{
-				NaturalHostname: option.Some(hostname),
-				Ns:              &Namespace{coll.Database().Name(), coll.Name()},
+				Natural:  true,
+				Hostname: option.Some(hostname),
+				Ns:       &Namespace{coll.Database().Name(), coll.Name()},
 				Key: PartitionKey{
 					Lower: priorToken,
 				},
