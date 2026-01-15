@@ -581,6 +581,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 		},
 	)
 
+	suite.Require().NotEmpty(mismatches)
 	firstMismatchTime := mismatches[0].Detail.MismatchHistory.First
 
 	_, err = suite.srcMongoClient.
