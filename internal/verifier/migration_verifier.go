@@ -164,6 +164,8 @@ type Verifier struct {
 	bytesComparedHistory *history.History[types.ByteCount]
 
 	verificationStatusCheckInterval time.Duration
+
+	warnNonResumableNaturalOnce sync.Once
 }
 
 var _ MigrationVerifierAPI = &Verifier{}
@@ -1391,7 +1393,7 @@ func (verifier *Verifier) partitionCollection(
 			var partitions []*partitions.Partition
 			var shardKeys []string
 
-			partitions, err = verifier.partitionAndInspectNamespace(ctx, srcNs)
+			partitions, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
 			if err != nil {
 				return errors.Wrapf(err, "partitioning %#q via $sample", srcNs)
 			}
@@ -1416,15 +1418,17 @@ func (verifier *Verifier) partitionCollection(
 		}
 
 		if clusterInfo.Topology != util.TopologyReplset {
-			err = fmt.Errorf("resumable natural can requires a replica set")
+			err = fmt.Errorf("resumable natural scan requires a replica set")
 		} else {
 			err = mmongo.WhyFindCannotResume([2]int(verifier.srcClusterInfo.VersionArray))
 		}
 
 		if err != nil {
+			verifier.warnAboutNonResumableNatural(err)
+
 			return verifier.partitionSingleNatural(
 				ctx,
-				err,
+				nil,
 				srcNs,
 				shardKeyFields,
 				dstNs,
@@ -1506,6 +1510,14 @@ func (verifier *Verifier) partitionCollection(
 	return nil
 }
 
+func (verifier *Verifier) warnAboutNonResumableNatural(cause error) {
+	verifier.warnNonResumableNaturalOnce.Do(func() {
+		verifier.logger.Warn().
+			AnErr("cause", cause).
+			Msg("Resumable natural scan is unavailable. Each collection will be verified in a single worker. Any collection left unfinished before a restart will need full re-verification.")
+	})
+}
+
 // This returns a partition that verifies a full collection via natural scan
 // in a single thread. Because there is no resumability, document order
 // doesn’t matter, which means such tasks can go to a mongos or a full
@@ -1519,8 +1531,9 @@ func (verifier *Verifier) partitionSingleNatural(
 ) error {
 	if why != nil {
 		verifier.logger.Warn().
+			Str("namespace", srcNs).
 			AnErr("reason", why).
-			Msg("Resumable natural scan is unavailable. Entire collection will be verified in a single worker. This collection’s verification will reset if unfinished before a restart.")
+			Msg("Verification cannot resume a natural scan for this collection. The collection will be verified in a single worker thread. This collection’s verification will reset if unfinished before a restart.")
 	}
 
 	partition := partitions.CreateSingleNaturalOrderPartition(

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/10gen/migration-verifier/internal/comparehashed"
-	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/pkg/errors"
@@ -51,12 +50,6 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 	if verifier.docCompareMethod == compare.ToHashedIndexKey {
 		if !comparehashed.CanCompareDocsViaToHashedIndexKey(clusterInfo.VersionArray) {
 			return errors.Errorf("document comparison mode %#q doesn’t work on source version %v", compare.ToHashedIndexKey, clusterInfo.VersionArray)
-		}
-	}
-
-	if verifier.partitionBy == partitions.PartitionByNatural {
-		if clusterInfo.Topology != util.TopologyReplset {
-			return errors.Errorf("natural partitioning requires the source to be a replica set")
 		}
 	}
 

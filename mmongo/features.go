@@ -45,7 +45,7 @@ func WhyFindCannotResume(version [2]int) error {
 	}
 
 	return fmt.Errorf(
-		"resumable scan requires MongoDB 4.4+ (this is %d.%d)",
+		"resumable natural collection scan requires MongoDB 4.4+ (this is %d.%d)",
 		version[0],
 		version[1],
 	)
