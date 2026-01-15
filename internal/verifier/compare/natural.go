@@ -151,6 +151,8 @@ func ReadNaturalPartitionFromSource(
 					startAt,
 				})
 			}
+		} else if compareMethod == ToHashedIndexKey {
+			cmd = append(cmd, bson.E{"projection", GetHashedIndexKeyProjection(task.QueryFilter)})
 		}
 
 		if filter, has := docFilter.Get(); has {
@@ -351,6 +353,8 @@ cursorLoop:
 		}
 
 		batch = append(batch, NewDocWithTS(userDoc, *opTime))
+
+		fmt.Printf("----- user doc %v\n\n", userDoc)
 
 		docID, err := compareMethod.RawDocIDForComparison(
 			userDoc,
