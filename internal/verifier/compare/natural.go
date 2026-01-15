@@ -22,6 +22,22 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
+func SetDirectHostInConnectionString(connstr, hostname string) (string, error) {
+	parsedURI, err := url.ParseRequestURI(connstr)
+	if err != nil {
+		return "", errors.Wrapf(err, "parsing connection string")
+	}
+
+	parsedURI.Host = hostname
+
+	_, connstr, err = mmongo.MaybeAddDirectConnection(parsedURI.String())
+	if err != nil {
+		return "", errors.Wrapf(err, "tweaking connection string to %#q to ensure direct connection", parsedURI.Host)
+	}
+
+	return connstr, nil
+}
+
 // ReadNaturalPartitionFromSource queries a source collection according
 // to the given task and sends the relevant data to the destination
 // reader and compare channels. This function only returns when there are

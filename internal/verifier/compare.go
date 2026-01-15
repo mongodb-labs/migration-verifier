@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net/url"
 	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
@@ -15,7 +14,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
-	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
@@ -481,21 +479,18 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
 ) {
+	hostname, isNatural := task.QueryFilter.Partition.NaturalHostname.Get()
 	lo.Assertf(
-		task.QueryFilter.Partition.NaturalHostname.IsSome(),
+		isNatural,
 		"natural partition requires persisted hostname",
 	)
 
-	parsedURI, err := url.ParseRequestURI(verifier.srcURI)
+	connstr, err := compare.SetDirectHostInConnectionString(
+		verifier.srcURI,
+		hostname,
+	)
 	if err != nil {
-		return nil, nil, nil, nil, errors.Wrapf(err, "parsing source connection string")
-	}
-
-	parsedURI.Host = task.QueryFilter.Partition.NaturalHostname.MustGet()
-
-	_, connstr, err := mmongo.MaybeAddDirectConnection(parsedURI.String())
-	if err != nil {
-		return nil, nil, nil, nil, errors.Wrapf(err, "tweaking connection string to %#q to ensure direct connection", parsedURI.Host)
+		return nil, nil, nil, nil, errors.Wrapf(err, "setting source connstr to connect directly to %#q", hostname)
 	}
 
 	srcToCompareChannel := make(chan compare.DocWithTS)

@@ -52,6 +52,12 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 	hostname, err := bsontools.RawValueTo[string](hostnameRV)
 	require.NoError(t, err)
 
+	connstr, err := compare.SetDirectHostInConnectionString(
+		suite.srcConnStr,
+		hostname,
+	)
+	require.NoError(t, err)
+
 	for _, clustered := range mslices.Of(true, false) {
 		suite.Run(
 			lo.Ternary(clustered, "clustered", "nonclustered"),
@@ -138,7 +144,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							ctx,
 							logger,
 							notifier,
-							suite.srcConnStr,
+							connstr,
 							task,
 							option.None[bson.D](),
 							compare.Binary,
@@ -218,7 +224,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							ctx,
 							logger,
 							notifier,
-							suite.srcConnStr,
+							connstr,
 							task,
 							option.None[bson.D](),
 							compare.Binary,
@@ -299,7 +305,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							ctx,
 							logger,
 							notifier,
-							suite.srcConnStr,
+							connstr,
 							task,
 							option.None[bson.D](),
 							compare.Binary,
@@ -387,7 +393,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							ctx,
 							logger,
 							notifier,
-							suite.srcConnStr,
+							connstr,
 							task,
 							option.None[bson.D](),
 							compare.Binary,
