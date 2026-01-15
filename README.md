@@ -406,18 +406,33 @@ reduce server load, for collections with custom `_id` values.
 
 The following caveats apply:
 
+### Lost checks
+
+Under this method, Migration Verifier fetches documents from the source in
+natural (i.e., on-disk) order. After fetching a batch of documents from the
+source, Migration Verifier fetches those same documents by `_id` from the
+destination. There is no full collection scan on the destination.
+Because of this, under natural partitioning Migration Verifier cannot detect
+documents that exist only on the destination _unless_ such documents change
+during verification.
+
+As of this writing, no migration tooling from MongoDB is expected to create
+such documents.
+
 ### MongoDB 4.2 & earlier
 
 The features that enable natural partitioning were added in MongoDB 4.4. If
 the source lacks those features, then all collections are scanned in a single
 thread.
 
-In other words, no collections are “partitioned”, but the actual reading of
-documents still uses natural order.
+In other words, nothing is “partitioned”. The actual reading of documents
+from the source, though, still uses natural order.
 
-Single-threaded scanning will impede performance, though it may still outpace
-`_id` partitioning. Additionally, any progress made verifying individual
-collections will be lost if Migration Verifier restarts.
+Single-threaded scanning will impede performance, though single-threaded
+natural order may still outpace reading `_id`-partitioned documents.
+
+Additionally, if Migration Verifier restarts, any collections that were
+incompletely verified at shutdown will be re-verified from the beginning.
 
 ### Sharded clusters
 
@@ -447,19 +462,6 @@ non-numeric, so it’s infeasible to decrement them.
 Because of this, if the source lacks
 [SERVER-110161](https://jira.mongodb.org/browse/SERVER-110161)’s fix,
 clustered collections are verified in a single thread.
-
-### Lost checks
-
-Under this method, Migration Verifier fetches documents from the source in
-natural (i.e., on-disk) order. After fetching a batch of documents from the
-source, Migration Verifier fetches those same documents by `_id` from the
-destination. There is no full collection scan on the destination.
-Because of this, under natural partitioning Migration Verifier cannot detect
-documents that exist only on the destination _unless_ such documents change
-during verification.
-
-As of this writing, no migration tooling from MongoDB is expected to create
-such documents.
 
 # Change reading methods
 

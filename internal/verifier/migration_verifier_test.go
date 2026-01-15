@@ -75,6 +75,47 @@ func TestIntegration(t *testing.T) {
 	suite.Run(t, testSuite)
 }
 
+func (suite *IntegrationTestSuite) TestEmptyExceptDestination() {
+	ctx := suite.Context()
+	require := require.New(suite.T())
+
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	collName := "stuff"
+	require.NoError(db.CreateCollection(ctx, collName))
+
+	dstDB := suite.dstMongoClient.Database(db.Name())
+	require.NoError(dstDB.CreateCollection(ctx, collName))
+
+	_, err := dstDB.Collection(collName).InsertMany(
+		ctx,
+		[]bson.D{
+			{{"foo", "bar"}},
+			{{"baz", "qux"}},
+		},
+	)
+	require.NoError(err)
+
+	verifier := suite.BuildVerifier()
+
+	verifier.SetVerifyAll(true)
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	status, err := verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+
+	assert.Equal(
+		suite.T(),
+		&VerificationStatus{
+			TotalTasks:     2,
+			CompletedTasks: 1,
+			FailedTasks:    1,
+		},
+		status,
+		"expected task status",
+	)
+}
+
 func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
 	ctx := suite.Context()
 	require := require.New(suite.T())
