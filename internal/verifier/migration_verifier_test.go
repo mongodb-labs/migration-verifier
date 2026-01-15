@@ -2509,7 +2509,7 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	var theTasks []tasks.Task
 	suite.Require().NoError(cursor.All(ctx, &theTasks))
 
-	suite.Require().Len(theTasks, 2)
+	suite.Require().Len(theTasks, 2, "tasks: %+v", theTasks)
 	suite.Assert().Equal(tasks.VerifyDocuments, theTasks[0].Type)
 	suite.Assert().Equal(tasks.Completed, theTasks[0].Status)
 	suite.Assert().Equal(tasks.VerifyCollection, theTasks[1].Type)
