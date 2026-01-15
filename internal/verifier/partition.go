@@ -6,9 +6,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
-	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
@@ -54,19 +52,23 @@ func (verifier *Verifier) findLatestPartitionUpperBound(
 func (verifier *Verifier) createPartitionTasksWithSampleRate(
 	ctx context.Context,
 	task *tasks.Task,
-) (int, types.DocumentCount, types.ByteCount, error) {
+	shardFields []string,
+) (int, error) {
 	srcColl := verifier.srcClientCollection(task)
 	srcNs := FullName(srcColl)
 
 	var partitionsCount int
-	var docCount types.DocumentCount
-	var byteCount types.ByteCount
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, fi *retry.FuncInfo) error {
 			var err error
 
-			partitionsCount, docCount, byteCount, err = verifier.createPartitionTasksWithSampleRateRetryable(ctx, task, fi)
+			partitionsCount, err = verifier.createPartitionTasksWithSampleRateRetryable(
+				ctx,
+				fi,
+				task,
+				shardFields,
+			)
 
 			return err
 		},
@@ -74,27 +76,17 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 		srcNs,
 	).Run(ctx, verifier.logger)
 
-	return partitionsCount, docCount, byteCount, err
+	return partitionsCount, err
 }
 
 func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	ctx context.Context,
-	task *tasks.Task,
 	fi *retry.FuncInfo,
-) (int, types.DocumentCount, types.ByteCount, error) {
+	task *tasks.Task,
+	shardFields []string,
+) (int, error) {
 	srcColl := verifier.srcClientCollection(task)
 	srcNs := FullName(srcColl)
-
-	shardKeys, err := verifier.getShardKeyFields(
-		ctx,
-		&uuidutil.NamespaceAndUUID{
-			DBName:   srcColl.Database().Name(),
-			CollName: srcColl.Name(),
-		},
-	)
-	if err != nil {
-		return 0, 0, 0, errors.Wrapf(err, "getting %#q’s shard key", srcNs)
-	}
 
 	pipeline := mongo.Pipeline{
 		// NB: $sort MUST precede $project in order to avoid a blocking sort
@@ -105,7 +97,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 	lowerBoundOpt, err := verifier.findLatestPartitionUpperBound(ctx, srcNs)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, err
 	}
 
 	if lowerBound, has := lowerBoundOpt.Get(); has {
@@ -119,7 +111,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 			bson.MaxKey{},
 		)
 		if err != nil {
-			return 0, 0, 0, errors.Wrapf(err, "getting lower-bound filter predicate (%v)", lowerBound)
+			return 0, errors.Wrapf(err, "getting lower-bound filter predicate (%v)", lowerBound)
 		}
 
 		var filter bson.D
@@ -148,20 +140,10 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		srcColl,
 	)
 	if err != nil {
-		return 0, 0, 0, errors.Wrapf(err, "getting %#q’s size", srcNs)
+		return 0, errors.Wrapf(err, "getting %#q’s size", srcNs)
 	}
 
 	dstNs := FullName(verifier.dstClientCollection(task))
-
-	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(
-		ctx,
-		verifier.logger,
-		verifier.srcClientDatabase(srcColl.Database().Name()),
-		srcColl.Name(),
-	)
-	if err != nil {
-		return 0, 0, 0, errors.Wrapf(err, "fetching %#q’s UUID on source", srcNs)
-	}
 
 	partitionsCount := 0
 
@@ -170,8 +152,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	createAndInsertPartition := func(lowerBound, upperBound bson.RawValue) error {
 		partition := partitions.Partition{
 			Key: partitions.PartitionKey{
-				SourceUUID: namespaceAndUUID.UUID,
-				Lower:      lowerBound,
+				Lower: lowerBound,
 			},
 			Ns: &partitions.Namespace{
 				srcColl.Database().Name(),
@@ -184,7 +165,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		_, err = verifier.InsertPartitionVerificationTask(
 			ctx,
 			&partition,
-			shardKeys,
+			shardFields,
 			dstNs,
 		)
 		if err != nil {
@@ -230,7 +211,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 				SetHint(bson.D{{"_id", 1}}),
 		)
 		if err != nil {
-			return 0, 0, 0, errors.Wrapf(err, "opening %#q’s sampling cursor", srcNs)
+			return 0, errors.Wrapf(err, "opening %#q’s sampling cursor", srcNs)
 		}
 
 		defer cursor.Close(ctx)
@@ -239,28 +220,28 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		for cursor.Next(ctx) {
 			upperBound, err := cursor.Current.LookupErr("_id")
 			if err != nil {
-				return 0, 0, 0, errors.Wrapf(err, "fetching %#q from %#q’s sampling cursor", "_id", srcNs)
+				return 0, errors.Wrapf(err, "fetching %#q from %#q’s sampling cursor", "_id", srcNs)
 			}
 
 			err = createAndInsertPartition(lowerBound, upperBound)
 			if err != nil {
-				return 0, 0, 0, err
+				return 0, err
 			}
 
 			lowerBound = upperBound
 		}
 
 		if cursor.Err() != nil {
-			return 0, 0, 0, errors.Wrapf(err, "iterating %#q’s sampling cursor", srcNs)
+			return 0, errors.Wrapf(err, "iterating %#q’s sampling cursor", srcNs)
 		}
 	}
 
 	err = createAndInsertPartition(lowerBound, bsontools.ToRawValue(bson.MaxKey{}))
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, err
 	}
 
-	return partitionsCount, types.DocumentCount(docsCount), types.ByteCount(collBytes), nil
+	return partitionsCount, nil
 }
 
 func (v *Verifier) srcHasSampleRate() bool {

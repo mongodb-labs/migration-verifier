@@ -304,7 +304,8 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 	suite.Assert().Equal(
 		3,
 		verificationStatus.CompletedTasks,
-		"should be completed: view meta, buckets meta, and buckets docs",
+		"should be completed: view meta, buckets meta, and buckets docs (tasks: %+v)",
+		verificationStatus,
 	)
 
 	suite.T().Logf("verificationStatus")

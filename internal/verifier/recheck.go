@@ -333,7 +333,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 	var idAccum []bson.RawValue
 	var idsSizer util.BSONArraySizer
 	var totalDocs types.DocumentCount
-	var dataSizeAccum, totalRecheckData int64
+	var dataSizeAccum, totalRecheckData types.ByteCount
 
 	// These are indexed by idAccum index:
 	firstMismatchTime := map[int32]bson.DateTime{}
@@ -518,11 +518,11 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		lastIDRaw = idRaw
 
 		idsSizer.Add(idRaw)
-		dataSizeAccum += int64(doc.DataSize)
+		dataSizeAccum += types.ByteCount(doc.DataSize)
 
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 
-		totalRecheckData += int64(doc.DataSize)
+		totalRecheckData += types.ByteCount(doc.DataSize)
 		totalDocs++
 	}
 

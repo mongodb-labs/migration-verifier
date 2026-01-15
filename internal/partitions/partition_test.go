@@ -115,7 +115,7 @@ func (suite *UnitTestSuite) makeTestPartition() (Partition, bson.D) {
 	return partition, suite.makeExpectedFilter(partition.Key.Lower, partition.Upper)
 }
 
-func (suite *UnitTestSuite) makeExpectedFilter(lower, upper any) bson.D {
+func (suite *UnitTestSuite) makeExpectedFilter(lower, upper bson.RawValue) bson.D {
 	return roundTripBSON(suite.T(), bson.D{{"$and", []bson.D{
 		// All _id values >= lower bound.
 		{{"$expr", bson.D{
