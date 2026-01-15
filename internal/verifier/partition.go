@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -55,6 +56,11 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 	task *tasks.Task,
 	shardFields []string,
 ) (int, error) {
+	lo.Assertf(
+		verifier.srcHasSampleRate(),
+		"$sampleRate support required",
+	)
+
 	srcColl := verifier.srcClientCollection(task)
 	srcNs := FullName(srcColl)
 

@@ -18,8 +18,26 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
+type CannotPartitionNaturalError struct {
+	ns  string
+	err error
+}
+
+var _ error = CannotPartitionNaturalError{}
+
+func (c CannotPartitionNaturalError) Error() string {
+	return c.Cause().Error()
+}
+
+func (c CannotPartitionNaturalError) Cause() error {
+	return fmt.Errorf("cannot partition %#q naturally: %v", c.ns, c.err)
+}
+
 // PartitionCollectionNaturalOrder spawns a goroutine that partitions the
 // collection in natural order.
+//
+// If the collection can’t be partitioned naturally, this returns a
+// CannotPartitionNaturalError.
 func PartitionCollectionNaturalOrder(
 	ctx context.Context,
 	coll *mongo.Collection,
@@ -67,6 +85,41 @@ func PartitionCollectionNaturalOrder(
 		return nil, errors.Wrapf(err, "opening partition query (%+v)", cmd)
 	}
 
+	// Confirm that we can, in fact, partition this collection naturally:
+	curToken, err := cursor.GetResumeToken(c)
+	if err != nil {
+		return nil, errors.Wrapf(err, "extracting resume token")
+	}
+	if !c.IsFinished() {
+		recIDRV, err := curToken.LookupErr("$recordId")
+		if err != nil {
+			return nil, errors.Wrapf(err, "extracting record ID from resume token (%v)", curToken)
+		}
+
+		switch recIDRV.Type {
+		case bson.TypeInt64:
+			// A normal collection. All is well.
+		case bson.TypeBinary:
+			version, err := mmongo.GetVersionArray(ctx, coll.Database().Client())
+			if err != nil {
+				return nil, errors.Wrapf(err, "fetching cluster version")
+			}
+
+			if !mmongo.FindCanUseStartAt(version) {
+				return nil, CannotPartitionNaturalError{
+					ns:  coll.Database().Name() + "." + coll.Name(),
+					err: fmt.Errorf("verification of clustered collection requires a newer source version"),
+				}
+			}
+		default:
+			// This likely indicates a new, unexpected collection type.
+			return nil, CannotPartitionNaturalError{
+				ns:  coll.Database().Name() + "." + coll.Name(),
+				err: fmt.Errorf("unknown BSON type (%s) for record ID (%s)", recIDRV.Type, recIDRV),
+			}
+		}
+	}
+
 	helloRaw, err := util.GetHelloRaw(ctx, coll.Database().Client())
 	if err != nil {
 		return nil, errors.Wrapf(err, "sending hello/isMaster")
@@ -87,13 +140,10 @@ func PartitionCollectionNaturalOrder(
 	go func() {
 		defer close(pChan)
 
-		var version [3]int
-
 		priorToken := bsontools.ToRawValue(bson.Null{})
 		var curToken bson.Raw
 		var err error
 
-	batchLoop:
 		for {
 			curToken, err = cursor.GetResumeToken(c)
 			if err != nil {
@@ -109,30 +159,6 @@ func PartitionCollectionNaturalOrder(
 				if err != nil {
 					err = errors.Wrapf(err, "extracting record ID from resume token (%v)", curToken)
 					break
-				}
-
-				switch recIDRV.Type {
-				case bson.TypeInt64:
-					// A normal collection. All is well.
-				case bson.TypeBinary:
-					if version[0] == 0 {
-						version, err = mmongo.GetVersionArray(ctx, coll.Database().Client())
-						if err != nil {
-							err = errors.Wrapf(err, "fetching cluster version")
-							break batchLoop
-						}
-					}
-
-					if !mmongo.FindCanUseStartAt(version) {
-						err = fmt.Errorf(
-							"%#q is a clustered collection; source lacks features needed to verify",
-							coll.Database().Name()+"."+coll.Name(),
-						)
-						break batchLoop
-					}
-				default:
-					err = fmt.Errorf("unknown BSON type (%s) for record ID (%s)", recIDRV.Type, recIDRV)
-					break batchLoop
 				}
 			}
 
