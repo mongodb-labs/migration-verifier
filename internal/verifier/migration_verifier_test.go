@@ -2466,10 +2466,10 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	suite.Require().NoError(cursor.All(ctx, &theTasks))
 
 	suite.Require().Len(theTasks, 2)
-	suite.Require().Equal(tasks.VerifyDocuments, theTasks[0].Type)
-	suite.Require().Equal(tasks.Completed, theTasks[0].Status)
-	suite.Require().Equal(tasks.VerifyCollection, theTasks[1].Type)
-	suite.Require().Equal(tasks.MetadataMismatch, theTasks[1].Status)
+	suite.Assert().Equal(tasks.VerifyDocuments, theTasks[0].Type)
+	suite.Assert().Equal(tasks.Completed, theTasks[0].Status)
+	suite.Assert().Equal(tasks.VerifyCollection, theTasks[1].Type)
+	suite.Assert().Equal(tasks.MetadataMismatch, theTasks[1].Status)
 
 	// When tailing the oplog sometimes the verifier starts up “in the past”,
 	// which can cause extra rechecks that we wouldn’t normally expect. This
