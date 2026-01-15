@@ -93,13 +93,6 @@ func (p *Partitions) GetSlice() []*Partition {
 	return p.partitions
 }
 
-type minOrMaxBound string
-
-const (
-	minBound minOrMaxBound = "min"
-	maxBound minOrMaxBound = "max"
-)
-
 // PartitionCollectionWithSize splits the source collection into one or more
 // partitions. These partitions are expected to be somewhat similar in size,
 // but this is never guaranteed. The caller can choose a desired partition
