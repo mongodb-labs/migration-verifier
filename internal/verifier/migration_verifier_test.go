@@ -75,6 +75,9 @@ func TestIntegration(t *testing.T) {
 	suite.Run(t, testSuite)
 }
 
+// This test will fail if the collection in question is ever verified with
+// natural partitioning (due to how our implementation misses extra docs on
+// the destination).
 func (suite *IntegrationTestSuite) TestEmptyExceptDestination() {
 	ctx := suite.Context()
 	require := require.New(suite.T())
