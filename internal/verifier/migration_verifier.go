@@ -1485,6 +1485,10 @@ func (verifier *Verifier) partitionCollection(
 	return nil
 }
 
+// This returns a partition that verifies a full collection via natural scan
+// in a single thread. Because there is no resumability, document order
+// doesn’t matter, which means such tasks can go to a mongos or a full
+// replset (i.e., no direct connection needed).
 func (verifier *Verifier) partitionSingleNatural(
 	ctx context.Context,
 	why error,
