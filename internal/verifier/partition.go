@@ -185,55 +185,51 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 	idealNumPartitions := util.DivideToF64(collBytes, idealPartitionBytes)
 
-	// We only want to go in here when the collection has enough data
-	// to justify partitioning.
-	if idealNumPartitions > 1 {
-		docsPerPartition := util.DivideToF64(docsCount, idealNumPartitions)
+	docsPerPartition := util.DivideToF64(docsCount, idealNumPartitions)
 
-		sampleRate := util.DivideToF64(1, docsPerPartition)
+	sampleRate := util.DivideToF64(1, docsPerPartition)
 
-		if sampleRate > 0 && sampleRate < 1 {
-			pipeline = append(
-				pipeline,
-				bson.D{
-					{"$match", bson.D{
-						{"$sampleRate", sampleRate},
-					}},
-				},
-			)
-		}
-
-		cursor, err := partitions.ForPartitionAggregation(srcColl).Aggregate(
-			ctx,
+	if sampleRate > 0 && sampleRate < 1 {
+		pipeline = append(
 			pipeline,
-			options.Aggregate().
-				SetBatchSize(1).
-				SetHint(bson.D{{"_id", 1}}),
+			bson.D{
+				{"$match", bson.D{
+					{"$sampleRate", sampleRate},
+				}},
+			},
 		)
+	}
+
+	cursor, err := partitions.ForPartitionAggregation(srcColl).Aggregate(
+		ctx,
+		pipeline,
+		options.Aggregate().
+			SetBatchSize(1).
+			SetHint(bson.D{{"_id", 1}}),
+	)
+	if err != nil {
+		return 0, errors.Wrapf(err, "opening %#q’s sampling cursor", srcNs)
+	}
+
+	defer cursor.Close(ctx)
+	cursor.SetBatchSize(1)
+
+	for cursor.Next(ctx) {
+		upperBound, err := cursor.Current.LookupErr("_id")
 		if err != nil {
-			return 0, errors.Wrapf(err, "opening %#q’s sampling cursor", srcNs)
+			return 0, errors.Wrapf(err, "fetching %#q from %#q’s sampling cursor", "_id", srcNs)
 		}
 
-		defer cursor.Close(ctx)
-		cursor.SetBatchSize(1)
-
-		for cursor.Next(ctx) {
-			upperBound, err := cursor.Current.LookupErr("_id")
-			if err != nil {
-				return 0, errors.Wrapf(err, "fetching %#q from %#q’s sampling cursor", "_id", srcNs)
-			}
-
-			err = createAndInsertPartition(lowerBound, upperBound)
-			if err != nil {
-				return 0, err
-			}
-
-			lowerBound = upperBound
+		err = createAndInsertPartition(lowerBound, upperBound)
+		if err != nil {
+			return 0, err
 		}
 
-		if cursor.Err() != nil {
-			return 0, errors.Wrapf(err, "iterating %#q’s sampling cursor", srcNs)
-		}
+		lowerBound = upperBound
+	}
+
+	if cursor.Err() != nil {
+		return 0, errors.Wrapf(err, "iterating %#q’s sampling cursor", srcNs)
 	}
 
 	err = createAndInsertPartition(lowerBound, bsontools.ToRawValue(bson.MaxKey{}))

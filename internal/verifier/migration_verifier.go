@@ -1312,8 +1312,7 @@ func (verifier *Verifier) partitionCollection(
 	idealNumPartitions := util.DivideToF64(collBytes, verifier.partitionSizeInBytes)
 
 	if idealNumPartitions <= 1 {
-		fmt.Printf("--------------- making single partition for %#q\n\n\n", FullName(srcColl))
-		verifier.logger.Info().
+		verifier.logger.Debug().
 			Any("task", task.PrimaryKey).
 			Str("namespace", FullName(srcColl)).
 			Int64("documentsCount", int64(docsCount)).
@@ -1350,7 +1349,14 @@ func (verifier *Verifier) partitionCollection(
 		return nil
 	}
 
-	fmt.Printf("--------------- making partitions (%f) for %#q\n\n\n", idealNumPartitions, FullName(srcColl))
+	verifier.logger.Debug().
+		Any("task", task.PrimaryKey).
+		Str("namespace", FullName(srcColl)).
+		Int64("documentsCount", int64(docsCount)).
+		Int64("collectionBytes", int64(collBytes)).
+		Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
+		Float64("idealPartitionsCount", idealNumPartitions).
+		Msg("Partitioning collection.")
 
 	var partitionsCount int
 
