@@ -26,15 +26,22 @@ jobs:
           # NB: This is the only setup we’re supporting with 4.0.
           - mongodb_versions: [ '4.0', '8.0' ]
             topology: replset
+            partitionBy: _id
+            srcChangeReader: changeStream
+            dstChangeReader: changeStream
 
           - mongodb_versions: [ '4.0', '8.0' ]
             topology: replset
             partitionBy: natural
+            srcChangeReader: changeStream
+            dstChangeReader: changeStream
 
           # Testing fallback when `hello` isn’t implemented
           # (but appendOplogNote is).
           - mongodb_versions: [ '4.2.5', '6.0' ]
             topology: replset
+            srcChangeReader: changeStream
+            dstChangeReader: changeStream
 
           - mongodb_versions: [ '4.0', '8.0' ]
             topology: replset
@@ -72,21 +79,6 @@ jobs:
             dstChangeReader: tailOplog
 
         exclude:
-#          # 1. No natural scan for sharded source.
-#          - topology: sharded
-#            partitionBy: natural
-#
-#          # 2. No natural scan before 4.4.
-#          - mongodb_versions: [ '4.2', '4.2' ]
-#            partitionBy: natural
-#          - mongodb_versions: [ '4.2', '4.4' ]
-#            partitionBy: natural
-#          - mongodb_versions: [ '4.2', '5.0' ]
-#            partitionBy: natural
-#          - mongodb_versions: [ '4.2', '6.0' ]
-#            partitionBy: natural
-#          - mongodb_versions: [ '4.2', '8.0' ]
-#            partitionBy: natural
 
           # No hashed comparison before 4.4.
           - mongodb_versions: [ '4.2', '4.2' ]
