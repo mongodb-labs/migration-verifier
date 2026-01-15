@@ -408,6 +408,26 @@ Natural partitioning requires the source to be a replica set. (The destination
 can be sharded.) For best performance, the destination’s documents’ on-disk
 order should roughly match the source’s.
 
+### Resumption and document deletion
+
+In v6 and earlier, document deletions can complicate resumption of natural
+scans (i.e., after a restart). When reading documents from a given record ID,
+if the record ID’s referent document has been deleted, then Migration Verifier
+decrements the record ID & retries the query. If many documents have been
+deleted, this will cause a flurry of requests to the server until a record
+ID is reached that refers to an existing document.
+
+The above-described plan for decrementing record IDs does not work at all
+for clustered collections (including time-series). (This is because these
+collections’ record IDs are non-numeric.)
+
+This is not a problem if the source is MongoDB 7.0, 8.0, or later, as long as
+the server runs a version with [SERVER-110161](https://jira.mongodb.org/browse/SERVER-110161)
+fixed.
+
+Because of this problem, natural partitioning _only_ supports clustered
+collections if the source is one of the above versions.
+
 ### Lost checks
 
 Under this method, Migration Verifier fetches documents from the source in

@@ -2,11 +2,13 @@ package partitions
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mmongo/cursor"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
@@ -69,9 +71,13 @@ func PartitionCollectionNaturalOrder(
 	go func() {
 		defer close(pChan)
 
+		var version [3]int
+
 		priorToken := bsontools.ToRawValue(bson.Null{})
 		var curToken bson.Raw
 		var err error
+
+	batchLoop:
 		for {
 			curToken, err = cursor.GetResumeToken(c)
 			if err != nil {
@@ -87,6 +93,30 @@ func PartitionCollectionNaturalOrder(
 				if err != nil {
 					err = errors.Wrapf(err, "extracting record ID from resume token (%v)", curToken)
 					break
+				}
+
+				switch recIDRV.Type {
+				case bson.TypeInt64:
+					// A normal collection. All is well.
+				case bson.TypeBinary:
+					if version[0] == 0 {
+						version, err = mmongo.GetVersionArray(ctx, coll.Database().Client())
+						if err != nil {
+							err = errors.Wrapf(err, "fetching cluster version")
+							break batchLoop
+						}
+					}
+
+					if !mmongo.FindCanUseStartAt(version) {
+						err = fmt.Errorf(
+							"%#q is a clustered collection; source lacks features needed to verify",
+							coll.Database().Name()+"."+coll.Name(),
+						)
+						break batchLoop
+					}
+				default:
+					err = fmt.Errorf("unknown BSON type (%s) for record ID (%s)", recIDRV.Type, recIDRV)
+					break batchLoop
 				}
 			}
 
