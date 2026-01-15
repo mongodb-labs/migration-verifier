@@ -29,7 +29,6 @@ import (
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/dustin/go-humanize"
-	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -1300,7 +1299,7 @@ func (verifier *Verifier) partitionCollection(
 		return errors.Wrapf(err, "getting %#q’s shard key", srcNs)
 	}
 
-	collBytes, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
+	collBytes, docsCount, _, err := partitions.GetSizeAndDocumentCount(
 		ctx,
 		verifier.logger,
 		srcColl,
@@ -1336,33 +1335,13 @@ func (verifier *Verifier) partitionCollection(
 			Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
 			Msg("Collection is small enough not to need partitioning.")
 
-		partition := partitions.Partition{
-			Key: partitions.PartitionKey{
-				Lower: bsontools.ToRawValue(bson.MinKey{}),
-			},
-			Ns: &partitions.Namespace{
-				srcColl.Database().Name(),
-				srcColl.Name(),
-			},
-			Upper:    bsontools.ToRawValue(bson.MaxKey{}),
-			IsCapped: isCapped,
-		}
-
-		_, err = verifier.InsertPartitionVerificationTask(
+		return verifier.partitionSingleNatural(
 			ctx,
-			&partition,
+			err,
+			srcNs,
 			shardKeyFields,
 			dstNs,
 		)
-		if err != nil {
-			return errors.Wrapf(
-				err,
-				"inserting single partition task for namespace %#q",
-				srcNs,
-			)
-		}
-
-		return nil
 	}
 
 	verifier.logger.Debug().
