@@ -100,7 +100,7 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 	} else {
 		filter := []bson.D{}
 		for _, ns := range csr.namespaces {
-			db, coll := SplitNamespace(ns)
+			db, coll := mmongo.SplitNamespace(ns)
 			filter = append(filter, bson.D{
 				{"ns", bson.D{
 					{"db", db},

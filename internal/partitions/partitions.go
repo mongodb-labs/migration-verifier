@@ -345,13 +345,13 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 				{"aggregate", collName},
 				{"pipeline", mongo.Pipeline{
 					{{"$collStats", bson.D{
-						{"storageStats", bson.E{"scale", 1}},
+						{"storageStats", bson.D{{"scale", 1}}},
 					}}},
 					// The "$group" here behaves as a project and rename when there's only one
 					// document (non-sharded case).  When there are multiple documents (one for
 					// each shard) it correctly sums the counts and sizes from each shard.
 					{{"$group", bson.D{
-						{"_id", "ns"},
+						{"_id", "$ns"},
 						{"count", bson.D{{"$sum", "$storageStats.count"}}},
 						{"size", bson.D{{"$sum", "$storageStats.size"}}},
 						{"capped", bson.D{{"$first", "$capped"}}}}}},
@@ -529,7 +529,7 @@ func getOuterIDBound(
 				})
 
 			if cmdErr != nil {
-				return cmdErr
+				return errors.Wrapf(cmdErr, "fetching %#q’s %s", collName, minOrMaxBound)
 			}
 
 			// If we don't have at least one document, the collection is either empty or was dropped.
@@ -540,7 +540,7 @@ func getOuterIDBound(
 
 			// Return the _id value from that document.
 			docID, cmdErr = cursor.Current.LookupErr("_id")
-			return cmdErr
+			return errors.Wrapf(cmdErr, "extracting %s _id", minOrMaxBound)
 		},
 		"finding %#q's %s _id",
 		srcDB.Name()+"."+collName,

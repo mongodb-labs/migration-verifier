@@ -6,6 +6,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -53,7 +54,7 @@ func CmpMinorVersions(a, b [2]int) int {
 }
 
 func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Client) (ClusterInfo, error) {
-	va, err := getVersionArray(ctx, client)
+	va, err := mmongo.GetVersionArray(ctx, client)
 	if err != nil {
 		return ClusterInfo{}, errors.Wrap(err, "failed to fetch version array")
 	}
@@ -74,23 +75,6 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 		VersionArray: va,
 		Topology:     topology,
 	}, nil
-}
-
-func getVersionArray(ctx context.Context, client *mongo.Client) ([]int, error) {
-	commandResult := client.Database("admin").RunCommand(ctx, bson.D{{"buildinfo", 1}})
-
-	rawResp, err := commandResult.Raw()
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to run %#q", "buildinfo")
-	}
-
-	var va []int
-	_, err = mbson.RawLookup(rawResp, &va, "versionArray")
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to decode build info version array")
-	}
-
-	return va, nil
 }
 
 func getTopology(ctx context.Context, cmdName string, client *mongo.Client) (ClusterTopology, error) {
