@@ -158,7 +158,9 @@ func ReadNaturalPartitionFromSource(
 			projection = GetHashedIndexKeyProjection(task.QueryFilter)
 		}
 
-		cmd = append(cmd, bson.E{"projection", projection})
+		if projection != nil {
+			cmd = append(cmd, bson.E{"projection", projection})
+		}
 
 		if filter, has := docFilter.Get(); has {
 			cmd = append(cmd, bson.E{"filter", filter})
