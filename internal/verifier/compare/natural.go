@@ -114,9 +114,22 @@ func ReadNaturalPartitionFromSource(
 	}
 
 	for {
+		var docProjection any
+
+		switch compareMethod {
+		case ToHashedIndexKey:
+			docProjection = GetHashedIndexKeyProjection(task.QueryFilter)
+		case Binary, IgnoreOrder:
+			docProjection = "$$ROOT"
+		}
+
 		cmd := bson.D{
 			{"find", coll.Name()},
 			{"hint", bson.D{{"$natural", 1}}},
+			{"projection", bson.D{
+				{"_id", 0},
+				{"_", docProjection},
+			}},
 		}
 
 		if useResumeTokens {
@@ -133,20 +146,6 @@ func ReadNaturalPartitionFromSource(
 			cmd = append(cmd, bson.E{"filter", filter})
 		}
 
-		var docProjection any
-
-		switch compareMethod {
-		case ToHashedIndexKey:
-			docProjection = GetHashedIndexKeyProjection(task.QueryFilter)
-		case Binary, IgnoreOrder:
-			docProjection = "$$ROOT"
-		}
-
-		cmd = append(cmd, bson.E{"projection", bson.D{
-			{"_id", 0},
-			{"_", docProjection},
-		}})
-
 		if useResumeTokens {
 			if startAt, has := resumeTokenOpt.Get(); has {
 				cmd = append(cmd, bson.E{
@@ -157,6 +156,7 @@ func ReadNaturalPartitionFromSource(
 		}
 
 		cursor, err = coll.Database().RunCommandCursor(sctx, cmd)
+
 		if err != nil {
 			if !mmongo.ErrorHasCode(err, util.KeyNotFoundErrCode) {
 				return errors.Wrapf(err, "reading from source")

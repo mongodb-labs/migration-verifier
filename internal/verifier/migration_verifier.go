@@ -1410,7 +1410,17 @@ func (verifier *Verifier) partitionCollection(
 			}
 		}
 	case partitions.PartitionByNatural:
-		err := mmongo.WhyFindCannotResume([2]int(verifier.srcClusterInfo.VersionArray))
+		clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.srcClient)
+		if err != nil {
+			return errors.Wrapf(err, "reading source cluster info")
+		}
+
+		if clusterInfo.Topology != util.TopologyReplset {
+			err = fmt.Errorf("resumable natural can requires a replica set")
+		} else {
+			err = mmongo.WhyFindCannotResume([2]int(verifier.srcClusterInfo.VersionArray))
+		}
+
 		if err != nil {
 			return verifier.partitionSingleNatural(
 				ctx,
