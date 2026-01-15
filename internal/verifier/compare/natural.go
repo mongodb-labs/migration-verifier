@@ -120,6 +120,10 @@ func ReadNaturalPartitionFromSource(
 		}
 
 		if useResumeTokens {
+			// Because we send `showRecordId` we need to disambiguate the
+			// server-added $recordId field from a user field of the same name
+			// (however unlikely!). We do that by projecting the original
+			// document down a level.
 			var docProjection any
 
 			switch compareMethod {
