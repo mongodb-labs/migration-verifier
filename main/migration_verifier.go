@@ -51,6 +51,7 @@ const (
 	configFileFlag        = "configFile"
 	pprofInterval         = "pprofInterval"
 	startFlag             = "start"
+	partitionBy           = "partitionBy"
 
 	buildVarDefaultStr = "Unknown; build with build.sh."
 )
@@ -151,6 +152,14 @@ func main() {
 			Name:  metaDBName,
 			Value: "migration_verification_metadata",
 			Usage: "`name` of the database in which to store verification metadata",
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  partitionBy,
+			Value: partitions.PartitionByDefault,
+			Usage: "Method to partition documents. One of: " + strings.Join(
+				partitions.PartitionByMethods,
+				", ",
+			),
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name: docCompareMethod,
@@ -390,6 +399,12 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		return nil, errors.Errorf("invalid doc compare method (%s); valid values are: %#q", docCompareMethod, compare.Methods)
 	}
 	v.SetDocCompareMethod(docCompareMethod)
+
+	partitionBy := cCtx.String(partitionBy)
+	if !slices.Contains(partitions.PartitionByMethods, partitionBy) {
+		return nil, errors.Errorf("invalid partitioning method (%s); valid values are: %#q", partitionBy, partitions.PartitionByMethods)
+	}
+	v.SetPartitionBy(partitions.PartitionBy(partitionBy))
 
 	err = v.SetReadPreference(cCtx.String(readPreference))
 	if err != nil {

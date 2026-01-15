@@ -143,6 +143,7 @@ The verifier will now check to completion to make sure that there are no inconsi
 | `--dstNamespace <namespaces>`           | destination namespaces to check                                                                                                                                                             |
 | `--metaDBName <name>`                   | name of the database in which to store verification metadata (default: "migration_verification_metadata")                                                                                   |
 | `--docCompareMethod`                    | How to compare documents. See below for details.                                                                                                                                        |
+| `--partitionBy`                         | How to partition collections. See below for details.                                                                                                                                        |
 | `--srcChangeReader`                     | How to read changes from the source. See below for details.             |
 | `--dstChangeReader`                     | How to read changes from the destination. See below for details.        |
 | `--start`                               | Start checking documents right away rather than waiting for a `/check` API request. |
@@ -389,6 +390,36 @@ The above are all **highly** unlikely in real-world migrations.
 Full-document verification methods allow migration-verifier to diagnose mismatches, e.g., by identifying specific changed fields. The only such detail that `toHashedIndexKey` can discern, though, is a change in document length.
 
 Additionally, because the amount of data sent to migration-verifier doesn’t actually reflect the documents’ size, no meaningful statistics are shown concerning the collection data size. Document counts, of course, are still shown.
+
+# Partitioning methods
+
+## `_id`
+
+The default. Collections are partitioned along their `_id` index. This works for
+all collections & topologies.
+
+## `natural`
+
+This partitions collections on the source by their record ID, which corresponds
+to their location in storage. This can greatly accelerate verification, and
+reduce server load, for collections with custom `_id` values.
+
+Natural partitioning requires the source to be a replica set. (The destination
+can be sharded.) For best performance, the destination’s documents’ on-disk
+order should roughly match the source’s.
+
+### Lost checks
+
+Under this method, Migration Verifier fetches documents from the source in
+natural (i.e., on-disk) order. After fetching a batch of documents from the
+source, Migration Verifier fetches those same documents by `_id` from the
+destination. There is no full collection scan on the destination.
+Because of this, under natural partitioning Migration Verifier cannot detect
+documents that exist only on the destination _unless_ such documents change
+during verification.
+
+As of this writing, no migration tooling from MongoDB is expected to create
+such documents.
 
 # Change reading methods
 

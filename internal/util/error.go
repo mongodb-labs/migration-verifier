@@ -28,6 +28,7 @@ const (
 	SampleTooManyDuplicatesErrCode = 28799
 	CursorKilledErrCode            = 237
 	DuplicateKeyErrCode            = 11000
+	KeyNotFoundErrCode             = 211
 )
 
 //

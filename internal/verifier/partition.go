@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
@@ -46,7 +47,7 @@ func (verifier *Verifier) findLatestPartitionUpperBound(
 		return option.None[bson.RawValue](), fmt.Errorf("nil partition … shouldn’t happen?!? task=%+v", task)
 	}
 
-	return option.FromPointer(&task.QueryFilter.Partition.Upper), nil
+	return option.Some(task.QueryFilter.Partition.Upper), nil
 }
 
 func (verifier *Verifier) createPartitionTasksWithSampleRate(
@@ -241,7 +242,5 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 }
 
 func (v *Verifier) srcHasSampleRate() bool {
-	srcVersion := v.srcClusterInfo.VersionArray
-
-	return srcVersion[0] > 4 || srcVersion[1] >= 4
+	return mmongo.VersionAtLeast(v.srcClusterInfo.VersionArray, 4, 4)
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -185,6 +186,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		// Forgo validation because the tested code should do that.
 	}
 	verifier.SetDocCompareMethod(docCompareMethod)
+	verifier.SetPartitionBy(partitions.PartitionByID)
 
 	ctx := suite.Context()
 
@@ -212,8 +214,13 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		os.Getenv("MVTEST_DST_CHANGE_READER"),
 		ChangeReaderOptChangeStream,
 	)
-
 	suite.Require().NoError(verifier.SetDstChangeReaderMethod(envDstChangeReader))
+
+	envPartitionBy := cmp.Or(
+		partitions.PartitionBy(os.Getenv("MVTEST_PARTITION_BY")),
+		partitions.PartitionByID,
+	)
+	verifier.SetPartitionBy(envPartitionBy)
 
 	suite.Require().NoError(verifier.initializeChangeReaders())
 

@@ -68,6 +68,23 @@ jobs:
             dstChangeReader: tailOplog
 
         exclude:
+          # 1. No natural scan for sharded source.
+          - topology: sharded
+            partitionBy: natural
+
+          # 2. No natural scan before 4.4.
+          - mongodb_versions: [ '4.2', '4.2' ]
+            partitionBy: natural
+          - mongodb_versions: [ '4.2', '4.4' ]
+            partitionBy: natural
+          - mongodb_versions: [ '4.2', '5.0' ]
+            partitionBy: natural
+          - mongodb_versions: [ '4.2', '6.0' ]
+            partitionBy: natural
+          - mongodb_versions: [ '4.2', '8.0' ]
+            partitionBy: natural
+
+          # No hashed comparison before 4.4.
           - mongodb_versions: [ '4.2', '4.2' ]
             toHashedIndexKey: true
           - mongodb_versions: [ '4.2', '4.4' ]
@@ -108,6 +125,8 @@ jobs:
 
         toHashedIndexKey: [true, false]
 
+        partitionBy: ["_id", "natural"]
+
         srcChangeReader: [changeStream]
         dstChangeReader: [changeStream]
 
@@ -120,7 +139,7 @@ jobs:
     # versions need.
     runs-on: ubuntu-22.04
 
-    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology }}${{ matrix.toHashedIndexKey && ', hashed doc compare' || '' }}, srcChangeReader=${{ matrix.srcChangeReader }}, dstChangeReader=${{ matrix.dstChangeReader }}
+    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology }}${{ matrix.toHashedIndexKey && ', hashed doc compare' || '' }}, srcChangeReader=${{ matrix.srcChangeReader }}, dstChangeReader=${{ matrix.dstChangeReader }}, partitionBy=${{ matrix.partitionBy }}
 
     steps:
       - run: uname -a
@@ -168,6 +187,7 @@ jobs:
 
           MVTEST_SRC_CHANGE_READER: ${{matrix.srcChangeReader}}
           MVTEST_DST_CHANGE_READER: ${{matrix.dstChangeReader}}
+          MVTEST_PARTITION_BY: ${{matrix.partitionBy}}
 
           MVTEST_SRC: ${{ (matrix.topology == 'sharded') && env.shardedSrcConnStr || env.replsetSrcConnStr }}
           MVTEST_DST: ${{ (matrix.topology == 'sharded' || matrix.topology == 'replset-to-sharded') && env.shardedDstConnStr || env.replsetDstConnStr }}

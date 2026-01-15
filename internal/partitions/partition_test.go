@@ -121,14 +121,14 @@ func (suite *UnitTestSuite) makeExpectedFilter(lower, upper bson.RawValue) bson.
 		{{"$expr", bson.D{
 			{"$gte", bson.A{
 				"$_id",
-				bson.D{{"$literal", lower}},
+				bson.D{{"$literal", bsontools.ToRawValue(lower.ObjectID())}},
 			}},
 		}}},
 		// All _id values <= upper bound.
 		{{"$expr", bson.D{
 			{"$lte", bson.A{
 				"$_id",
-				bson.D{{"$literal", upper}},
+				bson.D{{"$literal", bsontools.ToRawValue(upper.ObjectID())}},
 			}},
 		}}},
 	}}})

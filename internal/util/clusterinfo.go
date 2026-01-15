@@ -72,7 +72,7 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 	}
 
 	return ClusterInfo{
-		VersionArray: va,
+		VersionArray: va[:],
 		Topology:     topology,
 	}, nil
 }

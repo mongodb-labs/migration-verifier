@@ -302,7 +302,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 		verificationStatus,
 	)
 	suite.Assert().Equal(
-		3,
+		verificationStatus.TotalTasks,
 		verificationStatus.CompletedTasks,
 		"should be completed: view meta, buckets meta, and buckets docs (tasks: %+v)",
 		verificationStatus,
