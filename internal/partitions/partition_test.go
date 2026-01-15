@@ -115,20 +115,20 @@ func (suite *UnitTestSuite) makeTestPartition() (Partition, bson.D) {
 	return partition, suite.makeExpectedFilter(partition.Key.Lower, partition.Upper)
 }
 
-func (suite *UnitTestSuite) makeExpectedFilter(lower, upper bson.RawValue) bson.D {
+func (suite *UnitTestSuite) makeExpectedFilter(lower, upper any) bson.D {
 	return roundTripBSON(suite.T(), bson.D{{"$and", []bson.D{
 		// All _id values >= lower bound.
 		{{"$expr", bson.D{
 			{"$gte", bson.A{
 				"$_id",
-				bson.D{{"$literal", bsontools.ToRawValue(lower.ObjectID())}},
+				bson.D{{"$literal", lower}},
 			}},
 		}}},
 		// All _id values <= upper bound.
 		{{"$expr", bson.D{
 			{"$lte", bson.A{
 				"$_id",
-				bson.D{{"$literal", bsontools.ToRawValue(upper.ObjectID())}},
+				bson.D{{"$literal", upper}},
 			}},
 		}}},
 	}}})

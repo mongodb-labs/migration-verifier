@@ -1288,7 +1288,7 @@ func (verifier *Verifier) partitionCollection(
 	var partitionsCount int
 	var docsCount types.DocumentCount
 
-	shardKeys, err := verifier.getShardKeyFields(
+	shardKeyFields, err := verifier.getShardKeyFields(
 		ctx,
 		&uuidutil.NamespaceAndUUID{
 			DBName:   srcColl.Database().Name(),
@@ -1327,7 +1327,7 @@ func (verifier *Verifier) partitionCollection(
 	idealNumPartitions := util.DivideToF64(collBytes, verifier.partitionSizeInBytes)
 
 	if idealNumPartitions <= 1 {
-		verifier.logger.Info().
+		verifier.logger.Debug().
 			Any("task", task.PrimaryKey).
 			Str("namespace", FullName(srcColl)).
 			Int64("documentsCount", int64(docsCount)).
@@ -1350,7 +1350,7 @@ func (verifier *Verifier) partitionCollection(
 		_, err = verifier.InsertPartitionVerificationTask(
 			ctx,
 			&partition,
-			shardKeys,
+			shardKeyFields,
 			dstNs,
 		)
 		if err != nil {
@@ -1364,12 +1364,22 @@ func (verifier *Verifier) partitionCollection(
 		return nil
 	}
 
+	verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Any("task", task.PrimaryKey).
+		Str("namespace", FullName(srcColl)).
+		Int64("documentsCount", int64(docsCount)).
+		Int64("collectionBytes", int64(collBytes)).
+		Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
+		Float64("idealPartitionsCount", idealNumPartitions).
+		Msg("Partitioning collection.")
+
 	switch verifier.partitionBy {
 
 	case partitions.PartitionByID:
 		if verifier.srcHasSampleRate() {
 			var err error
-			partitionsCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task, shardKeys)
+			partitionsCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task, shardKeyFields)
 			if err != nil {
 				return errors.Wrapf(err, "partitioning %#q via $sampleRate", srcNs)
 			}

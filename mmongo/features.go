@@ -51,6 +51,8 @@ func WhyFindCannotResume(version [2]int) error {
 	)
 }
 
+// VersionAtLeast returns whether the version is >= the version given
+// as separate numbers.
 func VersionAtLeast(version []int, nums ...int) bool {
 	lo.Assertf(
 		len(nums) > 0,
