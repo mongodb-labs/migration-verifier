@@ -404,29 +404,49 @@ This partitions collections on the source by their record ID, which corresponds
 to their location in storage. This can greatly accelerate verification, and
 reduce server load, for collections with custom `_id` values.
 
-Natural partitioning requires the source to be a replica set. (The destination
-can be sharded.) For best performance, the destination’s documents’ on-disk
-order should roughly match the source’s.
+The following caveats apply:
+
+### MongoDB 4.2 & earlier
+
+The features that enable natural partitioning were added in MongoDB 4.4. If
+the source lacks those features, then all collections are scanned in a single
+thread.
+
+In other words, no collections are “partitioned”, but the actual reading of
+documents still uses natural order.
+
+Single-threaded scanning will impede performance, though it may still outpace
+`_id` partitioning. Additionally, any progress made verifying individual
+collections will be lost if Migration Verifier restarts.
+
+### Sharded clusters
+
+Natural partitioning only works on replica sets. Thus, when connected to a
+mongos, all collections are verified in a single thread, as for MongoDB 4.2
+& earlier.
 
 ### Resumption and document deletion
 
-In v6 and earlier, document deletions can complicate resumption of natural
+In MongoDB 6 and earlier, document deletions can complicate resumption of natural
 scans (i.e., after a restart). When reading documents from a given record ID,
 if the record ID’s referent document has been deleted, then Migration Verifier
-decrements the record ID & retries the query. If many documents have been
-deleted, this will cause a flurry of requests to the server until a record
+decrements the (numeric) record ID & retries the query. If many documents have
+been deleted, this will cause a flurry of requests to the server until a record
 ID is reached that refers to an existing document.
-
-The above-described plan for decrementing record IDs does not work at all
-for clustered collections (including time-series). (This is because these
-collections’ record IDs are non-numeric.)
 
 This is not a problem if the source is MongoDB 7.0, 8.0, or later, as long as
 the server runs a version with [SERVER-110161](https://jira.mongodb.org/browse/SERVER-110161)
 fixed.
 
-Because of this problem, natural partitioning _only_ supports clustered
-collections if the source is one of the above versions.
+### Clustered collections
+
+The above-described logic for handling document deletions does not work
+for clustered collections. This is because these collections’ record IDs are
+non-numeric, so it’s infeasible to decrement them.
+
+Because of this, if the source lacks
+[SERVER-110161](https://jira.mongodb.org/browse/SERVER-110161)’s fix,
+clustered collections are verified in a single thread.
 
 ### Lost checks
 
