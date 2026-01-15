@@ -60,7 +60,7 @@ type Partition struct {
 	// upper/lower bounds should be set to the minKey and maxKey of the collection.
 	IsCapped bool `bson:"isCapped"`
 
-	Natural bool `bson:"natural"`
+	NaturalHostname option.Option[string] `bson:"naturalHostname"`
 }
 
 // String returns a string representation of the partition.

@@ -19,6 +19,8 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 		return errors.Wrapf(err, "failed to connect to source %#q", uri)
 	}
 
+	verifier.srcURI = uri
+
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.srcClient)
 	if err != nil {
 		return errors.Wrap(err, "failed to read source cluster info")

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"slices"
 
 	"github.com/10gen/migration-verifier/chanutil"
@@ -18,6 +19,7 @@ import (
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // ReadNaturalPartitionFromSource queries a source collection according
@@ -33,7 +35,7 @@ func ReadNaturalPartitionFromSource(
 	ctx context.Context,
 	logger *logger.Logger,
 	retryState retry.SuccessNotifier,
-	client *mongo.Client,
+	uri string,
 	task *tasks.Task,
 	docFilter option.Option[bson.D],
 	compareMethod Method,
@@ -44,10 +46,28 @@ func ReadNaturalPartitionFromSource(
 	defer close(toDst)
 
 	lo.Assertf(
-		task.QueryFilter.Partition.Natural,
-		"partition must indicate natural scan but doesn’t (task: %+v)",
-		task,
+		task.QueryFilter.Partition.NaturalHostname.IsSome(),
+		"natural partition requires persisted hostname",
 	)
+
+	lowerBoundRV := task.QueryFilter.Partition.Key.Lower
+
+	parsedCS, err := url.ParseRequestURI(uri)
+	if err != nil {
+		return errors.Wrapf(err, "parsing connection string")
+	}
+
+	lo.Assertf(
+		parsedCS.Host == task.QueryFilter.Partition.NaturalHostname.MustGet(),
+		"connstr hostname (%#q) must match partition’s (%#q)",
+		parsedCS.Host,
+		task.QueryFilter.Partition.NaturalHostname.MustGet(),
+	)
+
+	client, err := mongo.Connect(options.Client().ApplyURI(uri))
+	if err != nil {
+		return errors.Wrapf(err, "connecting to client for natural read")
+	}
 
 	upperRecordID := task.QueryFilter.Partition.Upper
 
@@ -66,12 +86,8 @@ func ReadNaturalPartitionFromSource(
 
 	var resumeTokenOpt option.Option[bson.RawValue]
 
-	lowerBound := task.QueryFilter.Partition.Key.Lower
-
-	// To simplify testing we interpret empty RawValue here as equivalent
-	// to BSON null.
-	if lowerBound.Type != bson.TypeNull && !lowerBound.IsZero() {
-		resumeTokenOpt = option.Some(lowerBound)
+	if lowerBoundRV.Type != bson.TypeNull || lowerBoundRV.IsZero() {
+		resumeTokenOpt = option.Some(lowerBoundRV)
 	}
 
 	var canUseStartAt bool

@@ -59,15 +59,10 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 		return ClusterInfo{}, errors.Wrap(err, "failed to fetch version array")
 	}
 
-	topology, err := getTopology(ctx, "hello", client)
+	topology, err := getTopology(ctx, client)
 	if err != nil {
-		logger.Info().
-			Err(err).
-			Msgf("Failed to learn topology via %#q; falling back to %#q.", "hello", "isMaster")
-
-		topology, err = getTopology(ctx, "isMaster", client)
 		if err != nil {
-			return ClusterInfo{}, errors.Wrapf(err, "failed to learn topology via %#q", "isMaster")
+			return ClusterInfo{}, errors.Wrapf(err, "failed to learn topology")
 		}
 	}
 
@@ -77,22 +72,32 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 	}, nil
 }
 
-func getTopology(ctx context.Context, cmdName string, client *mongo.Client) (ClusterTopology, error) {
-
-	resp := client.Database("admin").RunCommand(
-		ctx,
-		bson.D{{cmdName, 1}},
-	)
-
-	raw, err := resp.Raw()
+func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, error) {
+	raw, err := GetHelloRaw(ctx, client)
 	if err != nil {
-		return "", errors.Wrapf(err, "failed learn topology via %#q", cmdName)
+		return "", errors.Wrapf(err, "failed learn topology")
 	}
 
 	hasMsg, err := mbson.RawContains(raw, "msg")
 	if err != nil {
-		return "", errors.Wrapf(err, "failed to check for %#q in %#q response (%v)", "msg", cmdName, raw)
+		return "", errors.Wrapf(err, "failed to check for %#q in hello response (%v)", "msg", raw)
 	}
 
 	return lo.Ternary(hasMsg, TopologySharded, TopologyReplset), nil
+}
+
+func GetHelloRaw(ctx context.Context, client *mongo.Client) (bson.Raw, error) {
+	resp := client.Database("admin").RunCommand(
+		ctx,
+		bson.D{{"hello", 1}},
+	)
+
+	if resp.Err() != nil {
+		resp = client.Database("admin").RunCommand(
+			ctx,
+			bson.D{{"isMaster", 1}},
+		)
+	}
+
+	return resp.Raw()
 }

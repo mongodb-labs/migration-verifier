@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mmongo/cursor"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"github.com/samber/mo"
@@ -64,6 +65,21 @@ func PartitionCollectionNaturalOrder(
 	c, err := cursor.New(coll.Database(), resp, sess)
 	if err != nil {
 		return nil, errors.Wrapf(err, "opening partition query (%+v)", cmd)
+	}
+
+	helloRaw, err := util.GetHelloRaw(ctx, coll.Database().Client())
+	if err != nil {
+		return nil, errors.Wrapf(err, "sending hello/isMaster")
+	}
+
+	hostnameRV, err := helloRaw.LookupErr("me")
+	if err != nil {
+		return nil, errors.Wrapf(err, "parsing isMaster")
+	}
+
+	hostname, err := bsontools.RawValueTo[string](hostnameRV)
+	if err != nil {
+		return nil, errors.Wrapf(err, "parsing hostname in isMaster")
 	}
 
 	pChan := make(chan mo.Result[Partition])
@@ -121,8 +137,8 @@ func PartitionCollectionNaturalOrder(
 			}
 
 			partition := Partition{
-				Natural: true,
-				Ns:      &Namespace{coll.Database().Name(), coll.Name()},
+				NaturalHostname: option.Some(hostname),
+				Ns:              &Namespace{coll.Database().Name(), coll.Name()},
 				Key: PartitionKey{
 					Lower: priorToken,
 				},

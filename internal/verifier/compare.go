@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
@@ -14,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
@@ -461,7 +463,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
 ) {
-	if task.QueryFilter.Partition != nil && task.QueryFilter.Partition.Natural {
+	if task.QueryFilter.Partition != nil && task.QueryFilter.Partition.NaturalHostname.IsSome() {
 		return verifier.getFetcherChannelsAndCallbacksForNaturalPartition(task)
 	}
 
@@ -479,6 +481,23 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
 ) {
+	lo.Assertf(
+		task.QueryFilter.Partition.NaturalHostname.IsSome(),
+		"natural partition requires persisted hostname",
+	)
+
+	parsedURI, err := url.ParseRequestURI(verifier.srcURI)
+	if err != nil {
+		return nil, nil, nil, nil, errors.Wrapf(err, "parsing source connection string")
+	}
+
+	parsedURI.Host = task.QueryFilter.Partition.NaturalHostname.MustGet()
+
+	_, connstr, err := mmongo.MaybeAddDirectConnection(parsedURI.String())
+	if err != nil {
+		return nil, nil, nil, nil, errors.Wrapf(err, "tweaking connection string to %#q to ensure direct connection", parsedURI.Host)
+	}
+
 	srcToCompareChannel := make(chan compare.DocWithTS)
 	dstToCompareChannel := make(chan compare.DocWithTS)
 
@@ -495,7 +514,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			ctx,
 			verifier.logger,
 			state,
-			verifier.srcClient,
+			connstr,
 			task,
 			option.IfNotZero(verifier.globalFilter),
 			verifier.docCompareMethod,

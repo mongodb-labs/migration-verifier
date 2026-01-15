@@ -43,6 +43,15 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 
 	client := suite.srcMongoClient
 
+	helloRaw, err := util.GetHelloRaw(ctx, client)
+	require.NoError(t, err)
+
+	hostnameRV, err := helloRaw.LookupErr("me")
+	require.NoError(t, err)
+
+	hostname, err := bsontools.RawValueTo[string](hostnameRV)
+	require.NoError(t, err)
+
 	for _, clustered := range mslices.Of(true, false) {
 		suite.Run(
 			lo.Ternary(clustered, "clustered", "nonclustered"),
@@ -116,8 +125,8 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							QueryFilter: tasks.QueryFilter{
 								Namespace: FullName(coll),
 								Partition: &partitions.Partition{
-									Natural: true,
-									Upper:   lo.Must(resumeTokens[3].LookupErr("$recordId")),
+									NaturalHostname: option.Some(hostname),
+									Upper:           lo.Must(resumeTokens[3].LookupErr("$recordId")),
 								},
 							},
 						}
@@ -129,7 +138,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							ctx,
 							logger,
 							notifier,
-							client,
+							suite.srcConnStr,
 							task,
 							option.None[bson.D](),
 							compare.Binary,
@@ -193,7 +202,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							QueryFilter: tasks.QueryFilter{
 								Namespace: FullName(coll),
 								Partition: &partitions.Partition{
-									Natural: true,
+									NaturalHostname: option.Some(hostname),
 									Key: partitions.PartitionKey{
 										Lower: bsontools.ToRawValue(resumeTokens[3]),
 									},
@@ -209,7 +218,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							ctx,
 							logger,
 							notifier,
-							client,
+							suite.srcConnStr,
 							task,
 							option.None[bson.D](),
 							compare.Binary,
@@ -275,7 +284,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							QueryFilter: tasks.QueryFilter{
 								Namespace: FullName(coll),
 								Partition: &partitions.Partition{
-									Natural: true,
+									NaturalHostname: option.Some(hostname),
 									Key: partitions.PartitionKey{
 										Lower: bsontools.ToRawValue(resumeTokens[7]),
 									},
@@ -290,7 +299,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							ctx,
 							logger,
 							notifier,
-							client,
+							suite.srcConnStr,
 							task,
 							option.None[bson.D](),
 							compare.Binary,
@@ -363,7 +372,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							QueryFilter: tasks.QueryFilter{
 								Namespace: FullName(coll),
 								Partition: &partitions.Partition{
-									Natural: true,
+									NaturalHostname: option.Some(hostname),
 									Key: partitions.PartitionKey{
 										Lower: bsontools.ToRawValue(resumeTokens[7]),
 									},
@@ -378,7 +387,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							ctx,
 							logger,
 							notifier,
-							client,
+							suite.srcConnStr,
 							task,
 							option.None[bson.D](),
 							compare.Binary,

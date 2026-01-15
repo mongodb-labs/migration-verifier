@@ -99,6 +99,7 @@ type Verifier struct {
 	running            bool
 	generation         int
 	port               int
+	srcURI             string
 	metaURI            string
 	metaClient         *mongo.Client
 	srcClient          *mongo.Client
