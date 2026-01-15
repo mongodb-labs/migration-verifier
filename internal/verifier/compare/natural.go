@@ -114,45 +114,43 @@ func ReadNaturalPartitionFromSource(
 	}
 
 	for {
-		var docProjection any
-
-		switch compareMethod {
-		case ToHashedIndexKey:
-			docProjection = GetHashedIndexKeyProjection(task.QueryFilter)
-		case Binary, IgnoreOrder:
-			docProjection = "$$ROOT"
-		}
-
 		cmd := bson.D{
 			{"find", coll.Name()},
 			{"hint", bson.D{{"$natural", 1}}},
-			{"projection", bson.D{
-				{"_id", 0},
-				{"_", docProjection},
-			}},
 		}
 
 		if useResumeTokens {
+			var docProjection any
+
+			switch compareMethod {
+			case ToHashedIndexKey:
+				docProjection = GetHashedIndexKeyProjection(task.QueryFilter)
+			case Binary, IgnoreOrder:
+				docProjection = "$$ROOT"
+			}
+
 			cmd = append(
 				cmd,
 				bson.D{
 					{"showRecordId", true},
 					{"$_requestResumeToken", true},
+					{"projection", bson.D{
+						{"_id", 0},
+						{"_", docProjection},
+					}},
 				}...,
 			)
-		}
 
-		if filter, has := docFilter.Get(); has {
-			cmd = append(cmd, bson.E{"filter", filter})
-		}
-
-		if useResumeTokens {
 			if startAt, has := resumeTokenOpt.Get(); has {
 				cmd = append(cmd, bson.E{
 					lo.Ternary(canUseStartAt, "$_startAt", "$_resumeAfter"),
 					startAt,
 				})
 			}
+		}
+
+		if filter, has := docFilter.Get(); has {
+			cmd = append(cmd, bson.E{"filter", filter})
 		}
 
 		cursor, err = coll.Database().RunCommandCursor(sctx, cmd)
@@ -332,14 +330,20 @@ cursorLoop:
 			}
 		}
 
-		userDocRV, err := cursor.Current.LookupErr("_")
-		if err != nil {
-			return errors.Wrapf(err, "getting user document")
-		}
+		var userDoc bson.Raw
 
-		userDoc, err := bsontools.RawValueTo[bson.Raw](userDocRV)
-		if err != nil {
-			return errors.Wrapf(err, "parsing user document")
+		if useResumeTokens {
+			userDocRV, err := cursor.Current.LookupErr("_")
+			if err != nil {
+				return errors.Wrapf(err, "getting user document")
+			}
+
+			userDoc, err = bsontools.RawValueTo[bson.Raw](userDocRV)
+			if err != nil {
+				return errors.Wrapf(err, "parsing user document")
+			}
+		} else {
+			userDoc = cursor.Current
 		}
 
 		batch = append(batch, NewDocWithTS(userDoc, *opTime))
