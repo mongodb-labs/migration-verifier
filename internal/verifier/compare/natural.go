@@ -86,7 +86,7 @@ func ReadNaturalPartitionFromSource(
 
 	var resumeTokenOpt option.Option[bson.RawValue]
 
-	if lowerBoundRV.Type != bson.TypeNull || lowerBoundRV.IsZero() {
+	if lowerBoundRV.Type != bson.TypeNull && !lowerBoundRV.IsZero() {
 		resumeTokenOpt = option.Some(lowerBoundRV)
 	}
 
