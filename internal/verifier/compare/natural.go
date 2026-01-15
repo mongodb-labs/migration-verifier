@@ -119,6 +119,8 @@ func ReadNaturalPartitionFromSource(
 			{"hint", bson.D{{"$natural", 1}}},
 		}
 
+		var projection bson.D
+
 		if useResumeTokens {
 			// Because we send `showRecordId` we need to disambiguate the
 			// server-added $recordId field from a user field of the same name
@@ -133,15 +135,16 @@ func ReadNaturalPartitionFromSource(
 				docProjection = "$$ROOT"
 			}
 
+			projection = bson.D{
+				{"_id", 0},
+				{"_", docProjection},
+			}
+
 			cmd = append(
 				cmd,
 				bson.D{
 					{"showRecordId", true},
 					{"$_requestResumeToken", true},
-					{"projection", bson.D{
-						{"_id", 0},
-						{"_", docProjection},
-					}},
 				}...,
 			)
 
@@ -152,8 +155,10 @@ func ReadNaturalPartitionFromSource(
 				})
 			}
 		} else if compareMethod == ToHashedIndexKey {
-			cmd = append(cmd, bson.E{"projection", GetHashedIndexKeyProjection(task.QueryFilter)})
+			projection = GetHashedIndexKeyProjection(task.QueryFilter)
 		}
+
+		cmd = append(cmd, bson.E{"projection", projection})
 
 		if filter, has := docFilter.Get(); has {
 			cmd = append(cmd, bson.E{"filter", filter})
