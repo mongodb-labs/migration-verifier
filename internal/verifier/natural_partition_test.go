@@ -95,11 +95,9 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 			require.Equal(t, bson.TypeEmbeddedDocument, partition.Key.Lower.Type)
 		}
 
-		if i == len(results)-1 {
-			assert.Equal(t, bson.TypeNull, partition.Upper.Type)
-		} else {
-			require.Equal(t, bson.TypeInt64, partition.Upper.Type)
-		}
+		// Even the last partition should have a non-nil upper bound because
+		// this is a nonempty collection.
+		require.Equal(t, bson.TypeInt64, partition.Upper.Type)
 	}
 }
 

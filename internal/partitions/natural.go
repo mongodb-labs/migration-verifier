@@ -13,9 +13,11 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // CannotResumeNaturalError indicates a collection that cannot be
@@ -36,6 +38,9 @@ func (c CannotResumeNaturalError) Cause() error {
 	return fmt.Errorf("cannot resume %#q natural partitions: %v", c.ns, c.err)
 }
 
+// CreateSingleNaturalOrderPartition returns a partition that indicates to
+// scan the entire collection in a single thread. This is useful if the
+// source cluster cannot partition a natural scan.
 func CreateSingleNaturalOrderPartition(
 	db, coll string,
 ) Partition {
@@ -155,6 +160,13 @@ func PartitionCollectionNaturalOrder(
 
 	pChan := make(chan mo.Result[Partition])
 
+	// Avoid storing a null upper limit if we can. See architecture
+	// documentation for rationale.
+	topRecordID, err := getTopRecordID(ctx, coll)
+	if err != nil {
+		return nil, errors.Wrapf(err, "fetching top record ID")
+	}
+
 	go func() {
 		defer close(pChan)
 
@@ -170,13 +182,15 @@ func PartitionCollectionNaturalOrder(
 			}
 
 			var recIDRV bson.RawValue
-			if c.IsFinished() {
-				recIDRV = bsontools.ToRawValue(bson.Null{})
-			} else {
-				recIDRV, err = curToken.LookupErr("$recordId")
-				if err != nil {
-					err = errors.Wrapf(err, "extracting record ID from resume token (%v)", curToken)
-					break
+			recIDRV, err = curToken.LookupErr("$recordId")
+			if err != nil {
+				err = errors.Wrapf(err, "extracting record ID from resume token (%v)", curToken)
+				break
+			}
+
+			if recIDRV.Type == bson.TypeNull {
+				if topID, has := topRecordID.Get(); has {
+					recIDRV = topID
 				}
 			}
 
@@ -235,4 +249,45 @@ func PartitionCollectionNaturalOrder(
 	}()
 
 	return pChan, nil
+}
+
+func getTopRecordID(
+	ctx context.Context,
+	coll *mongo.Collection,
+) (option.Option[bson.RawValue], error) {
+	cursor, err := coll.Find(
+		ctx,
+		bson.D{},
+		options.Find().
+			SetSort(bson.D{{"$natural", -1}}).
+			SetLimit(1).
+			SetProjection(bson.D{{"id", 0}}).
+			SetShowRecordID(true),
+	)
+
+	if err != nil {
+		return option.None[bson.RawValue](), errors.Wrap(
+			err,
+			"fetching last record ID",
+		)
+	}
+
+	var docs []bson.Raw
+	err = cursor.All(ctx, &docs)
+	if err != nil {
+		return option.None[bson.RawValue](), errors.Wrap(
+			err,
+			"reading last record ID",
+		)
+	}
+
+	lastDoc, ok := lo.Last(docs)
+
+	if !ok {
+		return option.None[bson.RawValue](), nil
+	}
+
+	recID, err := lastDoc.LookupErr("$recordId")
+
+	return option.Some(recID), errors.Wrapf(err, "extracting record ID (doc: %v)", lastDoc)
 }

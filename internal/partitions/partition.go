@@ -35,6 +35,7 @@ type PartitionKey struct {
 	SourceUUID util.UUID `bson:"srcUUID"`
 
 	// The partition’s lower bound.
+	// Under ID partitioning this is always given.
 	// Under natural partitioning this is null (or empty) in the first partition.
 	Lower bson.RawValue `bson:"lowerBound"`
 }
@@ -53,6 +54,7 @@ type Partition struct {
 	Ns  *Namespace   `bson:"namespace"`
 
 	// The partition’s upper bound.
+	// Under ID partitioning this is always given.
 	// Under natural partitioning this is null (or empty) in the last partition.
 	Upper bson.RawValue `bson:"upperBound"`
 
@@ -60,7 +62,9 @@ type Partition struct {
 	// upper/lower bounds should be set to the minKey and maxKey of the collection.
 	IsCapped bool `bson:"isCapped"`
 
-	Natural  bool
+	Natural bool
+
+	// The hostname to use when querying in $natural order.
 	Hostname option.Option[string]
 }
 
