@@ -1094,13 +1094,6 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	srcNs := FullName(srcColl)
 	dstNs := FullName(dstColl)
 
-	// We set the collection size & doc count in the task up-front so that
-	// logs can immediately show progress against the total data size.
-	collBytes, docsCount, isCapped, err := verifier.setCollectionSizeInTask(ctx, task, srcColl)
-	if err != nil {
-		return errors.Wrapf(err, "fetching & persisting collection size")
-	}
-
 	srcSpecOpt, err := util.GetCollectionSpecIfExists(ctx, srcColl)
 	if err != nil {
 		return errors.Wrapf(
@@ -1130,6 +1123,19 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 
 	srcSpec, hasSrcSpec := srcSpecOpt.Get()
 	dstSpec, hasDstSpec := dstSpecOpt.Get()
+
+	var collBytes types.ByteCount
+	var docsCount types.DocumentCount
+	var isCapped bool
+
+	if hasSrcSpec {
+		// We set the collection size & doc count in the task up-front so that
+		// logs can immediately show progress against the total data size.
+		collBytes, docsCount, isCapped, err = verifier.setCollectionSizeInTask(ctx, task, srcColl)
+		if err != nil {
+			return errors.Wrapf(err, "fetching & persisting collection size")
+		}
+	}
 
 	if !hasDstSpec {
 		if !hasSrcSpec {
