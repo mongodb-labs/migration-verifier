@@ -1452,7 +1452,6 @@ func (verifier *Verifier) partitionCollection(
 			srcColl,
 			verifier.partitionSizeInBytes,
 			verifier.logger,
-			verifier.globalFilter,
 		)
 		if err != nil {
 			if errors.As(err, &partitions.CannotResumeNaturalError{}) {

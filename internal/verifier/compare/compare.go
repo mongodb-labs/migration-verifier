@@ -7,7 +7,8 @@ import (
 )
 
 // DocID is how natural partitioning sends document IDs from the
-// source-reader thread to the destination. This wraps
+// source-reader thread to the destination. This wraps a document ID
+// with a struct that simplifies memory management.
 type DocID struct {
 	ID bson.RawValue
 }

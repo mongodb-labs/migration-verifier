@@ -54,12 +54,14 @@ func CreateSingleNaturalOrderPartition(
 //
 // If the collection can’t be partitioned naturally, this returns a
 // CannotPartitionNaturalError.
+//
+// NB: This ignores document filtering because we’re doing a collection
+// scan anyway later on to compare the documents.
 func PartitionCollectionNaturalOrder(
 	ctx context.Context,
 	coll *mongo.Collection,
 	idealPartitionBytes types.ByteCount,
 	subLogger *logger.Logger,
-	globalFilter bson.D,
 ) (chan mo.Result[Partition], error) {
 
 	collSizeInBytes, docCount, _, err := GetSizeAndDocumentCount(ctx, subLogger, coll)

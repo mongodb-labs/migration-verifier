@@ -1,6 +1,8 @@
 package verifier
 
 import (
+	"strings"
+
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
@@ -17,6 +19,89 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
+
+func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
+	ctx := suite.T().Context()
+	t := suite.T()
+
+	topology := suite.GetTopology(suite.srcMongoClient)
+	if topology != util.TopologyReplset {
+		t.Skipf("source must be replset; instead we have %#q", topology)
+	}
+
+	version, err := mmongo.GetVersionArray(
+		ctx,
+		suite.srcMongoClient,
+	)
+	require.NoError(t, err)
+
+	if err := mmongo.WhyFindCannotResume([2]int(version[:])); err != nil {
+		suite.T().Skipf("no natural scan (%v)", err)
+	}
+
+	logger, _ := getLoggerAndWriter("stdout")
+
+	coll := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("c")
+
+	// Insert ~100 MiB of data into the collection.
+	// Each document is roughly 220 bytes.
+	docs := lo.RepeatBy(
+		50_000,
+		func(i int) bson.D {
+			return bson.D{
+				{"_id", i},
+				{"str", strings.Repeat("x", 200)},
+			}
+		},
+	)
+	_, err = coll.InsertMany(ctx, docs)
+	require.NoError(t, err)
+
+	// Partition the collection in 100-KB chunks.
+	pChan, err := partitions.PartitionCollectionNaturalOrder(
+		ctx,
+		coll,
+		100_000,
+		logger,
+	)
+	require.NoError(t, err)
+
+	hello, err := util.GetHelloRaw(ctx, suite.srcMongoClient)
+	require.NoError(t, err)
+
+	hostnameRV, err := hello.LookupErr("me")
+	require.NoError(t, err)
+
+	hostname, err := bsontools.RawValueTo[string](hostnameRV)
+	require.NoError(t, err)
+
+	results := lo.ChannelToSlice(pChan)
+
+	// It *could* happen that we get a single partition, but it seems
+	// very unlikely to happen anytime soon.
+	assert.GreaterOrEqual(t, len(results), 2)
+
+	for i, result := range results {
+		partition, err := result.Get()
+		require.NoError(t, err, "should create partition")
+
+		require.True(t, partition.Natural, "must be natural partition")
+		require.NotZero(t, partition.Hostname, "need hostname")
+		require.Equal(t, hostname, partition.Hostname.MustGet(), "hostname")
+
+		if i == 0 {
+			assert.Equal(t, bson.TypeNull, partition.Key.Lower.Type)
+		} else {
+			require.Equal(t, bson.TypeEmbeddedDocument, partition.Key.Lower.Type)
+		}
+
+		if i == len(results)-1 {
+			assert.Equal(t, bson.TypeNull, partition.Upper.Type)
+		} else {
+			require.Equal(t, bson.TypeInt64, partition.Upper.Type)
+		}
+	}
+}
 
 func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 	if suite.GetTopology(suite.srcMongoClient) != util.TopologyReplset {
