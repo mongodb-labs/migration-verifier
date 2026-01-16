@@ -8,7 +8,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mmongo/cursor"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
@@ -19,40 +18,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
-
-// CannotResumeNaturalError indicates a collection that cannot be
-// partitioned naturally with resumability. These can be safely handled
-// in a single thread.
-type CannotResumeNaturalError struct {
-	ns  string
-	err error
-}
-
-var _ error = CannotResumeNaturalError{}
-
-func (c CannotResumeNaturalError) Error() string {
-	return c.Cause().Error()
-}
-
-func (c CannotResumeNaturalError) Cause() error {
-	return fmt.Errorf("cannot resume %#q natural partitions: %v", c.ns, c.err)
-}
-
-// CreateSingleNaturalOrderPartition returns a partition that indicates to
-// scan the entire collection in a single thread. This is useful if the
-// source cluster cannot partition a natural scan.
-func CreateSingleNaturalOrderPartition(
-	db, coll string,
-) Partition {
-	return Partition{
-		Natural: true,
-		Ns:      &Namespace{db, coll},
-		Key: PartitionKey{
-			Lower: bsontools.ToRawValue(bson.Null{}),
-		},
-		Upper: bsontools.ToRawValue(bson.Null{}),
-	}
-}
 
 // PartitionCollectionNaturalOrder spawns a goroutine that partitions the
 // collection in natural order.
@@ -120,26 +85,11 @@ func PartitionCollectionNaturalOrder(
 		}
 
 		switch recIDRV.Type {
-		case bson.TypeInt64:
-			// A normal collection. All is well.
-		case bson.TypeBinary:
-			version, err := mmongo.GetVersionArray(ctx, coll.Database().Client())
-			if err != nil {
-				return nil, errors.Wrapf(err, "fetching cluster version")
-			}
-
-			if !mmongo.FindCanUseStartAt(version) {
-				return nil, CannotResumeNaturalError{
-					ns:  coll.Database().Name() + "." + coll.Name(),
-					err: fmt.Errorf("verification of clustered collection requires a newer source version"),
-				}
-			}
+		case bson.TypeInt64, bson.TypeBinary:
+			// All good! We recognize these record ID types.
 		default:
 			// This likely indicates a new, unexpected collection type.
-			return nil, CannotResumeNaturalError{
-				ns:  coll.Database().Name() + "." + coll.Name(),
-				err: fmt.Errorf("unknown BSON type (%s) for record ID (%s)", recIDRV.Type, recIDRV),
-			}
+			return nil, fmt.Errorf("unknown BSON type (%s) for record ID (%s)", recIDRV.Type, recIDRV)
 		}
 	}
 

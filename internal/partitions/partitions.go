@@ -20,7 +20,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-type PartitionBy string
+type PartitioningScheme string
 
 const (
 	//
@@ -74,8 +74,8 @@ const (
 	//
 	DefaultPartitionMiB = 400
 
-	PartitionByID      PartitionBy = "_id"
-	PartitionByNatural PartitionBy = "natural"
+	PartitionByID      PartitioningScheme = "_id"
+	PartitionByNatural PartitioningScheme = "natural"
 )
 
 var PartitionByMethods = mslices.Of(

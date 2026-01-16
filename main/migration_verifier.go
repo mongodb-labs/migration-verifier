@@ -404,7 +404,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	if !slices.Contains(partitions.PartitionByMethods, partitionBy) {
 		return nil, errors.Errorf("invalid partitioning method (%s); valid values are: %#q", partitionBy, partitions.PartitionByMethods)
 	}
-	v.SetPartitionBy(partitions.PartitionBy(partitionBy))
+	v.SetPartitionBy(partitions.PartitioningScheme(partitionBy))
 
 	err = v.SetReadPreference(cCtx.String(readPreference))
 	if err != nil {

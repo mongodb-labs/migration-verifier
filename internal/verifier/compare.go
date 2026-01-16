@@ -515,6 +515,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			verifier.logger,
 			state,
 			client,
+			verifier.verificationTaskCollection(),
 			task,
 			option.IfNotZero(verifier.globalFilter),
 			verifier.docCompareMethod,

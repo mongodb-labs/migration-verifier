@@ -2,6 +2,7 @@ package compare
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"net/url"
@@ -13,12 +14,14 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func SetDirectHostInConnectionString(connstr, hostname string) (string, error) {
@@ -55,6 +58,7 @@ func ReadNaturalPartitionFromSource(
 	logger *logger.Logger,
 	retryState retry.SuccessNotifier,
 	client *mongo.Client,
+	tasksColl *mongo.Collection,
 	task *tasks.Task,
 	docFilter option.Option[bson.D],
 	compareMethod Method,
@@ -88,127 +92,161 @@ func ReadNaturalPartitionFromSource(
 
 	var resumeTokenOpt option.Option[bson.RawValue]
 
-	// If there are no (non-null) lower or upper bounds then we can forgo
-	// resume tokens entirely. This is useful for:
-	// - pre-4.4 sources
-	// - small collections that don’t need resumability
-	// - collections that we can’t resume (e.g., clustered on v6)
-	var useResumeTokens bool
-
 	if rvIsNonEmpty(lowerBoundRV) {
-		useResumeTokens = true
 		resumeTokenOpt = option.Some(lowerBoundRV)
-	} else {
-		useResumeTokens = rvIsNonEmpty(upperRecordID)
 	}
 
 	var canUseStartAt bool
 
-	if resumeTokenOpt.IsSome() {
+	resumeToken, hasToken := resumeTokenOpt.Get()
+
+	var startRecordID option.Option[bson.RawValue]
+
+	if hasToken {
 		version, err := mmongo.GetVersionArray(ctx, client)
 		if err != nil {
 			return errors.Wrapf(err, "fetching server version")
 		}
 
 		canUseStartAt = mmongo.FindCanUseStartAt(version)
+
+		rawToken, err := bsontools.RawValueTo[bson.Raw](resumeToken)
+		if err != nil {
+			return errors.Wrapf(err, "resume token to %T", rawToken)
+		}
+
+		recIDRV, err := rawToken.LookupErr("$recordId")
+		if err != nil {
+			return errors.Wrapf(err, "extracting record ID (resume token: %+v)", rawToken)
+		}
+
+		startRecordID = option.Some(recIDRV)
 	}
 
-	for {
-		cmd := bson.D{
-			{"find", coll.Name()},
-			{"hint", bson.D{{"$natural", 1}}},
-		}
+	resumeTokenParameter := lo.Ternary(
+		canUseStartAt,
+		"$_startAt",
+		"$_resumeAfter",
+	)
 
-		var projection bson.D
+	cmd := bson.D{
+		{"find", coll.Name()},
+		{"hint", bson.D{{"$natural", 1}}},
+	}
 
-		if useResumeTokens {
-			// Because we send `showRecordId` we need to disambiguate the
-			// server-added $recordId field from a user field of the same name
-			// (however unlikely!). We do that by projecting the original
-			// document down a level.
-			var docProjection any
+	// Because we send `showRecordId` we need to disambiguate the
+	// server-added $recordId field from a user field of the same name
+	// (however unlikely!). We do that by projecting the original
+	// document down a level.
+	var docProjection any
 
-			switch compareMethod {
-			case ToHashedIndexKey:
-				docProjection = GetHashedIndexKeyProjection(task.QueryFilter)
-			case Binary, IgnoreOrder:
-				docProjection = "$$ROOT"
-			}
+	switch compareMethod {
+	case ToHashedIndexKey:
+		docProjection = GetHashedIndexKeyProjection(task.QueryFilter)
+	case Binary, IgnoreOrder:
+		docProjection = "$$ROOT"
+	}
 
-			projection = bson.D{
+	cmd = append(
+		cmd,
+		bson.D{
+			{"showRecordId", true},
+			{"$_requestResumeToken", true},
+			{"projection", bson.D{
 				{"_id", 0},
 				{"_", docProjection},
-			}
+			}},
+		}...,
+	)
 
-			cmd = append(
-				cmd,
-				bson.D{
-					{"showRecordId", true},
-					{"$_requestResumeToken", true},
-				}...,
-			)
+	if hasToken {
+		cmd = append(cmd, bson.E{resumeTokenParameter, resumeToken})
+	}
 
-			if startAt, has := resumeTokenOpt.Get(); has {
-				cmd = append(cmd, bson.E{
-					lo.Ternary(canUseStartAt, "$_startAt", "$_resumeAfter"),
-					startAt,
-				})
-			}
-		} else if compareMethod == ToHashedIndexKey {
-			projection = GetHashedIndexKeyProjection(task.QueryFilter)
+	if filter, has := docFilter.Get(); has {
+		cmd = append(cmd, bson.E{"filter", filter})
+	}
+
+	cmdBytes, err := bson.Marshal(cmd)
+	if err != nil {
+		return errors.Wrapf(err, "marshaling open-cursor request (%+v)", cmd)
+	}
+
+	cmdRaw := bson.Raw(cmdBytes)
+
+	cursor, err = coll.Database().RunCommandCursor(sctx, cmdRaw)
+
+	if err != nil {
+		if !mmongo.ErrorHasCode(err, util.KeyNotFoundErrCode) {
+			return errors.Wrapf(err, "opening source cursor")
 		}
 
-		if projection != nil {
-			cmd = append(cmd, bson.E{"projection", projection})
-		}
+		logger.Debug().
+			Any("task", task.PrimaryKey).
+			Stringer("resumeToken", resumeToken).
+			Err(err).
+			Msg("Resume token is no longer valid. Will attempt use of earlier tokens.")
 
-		if filter, has := docFilter.Get(); has {
-			cmd = append(cmd, bson.E{"filter", filter})
-		}
-
-		cursor, err = coll.Database().RunCommandCursor(sctx, cmd)
-
+		// NB: These are in descending order.
+		priorTokens, err := fetchResumeTokensBefore(
+			ctx,
+			task.QueryFilter.Namespace,
+			startRecordID.MustGet(),
+			tasksColl,
+		)
 		if err != nil {
-			if !mmongo.ErrorHasCode(err, util.KeyNotFoundErrCode) {
-				return errors.Wrapf(err, "reading from source")
-			}
-
-			startAt := resumeTokenOpt.MustGet()
-			raw := lo.Must(bsontools.RawValueTo[bson.Raw](startAt))
-
-			raw = slices.Clone(raw)
-			recIDRV := lo.Must(raw.LookupErr("$recordId"))
-			switch recIDRV.Type {
-			case bson.TypeInt64:
-				recID := recIDRV.Int64()
-
-				if recID == 1 {
-					resumeTokenOpt = option.None[bson.RawValue]()
-				} else {
-					replaced, err := bsontools.ReplaceInRaw(
-						&raw,
-						bsontools.ToRawValue(recID-1),
-						"$recordId",
-					)
-					lo.Assertf(
-						replaced,
-						"should update record ID in token (%+v)",
-						raw,
-					)
-					if err != nil {
-						return errors.Wrapf(err, "incrementing record ID in resume token (%v)", raw)
-					}
-
-					resumeTokenOpt = option.Some(bsontools.ToRawValue(raw))
-				}
-
-				continue
-			default:
-				return fmt.Errorf("fatal error: received key-not-found error (%v) but cannot increment record ID (%s) because of its BSON type (%s)", err, recIDRV.String(), recIDRV.Type)
-			}
+			return errors.Wrapf(err, "fetching resume tokens after a key-not-found error")
 		}
 
-		break
+		failedTokens := 1
+
+		for _, token := range priorTokens {
+			found, err := bsontools.ReplaceInRaw(
+				&cmdRaw,
+				bsontools.ToRawValue(token),
+				resumeTokenParameter,
+				"$recordId",
+			)
+			if err != nil {
+				return errors.Wrapf(err, "replacing resume token (new: %s) in command (%v)", cmdRaw, token)
+			}
+
+			lo.Assertf(found, "command should have resume token: %+v", cmdRaw)
+
+			cursor, err = coll.Database().RunCommandCursor(sctx, cmdRaw)
+			if err == nil {
+				logger.Info().
+					Any("task", task.PrimaryKey).
+					Str("srcNamespace", task.QueryFilter.Namespace).
+					Int("combinedPartitions", failedTokens).
+					Msg("Because of a specific document deletion on the source cluster, this task has to read other tasks’ documents. This task may take longer to complete than others.")
+
+				break
+			}
+
+			if !mmongo.ErrorHasCode(err, util.KeyNotFoundErrCode) {
+				return errors.Wrapf(err, "opening source cursor after replacing resume token")
+			}
+
+			failedTokens++
+		}
+
+		if failedTokens > len(priorTokens) {
+			// If we’re here, then every resume token has failed, and we
+			// need to read the entire collection. Hopefully the original
+			// partition was an early one …
+			found, err := bsontools.RemoveFromRaw(&cmdRaw, resumeTokenParameter, "$recordId")
+			if err != nil {
+				return errors.Wrapf(err, "removing resume token from command (%v)", cmdRaw)
+			}
+
+			lo.Assertf(found, "command should have resume token: %+v", cmdRaw)
+
+			cursor, err = coll.Database().RunCommandCursor(sctx, cmdRaw)
+			if err != nil {
+				return errors.Wrapf(err, "opening source cursor from beginning")
+			}
+		}
 	}
 
 	defer cursor.Close(ctx)
@@ -287,81 +325,46 @@ cursorLoop:
 			panic("session should have optime after reading a document")
 		}
 
-		if useResumeTokens {
-			recIDRV, err := cursor.Current.LookupErr("$recordId")
+		recIDRV, err := cursor.Current.LookupErr("$recordId")
+		if err != nil {
+			return errors.Wrapf(err, "getting record ID")
+		}
+
+		if startID, has := startRecordID.Get(); has {
+			val, err := compareRawValues(recIDRV, startID)
 			if err != nil {
-				return errors.Wrapf(err, "getting record ID")
+				return errors.Wrap(err, "comparing current record ID with start")
 			}
 
-			switch upperRecordID.Type {
+			if val < 0 {
+				continue cursorLoop
+			}
+		}
 
-			// To simplify testing we interpret empty RawValue here as equivalent
-			// to BSON null.
-			case 0, bson.TypeNull:
-				// No upper bound.
-			case bson.TypeInt64:
-				// A non-clustered collection:
-				recID, err := bsontools.RawValueTo[int64](recIDRV)
-				if err != nil {
-					return errors.Wrapf(err, "parsing record ID")
-				}
+		if rvIsNonEmpty(upperRecordID) {
+			val, err := compareRawValues(recIDRV, upperRecordID)
+			if err != nil {
+				return errors.Wrap(err, "comparing record ID with partition’s upper bound")
+			}
 
-				bound, err := bsontools.RawValueTo[int64](upperRecordID)
-				if err != nil {
-					return errors.Wrapf(err, "parsing upper bound")
-				}
-
-				if recID > bound {
-					break cursorLoop
-				}
-			case bson.TypeBinary:
-				// A clustered collection:
-				recID, err := bsontools.RawValueTo[bson.Binary](recIDRV)
-				if err != nil {
-					return errors.Wrapf(err, "parsing record ID")
-				}
-
-				bound, err := bsontools.RawValueTo[bson.Binary](upperRecordID)
-				if err != nil {
-					return errors.Wrapf(err, "parsing upper bound")
-				}
-
-				if recID.Subtype != bound.Subtype {
-					return errors.Wrapf(
-						err,
-						"upper bound subtype is %d but record ID subtype is %d",
-						bound.Subtype,
-						recID.Subtype,
-					)
-				}
-
-				if bytes.Compare(recID.Data, bound.Data) > 0 {
-					break cursorLoop
-				}
-			default:
-				panic(fmt.Sprintf("bad upper bound (%v) BSON type: %s", upperRecordID, upperRecordID.Type))
+			if val > 0 {
+				break cursorLoop
 			}
 		}
 
 		var userDoc bson.Raw
 
-		if useResumeTokens {
-			userDocRV, err := cursor.Current.LookupErr("_")
-			if err != nil {
-				return errors.Wrapf(err, "getting user document")
-			}
+		userDocRV, err := cursor.Current.LookupErr("_")
+		if err != nil {
+			return errors.Wrapf(err, "getting user document")
+		}
 
-			userDoc, err = bsontools.RawValueTo[bson.Raw](userDocRV)
-			if err != nil {
-				return errors.Wrapf(err, "parsing user document")
-			}
-		} else {
-			userDoc = cursor.Current
+		userDoc, err = bsontools.RawValueTo[bson.Raw](userDocRV)
+		if err != nil {
+			return errors.Wrapf(err, "parsing user document")
 		}
 
 		batch = append(batch, NewDocWithTS(userDoc, *opTime))
-
-		fmt.Printf("----- user doc %v\n\n", userDoc)
 
 		docID, err := compareMethod.RawDocIDForComparison(
 			userDoc,
@@ -386,4 +389,93 @@ cursorLoop:
 	}
 
 	return nil
+}
+
+func fetchResumeTokensBefore(
+	ctx context.Context,
+	namespace string,
+	recordID bson.RawValue,
+	tasksColl *mongo.Collection,
+) ([]bson.Raw, error) {
+	cursor, err := tasksColl.Find(
+		ctx,
+		bson.D{
+			{"generation", 0},
+			{"type", tasks.VerifyDocuments},
+			{"query_filter.partition._id.lowerBound", bson.D{
+				{"$lt", recordID},
+			}},
+		},
+		options.Find().
+			SetProjection(bson.D{
+				{"rid", "$query_filter.partition._id.lowerBound"},
+			}).
+			SetSort(bson.D{
+				{"query_filter.partition._id.lowerBound", -1},
+			}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("opening cursor to read task record IDs before %s", recordID)
+	}
+
+	type rec struct {
+		RID bson.Raw
+	}
+
+	var recs []rec
+
+	if err := cursor.All(ctx, &recs); err != nil {
+		return nil, fmt.Errorf("reading task record IDs before %s", recordID)
+	}
+
+	return mslices.Map1(
+		recs,
+		func(r rec) bson.Raw {
+			return r.RID
+		},
+	), nil
+}
+
+func compareRawValues(a, b bson.RawValue) (int, error) {
+	if a.Type != b.Type {
+		return 0, fmt.Errorf("can’t compare BSON %s against %s", a.Type, b.Type)
+	}
+
+	switch a.Type {
+	case bson.TypeInt64:
+		aI64, err := bsontools.RawValueTo[int64](a)
+		if err != nil {
+			return 0, fmt.Errorf("parsing BSON %T (%s)", a.Type, a)
+		}
+
+		bI64, err := bsontools.RawValueTo[int64](b)
+		if err != nil {
+			return 0, fmt.Errorf("parsing BSON %T (%s)", b.Type, b)
+		}
+
+		return cmp.Compare(aI64, bI64), nil
+	case bson.TypeBinary:
+		aBin, err := bsontools.RawValueTo[bson.Binary](a)
+		if err != nil {
+			return 0, fmt.Errorf("parsing BSON %T (%s)", a.Type, a)
+		}
+
+		bBin, err := bsontools.RawValueTo[bson.Binary](b)
+		if err != nil {
+			return 0, fmt.Errorf("parsing BSON %T (%s)", b.Type, b)
+		}
+
+		if aBin.Subtype != bBin.Subtype {
+			return 0, errors.Wrapf(
+				err,
+				"cannot compare BSON binary subtype %d against %d",
+				aBin.Subtype,
+				bBin.Subtype,
+			)
+		}
+
+		return bytes.Compare(aBin.Data, bBin.Data), nil
+	default:
+		return 0, fmt.Errorf("can’t compare BSON %s (other type: %s)", a.Type, b.Type)
+	}
 }

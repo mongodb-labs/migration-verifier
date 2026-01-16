@@ -126,7 +126,7 @@ type Verifier struct {
 	generationPauseDelay time.Duration
 	workerSleepDelay     time.Duration
 	docCompareMethod     compare.Method
-	partitionBy          partitions.PartitionBy
+	partitionBy          partitions.PartitioningScheme
 	verifyAll            bool
 	startClean           bool
 
@@ -394,7 +394,7 @@ func (verifier *Verifier) SetDocCompareMethod(method compare.Method) {
 	verifier.docCompareMethod = method
 }
 
-func (verifier *Verifier) SetPartitionBy(method partitions.PartitionBy) {
+func (verifier *Verifier) SetPartitionBy(method partitions.PartitioningScheme) {
 	verifier.partitionBy = method
 }
 
@@ -1452,21 +1452,13 @@ func (verifier *Verifier) partitionCollection(
 		}
 
 		if clusterInfo.Topology != util.TopologyReplset {
-			err = fmt.Errorf("resumable natural scan requires a replica set")
+			return fmt.Errorf("resumable natural scan requires a replica set")
 		} else {
 			err = mmongo.WhyFindCannotResume([2]int(verifier.srcClusterInfo.VersionArray))
-		}
 
-		if err != nil {
-			verifier.warnAboutNonResumableNatural(err)
-
-			return verifier.partitionSingleNatural(
-				ctx,
-				nil,
-				srcNs,
-				shardKeyFields,
-				dstNs,
-			)
+			if err != nil {
+				return err
+			}
 		}
 
 		shardKeys, err := verifier.getShardKeyFields(
@@ -1488,16 +1480,6 @@ func (verifier *Verifier) partitionCollection(
 			verifier.logger,
 		)
 		if err != nil {
-			if errors.As(err, &partitions.CannotResumeNaturalError{}) {
-				return verifier.partitionSingleNatural(
-					ctx,
-					err,
-					srcNs,
-					shardKeyFields,
-					dstNs,
-				)
-			}
-
 			return fmt.Errorf("starting natural partitioning: %w", err)
 		}
 
@@ -1541,49 +1523,6 @@ func (verifier *Verifier) partitionCollection(
 		Msg("Done partitioning collection.")
 
 	return nil
-}
-
-func (verifier *Verifier) warnAboutNonResumableNatural(cause error) {
-	verifier.warnNonResumableNaturalOnce.Do(func() {
-		verifier.logger.Warn().
-			AnErr("cause", cause).
-			Msg("Resumable natural scan is unavailable. Each collection will be verified in a single worker. Any collection left unfinished before a restart will need full re-verification.")
-	})
-}
-
-// This returns a partition that verifies a full collection via natural scan
-// in a single thread. Because there is no resumability, document order
-// doesn’t matter, which means such tasks can go to a mongos or a full
-// replset (i.e., no direct connection needed).
-func (verifier *Verifier) partitionSingleNatural(
-	ctx context.Context,
-	why error,
-	srcNs string,
-	shardKeyFields []string,
-	dstNs string,
-) error {
-	if why != nil {
-		verifier.logger.Warn().
-			Str("namespace", srcNs).
-			AnErr("reason", why).
-			Msg("Verification cannot resume a natural scan for this collection. The collection will be verified in a single worker thread. This collection’s verification will reset if unfinished before a restart.")
-	}
-
-	partition := partitions.CreateSingleNaturalOrderPartition(
-		mmongo.SplitNamespace(srcNs),
-	)
-
-	_, err := verifier.InsertPartitionVerificationTask(
-		ctx,
-		&partition,
-		shardKeyFields,
-		dstNs,
-	)
-	return errors.Wrapf(
-		err,
-		"inserting single natural-partition task for namespace %#q",
-		srcNs,
-	)
 }
 
 func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*VerificationStatus, error) {
