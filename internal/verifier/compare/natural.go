@@ -218,8 +218,8 @@ func ReadNaturalPartitionFromSource(
 				logger.Info().
 					Any("task", task.PrimaryKey).
 					Str("srcNamespace", task.QueryFilter.Namespace).
-					Int("combinedPartitions", failedTokens).
-					Msg("Because of a specific document deletion on the source cluster, this task has to read other tasks’ documents. This task may take longer to complete than others.")
+					Int("skippedPartitions", failedTokens-1).
+					Msg("Due to a document deletion on the source cluster, this task has to read other tasks’ documents. This task may take longer to complete than others.")
 
 				break
 			}
@@ -232,6 +232,12 @@ func ReadNaturalPartitionFromSource(
 		}
 
 		if failedTokens > len(priorTokens) {
+			logger.Info().
+				Any("task", task.PrimaryKey).
+				Str("srcNamespace", task.QueryFilter.Namespace).
+				Int("skippedPartitions", failedTokens).
+				Msg("Due to a document deletion on the source cluster, this task has to read the entire collection. This task may take longer to complete than others.")
+
 			// If we’re here, then every resume token has failed, and we
 			// need to read the entire collection. Hopefully the original
 			// partition was an early one …
@@ -402,6 +408,7 @@ func fetchResumeTokensBefore(
 		bson.D{
 			{"generation", 0},
 			{"type", tasks.VerifyDocuments},
+			{"query_filter.namespace", namespace},
 			{"query_filter.partition._id.lowerBound", bson.D{
 				{"$lt", recordID},
 			}},
