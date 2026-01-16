@@ -188,7 +188,7 @@ func ReadNaturalPartitionFromSource(
 			Msg("Resume token is no longer valid. Will attempt use of earlier tokens.")
 
 		// NB: These are in descending order.
-		priorTokens, err := fetchResumeTokensBefore(
+		priorTokens, err := fetchPriorResumeTokens(
 			ctx,
 			task.QueryFilter.Namespace,
 			startRecordID.MustGet(),
@@ -397,7 +397,7 @@ cursorLoop:
 	return nil
 }
 
-func fetchResumeTokensBefore(
+func fetchPriorResumeTokens(
 	ctx context.Context,
 	namespace string,
 	recordID bson.RawValue,
