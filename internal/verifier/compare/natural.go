@@ -14,14 +14,12 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mmongo"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func SetDirectHostInConnectionString(connstr, hostname string) (string, error) {
@@ -188,7 +186,7 @@ func ReadNaturalPartitionFromSource(
 			Msg("Resume token is no longer valid. Will attempt use of earlier tokens.")
 
 		// NB: These are in descending order.
-		priorTokens, err := fetchPriorResumeTokens(
+		priorTokens, err := tasks.FetchPriorResumeTokens(
 			ctx,
 			task.QueryFilter.Namespace,
 			startRecordID.MustGet(),
@@ -395,52 +393,6 @@ cursorLoop:
 	}
 
 	return nil
-}
-
-func fetchPriorResumeTokens(
-	ctx context.Context,
-	namespace string,
-	recordID bson.RawValue,
-	tasksColl *mongo.Collection,
-) ([]bson.Raw, error) {
-	cursor, err := tasksColl.Find(
-		ctx,
-		bson.D{
-			{"generation", 0},
-			{"type", tasks.VerifyDocuments},
-			{"query_filter.namespace", namespace},
-			{"query_filter.partition._id.lowerBound", bson.D{
-				{"$lt", recordID},
-			}},
-		},
-		options.Find().
-			SetProjection(bson.D{
-				{"rid", "$query_filter.partition._id.lowerBound"},
-			}).
-			SetSort(bson.D{
-				{"query_filter.partition._id.lowerBound", -1},
-			}),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("opening cursor to read task record IDs before %s", recordID)
-	}
-
-	type rec struct {
-		RID bson.Raw
-	}
-
-	var recs []rec
-
-	if err := cursor.All(ctx, &recs); err != nil {
-		return nil, fmt.Errorf("reading task record IDs before %s", recordID)
-	}
-
-	return mslices.Map1(
-		recs,
-		func(r rec) bson.Raw {
-			return r.RID
-		},
-	), nil
 }
 
 func compareRawValues(a, b bson.RawValue) (int, error) {
