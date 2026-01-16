@@ -96,6 +96,72 @@ When partitioning by record ID, the bounds stored are:
 - Lower: BSON null for the first partition; afterwards a resume token
 - Upper: a record ID or, for empty collections, BSON null
 
+### Record ID scope
+
+Unlike a document’s `_id`, its record ID is an artifact of storage on a
+particular node in a replica set. A document with `{_id: 234}` might have
+a record ID of 2 on one node while on another node that document’s record
+ID is 48.
+
+Because of this, Verifier **MUST** fulfill natural-partition tasks by
+fetching documents from the same node it connected to during partitioning.
+
+We achieve this by storing the node’s hostname in the task itself. Then,
+when Verifier executes the task, it opens a direct connection to that
+specific node in order to read the documents.
+
+### Querying & document deletions
+
+MongoDB doesn’t expose a control for querying a range of record IDs.
+This is why lower bounds are resume tokens—which contain record IDs—rather
+than simple record IDs: MongoDB _will_ resume from a token.
+
+There’s a problem, though. Assume that the document that a given resume
+token refers to has been _deleted_. Historically, the server always returned
+an error in this case.
+
+To handle this error, Verifier decrements the record ID and resends the
+request. Eventually there will either be a “hit” (i.e., a record ID that
+refers to a still-existing document), or we’ll reach record ID of 0, which
+means we can just start from the beginning of the collection.
+
+(This can yield a substantial “flurry” of requests until the cursor is
+opened.)
+
+The above doesn’t work for all record IDs, though. See below.
+
+In 7.0 & later the server’s `find` command accepts an alternate parameter,
+`$_startAt`, that will, in this circumstance, instead seek to the next
+existing document and start the cursor there.
+
+### What’s in a record ID?
+
+For ordinary collections the record IDs are BSON int64. These can be
+decremented as described above to handle deletions.
+
+For clustered collections, though, the record IDs are binary strings.
+These can’t be meaningfully decremented as int64 record IDs can. Thus,
+only source versions whose `find` supports `$_startAt` can partition
+a clustered collection naturally.
+
+### When partitioning can’t happen
+
+Besides the clustered-collection case, pre-4.4 sources and sharded
+clusters are other cases where natural partitioning doesn’t work.
+
+Natural _scanning_, however, is still valuable for fetching the
+documents to avoid the high read amplification that can happen from
+ID partitioning.
+
+Thus, in these cases where natural partitioning is chosen but,
+for whatever reason, doesn’t work, Verifier puts the entire collection
+into a single task. This task will be processed via natural scanning.
+Because there is only 1 task, though, the collection’s verification
+is not resumable: if a failure happens while verifying the collection,
+the collection’s verification has to be restarted. This will also be
+slower than parallelizing the verification, though it may still
+outperform ID partitioning.
+
 ### Why upper bound is only null for empty collections
 
 One might think that, because the first partition’s lower bound is
