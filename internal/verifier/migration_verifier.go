@@ -1128,7 +1128,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	var docsCount types.DocumentCount
 	var isCapped bool
 
-	if hasSrcSpec {
+	if hasSrcSpec && srcSpec.Type == "collection" {
 		// We set the collection size & doc count in the task up-front so that
 		// logs can immediately show progress against the total data size.
 		collBytes, docsCount, isCapped, err = verifier.setCollectionSizeInTask(ctx, task, srcColl)
