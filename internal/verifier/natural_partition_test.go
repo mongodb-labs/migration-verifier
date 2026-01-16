@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -102,6 +103,8 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 }
 
 func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
 	if suite.GetTopology(suite.srcMongoClient) != util.TopologyReplset {
 		suite.T().Skipf("Source must be a replica set.")
 	}
@@ -460,10 +463,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 				suite.Run(
 					"8 to end with missing resume token",
 					func() {
-						if clustered && !mmongo.FindCanUseStartAt(version) {
-							suite.T().Skipf("server %v can’t tolerate this with clustered", version)
-						}
-
 						task := &tasks.Task{
 							PrimaryKey: bson.NewObjectID(),
 							Type:       tasks.VerifyDocuments,
