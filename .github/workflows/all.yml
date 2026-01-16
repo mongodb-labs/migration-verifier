@@ -79,6 +79,21 @@ jobs:
             dstChangeReader: tailOplog
 
         exclude:
+          # 1. No natural scan for sharded sources.
+          - topology: sharded
+            partitionBy: natural
+
+          # 2. No natural scan before 4.4.
+          - mongodb_versions: [ '4.2', '4.2' ]
+            partitionBy: natural
+          - mongodb_versions: [ '4.2', '4.4' ]
+            partitionBy: natural
+          - mongodb_versions: [ '4.2', '5.0' ]
+            partitionBy: natural
+          - mongodb_versions: [ '4.2', '6.0' ]
+            partitionBy: natural
+          - mongodb_versions: [ '4.2', '8.0' ]
+            partitionBy: natural
 
           # No hashed comparison before 4.4.
           - mongodb_versions: [ '4.2', '4.2' ]
