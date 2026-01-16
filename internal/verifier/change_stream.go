@@ -267,9 +267,9 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 
 	defer cs.Close(sctx)
 
+changeStreamLoop:
 	for {
 		var err error
-		var gotwritesOffTimestamp bool
 
 		select {
 
@@ -295,8 +295,6 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 				Any("writesOffTimestamp", writesOffTs).
 				Msgf("%s received writesOff timestamp. Finalizing change stream.", csr)
 
-			gotwritesOffTimestamp = true
-
 			// Read change events until the stream reaches the writesOffTs.
 			// (i.e., the `getMore` call returns empty)
 			for {
@@ -314,7 +312,10 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 						Any("writesOffTimestamp", writesOffTs).
 						Msgf("%s has reached the writesOff timestamp. Shutting down.", csr)
 
-					break
+					csr.running = false
+					csr.startAtTs = &curTs
+
+					break changeStreamLoop
 				}
 
 				err = csr.readAndHandleOneChangeEventBatch(sctx, ri, cs)
@@ -330,15 +331,6 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 			if err != nil {
 				return err
 			}
-		}
-
-		if gotwritesOffTimestamp {
-			csr.running = false
-			if ts, has := csr.lastChangeEventTime.Load().Get(); has {
-				csr.startAtTs = &ts
-			}
-
-			break
 		}
 	}
 
