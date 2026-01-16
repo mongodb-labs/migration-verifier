@@ -129,7 +129,7 @@ type Verifier struct {
 	// This would seem more ideal as uint64, but changing it would
 	// trigger several other similar type changes, and that’s not really
 	// worthwhile for now.
-	partitionSizeInBytes int64
+	partitionSizeInBytes types.ByteCount
 
 	readPreference *readpref.ReadPref
 
@@ -365,7 +365,7 @@ func (verifier *Verifier) SetWorkerSleepDelay(arg time.Duration) {
 
 // SetPartitionSizeMB sets the verifier’s maximum partition size in MiB.
 func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
-	verifier.partitionSizeInBytes = int64(partitionSizeMB) * 1024 * 1024
+	verifier.partitionSizeInBytes = types.ByteCount(partitionSizeMB) * 1024 * 1024
 }
 
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {
@@ -751,22 +751,27 @@ func (verifier *Verifier) getShardKeyFields(
 //  1. Devise partition boundaries.
 //  2. Fetch shard keys.
 //  3. Fetch the size: # of docs, and # of bytes.
-func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, namespace string) ([]*partitions.Partition, []string, types.DocumentCount, types.ByteCount, error) {
+func (verifier *Verifier) partitionAndInspectNamespace(
+	ctx context.Context,
+	namespace string,
+) ([]*partitions.Partition, error) {
 	dbName, collName := mmongo.SplitNamespace(namespace)
 	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, verifier.logger,
 		verifier.srcClientDatabase(dbName), collName)
 	if err != nil {
-		return nil, nil, 0, 0, err
-	}
-	shardKeys, err := verifier.getShardKeyFields(ctx, namespaceAndUUID)
-	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, err
 	}
 
-	partitionList, srcDocs, srcBytes, err := partitions.PartitionCollectionWithSize(
-		ctx, namespaceAndUUID, verifier.srcClient, verifier.logger, verifier.partitionSizeInBytes, verifier.globalFilter)
+	partitionList, err := partitions.PartitionCollectionWithSize(
+		ctx,
+		namespaceAndUUID,
+		verifier.srcClient,
+		verifier.logger,
+		verifier.partitionSizeInBytes,
+		verifier.globalFilter,
+	)
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, err
 	}
 	// TODO: Test the empty collection (which returns no partitions)
 	if len(partitionList) == 0 {
@@ -778,9 +783,7 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 				DB:   namespaceAndUUID.DBName,
 				Coll: namespaceAndUUID.CollName}}}
 	}
-	// Use "open" partitions, otherwise out-of-range keys on the destination might be missed
-	partitionList[0].Key.Lower = bsontools.ToRawValue(bson.MinKey{})
-	partitionList[len(partitionList)-1].Upper = bsontools.ToRawValue(bson.MaxKey{})
+
 	debugLog := verifier.logger.Debug()
 	if debugLog.Enabled() {
 		debugLog.Msgf("Partitions (%d):", len(partitionList))
@@ -801,7 +804,7 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 		}
 	}
 
-	return partitionList, shardKeys, srcDocs, srcBytes, nil
+	return partitionList, nil
 }
 
 // Returns a slice of VerificationResults with the differences, and a boolean indicating whether or
@@ -1121,6 +1124,19 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	srcSpec, hasSrcSpec := srcSpecOpt.Get()
 	dstSpec, hasDstSpec := dstSpecOpt.Get()
 
+	var collBytes types.ByteCount
+	var docsCount types.DocumentCount
+	var isCapped bool
+
+	if hasSrcSpec && srcSpec.Type == "collection" {
+		// We set the collection size & doc count in the task up-front so that
+		// logs can immediately show progress against the total data size.
+		collBytes, docsCount, isCapped, err = verifier.setCollectionSizeInTask(ctx, task, srcColl)
+		if err != nil {
+			return errors.Wrapf(err, "fetching & persisting collection size")
+		}
+	}
+
 	if !hasDstSpec {
 		if !hasSrcSpec {
 			verifier.logger.Info().
@@ -1242,55 +1258,182 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	// matches between soruce & destination. Now we can partition the collection.
 
 	if task.Generation == 0 {
-		var partitionsCount int
-		var docsCount types.DocumentCount
-		var bytesCount types.ByteCount
+		err := verifier.partitionCollection(
+			ctx,
+			task,
+			workerNum,
+			collBytes,
+			docsCount,
+			isCapped,
+		)
 
-		if verifier.srcHasSampleRate() {
-			var err error
-			partitionsCount, docsCount, bytesCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task)
-			if err != nil {
-				return errors.Wrapf(err, "partitioning %#q via $sampleRate", srcNs)
-			}
-		} else {
-			verifier.logger.Warn().
-				Msg("Source MongoDB version lacks $sampleRate. Using legacy partitioning logic. This may cause imbalanced partitions, which will impede performance.")
-
-			var partitions []*partitions.Partition
-			var shardKeys []string
-
-			partitions, shardKeys, docsCount, bytesCount, err = verifier.partitionAndInspectNamespace(ctx, srcNs)
-			if err != nil {
-				return errors.Wrapf(err, "partitioning %#q via $sample", srcNs)
-			}
-
-			partitionsCount = len(partitions)
-
-			for _, partition := range partitions {
-				_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeys, dstNs)
-				if err != nil {
-					return errors.Wrapf(
-						err,
-						"failed to insert a partition task for namespace %#q",
-						srcNs,
-					)
-				}
-			}
+		if err != nil {
+			return errors.Wrapf(err, "partitioning collection")
 		}
-
-		verifier.logger.Debug().
-			Int("workerNum", workerNum).
-			Str("namespace", srcNs).
-			Int("partitionsCount", partitionsCount).
-			Msg("Divided collection into partitions.")
-
-		task.SourceDocumentCount = docsCount
-		task.SourceByteCount = bytesCount
 	}
 
 	if task.Status == tasks.Processing {
 		task.Status = tasks.Completed
 	}
+
+	return nil
+}
+
+func (verifier *Verifier) setCollectionSizeInTask(
+	ctx context.Context,
+	task *tasks.Task,
+	srcColl *mongo.Collection,
+) (types.ByteCount, types.DocumentCount, bool, error) {
+	lo.Assertf(
+		task.Status == tasks.Processing,
+		"task %v status should be %#q but is %#q",
+		task.PrimaryKey,
+		tasks.Processing,
+		task.Status,
+	)
+
+	collBytes, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
+		ctx,
+		verifier.logger,
+		srcColl,
+	)
+	if err != nil {
+		return 0, 0, false, errors.Wrapf(err, "getting %#q’s size", FullName(srcColl))
+	}
+
+	task.SourceDocumentCount = docsCount
+	task.SourceByteCount = collBytes
+
+	// Update the collection task now so that the doc count & byte count
+	// can inform logging.
+	if err := verifier.UpdateVerificationTask(ctx, task); err != nil {
+		// This failure shouldn’t happen, but it needn’t be fatal.
+		verifier.logger.Warn().
+			Any("task", task.PrimaryKey).
+			Str("namespace", FullName(srcColl)).
+			Int64("documentsCount", int64(docsCount)).
+			Int64("sizeInBytes", int64(collBytes)).
+			Err(err).
+			Msg("Failed to update verification task with collection stats.")
+	}
+
+	return collBytes, docsCount, isCapped, nil
+}
+
+func (verifier *Verifier) partitionCollection(
+	ctx context.Context,
+	task *tasks.Task,
+	workerNum int,
+	collBytes types.ByteCount,
+	docsCount types.DocumentCount,
+	isCapped bool,
+) error {
+	srcColl := verifier.srcClientCollection(task)
+	dstColl := verifier.dstClientCollection(task)
+	srcNs := FullName(srcColl)
+	dstNs := FullName(dstColl)
+
+	shardKeyFields, err := verifier.getShardKeyFields(
+		ctx,
+		&uuidutil.NamespaceAndUUID{
+			DBName:   srcColl.Database().Name(),
+			CollName: srcColl.Name(),
+		},
+	)
+	if err != nil {
+		return errors.Wrapf(err, "getting %#q’s shard key", srcNs)
+	}
+
+	idealNumPartitions := util.DivideToF64(collBytes, verifier.partitionSizeInBytes)
+
+	if idealNumPartitions <= 1 {
+		verifier.logger.Debug().
+			Any("task", task.PrimaryKey).
+			Str("namespace", FullName(srcColl)).
+			Int64("documentsCount", int64(docsCount)).
+			Int64("collectionBytes", int64(collBytes)).
+			Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
+			Msg("Collection is small enough not to need partitioning.")
+
+		partition := partitions.Partition{
+			Key: partitions.PartitionKey{
+				Lower: bsontools.ToRawValue(bson.MinKey{}),
+			},
+			Ns: &partitions.Namespace{
+				srcColl.Database().Name(),
+				srcColl.Name(),
+			},
+			Upper:    bsontools.ToRawValue(bson.MaxKey{}),
+			IsCapped: isCapped,
+		}
+
+		_, err = verifier.InsertPartitionVerificationTask(
+			ctx,
+			&partition,
+			shardKeyFields,
+			dstNs,
+		)
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"inserting single partition task for namespace %#q",
+				srcNs,
+			)
+		}
+
+		return nil
+	}
+
+	verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Any("task", task.PrimaryKey).
+		Str("namespace", FullName(srcColl)).
+		Int64("documentsCount", int64(docsCount)).
+		Int64("collectionBytes", int64(collBytes)).
+		Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
+		Float64("idealPartitionsCount", idealNumPartitions).
+		Msg("Partitioning collection.")
+
+	var partitionsCount int
+
+	if verifier.srcHasSampleRate() {
+		var err error
+		partitionsCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task, shardKeyFields)
+		if err != nil {
+			return errors.Wrapf(err, "partitioning %#q via $sampleRate", srcNs)
+		}
+	} else {
+		verifier.logger.Warn().
+			Msg("Source MongoDB version lacks $sampleRate. Using legacy partitioning logic. This may cause imbalanced partitions, which will impede performance.")
+
+		var partitions []*partitions.Partition
+		var shardKeys []string
+
+		partitions, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
+		if err != nil {
+			return errors.Wrapf(err, "partitioning %#q via $sample", srcNs)
+		}
+
+		partitionsCount = len(partitions)
+
+		for _, partition := range partitions {
+			_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeys, dstNs)
+			if err != nil {
+				return errors.Wrapf(
+					err,
+					"failed to insert a partition task for namespace %#q",
+					srcNs,
+				)
+			}
+		}
+	}
+
+	verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Any("task", task.PrimaryKey).
+		Str("namespace", srcNs).
+		Int("partitionsCount", partitionsCount).
+		Msg("Done partitioning collection.")
 
 	return nil
 }

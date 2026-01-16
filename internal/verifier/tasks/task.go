@@ -93,8 +93,8 @@ func (t *Task) AugmentLogWithDetails(evt *zerolog.Event) {
 		evt.Int("documentCount", len(t.Ids))
 	} else {
 		evt.
-			Any("minDocID", t.QueryFilter.Partition.Key.Lower).
-			Any("maxDocID", t.QueryFilter.Partition.Upper)
+			Stringer("min", t.QueryFilter.Partition.Key.Lower).
+			Stringer("max", t.QueryFilter.Partition.Upper)
 	}
 }
 

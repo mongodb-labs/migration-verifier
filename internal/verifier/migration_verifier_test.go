@@ -96,12 +96,8 @@ func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
 		},
 	}
 
-	partitions, docs, bytes, err := verifier.createPartitionTasksWithSampleRate(ctx, task)
+	err := verifier.partitionCollection(ctx, task, 0, 0, 0, false)
 	require.NoError(err, "should partition collection")
-
-	assert.EqualValues(suite.T(), 1, partitions, "should be 1 partition")
-	assert.Zero(suite.T(), docs, "should be 0 docs")
-	assert.Zero(suite.T(), bytes, "should be 0 bytes")
 
 	taskOpt, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
 	require.NoError(err, "should look up task")
@@ -114,15 +110,20 @@ func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
 		suite.T(),
 		bson.TypeMinKey,
 		foundTask.QueryFilter.Partition.Key.Lower.Type,
-		"min bound",
+		"min bound BSON type",
 	)
 
 	assert.Equal(
 		suite.T(),
 		bson.TypeMaxKey,
 		foundTask.QueryFilter.Partition.Upper.Type,
-		"max bound",
+		"max bound BSON type",
 	)
+
+	taskOpt, err = verifier.FindNextVerifyTaskAndUpdate(ctx)
+	require.NoError(err, "should look up task")
+
+	assert.Zero(suite.T(), taskOpt, "we expect no more tasks")
 }
 
 func (suite *IntegrationTestSuite) TestProcessVerifyTask_Failure() {
@@ -2465,9 +2466,9 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 
 	suite.Require().Len(theTasks, 2)
 	suite.Require().Equal(tasks.VerifyDocuments, theTasks[0].Type)
-	suite.Require().Equal(tasks.Completed, theTasks[0].Status)
+	suite.Require().Equal(tasks.Completed, theTasks[0].Status, "docs task should be done")
 	suite.Require().Equal(tasks.VerifyCollection, theTasks[1].Type)
-	suite.Require().Equal(tasks.MetadataMismatch, theTasks[1].Status)
+	suite.Require().Equal(tasks.MetadataMismatch, theTasks[1].Status, "collection task should be done")
 
 	// When tailing the oplog sometimes the verifier starts up “in the past”,
 	// which can cause extra rechecks that we wouldn’t normally expect. This
@@ -3010,7 +3011,7 @@ func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 	}
 
 	// Create partitions with the filter.
-	partitions, _, _, _, err := verifier.partitionAndInspectNamespace(ctx, dbname+".testColl1")
+	partitions, err := verifier.partitionAndInspectNamespace(ctx, dbname+".testColl1")
 	suite.Require().NoError(err)
 
 	// Check that each partition have bounds in the filter.

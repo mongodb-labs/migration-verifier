@@ -42,14 +42,6 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 		}
 	}
 
-	var msg string
-	if srcNamespace == dstNamespace {
-		msg = fmt.Sprintf("Adding task for %s", srcNamespace)
-	} else {
-		msg = fmt.Sprintf("Adding task for %s → %s", srcNamespace, dstNamespace)
-	}
-	verifier.logger.Debug().Msg(msg)
-
 	verificationTask := tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
 		Generation: generation,
@@ -60,6 +52,20 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 			To:        dstNamespace,
 		},
 	}
+
+	logEvent := verifier.logger.Debug().
+		Any("task", verificationTask.PrimaryKey)
+
+	if srcNamespace == dstNamespace {
+		logEvent.
+			Str("namespace", srcNamespace)
+	} else {
+		logEvent.
+			Str("srcNamespace", srcNamespace).
+			Str("dstNamespace", dstNamespace)
+	}
+
+	logEvent.Msg("Adding metadata task.")
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
