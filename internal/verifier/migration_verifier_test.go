@@ -140,7 +140,7 @@ func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
 		},
 	}
 
-	err := verifier.partitionCollection(ctx, task, 0)
+	err := verifier.partitionCollection(ctx, task, 0, 0, 0, false)
 	require.NoError(err, "should partition collection")
 
 	taskOpt, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
@@ -2511,9 +2511,9 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 
 	suite.Require().Len(theTasks, 2, "tasks: %+v", theTasks)
 	suite.Assert().Equal(tasks.VerifyDocuments, theTasks[0].Type)
-	suite.Assert().Equal(tasks.Completed, theTasks[0].Status)
+	suite.Assert().Equal(tasks.Completed, theTasks[0].Status, "docs task should be done")
 	suite.Assert().Equal(tasks.VerifyCollection, theTasks[1].Type)
-	suite.Assert().Equal(tasks.MetadataMismatch, theTasks[1].Status)
+	suite.Assert().Equal(tasks.MetadataMismatch, theTasks[1].Status, "collection task should be done")
 
 	// When tailing the oplog sometimes the verifier starts up “in the past”,
 	// which can cause extra rechecks that we wouldn’t normally expect. This

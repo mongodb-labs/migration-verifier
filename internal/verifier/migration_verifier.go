@@ -1104,6 +1104,13 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	srcNs := FullName(srcColl)
 	dstNs := FullName(dstColl)
 
+	// We set the collection size & doc count in the task up-front so that
+	// logs can immediately show progress against the total data size.
+	collBytes, docsCount, isCapped, err := verifier.setCollectionSizeInTask(ctx, task, srcColl)
+	if err != nil {
+		return errors.Wrapf(err, "fetching & persisting collection size")
+	}
+
 	srcSpecOpt, err := util.GetCollectionSpecIfExists(ctx, srcColl)
 	if err != nil {
 		return errors.Wrapf(
@@ -1259,6 +1266,9 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			ctx,
 			task,
 			workerNum,
+			collBytes,
+			docsCount,
+			isCapped,
 		)
 
 		if err != nil {
@@ -1273,34 +1283,18 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	return nil
 }
 
-func (verifier *Verifier) partitionCollection(
+func (verifier *Verifier) setCollectionSizeInTask(
 	ctx context.Context,
 	task *tasks.Task,
-	workerNum int,
-) error {
+	srcColl *mongo.Collection,
+) (types.ByteCount, types.DocumentCount, bool, error) {
 	lo.Assertf(
-		task.Generation == 0,
-		"generation should be 0 (task: %+v)",
-		task,
+		task.Status == tasks.Processing,
+		"task %v status should be %#q but is %#q",
+		task.PrimaryKey,
+		tasks.Processing,
+		task.Status,
 	)
-
-	srcColl := verifier.srcClientCollection(task)
-	srcNs := FullName(srcColl)
-	dstNs := FullName(verifier.dstClientCollection(task))
-
-	var partitionsCount int
-	var docsCount types.DocumentCount
-
-	shardKeyFields, err := verifier.getShardKeyFields(
-		ctx,
-		&uuidutil.NamespaceAndUUID{
-			DBName:   srcColl.Database().Name(),
-			CollName: srcColl.Name(),
-		},
-	)
-	if err != nil {
-		return errors.Wrapf(err, "getting %#q’s shard key", srcNs)
-	}
 
 	collBytes, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
 		ctx,
@@ -1308,7 +1302,7 @@ func (verifier *Verifier) partitionCollection(
 		srcColl,
 	)
 	if err != nil {
-		return errors.Wrapf(err, "getting %#q’s size", FullName(srcColl))
+		return 0, 0, false, errors.Wrapf(err, "getting %#q’s size", FullName(srcColl))
 	}
 
 	task.SourceDocumentCount = docsCount
@@ -1325,6 +1319,40 @@ func (verifier *Verifier) partitionCollection(
 			Int64("sizeInBytes", int64(collBytes)).
 			Err(err).
 			Msg("Failed to update verification task with collection stats.")
+	}
+
+	return collBytes, docsCount, isCapped, nil
+}
+
+func (verifier *Verifier) partitionCollection(
+	ctx context.Context,
+	task *tasks.Task,
+	workerNum int,
+	collBytes types.ByteCount,
+	docsCount types.DocumentCount,
+	isCapped bool,
+) error {
+	lo.Assertf(
+		task.Generation == 0,
+		"generation should be 0 (task: %+v)",
+		task,
+	)
+
+	srcColl := verifier.srcClientCollection(task)
+	srcNs := FullName(srcColl)
+	dstNs := FullName(verifier.dstClientCollection(task))
+
+	var partitionsCount int
+
+	shardKeyFields, err := verifier.getShardKeyFields(
+		ctx,
+		&uuidutil.NamespaceAndUUID{
+			DBName:   srcColl.Database().Name(),
+			CollName: srcColl.Name(),
+		},
+	)
+	if err != nil {
+		return errors.Wrapf(err, "getting %#q’s shard key", srcNs)
 	}
 
 	idealNumPartitions := util.DivideToF64(collBytes, verifier.partitionSizeInBytes)
