@@ -22,6 +22,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 )
 
 func (suite *IntegrationTestSuite) skipUnlessCanPartitionNatural() [3]int {
@@ -51,7 +52,9 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
 	ctx := suite.T().Context()
 	t := suite.T()
 
-	coll := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("c")
+	coll := suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection("c", options.Collection().SetReadConcern(readconcern.Majority()))
 
 	// Insert ~40 MiB of data into the collection.
 	// Each document is roughly 220 bytes.

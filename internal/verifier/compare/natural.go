@@ -149,13 +149,16 @@ func ReadNaturalPartitionFromSource(
 		// }
 		//
 		// NB: If the user document is 16 MiB, then the above will exceed that.
-		// The server allows this, thankfully.
+		// Thankfully, the server allows an extra 16 KiB of headroom for such.
 		cmd := bson.D{
 			{"find", coll.Name()},
 			{"hint", bson.D{{"$natural", 1}}},
 			{"showRecordId", true},
 			{"$_requestResumeToken", true},
 			{"filter", docFilter.OrElse(bson.D{})},
+			{"readConcern", bson.D{
+				{"level", "majority"},
+			}},
 			{"projection", bson.D{
 				{"_id", 0},
 				{"doc", docProjection},
@@ -297,7 +300,7 @@ cursorLoop:
 	for {
 		if !cursor.Next(ctx) {
 			if cursor.Err() != nil {
-				return errors.Wrapf(err, "reading documents")
+				return errors.Wrapf(cursor.Err(), "reading documents")
 			}
 
 			break
