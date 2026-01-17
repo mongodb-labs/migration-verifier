@@ -148,7 +148,8 @@ func ReadNaturalPartitionFromSource(
 		//      doc:       { ... },
 		// }
 		//
-		// NB: the server allows the above even if the user document is 16 MiB.
+		// NB: If the user document is 16 MiB, then the above will exceed that.
+		// The server allows this, thankfully.
 		cmd := bson.D{
 			{"find", coll.Name()},
 			{"hint", bson.D{{"$natural", 1}}},
