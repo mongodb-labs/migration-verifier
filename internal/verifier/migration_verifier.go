@@ -164,8 +164,6 @@ type Verifier struct {
 	bytesComparedHistory *history.History[types.ByteCount]
 
 	verificationStatusCheckInterval time.Duration
-
-	warnNonResumableNaturalOnce sync.Once
 }
 
 var _ MigrationVerifierAPI = &Verifier{}

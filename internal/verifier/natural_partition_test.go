@@ -84,7 +84,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
 				verifier.SetPartitioningScheme(partitions.SchemeNatural)
 				verifier.SetPartitionSizeMB(1)
 
-				defer verifier.verificationTaskCollection().Drop(ctx)
+				defer suite.Assert().NoError(verifier.verificationTaskCollection().Drop(ctx))
 
 				suite.Require().NoError(coll.Drop(ctx))
 
