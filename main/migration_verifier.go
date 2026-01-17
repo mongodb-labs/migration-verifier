@@ -51,7 +51,7 @@ const (
 	configFileFlag        = "configFile"
 	pprofInterval         = "pprofInterval"
 	startFlag             = "start"
-	partitionBy           = "partitionBy"
+	partitioningScheme    = "partitionBy"
 
 	buildVarDefaultStr = "Unknown; build with build.sh."
 )
@@ -154,10 +154,10 @@ func main() {
 			Usage: "`name` of the database in which to store verification metadata",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  partitionBy,
-			Value: partitions.PartitionByDefault,
+			Name:  partitioningScheme,
+			Value: partitions.SchemeDefault,
 			Usage: "Method to partition documents. One of: " + strings.Join(
-				partitions.PartitionByMethods,
+				partitions.Schemes,
 				", ",
 			),
 		}),
@@ -400,11 +400,11 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 	v.SetDocCompareMethod(docCompareMethod)
 
-	partitionBy := cCtx.String(partitionBy)
-	if !slices.Contains(partitions.PartitionByMethods, partitionBy) {
-		return nil, errors.Errorf("invalid partitioning method (%s); valid values are: %#q", partitionBy, partitions.PartitionByMethods)
+	partitioningScheme := cCtx.String(partitioningScheme)
+	if !slices.Contains(partitions.Schemes, partitioningScheme) {
+		return nil, errors.Errorf("invalid partitioning scheme (%s); valid values are: %#q", partitioningScheme, partitions.Schemes)
 	}
-	v.SetPartitionBy(partitions.PartitioningScheme(partitionBy))
+	v.SetPartitioningScheme(partitions.Scheme(partitioningScheme))
 
 	err = v.SetReadPreference(cCtx.String(readPreference))
 	if err != nil {

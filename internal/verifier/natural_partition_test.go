@@ -1,7 +1,10 @@
 package verifier
 
 import (
+	"context"
+	"fmt"
 	"strings"
+	"testing"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -21,33 +24,206 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
+func (suite *IntegrationTestSuite) skipUnlessCanPartitionNatural() [3]int {
+	ctx := suite.T().Context()
+
+	topology := suite.GetTopology(suite.srcMongoClient)
+	if topology != util.TopologyReplset {
+		suite.T().Skipf("source must be replset; instead we have %#q", topology)
+	}
+
+	version, err := mmongo.GetVersionArray(
+		ctx,
+		suite.srcMongoClient,
+	)
+	suite.Require().NoError(err)
+
+	if err := mmongo.WhyFindCannotResume([2]int(version[:])); err != nil {
+		suite.T().Skipf("no natural scan (%v)", err)
+	}
+
+	return version
+}
+
+func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
+	version := suite.skipUnlessCanPartitionNatural()
+
 	ctx := suite.T().Context()
 	t := suite.T()
 
-	for _, clustered := range mslices.Of(true, false) {
-		topology := suite.GetTopology(suite.srcMongoClient)
-		if topology != util.TopologyReplset {
-			t.Skipf("source must be replset; instead we have %#q", topology)
-		}
+	coll := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("c")
 
-		version, err := mmongo.GetVersionArray(
-			ctx,
-			suite.srcMongoClient,
+	// Insert ~20 MiB of data into the collection.
+	// Each document is roughly 220 bytes.
+	docs := lo.RepeatBy(
+		100_000,
+		func(i int) bson.D {
+			return bson.D{
+				{"_id", i},
+				{"str", strings.Repeat("x", 200)},
+			}
+		},
+	)
+
+	directClient, _ := getDirectClientAndHostname(
+		ctx,
+		suite.T(),
+		suite.srcMongoClient,
+		suite.srcConnStr,
+	)
+
+	for _, clustered := range mslices.Of(false, true) {
+		suite.Run(
+			fmt.Sprintf("clustered %t", clustered),
+			func() {
+				if version[0] < 6 && clustered {
+					suite.T().Skip("clustered requires v6+")
+				}
+
+				verifier := suite.BuildVerifier()
+				verifier.SetPartitioningScheme(partitions.SchemeNatural)
+				verifier.SetPartitionSizeMB(1)
+
+				defer verifier.verificationTaskCollection().Drop(ctx)
+
+				suite.Require().NoError(coll.Drop(ctx))
+
+				if clustered {
+					suite.Require().NoError(
+						coll.Database().CreateCollection(
+							ctx,
+							coll.Name(),
+							options.CreateCollection().
+								SetClusteredIndex(
+									bson.D{
+										{"key", bson.D{{"_id", 1}}},
+										{"unique", true},
+									},
+								),
+						),
+					)
+				}
+
+				_, err := coll.InsertMany(ctx, docs)
+				require.NoError(t, err)
+
+				task := &tasks.Task{
+					PrimaryKey: bson.NewObjectID(),
+					Type:       tasks.VerifyCollection,
+					QueryFilter: tasks.QueryFilter{
+						Namespace: FullName(coll),
+					},
+				}
+
+				collBytes, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
+					ctx,
+					verifier.logger,
+					coll,
+				)
+				suite.Require().NoError(err, "fetching & persisting collection size")
+
+				err = verifier.partitionCollection(
+					ctx,
+					task,
+					0,
+					collBytes,
+					docsCount,
+					isCapped,
+				)
+				suite.Require().NoError(err)
+
+				// Now delete half of the collection’s documents randomly:
+				_, err = coll.DeleteMany(
+					ctx,
+					bson.D{{"$sampleRate", 0.5}},
+				)
+				suite.Require().NoError(err)
+
+				cursor, err := coll.Find(ctx, bson.D{})
+				suite.Require().NoError(err)
+
+				var undeletedDocs []bson.D
+				suite.Require().NoError(cursor.All(ctx, &undeletedDocs))
+
+				cursor, err = verifier.verificationTaskCollection().Find(
+					ctx,
+					bson.D{
+						{"type", tasks.VerifyDocuments},
+					},
+					options.Find().SetSort(
+						bson.D{{"query_filter.partition._id.lowerBound", 1}},
+					),
+				)
+				suite.Require().NoError(err)
+
+				var theTasks []tasks.Task
+				suite.Require().NoError(cursor.All(ctx, &theTasks))
+
+				var taskDocCounter int
+
+				for _, task := range theTasks {
+					toCompare := make(chan compare.DocWithTS, len(undeletedDocs))
+					toDst := make(chan []compare.DocID, len(undeletedDocs))
+
+					err = compare.ReadNaturalPartitionFromSource(
+						ctx,
+						verifier.logger,
+						&MockSuccessNotifier{},
+						directClient,
+						verifier.verificationTaskCollection(),
+						&task,
+						option.None[bson.D](),
+						compare.Binary,
+						toCompare,
+						toDst,
+					)
+					require.NoError(t, err, "should read")
+
+					for d := range toCompare {
+						var doc bson.D
+						suite.Require().NoError(bson.Unmarshal(d.Doc, &doc), "unmarshal")
+
+						suite.Require().Equal(
+							undeletedDocs[taskDocCounter],
+							doc,
+							"doc %d",
+							taskDocCounter,
+						)
+
+						taskDocCounter++
+					}
+				}
+			},
 		)
-		require.NoError(t, err)
+	}
+}
 
+func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
+	version := suite.skipUnlessCanPartitionNatural()
+
+	ctx := suite.T().Context()
+	t := suite.T()
+
+	logger, _ := getLoggerAndWriter("stdout")
+
+	coll := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("c")
+
+	// Insert ~100 MiB of data into the collection.
+	// Each document is roughly 220 bytes.
+	docs := lo.RepeatBy(
+		50_000,
+		func(i int) bson.D {
+			return bson.D{
+				{"_id", i},
+				{"str", strings.Repeat("x", 200)},
+			}
+		},
+	)
+
+	for _, clustered := range mslices.Of(true, false) {
 		if version[0] < 6 && clustered {
 			suite.T().Skip("clustered requires v6+")
 		}
-
-		if err := mmongo.WhyFindCannotResume([2]int(version[:])); err != nil {
-			suite.T().Skipf("no natural scan (%v)", err)
-		}
-
-		logger, _ := getLoggerAndWriter("stdout")
-
-		coll := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("c")
 
 		suite.Require().NoError(coll.Drop(ctx))
 
@@ -67,18 +243,7 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 			)
 		}
 
-		// Insert ~100 MiB of data into the collection.
-		// Each document is roughly 220 bytes.
-		docs := lo.RepeatBy(
-			50_000,
-			func(i int) bson.D {
-				return bson.D{
-					{"_id", i},
-					{"str", strings.Repeat("x", 200)},
-				}
-			},
-		)
-		_, err = coll.InsertMany(ctx, docs)
+		_, err := coll.InsertMany(ctx, docs)
 		require.NoError(t, err)
 
 		// Partition the collection in 100-KB chunks.
@@ -145,12 +310,37 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 	}
 }
 
-func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
-	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+func getDirectClientAndHostname(
+	ctx context.Context,
+	t *testing.T,
+	client *mongo.Client,
+	connstr string,
+) (*mongo.Client, string) {
+	helloRaw, err := util.GetHelloRaw(ctx, client)
+	require.NoError(t, err)
 
-	if suite.GetTopology(suite.srcMongoClient) != util.TopologyReplset {
-		suite.T().Skipf("Source must be a replica set.")
-	}
+	hostnameRV, err := helloRaw.LookupErr("me")
+	require.NoError(t, err)
+
+	hostname, err := bsontools.RawValueTo[string](hostnameRV)
+	require.NoError(t, err)
+
+	connstr, err = compare.SetDirectHostInConnectionString(
+		connstr,
+		hostname,
+	)
+	require.NoError(t, err)
+
+	directClient, err := mongo.Connect(options.Client().ApplyURI(connstr))
+	require.NoError(t, err)
+
+	return directClient, hostname
+}
+
+func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
+	suite.skipUnlessCanPartitionNatural()
+
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
 	ctx := suite.T().Context()
 	t := suite.T()
@@ -161,10 +351,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 	)
 	require.NoError(t, err)
 
-	if err := mmongo.WhyFindCannotResume([2]int(version[:])); err != nil {
-		suite.T().Skipf("no natural scan (%v)", err)
-	}
-
 	dbName := suite.DBNameForTest()
 
 	logger, _ := getLoggerAndWriter("stdout")
@@ -173,23 +359,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 
 	client := suite.srcMongoClient
 
-	helloRaw, err := util.GetHelloRaw(ctx, client)
-	require.NoError(t, err)
-
-	hostnameRV, err := helloRaw.LookupErr("me")
-	require.NoError(t, err)
-
-	hostname, err := bsontools.RawValueTo[string](hostnameRV)
-	require.NoError(t, err)
-
-	connstr, err := compare.SetDirectHostInConnectionString(
-		suite.srcConnStr,
-		hostname,
-	)
-	require.NoError(t, err)
-
-	directClient, err := mongo.Connect(options.Client().ApplyURI(connstr))
-	require.NoError(t, err)
+	directClient, hostname := getDirectClientAndHostname(ctx, t, client, suite.srcConnStr)
 
 	for _, clustered := range mslices.Of(true, false) {
 		suite.Run(
@@ -277,7 +447,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 						err = compare.ReadNaturalPartitionFromSource(
 							ctx,
 							logger,
-							notifier,
+							&MockSuccessNotifier{},
 							directClient,
 							coll,
 							task,

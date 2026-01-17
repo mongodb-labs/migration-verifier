@@ -186,7 +186,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		// Forgo validation because the tested code should do that.
 	}
 	verifier.SetDocCompareMethod(docCompareMethod)
-	verifier.SetPartitionBy(partitions.PartitionByID)
+	verifier.SetPartitioningScheme(partitions.SchemeID)
 
 	ctx := suite.Context()
 
@@ -217,10 +217,10 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	suite.Require().NoError(verifier.SetDstChangeReaderMethod(envDstChangeReader))
 
 	envPartitionBy := cmp.Or(
-		partitions.PartitioningScheme(os.Getenv("MVTEST_PARTITION_BY")),
-		partitions.PartitionByID,
+		partitions.Scheme(os.Getenv("MVTEST_PARTITION_BY")),
+		partitions.SchemeID,
 	)
-	verifier.SetPartitionBy(envPartitionBy)
+	verifier.SetPartitioningScheme(envPartitionBy)
 
 	suite.Require().NoError(verifier.initializeChangeReaders())
 

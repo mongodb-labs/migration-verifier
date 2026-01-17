@@ -126,7 +126,7 @@ type Verifier struct {
 	generationPauseDelay time.Duration
 	workerSleepDelay     time.Duration
 	docCompareMethod     compare.Method
-	partitionBy          partitions.PartitioningScheme
+	partitioningScheme   partitions.Scheme
 	verifyAll            bool
 	startClean           bool
 
@@ -394,8 +394,8 @@ func (verifier *Verifier) SetDocCompareMethod(method compare.Method) {
 	verifier.docCompareMethod = method
 }
 
-func (verifier *Verifier) SetPartitionBy(method partitions.PartitioningScheme) {
-	verifier.partitionBy = method
+func (verifier *Verifier) SetPartitioningScheme(method partitions.Scheme) {
+	verifier.partitioningScheme = method
 }
 
 func (verifier *Verifier) SetSrcChangeReaderMethod(method string) error {
@@ -1411,9 +1411,9 @@ func (verifier *Verifier) partitionCollection(
 		Float64("idealPartitionsCount", idealNumPartitions).
 		Msg("Partitioning collection.")
 
-	switch verifier.partitionBy {
+	switch verifier.partitioningScheme {
 
-	case partitions.PartitionByID:
+	case partitions.SchemeID:
 		if verifier.srcHasSampleRate() {
 			var err error
 			partitionsCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task, shardKeyFields)
@@ -1445,7 +1445,7 @@ func (verifier *Verifier) partitionCollection(
 				}
 			}
 		}
-	case partitions.PartitionByNatural:
+	case partitions.SchemeNatural:
 		clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.srcClient)
 		if err != nil {
 			return errors.Wrapf(err, "reading source cluster info")
@@ -1512,7 +1512,7 @@ func (verifier *Verifier) partitionCollection(
 			}
 		}
 	default:
-		panic(fmt.Sprintf("bad partition method (%#q); how did that happen?!?", verifier.partitionBy))
+		panic(fmt.Sprintf("bad partition method (%#q); how did that happen?!?", verifier.partitioningScheme))
 	}
 
 	verifier.logger.Debug().

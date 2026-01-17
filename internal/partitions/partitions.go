@@ -20,7 +20,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-type PartitioningScheme string
+type Scheme string
 
 const (
 	//
@@ -74,15 +74,15 @@ const (
 	//
 	DefaultPartitionMiB = 400
 
-	PartitionByID      PartitioningScheme = "_id"
-	PartitionByNatural PartitioningScheme = "natural"
+	SchemeID      Scheme = "_id"
+	SchemeNatural Scheme = "natural"
 )
 
-var PartitionByMethods = mslices.Of(
-	string(PartitionByID),
-	string(PartitionByNatural),
+var Schemes = mslices.Of(
+	string(SchemeID),
+	string(SchemeNatural),
 )
-var PartitionByDefault = PartitionByMethods[0]
+var SchemeDefault = Schemes[0]
 
 // Partitions is a slice of partitions.
 type Partitions struct {

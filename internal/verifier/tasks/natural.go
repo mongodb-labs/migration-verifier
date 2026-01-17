@@ -10,28 +10,29 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-func FetchPriorResumeTokens(
+func FetchPriorRecordIDs(
 	ctx context.Context,
 	namespace string,
 	recordID bson.RawValue,
 	tasksColl *mongo.Collection,
-) ([]bson.Raw, error) {
+) ([]bson.RawValue, error) {
 	cursor, err := tasksColl.Find(
 		ctx,
 		bson.D{
 			{"generation", 0},
 			{"type", VerifyDocuments},
 			{"query_filter.namespace", namespace},
-			{"query_filter.partition._id.lowerBound", bson.D{
+			{"query_filter.partition._id.lowerBound.$recordId", bson.D{
 				{"$lt", recordID},
 			}},
 		},
 		options.Find().
 			SetProjection(bson.D{
-				{"rid", "$query_filter.partition._id.lowerBound"},
+				{"_id", 0},
+				{"rid", "$query_filter.partition._id.lowerBound.$recordId"},
 			}).
 			SetSort(bson.D{
-				{"query_filter.partition._id.lowerBound", -1},
+				{"query_filter.partition._id.lowerBound.$recordId", -1},
 			}),
 	)
 	if err != nil {
@@ -39,7 +40,7 @@ func FetchPriorResumeTokens(
 	}
 
 	type rec struct {
-		RID bson.Raw
+		RID bson.RawValue
 	}
 
 	var recs []rec
@@ -50,7 +51,7 @@ func FetchPriorResumeTokens(
 
 	return mslices.Map1(
 		recs,
-		func(r rec) bson.Raw {
+		func(r rec) bson.RawValue {
 			return r.RID
 		},
 	), nil

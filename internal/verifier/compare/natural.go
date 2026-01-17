@@ -55,7 +55,7 @@ func ReadNaturalPartitionFromSource(
 	ctx context.Context,
 	logger *logger.Logger,
 	retryState retry.SuccessNotifier,
-	client *mongo.Client,
+	srcClient *mongo.Client,
 	tasksColl *mongo.Collection,
 	task *tasks.Task,
 	docFilter option.Option[bson.D],
@@ -75,7 +75,7 @@ func ReadNaturalPartitionFromSource(
 
 	upperRecordID := task.QueryFilter.Partition.Upper
 
-	sess, err := client.StartSession()
+	sess, err := srcClient.StartSession()
 	if err != nil {
 		return errors.Wrapf(err, "starting session")
 	}
@@ -84,7 +84,7 @@ func ReadNaturalPartitionFromSource(
 	sctx := mongo.NewSessionContext(ctx, sess)
 
 	db, collName := mmongo.SplitNamespace(task.QueryFilter.Namespace)
-	coll := client.Database(db).Collection(collName)
+	coll := srcClient.Database(db).Collection(collName)
 
 	var cursor *mongo.Cursor
 
@@ -101,7 +101,7 @@ func ReadNaturalPartitionFromSource(
 	var startRecordID option.Option[bson.RawValue]
 
 	if hasToken {
-		version, err := mmongo.GetVersionArray(ctx, client)
+		version, err := mmongo.GetVersionArray(ctx, srcClient)
 		if err != nil {
 			return errors.Wrapf(err, "fetching server version")
 		}
@@ -186,7 +186,7 @@ func ReadNaturalPartitionFromSource(
 			Msg("Resume token is no longer valid. Will attempt use of earlier tokens.")
 
 		// NB: These are in descending order.
-		priorTokens, err := tasks.FetchPriorResumeTokens(
+		priorRecordIDs, err := tasks.FetchPriorRecordIDs(
 			ctx,
 			task.QueryFilter.Namespace,
 			startRecordID.MustGet(),
@@ -198,15 +198,15 @@ func ReadNaturalPartitionFromSource(
 
 		failedTokens := 1
 
-		for _, token := range priorTokens {
+		for _, priorRecID := range priorRecordIDs {
 			found, err := bsontools.ReplaceInRaw(
 				&cmdRaw,
-				bsontools.ToRawValue(token),
+				priorRecID,
 				resumeTokenParameter,
 				"$recordId",
 			)
 			if err != nil {
-				return errors.Wrapf(err, "replacing resume token (new: %s) in command (%v)", cmdRaw, token)
+				return errors.Wrapf(err, "replacing resume token (new: %s) in command (%v)", cmdRaw, priorRecID)
 			}
 
 			lo.Assertf(found, "command should have resume token: %+v", cmdRaw)
@@ -216,7 +216,7 @@ func ReadNaturalPartitionFromSource(
 				logger.Info().
 					Any("task", task.PrimaryKey).
 					Str("srcNamespace", task.QueryFilter.Namespace).
-					Int("skippedPartitions", failedTokens-1).
+					Int("skippedPartitions", failedTokens).
 					Msg("Due to a document deletion on the source cluster, this task has to read other tasks’ documents. This task may take longer to complete than others.")
 
 				break
@@ -229,7 +229,7 @@ func ReadNaturalPartitionFromSource(
 			failedTokens++
 		}
 
-		if failedTokens > len(priorTokens) {
+		if failedTokens > len(priorRecordIDs) {
 			logger.Info().
 				Any("task", task.PrimaryKey).
 				Str("srcNamespace", task.QueryFilter.Namespace).
