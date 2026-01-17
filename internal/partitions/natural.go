@@ -19,6 +19,11 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
+const (
+	// RecordID is the server’s name for record IDs in responses.
+	RecordID = "$recordId"
+)
+
 // PartitionCollectionNaturalOrder spawns a goroutine that partitions the
 // collection in natural order.
 //
@@ -79,7 +84,7 @@ func PartitionCollectionNaturalOrder(
 		return nil, errors.Wrapf(err, "extracting resume token")
 	}
 	if !c.IsFinished() {
-		recIDRV, err := curToken.LookupErr("$recordId")
+		recIDRV, err := curToken.LookupErr(RecordID)
 		if err != nil {
 			return nil, errors.Wrapf(err, "extracting record ID from resume token (%v)", curToken)
 		}
@@ -132,7 +137,7 @@ func PartitionCollectionNaturalOrder(
 			}
 
 			var recIDRV bson.RawValue
-			recIDRV, err = curToken.LookupErr("$recordId")
+			recIDRV, err = curToken.LookupErr(RecordID)
 			if err != nil {
 				err = errors.Wrapf(err, "extracting record ID from resume token (%v)", curToken)
 				break
@@ -237,7 +242,7 @@ func getTopRecordID(
 		return option.None[bson.RawValue](), nil
 	}
 
-	recID, err := lastDoc.LookupErr("$recordId")
+	recID, err := lastDoc.LookupErr(RecordID)
 
 	return option.Some(recID), errors.Wrapf(err, "extracting record ID (doc: %v)", lastDoc)
 }

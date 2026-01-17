@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/mslices"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -22,7 +23,7 @@ func FetchPriorResumeTokens(
 			{"generation", 0},
 			{"type", VerifyDocuments},
 			{"query_filter.namespace", namespace},
-			{"query_filter.partition._id.lowerBound.$recordId", bson.D{
+			{"query_filter.partition._id.lowerBound." + partitions.RecordID, bson.D{
 				{"$lt", recordID},
 			}},
 		},
@@ -32,7 +33,7 @@ func FetchPriorResumeTokens(
 				{"token", "$query_filter.partition._id.lowerBound"},
 			}).
 			SetSort(bson.D{
-				{"query_filter.partition._id.lowerBound.$recordId", -1},
+				{"query_filter.partition._id.lowerBound." + partitions.RecordID, -1},
 			}),
 	)
 	if err != nil {

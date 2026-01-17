@@ -65,6 +65,14 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
 		},
 	)
 
+	docs = append(
+		docs,
+		bson.D{
+			{"_id", -1},
+			{"x", strings.Repeat("x", (16<<20)-22)},
+		},
+	)
+
 	directClient, _ := getDirectClientAndHostname(
 		ctx,
 		suite.T(),
@@ -436,7 +444,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								Partition: &partitions.Partition{
 									Natural:  true,
 									Hostname: option.Some(hostname),
-									Upper:    lo.Must(resumeTokens[3].LookupErr("$recordId")),
+									Upper:    lo.Must(resumeTokens[3].LookupErr(partitions.RecordID)),
 								},
 							},
 						}
@@ -518,7 +526,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 									Key: partitions.PartitionKey{
 										Lower: bsontools.ToRawValue(resumeTokens[3]),
 									},
-									Upper: lo.Must(resumeTokens[7].LookupErr("$recordId")),
+									Upper: lo.Must(resumeTokens[7].LookupErr(partitions.RecordID)),
 								},
 							},
 						}

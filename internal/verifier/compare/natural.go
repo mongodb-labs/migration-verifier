@@ -10,6 +10,7 @@ import (
 
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
@@ -113,7 +114,7 @@ func ReadNaturalPartitionFromSource(
 			return errors.Wrapf(err, "resume token to %T", rawToken)
 		}
 
-		recIDRV, err := rawToken.LookupErr("$recordId")
+		recIDRV, err := rawToken.LookupErr(partitions.RecordID)
 		if err != nil {
 			return errors.Wrapf(err, "extracting record ID (resume token: %+v)", rawToken)
 		}
@@ -141,6 +142,13 @@ func ReadNaturalPartitionFromSource(
 	}
 
 	createCmd := func(resumeTokenOpt option.Option[bson.RawValue]) bson.D {
+		// This will yield documents of this form:
+		// {
+		//      $recordId: <...>,
+		//      doc:       { ... },
+		// }
+		//
+		// NB: the server allows the above even if the user document is 16 MiB.
 		cmd := bson.D{
 			{"find", coll.Name()},
 			{"hint", bson.D{{"$natural", 1}}},
@@ -149,7 +157,7 @@ func ReadNaturalPartitionFromSource(
 			{"filter", docFilter.OrElse(bson.D{})},
 			{"projection", bson.D{
 				{"_id", 0},
-				{"_", docProjection},
+				{"doc", docProjection},
 			}},
 		}
 
@@ -299,7 +307,7 @@ cursorLoop:
 			panic("session should have optime after reading a document")
 		}
 
-		recIDRV, err := cursor.Current.LookupErr("$recordId")
+		recIDRV, err := cursor.Current.LookupErr(partitions.RecordID)
 		if err != nil {
 			return errors.Wrapf(err, "getting record ID")
 		}
@@ -328,7 +336,7 @@ cursorLoop:
 
 		var userDoc bson.Raw
 
-		userDocRV, err := cursor.Current.LookupErr("_")
+		userDocRV, err := cursor.Current.LookupErr("doc")
 		if err != nil {
 			return errors.Wrapf(err, "getting user document")
 		}
