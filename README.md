@@ -419,7 +419,7 @@ source, Migration Verifier fetches those same documents by `_id` from the
 destination. There is no full collection scan on the destination.
 Because of this, under natural partitioning Migration Verifier cannot detect
 documents that exist only on the destination _unless_ such documents change
-during verification.
+(or are added) during verification.
 
 As of this writing, no migration tooling from MongoDB is expected to create
 such documents.
@@ -432,8 +432,8 @@ if the record ID’s referent document has been deleted, the server (prior to 7.
 cannot resume directly from that record ID.
 
 To compensate, in such cases Migration Verifier will read lower record IDs from
-other verification tasks and try to resume from them. In effect, the source is
-reading 2 or more tasks’ documents in a single cursor. Migration Verifier will
+other verification tasks and try to resume from them. In effect, 2 or more
+tasks’ documents are read in a single cursor. Migration Verifier will
 discard any documents that aren’t actually part of the partition to be
 compared.
 

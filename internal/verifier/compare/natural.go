@@ -127,11 +127,6 @@ func ReadNaturalPartitionFromSource(
 		"$_resumeAfter",
 	)
 
-	cmd := bson.D{
-		{"find", coll.Name()},
-		{"hint", bson.D{{"$natural", 1}}},
-	}
-
 	// Because we send `showRecordId` we need to disambiguate the
 	// server-added $recordId field from a user field of the same name
 	// (however unlikely!). We do that by projecting the original
@@ -145,34 +140,27 @@ func ReadNaturalPartitionFromSource(
 		docProjection = "$$ROOT"
 	}
 
-	cmd = append(
-		cmd,
-		bson.D{
+	createCmd := func(resumeTokenOpt option.Option[bson.RawValue]) bson.D {
+		cmd := bson.D{
+			{"find", coll.Name()},
+			{"hint", bson.D{{"$natural", 1}}},
 			{"showRecordId", true},
 			{"$_requestResumeToken", true},
+			{"filter", docFilter.OrElse(bson.D{})},
 			{"projection", bson.D{
 				{"_id", 0},
 				{"_", docProjection},
 			}},
-		}...,
-	)
+		}
 
-	if hasToken {
-		cmd = append(cmd, bson.E{resumeTokenParameter, resumeToken})
+		if token, has := resumeTokenOpt.Get(); has {
+			cmd = append(cmd, bson.E{resumeTokenParameter, token})
+		}
+
+		return cmd
 	}
 
-	if filter, has := docFilter.Get(); has {
-		cmd = append(cmd, bson.E{"filter", filter})
-	}
-
-	cmdBytes, err := bson.Marshal(cmd)
-	if err != nil {
-		return errors.Wrapf(err, "marshaling open-cursor request (%+v)", cmd)
-	}
-
-	cmdRaw := bson.Raw(cmdBytes)
-
-	cursor, err = coll.Database().RunCommandCursor(sctx, cmdRaw)
+	cursor, err = coll.Database().RunCommandCursor(sctx, createCmd(resumeTokenOpt))
 
 	if err != nil {
 		if !mmongo.ErrorHasCode(err, util.KeyNotFoundErrCode) {
@@ -199,18 +187,9 @@ func ReadNaturalPartitionFromSource(
 		failedTokens := 1
 
 		for _, priorResumeToken := range priorResumeTokens {
-			found, err := bsontools.ReplaceInRaw(
-				&cmdRaw,
-				bsontools.ToRawValue(priorResumeToken),
-				resumeTokenParameter,
-			)
-			if err != nil {
-				return errors.Wrapf(err, "replacing resume token (new: %s) in command (%v)", cmdRaw, priorResumeToken)
-			}
+			cmd := createCmd(option.Some(bsontools.ToRawValue(priorResumeToken)))
 
-			lo.Assertf(found, "command should have resume token: %+v", cmdRaw)
-
-			cursor, err = coll.Database().RunCommandCursor(sctx, cmdRaw)
+			cursor, err = coll.Database().RunCommandCursor(sctx, cmd)
 			if err == nil {
 				logger.Info().
 					Any("task", task.PrimaryKey).
@@ -235,17 +214,9 @@ func ReadNaturalPartitionFromSource(
 				Int("skippedPartitions", failedTokens).
 				Msg("Due to a document deletion on the source cluster, this task has to read the entire collection. This task may take longer to complete than others.")
 
-			// If we’re here, then every resume token has failed, and we
-			// need to read the entire collection. Hopefully the original
-			// partition was an early one …
-			found, err := bsontools.RemoveFromRaw(&cmdRaw, resumeTokenParameter, "$recordId")
-			if err != nil {
-				return errors.Wrapf(err, "removing resume token from command (%v)", cmdRaw)
-			}
+			cmd := createCmd(option.None[bson.RawValue]())
 
-			lo.Assertf(found, "command should have resume token: %+v", cmdRaw)
-
-			cursor, err = coll.Database().RunCommandCursor(sctx, cmdRaw)
+			cursor, err = coll.Database().RunCommandCursor(sctx, cmd)
 			if err != nil {
 				return errors.Wrapf(err, "opening source cursor from beginning")
 			}
