@@ -25,80 +25,123 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 	ctx := suite.T().Context()
 	t := suite.T()
 
-	topology := suite.GetTopology(suite.srcMongoClient)
-	if topology != util.TopologyReplset {
-		t.Skipf("source must be replset; instead we have %#q", topology)
-	}
-
-	version, err := mmongo.GetVersionArray(
-		ctx,
-		suite.srcMongoClient,
-	)
-	require.NoError(t, err)
-
-	if err := mmongo.WhyFindCannotResume([2]int(version[:])); err != nil {
-		suite.T().Skipf("no natural scan (%v)", err)
-	}
-
-	logger, _ := getLoggerAndWriter("stdout")
-
-	coll := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("c")
-
-	// Insert ~100 MiB of data into the collection.
-	// Each document is roughly 220 bytes.
-	docs := lo.RepeatBy(
-		50_000,
-		func(i int) bson.D {
-			return bson.D{
-				{"_id", i},
-				{"str", strings.Repeat("x", 200)},
-			}
-		},
-	)
-	_, err = coll.InsertMany(ctx, docs)
-	require.NoError(t, err)
-
-	// Partition the collection in 100-KB chunks.
-	pChan, err := partitions.PartitionCollectionNaturalOrder(
-		ctx,
-		coll,
-		100_000,
-		logger,
-	)
-	require.NoError(t, err)
-
-	hello, err := util.GetHelloRaw(ctx, suite.srcMongoClient)
-	require.NoError(t, err)
-
-	hostnameRV, err := hello.LookupErr("me")
-	require.NoError(t, err)
-
-	hostname, err := bsontools.RawValueTo[string](hostnameRV)
-	require.NoError(t, err)
-
-	results := lo.ChannelToSlice(pChan)
-
-	// It *could* happen that we get a single partition, but it seems
-	// very unlikely to happen anytime soon.
-	assert.GreaterOrEqual(t, len(results), 2)
-
-	for i, result := range results {
-		partition, err := result.Get()
-		require.NoError(t, err, "should create partition")
-
-		require.True(t, partition.Natural, "must be natural partition")
-		require.NotZero(t, partition.Hostname, "need hostname")
-		require.Equal(t, hostname, partition.Hostname.MustGet(), "hostname")
-
-		if i == 0 {
-			assert.Equal(t, bson.TypeNull, partition.Key.Lower.Type)
-		} else {
-			require.Equal(t, bson.TypeEmbeddedDocument, partition.Key.Lower.Type)
+	for _, clustered := range mslices.Of(true, false) {
+		topology := suite.GetTopology(suite.srcMongoClient)
+		if topology != util.TopologyReplset {
+			t.Skipf("source must be replset; instead we have %#q", topology)
 		}
 
-		// Even the last partition should have a non-nil upper bound because
-		// this is a nonempty collection.
-		require.Equal(t, bson.TypeInt64, partition.Upper.Type)
+		version, err := mmongo.GetVersionArray(
+			ctx,
+			suite.srcMongoClient,
+		)
+		require.NoError(t, err)
+
+		if version[0] < 6 && clustered {
+			suite.T().Skip("clustered requires v6+")
+		}
+
+		if err := mmongo.WhyFindCannotResume([2]int(version[:])); err != nil {
+			suite.T().Skipf("no natural scan (%v)", err)
+		}
+
+		logger, _ := getLoggerAndWriter("stdout")
+
+		coll := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("c")
+
+		suite.Require().NoError(coll.Drop(ctx))
+
+		if clustered {
+			suite.Require().NoError(
+				coll.Database().CreateCollection(
+					ctx,
+					coll.Name(),
+					options.CreateCollection().
+						SetClusteredIndex(
+							bson.D{
+								{"key", bson.D{{"_id", 1}}},
+								{"unique", true},
+							},
+						),
+				),
+			)
+		}
+
+		// Insert ~100 MiB of data into the collection.
+		// Each document is roughly 220 bytes.
+		docs := lo.RepeatBy(
+			50_000,
+			func(i int) bson.D {
+				return bson.D{
+					{"_id", i},
+					{"str", strings.Repeat("x", 200)},
+				}
+			},
+		)
+		_, err = coll.InsertMany(ctx, docs)
+		require.NoError(t, err)
+
+		// Partition the collection in 100-KB chunks.
+		pChan, err := partitions.PartitionCollectionNaturalOrder(
+			ctx,
+			coll,
+			100_000,
+			logger,
+		)
+		require.NoError(t, err)
+
+		hello, err := util.GetHelloRaw(ctx, suite.srcMongoClient)
+		require.NoError(t, err)
+
+		hostnameRV, err := hello.LookupErr("me")
+		require.NoError(t, err)
+
+		hostname, err := bsontools.RawValueTo[string](hostnameRV)
+		require.NoError(t, err)
+
+		results := lo.ChannelToSlice(pChan)
+
+		// It *could* happen that we get a single partition, but it seems
+		// very unlikely to happen anytime soon.
+		assert.GreaterOrEqual(t, len(results), 2)
+
+		tasksColl := coll.Database().Collection("tasks")
+
+		for i, result := range results {
+			partition, err := result.Get()
+			require.NoError(t, err, "should create partition")
+
+			// TODO: Ensure that partitions are non-overlapping.
+
+			task := tasks.Task{
+				PrimaryKey: bson.NewObjectID(),
+				Type:       tasks.VerifyDocuments,
+				QueryFilter: tasks.QueryFilter{
+					Partition: &partition,
+				},
+			}
+
+			_, err = tasksColl.InsertOne(ctx, task)
+			require.NoError(t, err, "should insert task")
+
+			require.True(t, partition.Natural, "must be natural partition")
+			require.NotZero(t, partition.Hostname, "need hostname")
+			require.Equal(t, hostname, partition.Hostname.MustGet(), "hostname")
+
+			if i == 0 {
+				assert.Equal(t, bson.TypeNull, partition.Key.Lower.Type)
+			} else {
+				require.Equal(t, bson.TypeEmbeddedDocument, partition.Key.Lower.Type)
+			}
+
+			// Even the last partition should have a non-nil upper bound because
+			// this is a nonempty collection.
+			require.Equal(
+				t,
+				lo.Ternary(clustered, bson.TypeBinary, bson.TypeInt64),
+				partition.Upper.Type,
+			)
+		}
 	}
 }
 
