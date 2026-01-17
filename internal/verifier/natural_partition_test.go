@@ -53,10 +53,10 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
 
 	coll := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("c")
 
-	// Insert ~20 MiB of data into the collection.
+	// Insert ~40 MiB of data into the collection.
 	// Each document is roughly 220 bytes.
 	docs := lo.RepeatBy(
-		100_000,
+		200_000,
 		func(i int) bson.D {
 			return bson.D{
 				{"_id", i},

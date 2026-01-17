@@ -114,53 +114,30 @@ specific node in order to read the documents.
 
 MongoDB doesn’t expose a control for querying a range of record IDs.
 This is why lower bounds are resume tokens—which contain record IDs—rather
-than simple record IDs: MongoDB _will_ resume from a token.
+than simple record IDs: `find` _will_ resume from a token via its
+`$_resumeAfter` parameter.
 
 There’s a problem, though. Assume that the document that a given resume
 token refers to has been _deleted_. Historically, the server always returned
-an error in this case.
+an error (KeyNotFound) in this case.
 
-To handle this error, Verifier decrements the record ID and resends the
-request. Eventually there will either be a “hit” (i.e., a record ID that
-refers to a still-existing document), or we’ll reach record ID of 0, which
-means we can just start from the beginning of the collection.
+In 7.0.26, 8.0.14, & later the server’s `find` command accepts an alternate
+parameter, `$_startAt`, that will, in this circumstance, instead seek to the
+next existing document and start the cursor there. Older source versions,
+though, remain a problem.
 
-(This can yield a substantial “flurry” of requests until the cursor is
-opened.)
+To compensate, in such cases Migration Verifier queries the tasks collection
+for record IDs that precede the one that yielded our KeyNotFound error.
+It tries to resume from each of those in reverse order. Eventually it either
+successfully creates a cursor, or it runs out of resume tokens, in which case
+it will start a full collection scan.
 
-The above doesn’t work for all record IDs, though. See below.
-
-In 7.0 & later the server’s `find` command accepts an alternate parameter,
-`$_startAt`, that will, in this circumstance, instead seek to the next
-existing document and start the cursor there.
-
-### What’s in a record ID?
-
-For ordinary collections the record IDs are BSON int64. These can be
-decremented as described above to handle deletions.
-
-For clustered collections, though, the record IDs are binary strings.
-These can’t be meaningfully decremented as int64 record IDs can. Thus,
-only source versions whose `find` supports `$_startAt` can partition
-a clustered collection naturally.
-
-### When partitioning can’t happen
-
-Besides the clustered-collection case, pre-4.4 sources and sharded
-clusters are other cases where natural partitioning doesn’t work.
-
-Natural _scanning_, however, is still valuable for fetching the
-documents to avoid the high read amplification that can happen from
-ID partitioning.
-
-Thus, in these cases where natural partitioning is chosen but,
-for whatever reason, doesn’t work, Verifier puts the entire collection
-into a single task. This task will be processed via natural scanning.
-Because there is only 1 task, though, the collection’s verification
-is not resumable: if a failure happens while verifying the collection,
-the collection’s verification has to be restarted. This will also be
-slower than parallelizing the verification, though it may still
-outperform ID partitioning.
+As a small mitigation of the above inefficiency, Migration Verifier, when
+reading from the source, projects the document’s record ID into the document.
+(The actual user document is, in turn, projected a layer down, so there’s
+no interference between the record ID and user data.) When reading these
+documents, Verifier then discards any document whose record ID precedes
+the partition’s lower bound.
 
 ### Why upper bound is only null for empty collections
 
@@ -169,12 +146,13 @@ BSON null, the last partition’s upper bound should be null as well.
 This, though, would make the last partition take over-long with no benefit.
 
 Consider a collection with frequent document insertions & deletions. Assume
-its top record ID is 1,000,000 at the start of partitioning. Assume that the
+its top record ID is 1,000,000 at the start of verification. Assume that the
 last partition is not processed until near the end of a days-long generation 0.
 Over those days a steady stream of insertions arrives. Each of those increments
 the collection’s top record ID. Thus, by the time that last partition is
-processed, the top record ID might be 2,000,000. This would mean that that
-single partition will encompass half of the record ID space!
+processed, the top record ID might be 2,000,000. If we created a partition
+from, say, 950,000 to “null”, that single partition would, by the time we get
+to it, encompass over half of the record ID space!
 
 We prevent this by querying the top record ID at partitioning time and
 setting that as the last partition’s upper bound. Since generation 1 will

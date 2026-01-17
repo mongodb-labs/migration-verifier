@@ -186,7 +186,7 @@ func ReadNaturalPartitionFromSource(
 			Msg("Resume token is no longer valid. Will attempt use of earlier tokens.")
 
 		// NB: These are in descending order.
-		priorRecordIDs, err := tasks.FetchPriorRecordIDs(
+		priorResumeTokens, err := tasks.FetchPriorResumeTokens(
 			ctx,
 			task.QueryFilter.Namespace,
 			startRecordID.MustGet(),
@@ -198,15 +198,14 @@ func ReadNaturalPartitionFromSource(
 
 		failedTokens := 1
 
-		for _, priorRecID := range priorRecordIDs {
+		for _, priorResumeToken := range priorResumeTokens {
 			found, err := bsontools.ReplaceInRaw(
 				&cmdRaw,
-				priorRecID,
+				bsontools.ToRawValue(priorResumeToken),
 				resumeTokenParameter,
-				"$recordId",
 			)
 			if err != nil {
-				return errors.Wrapf(err, "replacing resume token (new: %s) in command (%v)", cmdRaw, priorRecID)
+				return errors.Wrapf(err, "replacing resume token (new: %s) in command (%v)", cmdRaw, priorResumeToken)
 			}
 
 			lo.Assertf(found, "command should have resume token: %+v", cmdRaw)
@@ -229,7 +228,7 @@ func ReadNaturalPartitionFromSource(
 			failedTokens++
 		}
 
-		if failedTokens > len(priorRecordIDs) {
+		if failedTokens > len(priorResumeTokens) {
 			logger.Info().
 				Any("task", task.PrimaryKey).
 				Str("srcNamespace", task.QueryFilter.Namespace).

@@ -143,7 +143,7 @@ The verifier will now check to completion to make sure that there are no inconsi
 | `--dstNamespace <namespaces>`           | destination namespaces to check                                                                                                                                                             |
 | `--metaDBName <name>`                   | name of the database in which to store verification metadata (default: "migration_verification_metadata")                                                                                   |
 | `--docCompareMethod`                    | How to compare documents. See below for details.                                                                                                                                        |
-| `--partitionBy`                         | How to partition collections. See below for details.                                                                                                                                        |
+| `--partitioningScheme`                  | How to partition collections. See below for details.                                                                                                                                        |
 | `--srcChangeReader`                     | How to read changes from the source. See below for details.             |
 | `--dstChangeReader`                     | How to read changes from the destination. See below for details.        |
 | `--start`                               | Start checking documents right away rather than waiting for a `/check` API request. |
@@ -391,7 +391,7 @@ Full-document verification methods allow migration-verifier to diagnose mismatch
 
 Additionally, because the amount of data sent to migration-verifier doesn’t actually reflect the documents’ size, no meaningful statistics are shown concerning the collection data size. Document counts, of course, are still shown.
 
-# Partitioning methods
+# Partitioning schemes
 
 ## `_id`
 
@@ -406,6 +406,11 @@ reduce server load, for collections with custom `_id` values.
 
 The following caveats apply:
 
+### Unsupported configurations
+
+This scheme requires MongoDB 4.4+ and only works with replica set
+sources. (The destination can be sharded, but not the source.)
+
 ### Lost checks
 
 Under this method, Migration Verifier fetches documents from the source in
@@ -419,49 +424,24 @@ during verification.
 As of this writing, no migration tooling from MongoDB is expected to create
 such documents.
 
-### MongoDB 4.2 & earlier
-
-The features that enable natural partitioning were added in MongoDB 4.4. If
-the source lacks those features, then all collections are scanned in a single
-thread.
-
-In other words, nothing is “partitioned”. The actual reading of documents
-from the source, though, still uses natural order.
-
-Single-threaded scanning will impede performance, though single-threaded
-natural order may still outpace reading `_id`-partitioned documents.
-
-Additionally, if Migration Verifier restarts, any collections that were
-incompletely verified at shutdown will be re-verified from the beginning.
-
-### Sharded clusters
-
-Natural partitioning only works on replica sets. Thus, when connected to a
-mongos, all collections are verified in a single thread, as for MongoDB 4.2
-& earlier.
-
 ### Resumption and document deletion
 
-In MongoDB 6 and earlier, document deletions can complicate resumption of natural
+Document deletions can complicate resumption of natural
 scans (i.e., after a restart). When reading documents from a given record ID,
-if the record ID’s referent document has been deleted, then Migration Verifier
-decrements the (numeric) record ID & retries the query. If many documents have
-been deleted, this will cause a flurry of requests to the server until a record
-ID is reached that refers to an existing document.
+if the record ID’s referent document has been deleted, the server (prior to 7.0)
+cannot resume directly from that record ID.
 
-This is not a problem if the source is MongoDB 7.0, 8.0, or later, as long as
-the server runs a version with [SERVER-110161](https://jira.mongodb.org/browse/SERVER-110161)
-fixed.
+To compensate, in such cases Migration Verifier will read lower record IDs from
+other verification tasks and try to resume from them. In effect, the source is
+reading 2 or more tasks’ documents in a single cursor. Migration Verifier will
+discard any documents that aren’t actually part of the partition to be
+compared.
 
-### Clustered collections
+If, however, the server runs 7.0.26+ or 8.0.14+, then this is not necessary
+because these server versions expose a control that obviates this workaround.
 
-The above-described logic for handling document deletions does not work
-for clustered collections. This is because these collections’ record IDs are
-non-numeric, so it’s infeasible to decrement them.
-
-Because of this, if the source lacks
-[SERVER-110161](https://jira.mongodb.org/browse/SERVER-110161)’s fix,
-clustered collections are verified in a single thread.
+(See [SERVER-110161](https://jira.mongodb.org/browse/SERVER-110161) for more
+details.)
 
 # Change reading methods
 
