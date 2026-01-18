@@ -75,6 +75,9 @@ func ReadNaturalPartitionFromSource(
 	lowerBoundRV := task.QueryFilter.Partition.Key.Lower
 
 	upperRecordID := task.QueryFilter.Partition.Upper
+	if !rvIsNonEmpty(upperRecordID) {
+		return fmt.Errorf("empty/null upper bound is invalid")
+	}
 
 	sess, err := srcClient.StartSession()
 	if err != nil {
@@ -185,53 +188,17 @@ func ReadNaturalPartitionFromSource(
 			Err(err).
 			Msg("Resume token is no longer valid. Will attempt use of earlier tokens.")
 
-		// NB: These are in descending order.
-		priorResumeTokens, err := tasks.FetchPriorResumeTokens(
-			ctx,
-			task.QueryFilter.Namespace,
-			startRecordID.MustGet(),
+		cursor, err = openBackupNaturalCursor(
+			sctx,
+			logger,
+			coll,
+			task,
 			tasksColl,
+			startRecordID,
+			createCmd,
 		)
 		if err != nil {
-			return errors.Wrapf(err, "fetching resume tokens after a key-not-found error")
-		}
-
-		failedTokens := 1
-
-		for _, priorResumeToken := range priorResumeTokens {
-			cmd := createCmd(option.Some(bsontools.ToRawValue(priorResumeToken)))
-
-			cursor, err = coll.Database().RunCommandCursor(sctx, cmd)
-			if err == nil {
-				logger.Info().
-					Any("task", task.PrimaryKey).
-					Str("srcNamespace", task.QueryFilter.Namespace).
-					Int("skippedPartitions", failedTokens).
-					Msg("Due to a document deletion on the source cluster, this task has to read other tasks’ documents. This task may take longer to complete than others.")
-
-				break
-			}
-
-			if !mmongo.ErrorHasCode(err, util.KeyNotFoundErrCode) {
-				return errors.Wrapf(err, "opening source cursor after replacing resume token")
-			}
-
-			failedTokens++
-		}
-
-		if failedTokens > len(priorResumeTokens) {
-			logger.Info().
-				Any("task", task.PrimaryKey).
-				Str("srcNamespace", task.QueryFilter.Namespace).
-				Int("skippedPartitions", failedTokens).
-				Msg("Due to a document deletion on the source cluster, this task has to read the entire collection. This task may take longer to complete than others.")
-
-			cmd := createCmd(option.None[bson.RawValue]())
-
-			cursor, err = coll.Database().RunCommandCursor(sctx, cmd)
-			if err != nil {
-				return errors.Wrapf(err, "opening source cursor from beginning")
-			}
+			return errors.Wrapf(err, "opening backup natural cursor")
 		}
 	}
 
@@ -327,15 +294,14 @@ cursorLoop:
 			}
 		}
 
-		if rvIsNonEmpty(upperRecordID) {
-			val, err := compareRawValues(recIDRV, upperRecordID)
-			if err != nil {
-				return errors.Wrap(err, "comparing record ID with partition’s upper bound")
-			}
+		// NB: There is always an upper bound.
+		val, err := compareRawValues(recIDRV, upperRecordID)
+		if err != nil {
+			return errors.Wrap(err, "comparing record ID with partition’s upper bound")
+		}
 
-			if val > 0 {
-				break cursorLoop
-			}
+		if val > 0 {
+			break cursorLoop
 		}
 
 		var userDoc bson.Raw
@@ -375,6 +341,73 @@ cursorLoop:
 	}
 
 	return nil
+}
+
+func openBackupNaturalCursor(
+	sctx context.Context,
+	logger *logger.Logger,
+	coll *mongo.Collection,
+	task *tasks.Task,
+	tasksColl *mongo.Collection,
+	startRecordID option.Option[bson.RawValue],
+	createCmd func(resumeTokenOpt option.Option[bson.RawValue]) bson.D,
+) (*mongo.Cursor, error) {
+
+	// NB: These are in descending order.
+	priorResumeTokens, err := tasks.FetchPriorResumeTokens(
+		sctx,
+		task.QueryFilter.Namespace,
+		startRecordID.MustGet(),
+		tasksColl,
+	)
+	if err != nil {
+		return nil, errors.Wrapf(err, "fetching resume tokens after a key-not-found error")
+	}
+
+	failedTokens := 1
+
+	for _, priorResumeToken := range priorResumeTokens {
+		cmd := createCmd(option.Some(bsontools.ToRawValue(priorResumeToken)))
+
+		cursor, err := coll.Database().RunCommandCursor(sctx, cmd)
+		if err == nil {
+			logger.Info().
+				Any("task", task.PrimaryKey).
+				Str("srcNamespace", task.QueryFilter.Namespace).
+				Int("skippedPartitions", failedTokens).
+				Msg("Due to a document deletion on the source cluster, this task has to read other tasks’ documents. This task may take longer to complete than others.")
+
+			return cursor, nil
+		}
+
+		if !mmongo.ErrorHasCode(err, util.KeyNotFoundErrCode) {
+			return nil, errors.Wrapf(err, "opening source cursor after replacing resume token")
+		}
+
+		failedTokens++
+	}
+
+	lo.Assertf(
+		failedTokens > len(priorResumeTokens),
+		"failed tokens (%d) should outnumber prior tokens (%d)",
+		failedTokens,
+		len(priorResumeTokens),
+	)
+
+	logger.Info().
+		Any("task", task.PrimaryKey).
+		Str("srcNamespace", task.QueryFilter.Namespace).
+		Int("skippedPartitions", failedTokens).
+		Msg("Due to a document deletion on the source cluster, this task has to read the entire collection. This task may take longer to complete than others.")
+
+	cmd := createCmd(option.None[bson.RawValue]())
+
+	cursor, err := coll.Database().RunCommandCursor(sctx, cmd)
+	if err != nil {
+		return nil, errors.Wrapf(err, "opening source cursor from beginning")
+	}
+
+	return cursor, err
 }
 
 func compareRawValues(a, b bson.RawValue) (int, error) {
