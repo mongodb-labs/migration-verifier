@@ -17,6 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 )
 
 const (
@@ -125,7 +126,7 @@ func PartitionCollectionNaturalOrder(
 
 	// Avoid storing a null upper limit. See architecture
 	// documentation for rationale.
-	topRecordIDOpt, err := getTopRecordID(ctx, coll)
+	topRecordIDOpt, err := GetTopRecordID(ctx, coll)
 	if err != nil {
 		return nil, errors.Wrapf(err, "fetching top record ID")
 	}
@@ -220,19 +221,24 @@ func PartitionCollectionNaturalOrder(
 	return pChan, nil
 }
 
-func getTopRecordID(
+func GetTopRecordID(
 	ctx context.Context,
 	coll *mongo.Collection,
 ) (option.Option[bson.RawValue], error) {
-	cursor, err := coll.Find(
-		ctx,
-		bson.D{},
-		options.Find().
-			SetSort(bson.D{{"$natural", -1}}).
-			SetLimit(1).
-			SetProjection(bson.D{{"id", 0}}).
-			SetShowRecordID(true),
-	)
+	cursor, err := coll.
+		Database().
+		Collection(coll.Name(), options.Collection().
+			SetReadConcern(readconcern.Majority()),
+		).
+		Find(
+			ctx,
+			bson.D{},
+			options.Find().
+				SetSort(bson.D{{"$natural", -1}}).
+				SetLimit(1).
+				SetProjection(bson.D{{"id", 0}}).
+				SetShowRecordID(true),
+		)
 
 	if err != nil {
 		return option.None[bson.RawValue](), errors.Wrap(

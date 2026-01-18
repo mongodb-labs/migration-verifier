@@ -412,6 +412,12 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 					require.NoError(t, err)
 				}
 
+				topRecordOpt, err := partitions.GetTopRecordID(
+					ctx,
+					coll,
+				)
+				suite.Require().NoError(err)
+
 				resumeTokens := []bson.Raw{}
 
 				resp := coll.Database().RunCommand(
@@ -613,6 +619,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 									Key: partitions.PartitionKey{
 										Lower: bsontools.ToRawValue(resumeTokens[7]),
 									},
+									Upper: topRecordOpt.MustGetf("must have top record ID"),
 								},
 							},
 						}
@@ -699,6 +706,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 									Key: partitions.PartitionKey{
 										Lower: bsontools.ToRawValue(resumeTokens[7]),
 									},
+									Upper: topRecordOpt.MustGetf("must have top record ID"),
 								},
 							},
 						}
