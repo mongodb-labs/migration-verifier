@@ -550,15 +550,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 		coll := verifier.dstClientCollection(task)
 
 		for {
-			//start := time.Now()
 			docIDsOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
-
-			/*
-				verifier.logger.Debug().
-					Any("task", task.PrimaryKey).
-					Stringer("elapsed", time.Since(start)).
-					Msg("Destination thread done listening to source.")
-			*/
 
 			if err != nil {
 				return err
@@ -599,13 +591,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			if err != nil {
 				return errors.Wrapf(err, "finding %d documents", len(docIDs))
 			}
-
-			/*
-				verifier.logger.Debug().
-					Any("task", task.PrimaryKey).
-					Stringer("elapsed", time.Since(start)).
-					Msg("Destination query finished.")
-			*/
 
 			state.NoteSuccess("opened dst find cursor")
 

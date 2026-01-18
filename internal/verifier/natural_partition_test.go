@@ -445,9 +445,9 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							QueryFilter: tasks.QueryFilter{
 								Namespace: FullName(coll),
 								Partition: &partitions.Partition{
-									Natural:  true,
+									Natural:         true,
 									HostnameAndPort: option.Some(hostname),
-									Upper:    lo.Must(resumeTokens[3].LookupErr(partitions.RecordID)),
+									Upper:           lo.Must(resumeTokens[3].LookupErr(partitions.RecordID)),
 								},
 							},
 						}
@@ -524,7 +524,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							QueryFilter: tasks.QueryFilter{
 								Namespace: FullName(coll),
 								Partition: &partitions.Partition{
-									Natural:  true,
+									Natural:         true,
 									HostnameAndPort: option.Some(hostname),
 									Key: partitions.PartitionKey{
 										Lower: bsontools.ToRawValue(resumeTokens[3]),
@@ -608,7 +608,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							QueryFilter: tasks.QueryFilter{
 								Namespace: FullName(coll),
 								Partition: &partitions.Partition{
-									Natural:  true,
+									Natural:         true,
 									HostnameAndPort: option.Some(hostname),
 									Key: partitions.PartitionKey{
 										Lower: bsontools.ToRawValue(resumeTokens[7]),
@@ -694,7 +694,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							QueryFilter: tasks.QueryFilter{
 								Namespace: FullName(coll),
 								Partition: &partitions.Partition{
-									Natural:  true,
+									Natural:         true,
 									HostnameAndPort: option.Some(hostname),
 									Key: partitions.PartitionKey{
 										Lower: bsontools.ToRawValue(resumeTokens[7]),
