@@ -301,8 +301,8 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 			require.NoError(t, err, "should insert task")
 
 			require.True(t, partition.Natural, "must be natural partition")
-			require.NotZero(t, partition.Hostname, "need hostname")
-			require.Equal(t, hostname, partition.Hostname.MustGet(), "hostname")
+			require.NotZero(t, partition.HostnameAndPort, "need hostname")
+			require.Equal(t, hostname, partition.HostnameAndPort.MustGet(), "hostname")
 
 			if i == 0 {
 				assert.Equal(t, bson.TypeNull, partition.Key.Lower.Type)
@@ -412,6 +412,12 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 					require.NoError(t, err)
 				}
 
+				topRecordOpt, err := partitions.GetTopRecordID(
+					ctx,
+					coll,
+				)
+				suite.Require().NoError(err)
+
 				resumeTokens := []bson.Raw{}
 
 				resp := coll.Database().RunCommand(
@@ -445,9 +451,9 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							QueryFilter: tasks.QueryFilter{
 								Namespace: FullName(coll),
 								Partition: &partitions.Partition{
-									Natural:  true,
-									Hostname: option.Some(hostname),
-									Upper:    lo.Must(resumeTokens[3].LookupErr(partitions.RecordID)),
+									Natural:         true,
+									HostnameAndPort: option.Some(hostname),
+									Upper:           lo.Must(resumeTokens[3].LookupErr(partitions.RecordID)),
 								},
 							},
 						}
@@ -524,8 +530,8 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							QueryFilter: tasks.QueryFilter{
 								Namespace: FullName(coll),
 								Partition: &partitions.Partition{
-									Natural:  true,
-									Hostname: option.Some(hostname),
+									Natural:         true,
+									HostnameAndPort: option.Some(hostname),
 									Key: partitions.PartitionKey{
 										Lower: bsontools.ToRawValue(resumeTokens[3]),
 									},
@@ -608,11 +614,12 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							QueryFilter: tasks.QueryFilter{
 								Namespace: FullName(coll),
 								Partition: &partitions.Partition{
-									Natural:  true,
-									Hostname: option.Some(hostname),
+									Natural:         true,
+									HostnameAndPort: option.Some(hostname),
 									Key: partitions.PartitionKey{
 										Lower: bsontools.ToRawValue(resumeTokens[7]),
 									},
+									Upper: topRecordOpt.MustGetf("must have top record ID"),
 								},
 							},
 						}
@@ -694,11 +701,12 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							QueryFilter: tasks.QueryFilter{
 								Namespace: FullName(coll),
 								Partition: &partitions.Partition{
-									Natural:  true,
-									Hostname: option.Some(hostname),
+									Natural:         true,
+									HostnameAndPort: option.Some(hostname),
 									Key: partitions.PartitionKey{
 										Lower: bsontools.ToRawValue(resumeTokens[7]),
 									},
+									Upper: topRecordOpt.MustGetf("must have top record ID"),
 								},
 							},
 						}

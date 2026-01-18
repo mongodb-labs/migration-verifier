@@ -122,7 +122,7 @@ func (dcm Method) GetDocKeyValues(
 
 func GetHashedIndexKeyProjection(qf tasks.QueryFilter) bson.D {
 	return bson.D{
-		{"_id", "$$REMOVE"},
+		{"_id", 0},
 
 		// Single-letter field names minimize the document size.
 		{docKeyInHashedCompare, dockey.ExtractTrueDocKeyAgg(
