@@ -54,8 +54,7 @@ type Partition struct {
 	Ns  *Namespace   `bson:"namespace"`
 
 	// The partition’s upper bound.
-	// Under ID partitioning this is always given.
-	// Under natural partitioning this is null (or empty) in the last partition.
+	// Unlike the lower bound, this always exists, even in natural partitioning.
 	Upper bson.RawValue `bson:"upperBound"`
 
 	// Set to true if the partition is for a capped collection. If so, this partition's
@@ -65,7 +64,7 @@ type Partition struct {
 	Natural bool
 
 	// The hostname to use when querying in $natural order.
-	Hostname option.Option[string]
+	HostnameAndPort option.Option[string]
 }
 
 // String returns a string representation of the partition.

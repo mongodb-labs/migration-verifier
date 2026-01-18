@@ -481,7 +481,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 ) {
 	var client *mongo.Client
 
-	if hostname, has := task.QueryFilter.Partition.Hostname.Get(); has {
+	if hostname, has := task.QueryFilter.Partition.HostnameAndPort.Get(); has {
 		connstr, err := compare.SetDirectHostInConnectionString(
 			verifier.srcURI,
 			hostname,
