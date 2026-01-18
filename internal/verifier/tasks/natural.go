@@ -6,6 +6,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -37,7 +38,7 @@ func FetchPriorResumeTokens(
 			}),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("opening cursor to read task record IDs before %s", recordID)
+		return nil, errors.Wrapf(err, "opening cursor to read task record IDs before %s", recordID)
 	}
 
 	type rec struct {

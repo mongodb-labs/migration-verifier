@@ -189,7 +189,7 @@ func ReadNaturalPartitionFromSource(
 			Msg("Resume token is no longer valid. Will attempt use of earlier tokens.")
 
 		cursor, err = openBackupNaturalCursor(
-			sctx,
+			ctx,
 			logger,
 			coll,
 			task,
@@ -344,7 +344,7 @@ cursorLoop:
 }
 
 func openBackupNaturalCursor(
-	sctx context.Context,
+	ctx context.Context,
 	logger *logger.Logger,
 	coll *mongo.Collection,
 	task *tasks.Task,
@@ -355,7 +355,7 @@ func openBackupNaturalCursor(
 
 	// NB: These are in descending order.
 	priorResumeTokens, err := tasks.FetchPriorResumeTokens(
-		sctx,
+		ctx,
 		task.QueryFilter.Namespace,
 		startRecordID.MustGet(),
 		tasksColl,
@@ -369,7 +369,7 @@ func openBackupNaturalCursor(
 	for _, priorResumeToken := range priorResumeTokens {
 		cmd := createCmd(option.Some(bsontools.ToRawValue(priorResumeToken)))
 
-		cursor, err := coll.Database().RunCommandCursor(sctx, cmd)
+		cursor, err := coll.Database().RunCommandCursor(ctx, cmd)
 		if err == nil {
 			logger.Info().
 				Any("task", task.PrimaryKey).
@@ -402,7 +402,7 @@ func openBackupNaturalCursor(
 
 	cmd := createCmd(option.None[bson.RawValue]())
 
-	cursor, err := coll.Database().RunCommandCursor(sctx, cmd)
+	cursor, err := coll.Database().RunCommandCursor(ctx, cmd)
 	if err != nil {
 		return nil, errors.Wrapf(err, "opening source cursor from beginning")
 	}
