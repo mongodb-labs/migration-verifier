@@ -130,8 +130,7 @@ func PartitionCollectionNaturalOrder(
 		return nil, errors.Wrapf(err, "fetching top record ID")
 	}
 
-	topRecordIDOpt, hasDocs := topRecordIDOpt.Get()
-	if !hasDocs {
+	if !topRecordIDOpt.IsSome() {
 		// If the collection is empty then there’s no point in partitioning it.
 		// Any documents created during generation 0 will be rechecked in
 		// generation 1.
@@ -161,9 +160,7 @@ func PartitionCollectionNaturalOrder(
 			}
 
 			if recIDRV.Type == bson.TypeNull {
-				if topID, has := topRecordIDOpt.Get(); has {
-					recIDRV = topID
-				}
+				recIDRV = topRecordIDOpt.MustGetf("got null resume token but have no top record ID?!?")
 			}
 
 			partition := Partition{
