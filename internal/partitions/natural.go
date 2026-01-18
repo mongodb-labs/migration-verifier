@@ -56,6 +56,9 @@ func PartitionCollectionNaturalOrder(
 		{"batchSize", 1},
 		{"filter", bson.D{{"$sampleRate", sampleRate}}},
 		{"$_requestResumeToken", true},
+		{"readConcern", bson.D{
+			{"level", "majority"},
+		}},
 
 		// Discard the actual document. All we want are the resume tokens.
 		{"projection", bson.D{

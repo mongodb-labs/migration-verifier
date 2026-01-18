@@ -217,7 +217,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	suite.Require().NoError(verifier.SetDstChangeReaderMethod(envDstChangeReader))
 
 	envPartitionBy := cmp.Or(
-		partitions.Scheme(os.Getenv("MVTEST_PARTITION_BY")),
+		partitions.Scheme(os.Getenv("MVTEST_PARTITIONING_SCHEME")),
 		partitions.SchemeID,
 	)
 	verifier.SetPartitioningScheme(envPartitionBy)
