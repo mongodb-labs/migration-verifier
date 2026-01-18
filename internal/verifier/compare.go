@@ -626,14 +626,14 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			// by sending dummy values. We do that here.
 			missingDocsCount := len(docIDs) - sentCount
 			if missingDocsCount > 0 {
-				for range missingDocsCount {
+				for i := range missingDocsCount {
 					err := chanutil.WriteWithDoneCheck(
 						ctx,
 						dstToCompareChannel,
 						compare.DocWithTS{},
 					)
 					if err != nil {
-						return errors.Wrapf(err, "sending %d dummy docs dst->compare", missingDocsCount)
+						return errors.Wrapf(err, "sending dummy docs %d of %d dst->compare", 1+i, missingDocsCount)
 					}
 				}
 			}
