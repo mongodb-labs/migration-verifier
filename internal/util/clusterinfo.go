@@ -86,6 +86,8 @@ func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, er
 	return lo.Ternary(hasMsg, TopologySharded, TopologyReplset), nil
 }
 
+// GetHelloRaw returns the result of a `hello` (or, if needed,
+// `isMaster`) command.
 func GetHelloRaw(ctx context.Context, client *mongo.Client) (bson.Raw, error) {
 	resp := client.Database("admin").RunCommand(
 		ctx,
