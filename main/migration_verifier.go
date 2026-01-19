@@ -51,7 +51,7 @@ const (
 	configFileFlag        = "configFile"
 	pprofInterval         = "pprofInterval"
 	startFlag             = "start"
-	partitioningScheme    = "partitionBy"
+	partitioningScheme    = "partitioningScheme"
 
 	buildVarDefaultStr = "Unknown; build with build.sh."
 )
