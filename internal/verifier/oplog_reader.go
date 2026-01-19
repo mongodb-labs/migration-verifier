@@ -147,6 +147,7 @@ func (o *OplogReader) createCursor(
 	}
 
 	o.logger.Info().
+		Any("reader", o.getWhichCluster()).
 		Any("startReadTs", startTS).
 		Any("currentOplogTs", allowDDLBeforeTS).
 		Msg("Tailing oplog.")
