@@ -389,7 +389,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	if !slices.Contains(verifier.ChangeReaderOpts, dstChangeReaderVal) {
 		return nil, errors.Errorf("invalid %#q (%s); valid values are: %#q", dstChangeReader, dstChangeReaderVal, verifier.ChangeReaderOpts)
 	}
-	err = v.SetDstChangeReaderMethod(srcChangeReaderVal)
+	err = v.SetDstChangeReaderMethod(dstChangeReaderVal)
 	if err != nil {
 		return nil, err
 	}
