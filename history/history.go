@@ -4,6 +4,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"golang.org/x/exp/constraints"
 )
 
 // History stores an ordered list of entries, each with a TTL (time-to-live).
@@ -72,4 +74,20 @@ func (h *History[T]) getFirstValidIdxWhileLocked(now time.Time) int {
 
 func (h *History[T]) reapWhileLocked(now time.Time) {
 	h.logs = h.logs[h.getFirstValidIdxWhileLocked(now):]
+}
+
+type realNumber interface {
+	constraints.Integer | constraints.Float
+}
+
+// SumLogs adds up each log’s Datum & returns the result.
+// (This only works, of course, for real number types.)
+func SumLogs[T realNumber](l []Log[T]) T {
+	var sum T
+
+	for _, log := range l {
+		sum += log.Datum
+	}
+
+	return sum
 }

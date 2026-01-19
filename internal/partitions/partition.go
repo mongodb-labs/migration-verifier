@@ -33,7 +33,11 @@ func ForPartitionAggregation(coll *mongo.Collection) *mongo.Collection {
 // PartitionKey represents the _id of a partition document stored in the destination.
 type PartitionKey struct {
 	SourceUUID util.UUID `bson:"srcUUID"`
-	Lower      any       `bson:"lowerBound"`
+
+	// The partition’s lower bound.
+	// Under ID partitioning this is always given.
+	// Under natural partitioning this is null (or empty) in the first partition.
+	Lower bson.RawValue `bson:"lowerBound"`
 }
 
 // Namespace stores the database and collection name of the namespace being copied.
@@ -49,12 +53,18 @@ type Partition struct {
 	Key PartitionKey `bson:"_id"`
 	Ns  *Namespace   `bson:"namespace"`
 
-	// The upper index key bound for the partition.
-	Upper any `bson:"upperBound"`
+	// The partition’s upper bound.
+	// Unlike the lower bound, this always exists, even in natural partitioning.
+	Upper bson.RawValue `bson:"upperBound"`
 
 	// Set to true if the partition is for a capped collection. If so, this partition's
 	// upper/lower bounds should be set to the minKey and maxKey of the collection.
 	IsCapped bool `bson:"isCapped"`
+
+	Natural bool
+
+	// The hostname to use when querying in $natural order.
+	HostnameAndPort option.Option[string]
 }
 
 // String returns a string representation of the partition.
@@ -99,26 +109,6 @@ func (pqp PartitionQueryParameters) ToFindOptions() bson.D {
 
 	if theFilter, has := pqp.filter.Get(); has {
 		doc = append(doc, bson.E{"filter", theFilter})
-	}
-
-	pqp.addHintIfNeeded(&doc)
-
-	return doc
-}
-
-func (pqp PartitionQueryParameters) ToAggOptions() bson.D {
-	pl := mongo.Pipeline{}
-
-	if theFilter, has := pqp.filter.Get(); has {
-		pl = append(pl, bson.D{{"$match", theFilter}})
-	}
-
-	if theSort, has := pqp.sortField.Get(); has {
-		pl = append(pl, bson.D{{"$sort", bson.D{{theSort, 1}}}})
-	}
-
-	doc := bson.D{
-		{"pipeline", pl},
 	}
 
 	pqp.addHintIfNeeded(&doc)

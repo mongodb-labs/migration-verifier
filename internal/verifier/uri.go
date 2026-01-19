@@ -5,6 +5,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/comparehashed"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
@@ -17,6 +18,8 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to connect to source %#q", uri)
 	}
+
+	verifier.srcURI = uri
 
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.srcClient)
 	if err != nil {
@@ -44,9 +47,9 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 		return errors.Errorf("unsupported source version: %v", clusterInfo.VersionArray)
 	}
 
-	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
+	if verifier.docCompareMethod == compare.ToHashedIndexKey {
 		if !comparehashed.CanCompareDocsViaToHashedIndexKey(clusterInfo.VersionArray) {
-			return errors.Errorf("document comparison mode %#q doesn’t work on source version %v", DocCompareToHashedIndexKey, clusterInfo.VersionArray)
+			return errors.Errorf("document comparison mode %#q doesn’t work on source version %v", compare.ToHashedIndexKey, clusterInfo.VersionArray)
 		}
 	}
 
@@ -61,7 +64,7 @@ func (verifier *Verifier) maybeSuggestHashedComparisonOptimization() {
 		return
 	}
 
-	if verifier.docCompareMethod != DocCompareDefault {
+	if verifier.docCompareMethod != compare.Default {
 		// User already gave a non-default comparison method.
 		return
 	}
@@ -99,9 +102,9 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 		return errors.Errorf("unsupported destination version: %v", clusterInfo.VersionArray)
 	}
 
-	if verifier.docCompareMethod == DocCompareToHashedIndexKey {
+	if verifier.docCompareMethod == compare.ToHashedIndexKey {
 		if !comparehashed.CanCompareDocsViaToHashedIndexKey(clusterInfo.VersionArray) {
-			return errors.Errorf("document comparison mode %#q doesn’t work on destination version %v", DocCompareToHashedIndexKey, clusterInfo.VersionArray)
+			return errors.Errorf("document comparison mode %#q doesn’t work on destination version %v", compare.ToHashedIndexKey, clusterInfo.VersionArray)
 		}
 	}
 

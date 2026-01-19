@@ -147,6 +147,7 @@ func (o *OplogReader) createCursor(
 	}
 
 	o.logger.Info().
+		Any("reader", o.getWhichCluster()).
 		Any("startReadTs", startTS).
 		Any("currentOplogTs", allowDDLBeforeTS).
 		Msg("Tailing oplog.")
@@ -502,7 +503,7 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 			events,
 			ParsedEvent{
 				OpType:      oplogOpToOperationType[opName],
-				Ns:          NewNamespace(SplitNamespace(nsStr)),
+				Ns:          NewNamespace(mmongo.SplitNamespace(nsStr)),
 				DocID:       docID,
 				FullDocLen:  docLength,
 				ClusterTime: lo.ToPtr(ts),
@@ -646,7 +647,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 					func(subOp oplog.Op, _ int) ParsedEvent {
 						return ParsedEvent{
 							OpType:      oplogOpToOperationType[subOp.Op],
-							Ns:          NewNamespace(SplitNamespace(subOp.Ns)),
+							Ns:          NewNamespace(mmongo.SplitNamespace(subOp.Ns)),
 							DocID:       subOp.DocID,
 							FullDocLen:  option.Some(types.ByteCount(subOp.DocLen)),
 							ClusterTime: &op.TS,
@@ -659,7 +660,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 				events,
 				ParsedEvent{
 					OpType:      oplogOpToOperationType[op.Op],
-					Ns:          NewNamespace(SplitNamespace(op.Ns)),
+					Ns:          NewNamespace(mmongo.SplitNamespace(op.Ns)),
 					DocID:       op.DocID,
 					FullDocLen:  option.Some(types.ByteCount(op.DocLen)),
 					ClusterTime: &op.TS,

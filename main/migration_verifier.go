@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
@@ -10,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/verifier"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
@@ -48,6 +51,7 @@ const (
 	configFileFlag        = "configFile"
 	pprofInterval         = "pprofInterval"
 	startFlag             = "start"
+	partitioningScheme    = "partitioningScheme"
 
 	buildVarDefaultStr = "Unknown; build with build.sh."
 )
@@ -150,17 +154,25 @@ func main() {
 			Usage: "`name` of the database in which to store verification metadata",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  partitioningScheme,
+			Value: partitions.SchemeDefault,
+			Usage: "Method to partition documents. One of: " + strings.Join(
+				partitions.Schemes,
+				", ",
+			),
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
 			Name: docCompareMethod,
 			Usage: "Method to compare documents. One of: " + strings.Join(
 				lo.Map(
-					verifier.DocCompareMethods,
-					func(dcm verifier.DocCompareMethod, _ int) string {
+					compare.Methods,
+					func(dcm compare.Method, _ int) string {
 						return string(dcm)
 					},
 				),
 				", ",
 			),
-			Value: string(verifier.DocCompareDefault),
+			Value: string(compare.Default),
 		}),
 		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  startClean,
@@ -340,13 +352,15 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 
 	partitionSizeMB := cCtx.Uint64(partitionSizeMB)
+
 	if partitionSizeMB != 0 {
 		if partitionSizeMB > math.MaxInt64 {
 			return nil, fmt.Errorf("%q may not exceed %d", partitionSizeMB, math.MaxInt64)
 		}
 
-		v.SetPartitionSizeMB(uint32(partitionSizeMB))
 	}
+
+	v.SetPartitionSizeMB(uint32(cmp.Or(partitionSizeMB, partitions.DefaultPartitionMiB)))
 
 	v.SetStartClean(cCtx.Bool(startClean))
 
@@ -375,16 +389,22 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	if !slices.Contains(verifier.ChangeReaderOpts, dstChangeReaderVal) {
 		return nil, errors.Errorf("invalid %#q (%s); valid values are: %#q", dstChangeReader, dstChangeReaderVal, verifier.ChangeReaderOpts)
 	}
-	err = v.SetDstChangeReaderMethod(srcChangeReaderVal)
+	err = v.SetDstChangeReaderMethod(dstChangeReaderVal)
 	if err != nil {
 		return nil, err
 	}
 
-	docCompareMethod := verifier.DocCompareMethod(cCtx.String(docCompareMethod))
-	if !slices.Contains(verifier.DocCompareMethods, docCompareMethod) {
-		return nil, errors.Errorf("invalid doc compare method (%s); valid values are: %#q", docCompareMethod, verifier.DocCompareMethods)
+	docCompareMethod := compare.Method(cCtx.String(docCompareMethod))
+	if !slices.Contains(compare.Methods, docCompareMethod) {
+		return nil, errors.Errorf("invalid doc compare method (%s); valid values are: %#q", docCompareMethod, compare.Methods)
 	}
 	v.SetDocCompareMethod(docCompareMethod)
+
+	partitioningScheme := cCtx.String(partitioningScheme)
+	if !slices.Contains(partitions.Schemes, partitioningScheme) {
+		return nil, errors.Errorf("invalid partitioning scheme (%s); valid values are: %#q", partitioningScheme, partitions.Schemes)
+	}
+	v.SetPartitioningScheme(partitions.Scheme(partitioningScheme))
 
 	err = v.SetReadPreference(cCtx.String(readPreference))
 	if err != nil {

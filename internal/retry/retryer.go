@@ -16,7 +16,7 @@ type retryCallbackInfo struct {
 // Retryer handles retrying operations that fail because of network failures.
 type Retryer struct {
 	retryLimit           time.Duration
-	before               option.Option[func()]
+	before               option.Option[func() error]
 	callbacks            []retryCallbackInfo
 	description          option.Option[string]
 	additionalErrorCodes []int
@@ -54,7 +54,7 @@ func (r *Retryer) WithRetryLimit(limit time.Duration) *Retryer {
 // This is useful if there are multiple callbacks and you need to reset some
 // condition before each retryer iteration. (In the single-callback case it’s
 // largely redundant.)
-func (r *Retryer) WithBefore(todo func()) *Retryer {
+func (r *Retryer) WithBefore(todo func() error) *Retryer {
 	r2 := r.clone()
 	r2.before = option.Some(todo)
 

@@ -6,6 +6,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/comparehashed"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -89,7 +90,7 @@ func (suite *IntegrationTestSuite) TestCompare_Hashed() {
 				verifier.SetSrcNamespaces([]string{ns})
 				verifier.SetDstNamespaces([]string{ns})
 				verifier.SetNamespaceMap()
-				verifier.SetDocCompareMethod(DocCompareToHashedIndexKey)
+				verifier.SetDocCompareMethod(compare.ToHashedIndexKey)
 
 				runner := RunVerifierCheck(ctx, suite.T(), verifier)
 				suite.Require().NoError(runner.AwaitGenerationEnd())

@@ -15,110 +15,23 @@ import (
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"github.com/rs/zerolog"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-type verificationTaskType string
-type verificationTaskStatus string
-
 const (
 	verificationTasksCollection = "verification_tasks"
-
-	// --------------------------------------------------
-	// Task statuses:
-	// --------------------------------------------------
-
-	// This means the task is ready for work once a worker thread gets to it.
-	verificationTaskAdded verificationTaskStatus = "added"
-
-	// This means a worker thread is actively processing the task.
-	verificationTaskProcessing verificationTaskStatus = "processing"
-
-	// This means no mismatches were found. (Yay!)
-	verificationTaskCompleted verificationTaskStatus = "completed"
-
-	// This can mean a few different things. Generally it means that at least
-	// one mismatch was found. (It does *not* mean that the verifier failed to
-	// complete the verification task.)
-	verificationTaskFailed verificationTaskStatus = "failed"
-
-	// This is used for collection verification. It means the task successfully
-	// created the data tasks, but there were mismatches in the
-	// metadata/indexes.
-	verificationTaskMetadataMismatch verificationTaskStatus = "mismatch"
-
-	// --------------------------------------------------
-	// Task types:
-	// --------------------------------------------------
-
-	// The “workhorse” task type: verify a partition of documents.
-	verificationTaskVerifyDocuments verificationTaskType = "verifyDocuments"
-
-	// A verifyCollection task verifies collection metadata
-	// and, in generation 0, inserts verify-documents tasks for _id ranges.
-	verificationTaskVerifyCollection verificationTaskType = "verifyCollection"
-
-	// The primary task creates a verifyCollection task for each
-	// namespace.
-	verificationTaskPrimary verificationTaskType = "primary"
 )
-
-// VerificationTask stores source cluster info
-type VerificationTask struct {
-	PrimaryKey bson.ObjectID          `bson:"_id"`
-	Type       verificationTaskType   `bson:"type"`
-	Status     verificationTaskStatus `bson:"status"`
-	Generation int                    `bson:"generation"`
-
-	// For recheck tasks, this stores the document IDs to check.
-	Ids []bson.RawValue `bson:"_ids"`
-
-	QueryFilter QueryFilter `bson:"query_filter" json:"query_filter"`
-
-	// DocumentCount is set when the verifier is done with the task
-	// (whether we found mismatches or not).
-	SourceDocumentCount types.DocumentCount `bson:"source_documents_count"`
-
-	// ByteCount is like DocumentCount: set when the verifier is done
-	// with the task.
-	SourceByteCount types.ByteCount `bson:"source_bytes_count"`
-
-	// FirstMismatchTime correlates an index in Ids with the time when
-	// this document was first seen to mismatch.
-	FirstMismatchTime map[int32]bson.DateTime
-
-	// SrcTimestamp records the optime of the latest source change event that
-	// caused this (recheck) task to exist.
-	SrcTimestamp option.Option[bson.Timestamp]
-
-	// DstTimestamp is like SrcChangeOpTime but for the destination.
-	DstTimestamp option.Option[bson.Timestamp]
-}
-
-func (t *VerificationTask) augmentLogWithDetails(evt *zerolog.Event) {
-	if len(t.Ids) > 0 {
-		evt.Int("documentCount", len(t.Ids))
-	} else {
-		evt.
-			Any("minDocID", t.QueryFilter.Partition.Key.Lower).
-			Any("maxDocID", t.QueryFilter.Partition.Upper)
-	}
-}
-
-func (t *VerificationTask) IsRecheck() bool {
-	return t.Generation > 0
-}
 
 func (verifier *Verifier) insertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
-	generation int) (*VerificationTask, error) {
+	generation int) (*tasks.Task, error) {
 
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
@@ -129,24 +42,30 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 		}
 	}
 
-	var msg string
-	if srcNamespace == dstNamespace {
-		msg = fmt.Sprintf("Adding task for %s", srcNamespace)
-	} else {
-		msg = fmt.Sprintf("Adding task for %s → %s", srcNamespace, dstNamespace)
-	}
-	verifier.logger.Debug().Msg(msg)
-
-	verificationTask := VerificationTask{
+	verificationTask := tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
 		Generation: generation,
-		Status:     verificationTaskAdded,
-		Type:       verificationTaskVerifyCollection,
-		QueryFilter: QueryFilter{
+		Status:     tasks.Added,
+		Type:       tasks.VerifyCollection,
+		QueryFilter: tasks.QueryFilter{
 			Namespace: srcNamespace,
 			To:        dstNamespace,
 		},
 	}
+
+	logEvent := verifier.logger.Debug().
+		Any("task", verificationTask.PrimaryKey)
+
+	if srcNamespace == dstNamespace {
+		logEvent.
+			Str("namespace", srcNamespace)
+	} else {
+		logEvent.
+			Str("srcNamespace", srcNamespace).
+			Str("dstNamespace", dstNamespace)
+	}
+
+	logEvent.Msg("Adding metadata task.")
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
@@ -163,14 +82,14 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 func (verifier *Verifier) InsertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
-) (*VerificationTask, error) {
+) (*tasks.Task, error) {
 	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation)
 }
 
 func (verifier *Verifier) InsertFailedCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
-) (*VerificationTask, error) {
+) (*tasks.Task, error) {
 	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation+1)
 }
 
@@ -179,15 +98,15 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 	partition *partitions.Partition,
 	shardKeys []string,
 	dstNamespace string,
-) (*VerificationTask, error) {
+) (*tasks.Task, error) {
 	srcNamespace := strings.Join([]string{partition.Ns.DB, partition.Ns.Coll}, ".")
 
-	task := VerificationTask{
+	task := tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
 		Generation: verifier.generation,
-		Status:     verificationTaskAdded,
-		Type:       verificationTaskVerifyDocuments,
-		QueryFilter: QueryFilter{
+		Status:     tasks.Added,
+		Type:       tasks.VerifyDocuments,
+		QueryFilter: tasks.QueryFilter{
 			Partition: partition,
 			ShardKeys: shardKeys,
 			Namespace: srcNamespace,
@@ -217,7 +136,7 @@ func (verifier *Verifier) createDocumentRecheckTask(
 	dstTimestamp option.Option[bson.Timestamp],
 	dataSize types.ByteCount,
 	srcNamespace string,
-) (*VerificationTask, error) {
+) (*tasks.Task, error) {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
 		var ok bool
@@ -227,13 +146,13 @@ func (verifier *Verifier) createDocumentRecheckTask(
 		}
 	}
 
-	return &VerificationTask{
+	return &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
 		Generation: verifier.generation,
 		Ids:        ids,
-		Status:     verificationTaskAdded,
-		Type:       verificationTaskVerifyDocuments,
-		QueryFilter: QueryFilter{
+		Status:     tasks.Added,
+		Type:       tasks.VerifyDocuments,
+		QueryFilter: tasks.QueryFilter{
 			Namespace: srcNamespace,
 			To:        dstNamespace,
 		},
@@ -264,8 +183,8 @@ func (verifier *Verifier) insertDocumentRecheckTasks(
 
 func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 	ctx context.Context,
-) (option.Option[VerificationTask], error) {
-	task := &VerificationTask{}
+) (option.Option[tasks.Task], error) {
+	task := &tasks.Task{}
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
@@ -277,16 +196,16 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 						{"generation": verifier.generation},
 						{"type": bson.M{
 							"$in": mslices.Of(
-								verificationTaskVerifyDocuments,
-								verificationTaskVerifyCollection,
+								tasks.VerifyDocuments,
+								tasks.VerifyCollection,
 							),
 						}},
-						{"status": verificationTaskAdded},
+						{"status": tasks.Added},
 					},
 				},
 				bson.M{
 					"$set": bson.M{
-						"status":     verificationTaskProcessing,
+						"status":     tasks.Processing,
 						"begin_time": time.Now(),
 					},
 				},
@@ -313,7 +232,7 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 	return option.FromPointer(task), err
 }
 
-func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *VerificationTask) error {
+func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *tasks.Task) error {
 	return retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			result, err := verifier.verificationTaskCollection().UpdateOne(
@@ -354,12 +273,12 @@ func (verifier *Verifier) CreatePrimaryTaskIfNeeded(ctx context.Context) (bool, 
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			result, err := verifier.verificationTaskCollection().UpdateOne(
 				ctx,
-				bson.M{"type": verificationTaskPrimary},
+				bson.M{"type": tasks.Primary},
 				bson.M{
 					"$setOnInsert": bson.M{
 						"_id":    ownerSetId,
-						"type":   verificationTaskPrimary,
-						"status": verificationTaskAdded,
+						"type":   tasks.Primary,
+						"status": tasks.Added,
 					},
 				},
 				options.UpdateOne().SetUpsert(true),
@@ -383,10 +302,10 @@ func (verifier *Verifier) UpdatePrimaryTaskComplete(ctx context.Context) error {
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			result, err := verifier.verificationTaskCollection().UpdateMany(
 				ctx,
-				bson.M{"type": verificationTaskPrimary},
+				bson.M{"type": tasks.Primary},
 				bson.M{
 					"$set": bson.M{
-						"status": verificationTaskCompleted,
+						"status": tasks.Completed,
 					},
 				},
 			)

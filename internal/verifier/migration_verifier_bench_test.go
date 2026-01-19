@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 )
 
 func BenchmarkGeneric(t *testing.B) {
@@ -80,8 +82,8 @@ func BenchmarkGeneric(t *testing.B) {
 	println("Starting tasks")
 	for _, namespace := range namespaces {
 		fmt.Printf("Starting task with '%s' namespace\n", namespace)
-		qfilter := QueryFilter{Namespace: namespace}
-		task := VerificationTask{QueryFilter: qfilter}
+		qfilter := tasks.QueryFilter{Namespace: namespace}
+		task := tasks.Task{QueryFilter: qfilter}
 		// TODO: is this safe?
 		mismatchedIds, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(context.Background(), 0, &task)
 		if err != nil {

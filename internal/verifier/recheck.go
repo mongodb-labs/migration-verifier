@@ -15,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -52,7 +53,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		panic("mismatch recheck must have first-mismatch times!")
 	}
 
-	dbName, collName := SplitNamespace(namespace)
+	dbName, collName := mmongo.SplitNamespace(namespace)
 
 	dbNames := make([]string, len(documentIDs))
 	collNames := make([]string, len(documentIDs))
@@ -418,7 +419,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 	var idAccum []bson.RawValue
 	var idsSizer util.BSONArraySizer
 	var totalDocs types.DocumentCount
-	var dataSizeAccum, totalRecheckData int64
+	var dataSizeAccum, totalRecheckData types.ByteCount
 
 	// These are indexed by idAccum index:
 	firstMismatchTime := map[int32]bson.DateTime{}
@@ -603,11 +604,11 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		lastIDRaw = idRaw
 
 		idsSizer.Add(idRaw)
-		dataSizeAccum += int64(doc.DataSize)
+		dataSizeAccum += types.ByteCount(doc.DataSize)
 
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 
-		totalRecheckData += int64(doc.DataSize)
+		totalRecheckData += types.ByteCount(doc.DataSize)
 		totalDocs++
 	}
 

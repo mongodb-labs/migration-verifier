@@ -14,8 +14,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/olekukonko/tablewriter"
@@ -44,7 +47,7 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		ctx,
 		verifier.logger,
 		verifier.verificationTaskCollection(),
-		verificationTaskVerifyCollection,
+		tasks.VerifyCollection,
 		generation,
 	)
 	if err != nil {
@@ -62,7 +65,7 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 			verifier.verificationDatabase(),
 			lo.Map(
 				failedTasks,
-				func(ft VerificationTask, _ int) bson.ObjectID {
+				func(ft tasks.Task, _ int) bson.ObjectID {
 					return ft.PrimaryKey
 				},
 			),
@@ -102,7 +105,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		ctx,
 		verifier.logger,
 		verifier.verificationTaskCollection(),
-		verificationTaskVerifyDocuments,
+		tasks.VerifyDocuments,
 		generation,
 	)
 
@@ -122,7 +125,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	failedTaskMap := lo.SliceToMap(
 		lo.Range(len(failedTasks)),
-		func(i int) (bson.ObjectID, VerificationTask) {
+		func(i int) (bson.ObjectID, tasks.Task) {
 			return failedTasks[i].PrimaryKey, failedTasks[i]
 		},
 	)
@@ -348,7 +351,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 }
 
 // Boolean returned indicates whether this generation has any tasks.
-func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuilder *strings.Builder, now time.Time) (bool, error) {
+func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuilder *strings.Builder) (bool, error) {
 	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
 	if err != nil {
 		return false, err
@@ -389,8 +392,6 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		reportutils.FmtPercent(completedNss, totalNss),
 	)
 
-	elapsed := now.Sub(verifier.generationStartTime)
-
 	var activeWorkers int
 	perNamespaceWorkerStats := verifier.getPerNamespaceWorkerStats()
 	for _, nsWorkerStats := range perNamespaceWorkerStats {
@@ -410,11 +411,38 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		)
 	}
 
-	docsPerSecond := float64(comparedDocs) / elapsed.Seconds()
-	bytesPerSecond := float64(comparedBytes) / elapsed.Seconds()
+	var docsPerSecond, bytesPerSecond float64
+
+	docsLogs := verifier.docsComparedHistory.Get()
+	if len(docsLogs) > 1 {
+
+		// Since each log represents the number of docs compared since the prior
+		// log, the oldest log’s datum is meaningless. Zero it out so that we
+		// sum just the meaningful data.
+		docsLogs[0].Datum = 0
+		elapsed := docsLogs[len(docsLogs)-1].At.Sub(docsLogs[0].At)
+
+		total := history.SumLogs(docsLogs)
+
+		docsPerSecond = util.DivideToF64(total, elapsed.Seconds())
+	}
+
+	bytesLogs := verifier.bytesComparedHistory.Get()
+	if len(bytesLogs) > 1 {
+
+		// See above for why we do this.
+		bytesLogs[0].Datum = 0
+		elapsed := bytesLogs[len(bytesLogs)-1].At.Sub(bytesLogs[0].At)
+
+		total := history.SumLogs(bytesLogs)
+
+		bytesPerSecond = util.DivideToF64(total, elapsed.Seconds())
+	}
+
 	perSecondDataUnit := reportutils.FindBestUnit(bytesPerSecond)
 
 	if totalDocs > 0 {
+
 		fmt.Fprintf(
 			strBuilder,
 			"Total source documents compared: %s of %s (%s%%, %s/sec)\n",
@@ -824,7 +852,7 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 		}
 
 		var detail string
-		if wsmap[w].TaskType == verificationTaskVerifyDocuments {
+		if wsmap[w].TaskType == tasks.VerifyDocuments {
 			detail = fmt.Sprintf(
 				"%s documents (%s)",
 				reportutils.FmtReal(wsmap[w].SrcDocCount),

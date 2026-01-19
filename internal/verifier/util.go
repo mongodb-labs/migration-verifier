@@ -2,10 +2,7 @@ package verifier
 
 import (
 	"fmt"
-	"slices"
-	"strings"
 
-	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -30,15 +27,6 @@ const (
 	ErrorUpdateParentTask
 	ErrorUpdateTask
 )
-
-// SplitNamespace returns db, collection
-func SplitNamespace(namespace string) (string, string) {
-	dot := strings.Index(namespace, ".")
-	if dot < 0 {
-		return namespace, ""
-	}
-	return namespace[:dot], namespace[dot+1:]
-}
 
 // Returns full name of collection including database name
 func FullName(collection *mongo.Collection) string {
@@ -119,25 +107,6 @@ type TaskError struct {
 
 func (e TaskError) Error() string {
 	return e.Message
-}
-
-// QueryFilter stores namespace and partition info
-type QueryFilter struct {
-	Partition *partitions.Partition `bson:"partition"`
-	ShardKeys []string
-	Namespace string `bson:"namespace"    json:"namespace"`
-	To        string `bson:"to,omitempty" json:"to,omitempty"`
-}
-
-func (qf QueryFilter) GetDocKeyFields() []string {
-	if slices.Contains(qf.ShardKeys, "_id") {
-		return slices.Clone(qf.ShardKeys)
-	}
-
-	return append(
-		[]string{"_id"},
-		qf.ShardKeys...,
-	)
 }
 
 func newerTimestamp(a bson.Timestamp, b bson.Timestamp) bson.Timestamp {

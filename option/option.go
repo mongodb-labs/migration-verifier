@@ -97,9 +97,14 @@ func (o Option[T]) Get() (T, bool) {
 
 // MustGet is like Get but panics if the Option is empty.
 func (o Option[T]) MustGet() T {
+	return o.MustGetf("MustGet() called on empty %T", o)
+}
+
+// MustGetf is like MustGet but lets you customize the panic.
+func (o Option[T]) MustGetf(pattern string, args ...any) T {
 	val, exists := o.Get()
 	if !exists {
-		panic(fmt.Sprintf("MustGet() called on empty %T", o))
+		panic(fmt.Sprintf(pattern, args...))
 	}
 
 	return val

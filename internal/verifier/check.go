@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goaux/timer"
@@ -28,8 +29,8 @@ const (
 
 var (
 	failedStatuses = mapset.NewSet(
-		verificationTaskFailed,
-		verificationTaskMetadataMismatch,
+		tasks.Failed,
+		tasks.MetadataMismatch,
 	)
 
 	ChangeReaderOpts = mslices.Of(
@@ -490,10 +491,10 @@ func FetchFailedAndIncompleteTasks(
 	ctx context.Context,
 	logger *logger.Logger,
 	coll *mongo.Collection,
-	taskType verificationTaskType,
+	taskType tasks.Type,
 	generation int,
-) ([]VerificationTask, []VerificationTask, error) {
-	var FailedTasks, allTasks, IncompleteTasks []VerificationTask
+) ([]tasks.Task, []tasks.Task, error) {
+	var FailedTasks, allTasks, IncompleteTasks []tasks.Task
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
@@ -512,7 +513,7 @@ func FetchFailedAndIncompleteTasks(
 			for _, t := range allTasks {
 				if failedStatuses.Contains(t.Status) {
 					FailedTasks = append(FailedTasks, t)
-				} else if t.Status != verificationTaskCompleted {
+				} else if t.Status != tasks.Completed {
 					IncompleteTasks = append(IncompleteTasks, t)
 				}
 			}
@@ -569,7 +570,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 		verifier.workerTracker.Set(workerNum, task)
 
 		switch task.Type {
-		case verificationTaskVerifyCollection:
+		case tasks.VerifyCollection:
 			err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, &task)
 			verifier.workerTracker.Unset(workerNum)
 
@@ -582,7 +583,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 					verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
 				}
 			}
-		case verificationTaskVerifyDocuments:
+		case tasks.VerifyDocuments:
 			err := verifier.ProcessVerifyTask(ctx, workerNum, &task)
 			verifier.workerTracker.Unset(workerNum)
 

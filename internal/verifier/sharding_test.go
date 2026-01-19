@@ -5,6 +5,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -198,51 +199,51 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 		ctx,
 		bson.M{
 			"generation": 0,
-			"type":       verificationTaskVerifyCollection,
+			"type":       tasks.VerifyCollection,
 		},
 	)
 	suite.Require().NoError(err)
 
-	var tasks []VerificationTask
-	suite.Require().NoError(cursor.All(ctx, &tasks))
+	var theTasks []tasks.Task
+	suite.Require().NoError(cursor.All(ctx, &theTasks))
 
-	suite.Require().Len(tasks, len(allIndexes))
+	suite.Require().Len(theTasks, len(allIndexes))
 
 	if srcInfo.Topology == util.TopologySharded && dstInfo.Topology == util.TopologySharded {
 		taskMap := mslices.ToMap(
-			tasks,
-			func(task VerificationTask) string {
+			theTasks,
+			func(task tasks.Task) string {
 				return task.QueryFilter.Namespace
 			},
 		)
 
 		suite.Assert().Equal(
-			verificationTaskCompleted,
+			tasks.Completed,
 			taskMap[dbname+".idonly"].Status,
 			"full match",
 		)
 
 		suite.Assert().Equal(
-			verificationTaskCompleted,
+			tasks.Completed,
 			taskMap[dbname+".numtype"].Status,
 			"number type differences are ignored",
 		)
 
 		suite.Assert().Equal(
-			verificationTaskMetadataMismatch,
+			tasks.MetadataMismatch,
 			taskMap[dbname+".id_and_foo"].Status,
 			"catch field order difference",
 		)
 
 		suite.Assert().Equal(
-			verificationTaskMetadataMismatch,
+			tasks.MetadataMismatch,
 			taskMap[dbname+".sharded_dst"].Status,
 			"catch dst-only sharded",
 		)
 	} else {
-		for _, task := range tasks {
+		for _, task := range theTasks {
 			suite.Assert().Equal(
-				verificationTaskCompleted,
+				tasks.Completed,
 				task.Status,
 				"mismatched topologies, so task should have succeeded: %+v", task,
 			)

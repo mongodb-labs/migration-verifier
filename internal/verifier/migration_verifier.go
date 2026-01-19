@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/10gen/migration-verifier/chanutil"
+	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/reportutils"
@@ -20,13 +22,18 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/dustin/go-humanize"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -92,6 +99,7 @@ type Verifier struct {
 	running            bool
 	generation         int
 	port               int
+	srcURI             string
 	metaURI            string
 	metaClient         *mongo.Client
 	srcClient          *mongo.Client
@@ -117,14 +125,15 @@ type Verifier struct {
 	generationStartTime  time.Time
 	generationPauseDelay time.Duration
 	workerSleepDelay     time.Duration
-	docCompareMethod     DocCompareMethod
+	docCompareMethod     compare.Method
+	partitioningScheme   partitions.Scheme
 	verifyAll            bool
 	startClean           bool
 
 	// This would seem more ideal as uint64, but changing it would
 	// trigger several other similar type changes, and that’s not really
 	// worthwhile for now.
-	partitionSizeInBytes int64
+	partitionSizeInBytes types.ByteCount
 
 	readPreference *readpref.ReadPref
 
@@ -150,7 +159,9 @@ type Verifier struct {
 
 	pprofInterval time.Duration
 
-	workerTracker *WorkerTracker
+	workerTracker        *WorkerTracker
+	docsComparedHistory  *history.History[types.DocumentCount]
+	bytesComparedHistory *history.History[types.ByteCount]
 
 	verificationStatusCheckInterval time.Duration
 }
@@ -192,7 +203,9 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 
 		readConcernSetting: readConcern,
 
-		workerTracker: NewWorkerTracker(NumWorkers),
+		workerTracker:        NewWorkerTracker(NumWorkers),
+		docsComparedHistory:  history.New[types.DocumentCount](time.Minute),
+		bytesComparedHistory: history.New[types.ByteCount](time.Minute),
 
 		verificationStatusCheckInterval: 2 * time.Second,
 		nsMap:                           NewNSMap(),
@@ -356,7 +369,7 @@ func (verifier *Verifier) SetWorkerSleepDelay(arg time.Duration) {
 
 // SetPartitionSizeMB sets the verifier’s maximum partition size in MiB.
 func (verifier *Verifier) SetPartitionSizeMB(partitionSizeMB uint32) {
-	verifier.partitionSizeInBytes = int64(partitionSizeMB) * 1024 * 1024
+	verifier.partitionSizeInBytes = types.ByteCount(partitionSizeMB) * 1024 * 1024
 }
 
 func (verifier *Verifier) SetSrcNamespaces(arg []string) {
@@ -375,8 +388,12 @@ func (verifier *Verifier) SetMetaDBName(arg string) {
 	verifier.metaDBName = arg
 }
 
-func (verifier *Verifier) SetDocCompareMethod(method DocCompareMethod) {
+func (verifier *Verifier) SetDocCompareMethod(method compare.Method) {
 	verifier.docCompareMethod = method
+}
+
+func (verifier *Verifier) SetPartitioningScheme(method partitions.Scheme) {
+	verifier.partitioningScheme = method
 }
 
 func (verifier *Verifier) SetSrcChangeReaderMethod(method string) error {
@@ -453,7 +470,7 @@ func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []strin
 	table.SetHeader([]string{"Doc Count", "Database", "Collection"})
 
 	for _, n := range namespaces {
-		db, coll := SplitNamespace(n)
+		db, coll := mmongo.SplitNamespace(n)
 		if db != "" {
 			s, _ := client.Database(db).Collection(coll).EstimatedDocumentCount(ctx)
 			table.Append(
@@ -551,7 +568,7 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 	return
 }
 
-func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, task *VerificationTask) error {
+func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, task *tasks.Task) error {
 	start := time.Now()
 
 	debugLog := verifier.logger.Debug().
@@ -559,7 +576,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace)
 
-	task.augmentLogWithDetails(debugLog)
+	task.AugmentLogWithDetails(debugLog)
 
 	debugLog.Msg("Processing document comparison task.")
 
@@ -583,9 +600,9 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 	task.SourceByteCount = bytesCount
 
 	if len(problems) == 0 {
-		task.Status = verificationTaskCompleted
+		task.Status = tasks.Completed
 	} else {
-		task.Status = verificationTaskFailed
+		task.Status = tasks.Failed
 		// We know we won't change lastGeneration while verification tasks are running, so no mutex needed here.
 		if verifier.lastGeneration {
 			verifier.logger.Error().
@@ -742,22 +759,27 @@ func (verifier *Verifier) getShardKeyFields(
 //  1. Devise partition boundaries.
 //  2. Fetch shard keys.
 //  3. Fetch the size: # of docs, and # of bytes.
-func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, namespace string) ([]*partitions.Partition, []string, types.DocumentCount, types.ByteCount, error) {
-	dbName, collName := SplitNamespace(namespace)
+func (verifier *Verifier) partitionAndInspectNamespace(
+	ctx context.Context,
+	namespace string,
+) ([]*partitions.Partition, error) {
+	dbName, collName := mmongo.SplitNamespace(namespace)
 	namespaceAndUUID, err := uuidutil.GetCollectionNamespaceAndUUID(ctx, verifier.logger,
 		verifier.srcClientDatabase(dbName), collName)
 	if err != nil {
-		return nil, nil, 0, 0, err
-	}
-	shardKeys, err := verifier.getShardKeyFields(ctx, namespaceAndUUID)
-	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, err
 	}
 
-	partitionList, srcDocs, srcBytes, err := partitions.PartitionCollectionWithSize(
-		ctx, namespaceAndUUID, verifier.srcClient, verifier.logger, verifier.partitionSizeInBytes, verifier.globalFilter)
+	partitionList, err := partitions.PartitionCollectionWithSize(
+		ctx,
+		namespaceAndUUID,
+		verifier.srcClient,
+		verifier.logger,
+		verifier.partitionSizeInBytes,
+		verifier.globalFilter,
+	)
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, err
 	}
 	// TODO: Test the empty collection (which returns no partitions)
 	if len(partitionList) == 0 {
@@ -769,9 +791,7 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 				DB:   namespaceAndUUID.DBName,
 				Coll: namespaceAndUUID.CollName}}}
 	}
-	// Use "open" partitions, otherwise out-of-range keys on the destination might be missed
-	partitionList[0].Key.Lower = bson.MinKey{}
-	partitionList[len(partitionList)-1].Upper = bson.MaxKey{}
+
 	debugLog := verifier.logger.Debug()
 	if debugLog.Enabled() {
 		debugLog.Msgf("Partitions (%d):", len(partitionList))
@@ -792,7 +812,7 @@ func (verifier *Verifier) partitionAndInspectNamespace(ctx context.Context, name
 		}
 	}
 
-	return partitionList, shardKeys, srcDocs, srcBytes, nil
+	return partitionList, nil
 }
 
 // Returns a slice of VerificationResults with the differences, and a boolean indicating whether or
@@ -911,7 +931,7 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec, dstSpe
 func (verifier *Verifier) ProcessCollectionVerificationTask(
 	ctx context.Context,
 	workerNum int,
-	task *VerificationTask,
+	task *tasks.Task,
 ) error {
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
@@ -1075,7 +1095,7 @@ func (verifier *Verifier) verifyIndexes(
 func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	ctx context.Context,
 	workerNum int,
-	task *VerificationTask,
+	task *tasks.Task,
 ) error {
 	srcColl := verifier.srcClientCollection(task)
 	dstColl := verifier.dstClientCollection(task)
@@ -1112,6 +1132,19 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	srcSpec, hasSrcSpec := srcSpecOpt.Get()
 	dstSpec, hasDstSpec := dstSpecOpt.Get()
 
+	var collBytes types.ByteCount
+	var docsCount types.DocumentCount
+	var isCapped bool
+
+	if hasSrcSpec && srcSpec.Type == "collection" {
+		// We set the collection size & doc count in the task up-front so that
+		// logs can immediately show progress against the total data size.
+		collBytes, docsCount, isCapped, err = verifier.setCollectionSizeInTask(ctx, task, srcColl)
+		if err != nil {
+			return errors.Wrapf(err, "fetching & persisting collection size")
+		}
+	}
+
 	if !hasDstSpec {
 		if !hasSrcSpec {
 			verifier.logger.Info().
@@ -1121,11 +1154,11 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 				Msg("Collection not present on either cluster.")
 
 			// This counts as success.
-			task.Status = verificationTaskCompleted
+			task.Status = tasks.Completed
 			return nil
 		}
 
-		task.Status = verificationTaskFailed
+		task.Status = tasks.Failed
 		// Fall through here; comparing the collection specifications will produce the correct
 		// failure output.
 	}
@@ -1154,17 +1187,17 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		}
 
 		if !verifyData {
-			task.Status = verificationTaskFailed
+			task.Status = tasks.Failed
 			return nil
 		}
-		task.Status = verificationTaskMetadataMismatch
+		task.Status = tasks.MetadataMismatch
 	}
 	if !verifyData {
 		// If the metadata mismatched and we're not checking the actual data, that's a complete failure.
-		if task.Status == verificationTaskMetadataMismatch {
-			task.Status = verificationTaskFailed
+		if task.Status == tasks.MetadataMismatch {
+			task.Status = tasks.Failed
 		} else {
-			task.Status = verificationTaskCompleted
+			task.Status = tasks.Completed
 		}
 		return nil
 	}
@@ -1196,7 +1229,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			return errors.Wrapf(err, "recording %#q index discrepancies", srcNs)
 		}
 
-		task.Status = verificationTaskMetadataMismatch
+		task.Status = tasks.MetadataMismatch
 	}
 
 	shardingProblems, err := verifier.verifyShardingIfNeeded(ctx, srcColl, dstColl)
@@ -1226,20 +1259,162 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			return errors.Wrapf(err, "recording %#q sharding discrepancies", srcNs)
 		}
 
-		task.Status = verificationTaskMetadataMismatch
+		task.Status = tasks.MetadataMismatch
 	}
 
 	// We’ve confirmed that the collection metadata (including indices)
 	// matches between soruce & destination. Now we can partition the collection.
 
 	if task.Generation == 0 {
-		var partitionsCount int
-		var docsCount types.DocumentCount
-		var bytesCount types.ByteCount
+		err := verifier.partitionCollection(
+			ctx,
+			task,
+			workerNum,
+			collBytes,
+			docsCount,
+			isCapped,
+		)
 
+		if err != nil {
+			return errors.Wrapf(err, "partitioning collection")
+		}
+	}
+
+	if task.Status == tasks.Processing {
+		task.Status = tasks.Completed
+	}
+
+	return nil
+}
+
+func (verifier *Verifier) setCollectionSizeInTask(
+	ctx context.Context,
+	task *tasks.Task,
+	srcColl *mongo.Collection,
+) (types.ByteCount, types.DocumentCount, bool, error) {
+	lo.Assertf(
+		task.Status == tasks.Processing,
+		"task %v status should be %#q but is %#q",
+		task.PrimaryKey,
+		tasks.Processing,
+		task.Status,
+	)
+
+	collBytes, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
+		ctx,
+		verifier.logger,
+		srcColl,
+	)
+	if err != nil {
+		return 0, 0, false, errors.Wrapf(err, "getting %#q’s size", FullName(srcColl))
+	}
+
+	task.SourceDocumentCount = docsCount
+	task.SourceByteCount = collBytes
+
+	// Update the collection task now so that the doc count & byte count
+	// can inform logging.
+	if err := verifier.UpdateVerificationTask(ctx, task); err != nil {
+		// This failure shouldn’t happen, but it needn’t be fatal.
+		verifier.logger.Warn().
+			Any("task", task.PrimaryKey).
+			Str("namespace", FullName(srcColl)).
+			Int64("documentsCount", int64(docsCount)).
+			Int64("sizeInBytes", int64(collBytes)).
+			Err(err).
+			Msg("Failed to update verification task with collection stats.")
+	}
+
+	return collBytes, docsCount, isCapped, nil
+}
+
+func (verifier *Verifier) partitionCollection(
+	ctx context.Context,
+	task *tasks.Task,
+	workerNum int,
+	collBytes types.ByteCount,
+	docsCount types.DocumentCount,
+	isCapped bool,
+) error {
+	lo.Assertf(
+		task.Generation == 0,
+		"generation should be 0 (task: %+v)",
+		task,
+	)
+
+	srcColl := verifier.srcClientCollection(task)
+	srcNs := FullName(srcColl)
+	dstNs := FullName(verifier.dstClientCollection(task))
+
+	var partitionsCount int
+
+	shardKeyFields, err := verifier.getShardKeyFields(
+		ctx,
+		&uuidutil.NamespaceAndUUID{
+			DBName:   srcColl.Database().Name(),
+			CollName: srcColl.Name(),
+		},
+	)
+	if err != nil {
+		return errors.Wrapf(err, "getting %#q’s shard key", srcNs)
+	}
+
+	idealNumPartitions := util.DivideToF64(collBytes, verifier.partitionSizeInBytes)
+
+	if idealNumPartitions <= 1 {
+		verifier.logger.Debug().
+			Any("task", task.PrimaryKey).
+			Str("namespace", FullName(srcColl)).
+			Int64("documentsCount", int64(docsCount)).
+			Int64("collectionBytes", int64(collBytes)).
+			Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
+			Msg("Collection is small enough not to need partitioning.")
+
+		partition := partitions.Partition{
+			Key: partitions.PartitionKey{
+				Lower: bsontools.ToRawValue(bson.MinKey{}),
+			},
+			Ns: &partitions.Namespace{
+				srcColl.Database().Name(),
+				srcColl.Name(),
+			},
+			Upper:    bsontools.ToRawValue(bson.MaxKey{}),
+			IsCapped: isCapped,
+		}
+
+		_, err = verifier.InsertPartitionVerificationTask(
+			ctx,
+			&partition,
+			shardKeyFields,
+			dstNs,
+		)
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"inserting single partition task for namespace %#q",
+				srcNs,
+			)
+		}
+
+		return nil
+	}
+
+	verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Any("task", task.PrimaryKey).
+		Str("namespace", FullName(srcColl)).
+		Int64("documentsCount", int64(docsCount)).
+		Int64("collectionBytes", int64(collBytes)).
+		Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
+		Float64("idealPartitionsCount", idealNumPartitions).
+		Msg("Partitioning collection.")
+
+	switch verifier.partitioningScheme {
+
+	case partitions.SchemeID:
 		if verifier.srcHasSampleRate() {
 			var err error
-			partitionsCount, docsCount, bytesCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task)
+			partitionsCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task, shardKeyFields)
 			if err != nil {
 				return errors.Wrapf(err, "partitioning %#q via $sampleRate", srcNs)
 			}
@@ -1250,7 +1425,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			var partitions []*partitions.Partition
 			var shardKeys []string
 
-			partitions, shardKeys, docsCount, bytesCount, err = verifier.partitionAndInspectNamespace(ctx, srcNs)
+			partitions, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
 			if err != nil {
 				return errors.Wrapf(err, "partitioning %#q via $sample", srcNs)
 			}
@@ -1268,20 +1443,82 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 				}
 			}
 		}
+	case partitions.SchemeNatural:
+		clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.srcClient)
+		if err != nil {
+			return errors.Wrapf(err, "reading source cluster info")
+		}
 
-		verifier.logger.Debug().
-			Int("workerNum", workerNum).
-			Str("namespace", srcNs).
-			Int("partitionsCount", partitionsCount).
-			Msg("Divided collection into partitions.")
+		if clusterInfo.Topology != util.TopologyReplset {
+			return fmt.Errorf("resumable natural scan requires a replica set")
+		} else {
+			err = mmongo.WhyFindCannotResume([2]int(verifier.srcClusterInfo.VersionArray))
 
-		task.SourceDocumentCount = docsCount
-		task.SourceByteCount = bytesCount
+			if err != nil {
+				return err
+			}
+		}
+
+		shardKeys, err := verifier.getShardKeyFields(
+			ctx,
+			&uuidutil.NamespaceAndUUID{
+				DBName:   srcColl.Database().Name(),
+				CollName: srcColl.Name(),
+			},
+		)
+		if err != nil {
+			return errors.Wrapf(err, "getting %#q’s shard key", srcNs)
+		}
+
+		var pChan chan mo.Result[partitions.Partition]
+		pChan, err = partitions.PartitionCollectionNaturalOrder(
+			ctx,
+			srcColl,
+			verifier.partitionSizeInBytes,
+			verifier.logger,
+		)
+		if err != nil {
+			return fmt.Errorf("starting natural partitioning: %w", err)
+		}
+
+		for {
+			resultOpt, err := chanutil.ReadWithDoneCheck(ctx, pChan)
+			if err != nil {
+				return fmt.Errorf("reading natural partition: %w", err)
+			}
+
+			result, has := resultOpt.Get()
+			if !has {
+				break
+			}
+
+			partition, err := result.Get()
+			if err != nil {
+				return fmt.Errorf("reading natural partition: %w", err)
+			}
+
+			partitionsCount++
+
+			_, err = verifier.InsertPartitionVerificationTask(ctx, &partition, shardKeys, dstNs)
+			if err != nil {
+				return errors.Wrapf(
+					err,
+					"inserting a partition task (%+v) for namespace %#q",
+					partition,
+					srcNs,
+				)
+			}
+		}
+	default:
+		panic(fmt.Sprintf("bad partition method (%#q); how did that happen?!?", verifier.partitioningScheme))
 	}
 
-	if task.Status == verificationTaskProcessing {
-		task.Status = verificationTaskCompleted
-	}
+	verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Any("task", task.PrimaryKey).
+		Str("namespace", srcNs).
+		Int("partitionsCount", partitionsCount).
+		Msg("Done partitioning collection.")
 
 	return nil
 }
@@ -1348,16 +1585,16 @@ func (verifier *Verifier) getVerificationStatusForGeneration(
 
 		count := int(result.Lookup("count").Int32())
 		verificationStatus.TotalTasks += int(count)
-		switch verificationTaskStatus(status) {
-		case verificationTaskAdded:
+		switch tasks.Status(status) {
+		case tasks.Added:
 			verificationStatus.AddedTasks = count
-		case verificationTaskProcessing:
+		case tasks.Processing:
 			verificationStatus.ProcessingTasks = count
-		case verificationTaskFailed:
+		case tasks.Failed:
 			verificationStatus.FailedTasks = count
-		case verificationTaskMetadataMismatch:
+		case tasks.MetadataMismatch:
 			verificationStatus.MetadataMismatchTasks = count
-		case verificationTaskCompleted:
+		case tasks.Completed:
 			verificationStatus.CompletedTasks = count
 		default:
 			verifier.logger.Info().Msgf("Unknown task status %s", status)
@@ -1407,27 +1644,24 @@ func (verifier *Verifier) dstClientDatabase(dbName string) *mongo.Database {
 	return db
 }
 
-func (verifier *Verifier) srcClientCollection(task *VerificationTask) *mongo.Collection {
+func (verifier *Verifier) srcClientCollection(task *tasks.Task) *mongo.Collection {
 	if task != nil {
-		dbName, collName := SplitNamespace(task.QueryFilter.Namespace)
+		dbName, collName := mmongo.SplitNamespace(task.QueryFilter.Namespace)
 		return verifier.srcClientDatabase(dbName).Collection(collName)
 	}
 	return nil
 }
 
-func (verifier *Verifier) dstClientCollection(task *VerificationTask) *mongo.Collection {
+func (verifier *Verifier) dstClientCollection(task *tasks.Task) *mongo.Collection {
 	if task != nil {
-		if task.QueryFilter.To != "" {
-			return verifier.dstClientCollectionByNameSpace(task.QueryFilter.To)
-		} else {
-			return verifier.dstClientCollectionByNameSpace(task.QueryFilter.Namespace)
-		}
+		return verifier.dstClientCollectionByNameSpace(task.QueryFilter.DstNamespace())
 	}
+
 	return nil
 }
 
 func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mongo.Collection {
-	dbName, collName := SplitNamespace(namespace)
+	dbName, collName := mmongo.SplitNamespace(namespace)
 	return verifier.dstClientDatabase(dbName).Collection(collName)
 }
 
@@ -1549,7 +1783,7 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	case Gen0MetadataAnalysisComplete:
 		fallthrough
 	case GenerationInProgress:
-		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder, reportGenStartTime)
+		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder)
 	case GenerationComplete:
 		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder, reportGenStartTime)
 	default:

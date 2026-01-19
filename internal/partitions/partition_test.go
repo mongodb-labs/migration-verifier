@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -46,7 +47,10 @@ func (suite *UnitTestSuite) TestVersioning() {
 	suite.Require().NoError(err)
 	findOptions = qp.ToFindOptions()
 	filter = getFilterFromFindOptions(findOptions)
-	suite.Require().Equal(expectedExprFilter, filter)
+	suite.Require().Equal(
+		expectedExprFilter,
+		roundTripBSON(suite.T(), filter),
+	)
 
 	// 4.4 (int64)
 	qp, err = partition.GetQueryParameters(&util.ClusterInfo{VersionArray: []int{4, 4, 0, 0}}, nil)
@@ -103,15 +107,15 @@ func (suite *UnitTestSuite) makeTestPartition() (Partition, bson.D) {
 	partition := Partition{
 		Key: PartitionKey{
 			SourceUUID: util.NewUUID(),
-			Lower:      bson.ObjectID([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}),
+			Lower:      bsontools.ToRawValue(bson.ObjectID([12]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})),
 		},
 		Ns:    &Namespace{DB: "testDB", Coll: "testColl"},
-		Upper: bson.ObjectID([12]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2}),
+		Upper: bsontools.ToRawValue(bson.ObjectID([12]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2})),
 	}
 	return partition, suite.makeExpectedFilter(partition.Key.Lower, partition.Upper)
 }
 
-func (suite *UnitTestSuite) makeExpectedFilter(lower, upper any) bson.D {
+func (suite *UnitTestSuite) makeExpectedFilter(lower, upper bson.RawValue) bson.D {
 	return roundTripBSON(suite.T(), bson.D{{"$and", []bson.D{
 		// All _id values >= lower bound.
 		{{"$expr", bson.D{

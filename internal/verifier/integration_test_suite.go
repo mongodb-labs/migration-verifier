@@ -11,9 +11,12 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -164,8 +167,8 @@ func (suite *IntegrationTestSuite) GetTopology(client *mongo.Client) util.Cluste
 }
 
 func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
-	qfilter := QueryFilter{Namespace: "keyhole.dealers"}
-	task := VerificationTask{QueryFilter: qfilter}
+	qfilter := tasks.QueryFilter{Namespace: "keyhole.dealers"}
+	task := tasks.Task{QueryFilter: qfilter}
 
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	//verifier.SetStartClean(true)
@@ -175,14 +178,15 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 
 	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
 
-	docCompareMethod := DocCompareDefault
+	docCompareMethod := compare.Default
 	envDocCompareMethod := os.Getenv("MVTEST_DOC_COMPARE_METHOD")
 	if envDocCompareMethod != "" {
-		docCompareMethod = DocCompareMethod(envDocCompareMethod)
+		docCompareMethod = compare.Method(envDocCompareMethod)
 
 		// Forgo validation because the tested code should do that.
 	}
 	verifier.SetDocCompareMethod(docCompareMethod)
+	verifier.SetPartitioningScheme(partitions.SchemeID)
 
 	ctx := suite.Context()
 
@@ -210,8 +214,13 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		os.Getenv("MVTEST_DST_CHANGE_READER"),
 		ChangeReaderOptChangeStream,
 	)
-
 	suite.Require().NoError(verifier.SetDstChangeReaderMethod(envDstChangeReader))
+
+	envPartitionBy := cmp.Or(
+		partitions.Scheme(os.Getenv("MVTEST_PARTITIONING_SCHEME")),
+		partitions.SchemeID,
+	)
+	verifier.SetPartitioningScheme(envPartitionBy)
 
 	suite.Require().NoError(verifier.initializeChangeReaders())
 

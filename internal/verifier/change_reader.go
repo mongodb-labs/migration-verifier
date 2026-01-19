@@ -163,15 +163,11 @@ func (rc *ChangeReaderCommon) getEventsPerSecond() option.Option[float64] {
 	if hasLogs && lastLog.At != logs[0].At {
 		span := lastLog.At.Sub(logs[0].At)
 
-		// Each log contains a time and a # of events that happened since
-		// the prior log. Thus, each log’s Datum is a count of events that
-		// happened before the timestamp. Since we want the # of events that
-		// happened between the first & last times, we only want events *after*
-		// the first time. Thus, we skip the first log entry here.
-		totalEvents := 0
-		for _, log := range logs[1:] {
-			totalEvents += log.Datum
-		}
+		// Since each log represents the number of events since the prior one,
+		// the oldest log’s datum is meaningless. Zero it out so that we sum
+		// just the meaningful data.
+		logs[0].Datum = 0
+		totalEvents := history.SumLogs(logs)
 
 		return option.Some(util.DivideToF64(totalEvents, span.Seconds()))
 	}
