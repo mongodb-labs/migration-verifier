@@ -36,10 +36,34 @@ func PartitionCollectionNaturalOrder(
 	idealPartitionBytes types.ByteCount,
 	subLogger *logger.Logger,
 ) (chan mo.Result[Partition], error) {
+	pChan := make(chan mo.Result[Partition])
+
+	// Avoid storing a null upper limit. See architecture
+	// documentation for rationale.
+	topRecordIDOpt, err := GetTopRecordID(ctx, coll)
+	if err != nil {
+		return nil, errors.Wrapf(err, "fetching top record ID")
+	}
+
+	if !topRecordIDOpt.IsSome() {
+		// If the collection is empty then there’s no point in partitioning it.
+		// Any documents created during generation 0 will be rechecked in
+		// generation 1.
+		close(pChan)
+
+		return pChan, nil
+	}
 
 	collSizeInBytes, docCount, _, err := GetSizeAndDocumentCount(ctx, subLogger, coll)
 	if err != nil {
 		return nil, errors.Wrapf(err, "getting collection size & count")
+	}
+
+	if docCount == 0 {
+		// Again: if the collection is empty, there’s no point in partitioning.
+		close(pChan)
+
+		return pChan, nil
 	}
 
 	idealNumPartitions := util.DivideToF64(collSizeInBytes, idealPartitionBytes)
@@ -81,12 +105,13 @@ func PartitionCollectionNaturalOrder(
 		return nil, errors.Wrapf(err, "opening partition query (%+v)", cmd)
 	}
 
-	// Confirm that we can, in fact, partition this collection naturally:
-	curToken, err := cursor.GetResumeToken(c)
-	if err != nil {
-		return nil, errors.Wrapf(err, "extracting resume token")
-	}
 	if !c.IsFinished() {
+		// Confirm that we can, in fact, partition this collection naturally:
+		curToken, err := cursor.GetResumeToken(c)
+		if err != nil {
+			return nil, errors.Wrapf(err, "extracting resume token")
+		}
+
 		recIDRV, err := curToken.LookupErr(RecordID)
 		if err != nil {
 			return nil, errors.Wrapf(err, "extracting record ID from resume token (%v)", curToken)
@@ -120,23 +145,6 @@ func PartitionCollectionNaturalOrder(
 	hostnameAndPort, err := bsontools.RawValueTo[string](hostnameAndPortRV)
 	if err != nil {
 		return nil, errors.Wrapf(err, "parsing hostname in isMaster")
-	}
-
-	pChan := make(chan mo.Result[Partition])
-
-	// Avoid storing a null upper limit. See architecture
-	// documentation for rationale.
-	topRecordIDOpt, err := GetTopRecordID(ctx, coll)
-	if err != nil {
-		return nil, errors.Wrapf(err, "fetching top record ID")
-	}
-
-	if !topRecordIDOpt.IsSome() {
-		// If the collection is empty then there’s no point in partitioning it.
-		// Any documents created during generation 0 will be rechecked in
-		// generation 1.
-		close(pChan)
-		return pChan, nil
 	}
 
 	go func() {

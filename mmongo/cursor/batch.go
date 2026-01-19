@@ -229,6 +229,10 @@ func (c *BatchCursor) SetMaxAwaitTime(d time.Duration) {
 // GetResumeToken is a convenience function that extracts the
 // cursor’s post-batch resume token.
 func GetResumeToken(c *BatchCursor) (bson.Raw, error) {
+	if c.IsFinished() {
+		panic("can’t get resume token from finished cursor!")
+	}
+
 	var resumeToken bson.Raw
 
 	tokenRV, err := c.rawResp.LookupErr("cursor", "postBatchResumeToken")
