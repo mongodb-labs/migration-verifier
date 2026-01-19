@@ -233,6 +233,10 @@ func GetResumeToken(c *BatchCursor) (option.Option[bson.Raw], error) {
 
 	tokenRV, err := c.rawResp.LookupErr("cursor", "postBatchResumeToken")
 	if err != nil {
+		if errors.Is(err, bsoncore.ErrElementNotFound) {
+			err = nil
+		}
+
 		return option.None[bson.Raw](), errors.Wrapf(err, "extracting resume token")
 	}
 
