@@ -105,13 +105,13 @@ func PartitionCollectionNaturalOrder(
 		return nil, errors.Wrapf(err, "opening partition query (%+v)", cmd)
 	}
 
-	if !c.IsFinished() {
-		// Confirm that we can, in fact, partition this collection naturally:
-		curToken, err := cursor.GetResumeToken(c)
-		if err != nil {
-			return nil, errors.Wrapf(err, "extracting resume token")
-		}
+	curTokenOpt, err := cursor.GetResumeToken(c)
+	if err != nil {
+		return nil, errors.Wrapf(err, "extracting resume token")
+	}
 
+	// Confirm that we can, in fact, partition this collection naturally:
+	if curToken, hasToken := curTokenOpt.Get(); hasToken {
 		recIDRV, err := curToken.LookupErr(RecordID)
 		if err != nil {
 			return nil, errors.Wrapf(err, "extracting record ID from resume token (%v)", curToken)
@@ -151,13 +151,18 @@ func PartitionCollectionNaturalOrder(
 		defer close(pChan)
 
 		priorToken := bsontools.ToRawValue(bson.Null{})
-		var curToken bson.Raw
 		var err error
 
-		for {
-			curToken, err = cursor.GetResumeToken(c)
+		for !c.IsFinished() {
+			var curTokenOpt option.Option[bson.Raw]
+			curTokenOpt, err = cursor.GetResumeToken(c)
 			if err != nil {
 				err = errors.Wrapf(err, "reading resume token from server response")
+				break
+			}
+
+			curToken, hasToken := curTokenOpt.Get()
+			if !hasToken {
 				break
 			}
 
