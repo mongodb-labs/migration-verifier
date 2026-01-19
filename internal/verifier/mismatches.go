@@ -8,6 +8,7 @@ import (
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -137,7 +138,7 @@ func countRechecksForGeneration(
 		mongo.Pipeline{
 			{{"$match", bson.D{
 				{"generation", bson.D{{"$in", []any{generation, generation - 1}}}},
-				{"type", verificationTaskVerifyDocuments},
+				{"type", tasks.VerifyDocuments},
 
 				// NB: We don’t filter by task status because we need to count
 				// all rechecks, including those in tasks that turned up no
