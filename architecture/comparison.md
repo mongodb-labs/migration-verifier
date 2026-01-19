@@ -80,11 +80,11 @@ initially given to Migration Verifier
 
 Not much to say … we compare two buffers, and if they mismatch, report that.
 
-## Ignoring field order
+### Ignoring field order
 
 Migration Verifier implements custom logic for this.
 
-## $toHashedIndexKey
+### $toHashedIndexKey
 
 In this mode Verifier compares just 2 integers for each document: the BSON
 length, and an int64 gotten from `$toHashedIndexKey`.
