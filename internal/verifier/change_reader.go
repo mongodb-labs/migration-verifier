@@ -161,7 +161,7 @@ func (rc *ChangeReaderCommon) getEventsPerSecond() option.Option[float64] {
 	lastLog, hasLogs := lo.Last(logs)
 
 	if hasLogs && lastLog.At != logs[0].At {
-		span := lastLog.At.Sub(logs[0].At)
+		span := time.Since(logs[0].At)
 
 		// Since each log represents the number of events since the prior one,
 		// the oldest log’s datum is meaningless. Zero it out so that we sum
