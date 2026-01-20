@@ -184,6 +184,7 @@ func ReadNaturalPartitionFromSource(
 
 		logger.Debug().
 			Any("task", task.PrimaryKey).
+			Str("namespace", task.QueryFilter.Namespace).
 			Stringer("resumeToken", resumeToken).
 			Err(err).
 			Msg("Resume token is no longer valid. Will attempt use of earlier tokens.")
@@ -212,6 +213,7 @@ func ReadNaturalPartitionFromSource(
 	flush := func(ctx context.Context) error {
 		logger.Trace().
 			Any("task", task.PrimaryKey).
+			Str("namespace", task.QueryFilter.Namespace).
 			Int("count", len(batchDocIDs)).
 			Msg("Flushing to dst.")
 
@@ -232,6 +234,7 @@ func ReadNaturalPartitionFromSource(
 
 		logger.Trace().
 			Any("task", task.PrimaryKey).
+			Str("namespace", task.QueryFilter.Namespace).
 			Int("count", len(batch)).
 			Msg("Flushing to compare.")
 
