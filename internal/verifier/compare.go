@@ -163,6 +163,9 @@ func (verifier *Verifier) compareDocsFromChannels(
 		docCompareMethod: verifier.docCompareMethod,
 	}
 
+	// A reusable slice of doc key values.
+	var docKeyValues []bson.RawValue
+
 	// This is the core document-handling logic. It either:
 	//
 	// a) caches the new document if its mapKey is unseen, or
@@ -170,6 +173,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	//    counterpart and records any mismatch.
 	handleNewDoc := func(curDocWithTS compare.DocWithTS, isSrc bool) error {
 		docKeyValues, err := verifier.docCompareMethod.GetDocKeyValues(
+			docKeyValues,
 			curDocWithTS.Doc,
 			mapKeyFieldNames,
 		)
@@ -178,6 +182,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 		}
 
 		mapKey := getMapKey(docKeyValues)
+		docKeyValues = docKeyValues[:0]
 
 		var ourMap, theirMap map[string]compare.DocWithTS
 

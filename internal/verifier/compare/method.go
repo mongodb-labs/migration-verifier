@@ -68,6 +68,7 @@ func (dcm Method) RawDocIDForComparison(
 }
 
 func (dcm Method) GetDocKeyValues(
+	in []bson.RawValue,
 	doc bson.Raw,
 	fieldNames []string,
 ) ([]bson.RawValue, error) {
@@ -75,12 +76,7 @@ func (dcm Method) GetDocKeyValues(
 
 	switch dcm {
 	case Binary, IgnoreOrder:
-		// If we have the full document, create the document key manually:
-		var err error
-		docKey, err = dockey.ExtractTrueDocKeyFromDoc(fieldNames, doc)
-		if err != nil {
-			return nil, err
-		}
+		return dockey.AppendDocKeyFields(in, doc, fieldNames)
 	case ToHashedIndexKey:
 		// If we have a hash, then the aggregation should have extracted the
 		// document key for us.
@@ -102,7 +98,6 @@ func (dcm Method) GetDocKeyValues(
 		}
 	}
 
-	var values []bson.RawValue
 	els, err := docKey.Elements()
 	if err != nil {
 		return nil, errors.Wrapf(err, "parsing doc key (%+v) of doc %+v", docKey, doc)
@@ -114,10 +109,10 @@ func (dcm Method) GetDocKeyValues(
 			return nil, errors.Wrapf(err, "parsing doc key element (%+v) of doc %+v", el, doc)
 		}
 
-		values = append(values, val)
+		in = append(in, val)
 	}
 
-	return values, nil
+	return in, nil
 }
 
 func GetHashedIndexKeyProjection(qf tasks.QueryFilter) bson.D {

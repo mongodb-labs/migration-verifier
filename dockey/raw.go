@@ -10,6 +10,35 @@ import (
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
+func AppendDocKeyFields(
+	in []bson.RawValue,
+	doc bson.Raw,
+	fieldNames []string,
+) ([]bson.RawValue, error) {
+	for _, field := range fieldNames {
+		var val bson.RawValue
+
+		// This is how sharding routes documents: it always
+		// splits on the dot and looks deeply into the document.
+		parts := strings.Split(field, ".")
+		val, err := doc.LookupErr(parts...)
+
+		if err != nil {
+			// Do nothing (yet).
+		} else if errors.Is(err, bsoncore.ErrElementNotFound) || errors.As(err, &bsoncore.InvalidDepthTraversalError{}) {
+			// If the document lacks a value for this field
+			// then make it null in the document key.
+			val = bson.RawValue{Type: bson.TypeNull}
+		} else {
+			return nil, errors.Wrapf(err, "extracting doc key field %#q from doc %+v", field, doc)
+		}
+
+		in = append(in, val)
+	}
+
+	return in, nil
+}
+
 // ExtractTrueDocKeyFromDoc extracts the document key from a document
 // given its field names.
 //
@@ -24,27 +53,17 @@ func ExtractTrueDocKeyFromDoc(
 
 	docBuilder := bsoncore.NewDocumentBuilder()
 
-	for _, field := range fieldNames {
-		var val bson.RawValue
+	vals, err := AppendDocKeyFields(nil, doc, fieldNames)
+	if err != nil {
+		return nil, errors.Wrapf(err, "fetch document key values")
+	}
 
-		// This is how sharding routes documents: it always
-		// splits on the dot and looks deeply into the document.
-		parts := strings.Split(field, ".")
-		val, err := doc.LookupErr(parts...)
-
-		if errors.Is(err, bsoncore.ErrElementNotFound) || errors.As(err, &bsoncore.InvalidDepthTraversalError{}) {
-			// If the document lacks a value for this field
-			// then make it null in the document key.
-			val = bson.RawValue{Type: bson.TypeNull}
-		} else if err != nil {
-			return nil, errors.Wrapf(err, "extracting doc key field %#q from doc %+v", field, doc)
-		}
-
+	for i, field := range fieldNames {
 		docBuilder.AppendValue(
 			field,
 			bsoncore.Value{
-				Type: bsoncore.Type(val.Type),
-				Data: val.Value,
+				Type: bsoncore.Type(vals[i].Type),
+				Data: vals[i].Value,
 			},
 		)
 	}
