@@ -10,6 +10,13 @@ import (
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
+// AppendDocKeyFields extracts the document key fields from a document
+// given its field names and appends them to the given slice. The same
+// slice (possibly re-allocated) is returned.
+//
+// NB: This avoids the problem documented in SERVER-109340; as a result,
+// the returned key may not always match the change stream’s `documentKey`
+// (because the server misreports its own sharding logic).
 func AppendDocKeyFields(
 	in []bson.RawValue,
 	doc bson.Raw,
@@ -39,12 +46,8 @@ func AppendDocKeyFields(
 	return in, nil
 }
 
-// ExtractTrueDocKeyFromDoc extracts the document key from a document
-// given its field names.
-//
-// NB: This avoids the problem documented in SERVER-109340; as a result,
-// the returned key may not always match the change stream’s `documentKey`
-// (because the server misreports its own sharding logic).
+// ExtractTrueDocKeyFromDoc is like AppendDocKeyFields, but it creates a
+// full BSON document.
 func ExtractTrueDocKeyFromDoc(
 	fieldNames []string,
 	doc bson.Raw,
@@ -53,7 +56,8 @@ func ExtractTrueDocKeyFromDoc(
 
 	docBuilder := bsoncore.NewDocumentBuilder()
 
-	vals, err := AppendDocKeyFields(nil, doc, fieldNames)
+	vals := make([]bson.RawValue, 0, len(fieldNames))
+	vals, err := AppendDocKeyFields(vals, doc, fieldNames)
 	if err != nil {
 		return nil, errors.Wrapf(err, "fetch document key values")
 	}
