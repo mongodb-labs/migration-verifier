@@ -23,7 +23,7 @@ func AppendDocKeyFields(
 		parts := strings.Split(field, ".")
 		val, err := doc.LookupErr(parts...)
 
-		if err != nil {
+		if err == nil {
 			// Do nothing (yet).
 		} else if errors.Is(err, bsoncore.ErrElementNotFound) || errors.As(err, &bsoncore.InvalidDepthTraversalError{}) {
 			// If the document lacks a value for this field
