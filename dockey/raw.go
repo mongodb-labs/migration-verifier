@@ -23,14 +23,14 @@ func AppendDocKeyFields(
 		parts := strings.Split(field, ".")
 		val, err := doc.LookupErr(parts...)
 
-		if err == nil {
-			// Do nothing (yet).
-		} else if errors.Is(err, bsoncore.ErrElementNotFound) || errors.As(err, &bsoncore.InvalidDepthTraversalError{}) {
-			// If the document lacks a value for this field
-			// then make it null in the document key.
-			val = bson.RawValue{Type: bson.TypeNull}
-		} else {
-			return nil, errors.Wrapf(err, "extracting doc key field %#q from doc %+v", field, doc)
+		if err != nil {
+			if errors.Is(err, bsoncore.ErrElementNotFound) || errors.As(err, &bsoncore.InvalidDepthTraversalError{}) {
+				// If the document lacks a value for this field
+				// then make it null in the document key.
+				val = bson.RawValue{Type: bson.TypeNull}
+			} else {
+				return nil, errors.Wrapf(err, "extracting doc key field %#q from doc %+v", field, doc)
+			}
 		}
 
 		in = append(in, val)
