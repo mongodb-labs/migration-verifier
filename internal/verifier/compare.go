@@ -781,6 +781,8 @@ func iterateCursorToChannel(
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
 
+		docs++
+
 		clusterTime, err := util.GetClusterTimeFromSession(sess)
 		if err != nil {
 			return 0, errors.Wrap(err, "reading cluster time from session")
@@ -797,8 +799,6 @@ func iterateCursorToChannel(
 		}
 
 		state.NoteSuccess("sent a document to compare thread")
-
-		docs++
 	}
 
 	if cursor.Err() != nil {

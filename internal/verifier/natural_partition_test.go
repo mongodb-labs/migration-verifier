@@ -312,6 +312,8 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 				)
 			}
 
+			lastUpperBound = partition.Upper
+
 			task := tasks.Task{
 				PrimaryKey: bson.NewObjectID(),
 				Type:       tasks.VerifyDocuments,
