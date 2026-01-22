@@ -6,6 +6,33 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+// DocID is how natural partitioning sends document IDs from the
+// source-reader thread to the destination. This wraps a document ID
+// with a struct that simplifies memory management.
+type DocID struct {
+	ID bson.RawValue
+}
+
+func NewDocID(rv bson.RawValue) DocID {
+	docID := DocID{rv}
+
+	if len(docID.ID.Value) > 0 {
+		copiedValue := pool.Get(len(rv.Value))
+		copy(copiedValue, rv.Value)
+
+		docID.ID.Value = copiedValue
+	}
+
+	return docID
+}
+
+// Free releases the memory allocated to hold the document ID’s value.
+func (d DocID) Free() {
+	if len(d.ID.Value) > 0 {
+		pool.Put(d.ID.Value)
+	}
+}
+
 // DocWithTS holds a document that’s to be compared with its peer’s or, if not,
 // marked as missing/extra on the destination.
 type DocWithTS struct {
@@ -30,9 +57,9 @@ func NewDocWithTS(doc bson.Raw, ts bson.Timestamp) DocWithTS {
 	}
 }
 
-// Release releases the memory allocated to hold the document.
+// Free releases the memory allocated to hold the document.
 // If the struct was not created with NewDocWithTS, this panics.
-func (d DocWithTS) Release() {
+func (d DocWithTS) Free() {
 	lo.Assertf(
 		d.manual,
 		"Release() called on auto-managed %T",

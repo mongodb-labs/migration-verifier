@@ -26,11 +26,16 @@ jobs:
           # NB: This is the only setup we’re supporting with 4.0.
           - mongodb_versions: [ '4.0', '8.0' ]
             topology: replset
+            partitioningScheme: _id
+            srcChangeReader: changeStream
+            dstChangeReader: changeStream
 
           # Testing fallback when `hello` isn’t implemented
           # (but appendOplogNote is).
           - mongodb_versions: [ '4.2.5', '6.0' ]
             topology: replset
+            srcChangeReader: changeStream
+            dstChangeReader: changeStream
 
           - mongodb_versions: [ '4.0', '8.0' ]
             topology: replset
@@ -68,6 +73,23 @@ jobs:
             dstChangeReader: tailOplog
 
         exclude:
+          # 1. No natural scan for sharded sources.
+          - topology: sharded
+            partitioningScheme: natural
+
+          # 2. No natural scan before 4.4.
+          - mongodb_versions: [ '4.2', '4.2' ]
+            partitioningScheme: natural
+          - mongodb_versions: [ '4.2', '4.4' ]
+            partitioningScheme: natural
+          - mongodb_versions: [ '4.2', '5.0' ]
+            partitioningScheme: natural
+          - mongodb_versions: [ '4.2', '6.0' ]
+            partitioningScheme: natural
+          - mongodb_versions: [ '4.2', '8.0' ]
+            partitioningScheme: natural
+
+          # No hashed comparison before 4.4.
           - mongodb_versions: [ '4.2', '4.2' ]
             toHashedIndexKey: true
           - mongodb_versions: [ '4.2', '4.4' ]
@@ -108,6 +130,8 @@ jobs:
 
         toHashedIndexKey: [true, false]
 
+        partitioningScheme: ["_id", "natural"]
+
         srcChangeReader: [changeStream]
         dstChangeReader: [changeStream]
 
@@ -120,7 +144,7 @@ jobs:
     # versions need.
     runs-on: ubuntu-22.04
 
-    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology }}${{ matrix.toHashedIndexKey && ', hashed doc compare' || '' }}, srcChangeReader=${{ matrix.srcChangeReader }}, dstChangeReader=${{ matrix.dstChangeReader }}
+    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology }}${{ matrix.toHashedIndexKey && ', hashed doc compare' || '' }}, srcChangeReader=${{ matrix.srcChangeReader }}, dstChangeReader=${{ matrix.dstChangeReader }}, partitioningScheme=${{ matrix.partitioningScheme }}
 
     steps:
       - run: uname -a
@@ -168,6 +192,7 @@ jobs:
 
           MVTEST_SRC_CHANGE_READER: ${{matrix.srcChangeReader}}
           MVTEST_DST_CHANGE_READER: ${{matrix.dstChangeReader}}
+          MVTEST_PARTITIONING_SCHEME: ${{matrix.partitioningScheme}}
 
           MVTEST_SRC: ${{ (matrix.topology == 'sharded') && env.shardedSrcConnStr || env.replsetSrcConnStr }}
           MVTEST_DST: ${{ (matrix.topology == 'sharded' || matrix.topology == 'replset-to-sharded') && env.shardedDstConnStr || env.replsetDstConnStr }}
