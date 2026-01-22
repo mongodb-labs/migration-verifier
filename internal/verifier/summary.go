@@ -392,22 +392,45 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		reportutils.FmtPercent(completedNss, totalNss),
 	)
 
-	var activeWorkers int
+	var documentWorkers, collectionWorkers int
 	perNamespaceWorkerStats := verifier.getPerNamespaceWorkerStats()
 	for _, nsWorkerStats := range perNamespaceWorkerStats {
 		for _, workerStats := range nsWorkerStats {
-			activeWorkers++
+			switch workerStats.TaskType {
+			case tasks.VerifyDocuments:
+				documentWorkers++
+			case tasks.VerifyCollection:
+				collectionWorkers++
+			}
 			comparedDocs += workerStats.SrcDocCount
 			comparedBytes += workerStats.SrcByteCount
 		}
 	}
 
-	if activeWorkers > 0 {
+	if documentWorkers+collectionWorkers > 0 {
+		threadDescriptions := []string{}
+
+		if documentWorkers > 0 {
+			threadDescriptions = append(threadDescriptions, fmt.Sprintf(
+				"%d comparing documents",
+				documentWorkers,
+			))
+		}
+
+		if collectionWorkers > 0 {
+			generation, _ := verifier.getGeneration()
+
+			threadDescriptions = append(threadDescriptions, fmt.Sprintf(
+				"%d comparing%s collections",
+				collectionWorkers,
+				lo.Ternary(generation == 0, "/partitioning", ""),
+			))
+		}
+
 		fmt.Fprintf(
 			strBuilder,
-			"Active document comparison threads: %d of %d\n",
-			activeWorkers,
-			verifier.numWorkers,
+			"Active threads: %s\n",
+			strings.Join(threadDescriptions, ", "),
 		)
 	}
 
@@ -507,21 +530,49 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 
 		tableHasRows = true
 
-		var threads int
+		// NB: There should only ever be 1 metadata thread.
+		var docThreads, metaThreads int
 
 		docsCompared := result.DocsCompared
 		bytesCompared := result.BytesCompared
 
 		if nsWorkerStats, ok := perNamespaceWorkerStats[result.Namespace]; ok {
-			threads = len(nsWorkerStats)
-
 			for _, workerStats := range nsWorkerStats {
+				switch workerStats.TaskType {
+				case tasks.VerifyDocuments:
+					docThreads++
+				case tasks.VerifyCollection:
+					metaThreads++
+				}
+
 				docsCompared += workerStats.SrcDocCount
 				bytesCompared += workerStats.SrcByteCount
 			}
 		}
 
-		row := []string{result.Namespace, reportutils.FmtReal(threads)}
+		lo.Assertf(
+			metaThreads < 2,
+			"metadata threads (%d) must be < 2",
+			metaThreads,
+		)
+
+		threadsDescs := []string{}
+
+		if docThreads > 0 {
+			threadsDescs = append(threadsDescs, fmt.Sprintf(
+				"%s (docs)",
+				reportutils.FmtReal(docThreads),
+			))
+		}
+
+		if metaThreads > 0 {
+			threadsDescs = append(threadsDescs, fmt.Sprintf(
+				"%s (metadata)",
+				reportutils.FmtReal(metaThreads),
+			))
+		}
+
+		row := []string{result.Namespace, strings.Join(threadsDescs, ", ")}
 
 		var docsCell string
 
