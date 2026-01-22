@@ -60,7 +60,7 @@ destination, even though the comparator still compares their results
 together.
 
 Also note that, unlike with `_id` partitioning, the destination here opens a
-separate cursor for each  batch of `_id`s it receives from the source. This
+separate cursor for each batch of `_id`s it receives from the source. This
 means we cannot close the dst->comparator channel after a cursor closes.
 Instead, the destination reader counts the number of `_id`s it received from
 the source and subtracts the number of documents read from the destination.
