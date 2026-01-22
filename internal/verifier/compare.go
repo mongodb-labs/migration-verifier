@@ -42,7 +42,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	types.ByteCount,
 	error,
 ) {
-	var srcChannel, dstChannel <-chan []compare.DocWithTS
+	var srcChannel, dstChannel <-chan compare.DocWithTS
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
 	results := []VerificationResult{}
