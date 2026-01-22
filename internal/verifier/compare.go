@@ -490,7 +490,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			return nil, nil, nil, nil, errors.Wrapf(err, "setting source connstr to connect directly to %#q", hostname)
 		}
 
-		client, err = mongo.Connect(options.Client().ApplyURI(connstr))
+		client, err = mongo.Connect(options.Client().
+			ApplyURI(connstr).
+			SetAppName(clientAppName),
+		)
 		if err != nil {
 			return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
 		}
@@ -571,7 +574,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				},
 			)
 
-			verifier.logger.Debug().
+			verifier.logger.Trace().
 				Any("task", task.PrimaryKey).
 				Int("count", len(docIDs)).
 				Msg("Querying dst for documents.")
@@ -596,7 +599,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 
 			state.NoteSuccess("opened dst find cursor")
 
-			verifier.logger.Debug().
+			verifier.logger.Trace().
 				Any("task", task.PrimaryKey).
 				Int("idsInQuery", len(docIDs)).
 				Msg("Iterating dst cursor.")
@@ -610,7 +613,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				)
 			}
 
-			verifier.logger.Debug().
+			verifier.logger.Trace().
 				Any("task", task.PrimaryKey).
 				Int("docsFound", dstDocsFound).
 				Stringer("elapsed", time.Since(cursorStartTime)).
@@ -637,7 +640,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			)
 
 			if missingDocsCount > 0 {
-				verifier.logger.Debug().
+				verifier.logger.Trace().
 					Any("task", task.PrimaryKey).
 					Int("count", missingDocsCount).
 					Msg("Sending dummy dst docs to compare thread.")

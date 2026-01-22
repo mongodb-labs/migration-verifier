@@ -234,7 +234,7 @@ func ReadNaturalPartitionFromSource(
 
 		batchDocIDs = batchDocIDs[:0]
 
-		logger.Debug().
+		logger.Trace().
 			Any("task", task.PrimaryKey).
 			Str("namespace", task.QueryFilter.Namespace).
 			Int("count", len(batch)).
@@ -258,7 +258,7 @@ func ReadNaturalPartitionFromSource(
 			retryState.NoteSuccess("sent doc #%d of %d to compare thread", 1+d, len(batch))
 		}
 
-		logger.Debug().
+		logger.Trace().
 			Any("task", task.PrimaryKey).
 			Int("count", len(batch)).
 			Stringer("elapsed", time.Since(toCompareStart)).

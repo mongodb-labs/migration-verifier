@@ -825,11 +825,7 @@ func (verifier *Verifier) getPerNamespaceWorkerStats() map[string][]WorkerStatus
 	return retMap
 }
 
-func (verifier *Verifier) printWorkerStatus(
-	builder *strings.Builder,
-	generation int,
-	now time.Time,
-) {
+func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
 
 	table := tablewriter.NewWriter(builder)
 	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed", "Detail"})
@@ -856,18 +852,11 @@ func (verifier *Verifier) printWorkerStatus(
 		}
 
 		var detail string
-		switch wsmap[w].TaskType {
-		case tasks.VerifyDocuments:
+		if wsmap[w].TaskType == tasks.VerifyDocuments {
 			detail = fmt.Sprintf(
 				"%s documents (%s)",
 				reportutils.FmtReal(wsmap[w].SrcDocCount),
 				reportutils.FmtBytes(wsmap[w].SrcByteCount),
-			)
-		case tasks.VerifyCollection:
-			detail = lo.Ternary(
-				generation == 0,
-				"check metadata & partition",
-				"check metadata",
 			)
 		}
 
