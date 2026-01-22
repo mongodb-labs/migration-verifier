@@ -283,11 +283,34 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 
 		tasksColl := coll.Database().Collection("tasks")
 
+		lastUpperBound := bsontools.ToRawValue(bson.Null{})
+
 		for i, result := range results {
 			partition, err := result.Get()
 			require.NoError(t, err, "should create partition")
 
-			// TODO: Ensure that partitions are non-overlapping.
+			if lastUpperBound.Type == bson.TypeNull {
+				assert.Equal(
+					t,
+					bson.TypeNull,
+					partition.Key.Lower.Type,
+					"",
+				)
+			} else {
+				lower, err := bsontools.RawValueTo[bson.Raw](partition.Key.Lower)
+				require.NoError(t, err)
+
+				lowerRecID, err := lower.LookupErr(partitions.RecordID)
+				require.NoError(t, err)
+
+				assert.True(
+					t,
+					lastUpperBound.Equal(lowerRecID),
+					"lower bound rec ID (%s) should match last upper bound (%s)",
+					lowerRecID.String(),
+					lastUpperBound.String(),
+				)
+			}
 
 			task := tasks.Task{
 				PrimaryKey: bson.NewObjectID(),
