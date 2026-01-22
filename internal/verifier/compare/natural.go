@@ -166,6 +166,7 @@ func ReadNaturalPartitionFromSource(
 				{"_id", 0},
 				{"doc", docProjection},
 			}},
+			{"comment", fmt.Sprintf("task %v", task.PrimaryKey)},
 		}
 
 		if token, has := resumeTokenOpt.Get(); has {
@@ -236,7 +237,7 @@ func ReadNaturalPartitionFromSource(
 			Any("task", task.PrimaryKey).
 			Str("namespace", task.QueryFilter.Namespace).
 			Int("count", len(batch)).
-			Msg("Flushing to compare.")
+			Msg("Flushing source documents to compare.")
 
 		// Now send documents (one by one) to the comparison thread.
 		for d, docAndTS := range batch {
@@ -257,7 +258,7 @@ func ReadNaturalPartitionFromSource(
 		logger.Trace().
 			Any("task", task.PrimaryKey).
 			Int("count", len(batch)).
-			Msg("Done flushing to compare.")
+			Msg("Done flushing source documents to compare.")
 
 		retryState.NoteSuccess("sent %d docs to compare", len(batch))
 
@@ -275,6 +276,8 @@ cursorLoop:
 
 			break
 		}
+
+		retryState.NoteSuccess("received a document")
 
 		opTime := sess.OperationTime()
 		if opTime == nil {

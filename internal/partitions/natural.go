@@ -65,6 +65,8 @@ func PartitionCollectionNaturalOrder(
 			{"_id", 0},
 			{"_", bson.D{{"$literal", true}}},
 		}},
+
+		{"comment", "partition"},
 	}
 
 	sess, err := coll.Database().Client().StartSession()

@@ -596,14 +596,14 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 
 			verifier.logger.Trace().
 				Any("task", task.PrimaryKey).
-				Int("count", len(docIDs)).
+				Int("idsInQuery", len(docIDs)).
 				Msg("Iterating dst cursor.")
 
 			sentCount, err := iterateCursorToChannel(sctx, state, cursor, dstToCompareChannel)
 
 			verifier.logger.Trace().
 				Any("task", task.PrimaryKey).
-				Int("count", len(docIDs)).
+				Int("count", sentCount).
 				Msg("Done iterating dst cursor.")
 
 			if err != nil {
@@ -625,16 +625,15 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			// block the compare thread unless the destination “compensates”
 			// by sending dummy values. We do that here.
 			missingDocsCount := len(docIDs) - sentCount
-			if missingDocsCount > 0 {
-				for i := range missingDocsCount {
-					err := chanutil.WriteWithDoneCheck(
-						ctx,
-						dstToCompareChannel,
-						compare.DocWithTS{},
-					)
-					if err != nil {
-						return errors.Wrapf(err, "sending dummy docs %d of %d dst->compare", 1+i, missingDocsCount)
-					}
+
+			for i := range missingDocsCount {
+				err := chanutil.WriteWithDoneCheck(
+					ctx,
+					dstToCompareChannel,
+					compare.DocWithTS{},
+				)
+				if err != nil {
+					return errors.Wrapf(err, "sending dummy docs %d of %d dst->compare", 1+i, missingDocsCount)
 				}
 			}
 
@@ -771,12 +770,20 @@ func iterateCursorToChannel(
 			compare.NewDocWithTS(cursor.Current, clusterTime),
 		)
 
+		state.NoteSuccess("sent a document to compare thread")
+
 		if err != nil {
 			return 0, errors.Wrapf(err, "sending document to compare thread")
 		}
 	}
 
-	return 0, errors.Wrap(cursor.Err(), "failed to iterate cursor")
+	if cursor.Err() != nil {
+		return 0, errors.Wrap(cursor.Err(), "failed to iterate cursor")
+	}
+
+	state.NoteSuccess("exhausted cursor")
+
+	return docs, nil
 }
 
 func getMapKey(docKeyValues []bson.RawValue) string {
@@ -819,7 +826,10 @@ func (verifier *Verifier) getDocumentsCursor(
 	}
 
 	cmd := append(
-		bson.D{{"find", collection.Name()}},
+		bson.D{
+			{"find", collection.Name()},
+			{"comment", fmt.Sprintf("task %v", task.PrimaryKey)},
+		},
 		findOptions...,
 	)
 
