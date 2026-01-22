@@ -53,6 +53,24 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 		},
 	}
 
+	srcColl := verifier.srcClientCollection(&verificationTask)
+
+	size, docs, _, err := partitions.GetSizeAndDocumentCount(
+		ctx,
+		verifier.logger,
+		srcColl,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"getting %#q’s size & doc count: %w",
+			srcNamespace,
+			err,
+		)
+	}
+
+	verificationTask.SourceByteCount = size
+	verificationTask.SourceDocumentCount = docs
+
 	logEvent := verifier.logger.Debug().
 		Any("task", verificationTask.PrimaryKey)
 
