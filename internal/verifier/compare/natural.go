@@ -62,7 +62,7 @@ func ReadNaturalPartitionFromSource(
 	task *tasks.Task,
 	docFilter option.Option[bson.D],
 	compareMethod Method,
-	toCompare chan<- DocWithTS,
+	toCompare chan<- []DocWithTS,
 	toDst chan<- []DocID,
 ) error {
 	defer close(toCompare)
@@ -243,20 +243,18 @@ func ReadNaturalPartitionFromSource(
 		toCompareStart := time.Now()
 
 		// Now send documents (one by one) to the comparison thread.
-		for d, docAndTS := range batch {
-			err := chanutil.WriteWithDoneCheck(
-				ctx,
-				toCompare,
-				docAndTS,
-			)
-			if err != nil {
-				// NB: This leaks memory, but that shouldn’t matter because
-				// this error should crash the verifier.
-				return errors.Wrapf(err, "sending src doc %d of %d to compare", 1+d, len(batch))
-			}
-
-			retryState.NoteSuccess("sent doc #%d of %d to compare thread", 1+d, len(batch))
+		err = chanutil.WriteWithDoneCheck(
+			ctx,
+			toCompare,
+			batch,
+		)
+		if err != nil {
+			// NB: This leaks memory, but that shouldn’t matter because
+			// this error should crash the verifier.
+			return errors.Wrapf(err, "sending %d src docs to compare", len(batch))
 		}
+
+		retryState.NoteSuccess("sent %d src docs to compare thread", len(batch))
 
 		logger.Debug().
 			Any("task", task.PrimaryKey).
