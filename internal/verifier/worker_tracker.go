@@ -6,6 +6,8 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/msync"
+	"github.com/samber/lo"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/exp/maps"
 )
 
@@ -22,10 +24,15 @@ type WorkerStatusMap = map[int]WorkerStatus
 // WorkerStatus details the work that an individual worker thread
 // is doing.
 type WorkerStatus struct {
-	TaskID       any
-	StartTime    time.Time
-	TaskType     tasks.Type
-	Namespace    string
+	TaskID    bson.ObjectID
+	StartTime time.Time
+	TaskType  tasks.Type
+	Namespace string
+
+	PartitionCount      int
+	IdealPartitionCount int
+
+	// For document-comparison tasks:
 	SrcDocCount  types.DocumentCount
 	SrcByteCount types.ByteCount
 }
@@ -55,9 +62,40 @@ func (wt *WorkerTracker) Set(workerNum int, task tasks.Task) {
 	})
 }
 
+func (wt *WorkerTracker) SetPartitionCounts(taskID bson.ObjectID, soFar int, target int) {
+	wt.guard.Store(func(m WorkerStatusMap) WorkerStatusMap {
+		for workerNum, status := range m {
+			if taskID != status.TaskID {
+				continue
+			}
+
+			lo.Assertf(
+				status.TaskType == tasks.VerifyCollection,
+				"task (type: %#q) must be collection metadata",
+				status.TaskType,
+			)
+
+			status.PartitionCount = soFar
+			status.IdealPartitionCount = target
+			m[workerNum] = status
+
+			break
+		}
+
+		return m
+	})
+}
+
 func (wt *WorkerTracker) SetSrcCounts(workerNum int, docs types.DocumentCount, bytes types.ByteCount) {
 	wt.guard.Store(func(m WorkerStatusMap) WorkerStatusMap {
 		status := m[workerNum]
+
+		lo.Assertf(
+			status.TaskType == tasks.VerifyDocuments,
+			"task (type: %#q) must be document comparison",
+			status.TaskType,
+		)
+
 		status.SrcDocCount = docs
 		status.SrcByteCount = bytes
 		m[workerNum] = status

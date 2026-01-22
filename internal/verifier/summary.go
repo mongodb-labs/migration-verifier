@@ -515,10 +515,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 
 	table := tablewriter.NewWriter(strBuilder)
 
-	headers := []string{"Src Namespace", "Threads", "Src Docs Compared"}
-	if showDataTotals {
-		headers = append(headers, "Src Data Compared")
-	}
+	headers := []string{"Src Namespace", "Threads", "Detail"}
 	table.SetHeader(headers)
 
 	tableHasRows := false
@@ -535,6 +532,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 
 		docsCompared := result.DocsCompared
 		bytesCompared := result.BytesCompared
+		var partitionsCreated, idealParititionsCount int
 
 		if nsWorkerStats, ok := perNamespaceWorkerStats[result.Namespace]; ok {
 			for _, workerStats := range nsWorkerStats {
@@ -543,6 +541,8 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 					docThreads++
 				case tasks.VerifyCollection:
 					metaThreads++
+					partitionsCreated = workerStats.PartitionCount
+					idealParititionsCount = workerStats.IdealPartitionCount
 				}
 
 				docsCompared += workerStats.SrcDocCount
@@ -572,29 +572,32 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 			))
 		}
 
-		row := []string{result.Namespace, strings.Join(threadsDescs, ", ")}
+		row := []string{
+			result.Namespace,
+			strings.Join(threadsDescs, ", "),
+		}
 
-		var docsCell string
+		var docsDescr string
 
 		if result.TotalDocs > 0 {
-			docsCell = fmt.Sprintf("%s of %s (%s%%)",
+			docsDescr = fmt.Sprintf("%s of %s documents (%s%%)",
 				reportutils.FmtReal(docsCompared),
 				reportutils.FmtReal(result.TotalDocs),
 				reportutils.FmtPercent(docsCompared, result.TotalDocs),
 			)
 		} else {
-			docsCell = reportutils.FmtReal(docsCompared)
+			docsDescr = reportutils.FmtReal(docsCompared)
 		}
 
-		row = append(row, docsCell)
+		details := []string{docsDescr}
 
 		if showDataTotals {
-			var dataCell string
+			var dataDescr string
 
 			if result.TotalBytes > 0 {
 				dataUnit := reportutils.FindBestUnit(result.TotalBytes)
 
-				dataCell = fmt.Sprintf("%s of %s %s (%s%%)",
+				dataDescr = fmt.Sprintf("%s of %s %s (%s%%)",
 					reportutils.BytesToUnit(bytesCompared, dataUnit),
 					reportutils.BytesToUnit(result.TotalBytes, dataUnit),
 					dataUnit,
@@ -603,14 +606,31 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 			} else {
 				dataUnit := reportutils.FindBestUnit(bytesCompared)
 
-				dataCell = fmt.Sprintf("%s %s",
+				dataDescr = fmt.Sprintf("%s %s",
 					reportutils.BytesToUnit(bytesCompared, dataUnit),
 					dataUnit,
 				)
 			}
 
-			row = append(row, dataCell)
+			details = append(details, dataDescr)
 		}
+
+		if metaThreads > 0 {
+			generation, _ := verifier.getGeneration()
+
+			// Only in generation 0 should metadata tasks be long-lived.
+			if generation == 0 {
+				partitionsDescr := fmt.Sprintf(
+					"%s partitions created (goal: %s)",
+					reportutils.FmtReal(partitionsCreated),
+					reportutils.FmtReal(idealParititionsCount),
+				)
+
+				details = append(details, partitionsDescr)
+			}
+		}
+
+		row = append(row, strings.Join(details, "\n"))
 
 		table.Append(row)
 	}
@@ -863,7 +883,7 @@ func (verifier *Verifier) getPerNamespaceWorkerStats() map[string][]WorkerStatus
 	retMap := map[string][]WorkerStatus{}
 
 	for _, workerStats := range wsmap {
-		if workerStats.TaskID == nil {
+		if (workerStats.TaskID == bson.ObjectID{}) {
 			continue
 		}
 
@@ -885,7 +905,7 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 
 	activeThreadCount := 0
 	for w := range verifier.numWorkers {
-		if wsmap[w].TaskID == nil {
+		if (wsmap[w].TaskID == bson.ObjectID{}) {
 			continue
 		}
 
@@ -893,14 +913,9 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 
 		var taskIdStr string
 
-		switch id := wsmap[w].TaskID.(type) {
-		case bson.ObjectID:
-			theBytes, _ := id.MarshalText()
+		theBytes, _ := wsmap[w].TaskID.MarshalText()
 
-			taskIdStr = string(theBytes)
-		default:
-			taskIdStr = fmt.Sprintf("%s", wsmap[w].TaskID)
-		}
+		taskIdStr = string(theBytes)
 
 		var detail string
 		if wsmap[w].TaskType == tasks.VerifyDocuments {
