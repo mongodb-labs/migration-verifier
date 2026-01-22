@@ -340,6 +340,8 @@ cursorLoop:
 		}
 	}
 
+	retryState.NoteSuccess("reached end of cursor")
+
 	if len(batch) > 0 {
 		if err := flush(ctx); err != nil {
 			return errors.Wrapf(err, "flushing final docs")
