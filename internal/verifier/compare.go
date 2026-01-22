@@ -571,10 +571,12 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				},
 			)
 
-			verifier.logger.Trace().
+			verifier.logger.Debug().
 				Any("task", task.PrimaryKey).
 				Int("count", len(docIDs)).
 				Msg("Querying dst for documents.")
+
+			cursorStartTime := time.Now()
 
 			cursor, err := verifier.getDocumentsCursor(
 				sctx,
@@ -594,17 +596,12 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 
 			state.NoteSuccess("opened dst find cursor")
 
-			verifier.logger.Trace().
+			verifier.logger.Debug().
 				Any("task", task.PrimaryKey).
 				Int("idsInQuery", len(docIDs)).
 				Msg("Iterating dst cursor.")
 
 			sentCount, err := iterateCursorToChannel(sctx, state, cursor, dstToCompareChannel)
-
-			verifier.logger.Trace().
-				Any("task", task.PrimaryKey).
-				Int("count", sentCount).
-				Msg("Done iterating dst cursor.")
 
 			if err != nil {
 				return errors.Wrap(
@@ -612,6 +609,19 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 					"failed to send documents from destination to compare",
 				)
 			}
+
+			verifier.logger.Debug().
+				Any("task", task.PrimaryKey).
+				Int("count", sentCount).
+				Stringer("elapsed", time.Since(cursorStartTime)).
+				Msg("Done iterating dst cursor.")
+
+			lo.Assertf(
+				sentCount <= len(docIDs),
+				"dest docs (%d) must be <= source docs (%d)",
+				sentCount,
+				len(docIDs),
+			)
 
 			// The compare thread, to prevent OOMs, always reads documents
 			// from the src & dst together. It only stops listening on one
@@ -626,6 +636,13 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			// by sending dummy values. We do that here.
 			missingDocsCount := len(docIDs) - sentCount
 
+			if missingDocsCount > 0 {
+				verifier.logger.Debug().
+					Any("task", task.PrimaryKey).
+					Int("count", missingDocsCount).
+					Msg("Sending dummy dst docs to compare thread.")
+			}
+
 			for i := range missingDocsCount {
 				err := chanutil.WriteWithDoneCheck(
 					ctx,
@@ -633,8 +650,14 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 					compare.DocWithTS{},
 				)
 				if err != nil {
-					return errors.Wrapf(err, "sending dummy docs %d of %d dst->compare", 1+i, missingDocsCount)
+					return errors.Wrapf(err, "sending dummy doc %d of %d dst->compare", 1+i, missingDocsCount)
 				}
+
+				state.NoteSuccess(
+					"sent dummy doc #%d of %d to compare thread",
+					1+i,
+					missingDocsCount,
+				)
 			}
 
 		}
@@ -757,8 +780,6 @@ func iterateCursorToChannel(
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
 
-		docs++
-
 		clusterTime, err := util.GetClusterTimeFromSession(sess)
 		if err != nil {
 			return 0, errors.Wrap(err, "reading cluster time from session")
@@ -770,11 +791,13 @@ func iterateCursorToChannel(
 			compare.NewDocWithTS(cursor.Current, clusterTime),
 		)
 
-		state.NoteSuccess("sent a document to compare thread")
-
 		if err != nil {
 			return 0, errors.Wrapf(err, "sending document to compare thread")
 		}
+
+		state.NoteSuccess("sent a document to compare thread")
+
+		docs++
 	}
 
 	if cursor.Err() != nil {

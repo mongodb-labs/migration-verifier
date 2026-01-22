@@ -216,7 +216,7 @@ func ReadNaturalPartitionFromSource(
 			Any("task", task.PrimaryKey).
 			Str("namespace", task.QueryFilter.Namespace).
 			Int("count", len(batchDocIDs)).
-			Msg("Flushing to dst.")
+			Msg("Flushing source document IDs to dst.")
 
 		err := chanutil.WriteWithDoneCheck(
 			ctx,
