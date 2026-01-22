@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/internal/logger"
@@ -233,11 +234,13 @@ func ReadNaturalPartitionFromSource(
 
 		batchDocIDs = batchDocIDs[:0]
 
-		logger.Trace().
+		logger.Debug().
 			Any("task", task.PrimaryKey).
 			Str("namespace", task.QueryFilter.Namespace).
 			Int("count", len(batch)).
 			Msg("Flushing source documents to compare.")
+
+		toCompareStart := time.Now()
 
 		// Now send documents (one by one) to the comparison thread.
 		for d, docAndTS := range batch {
@@ -255,9 +258,10 @@ func ReadNaturalPartitionFromSource(
 			retryState.NoteSuccess("sent doc #%d of %d to compare thread", 1+d, len(batch))
 		}
 
-		logger.Trace().
+		logger.Debug().
 			Any("task", task.PrimaryKey).
 			Int("count", len(batch)).
+			Stringer("elapsed", time.Since(toCompareStart)).
 			Msg("Done flushing source documents to compare.")
 
 		retryState.NoteSuccess("sent %d docs to compare", len(batch))
