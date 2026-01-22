@@ -163,13 +163,19 @@ func (verifier *Verifier) compareDocsFromChannels(
 		docCompareMethod: verifier.docCompareMethod,
 	}
 
+	// A reusable slice of doc key values.
+	var docKeyValues []bson.RawValue
+	var mapKeyBytes []byte
+
 	// This is the core document-handling logic. It either:
 	//
 	// a) caches the new document if its mapKey is unseen, or
 	// b) compares the new doc against its previously-received, cached
 	//    counterpart and records any mismatch.
 	handleNewDoc := func(curDocWithTS compare.DocWithTS, isSrc bool) error {
+		docKeyValues = docKeyValues[:0]
 		docKeyValues, err := verifier.docCompareMethod.GetDocKeyValues(
+			docKeyValues,
 			curDocWithTS.Doc,
 			mapKeyFieldNames,
 		)
@@ -177,7 +183,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 			return errors.Wrapf(err, "extracting doc key (fields: %v) values from doc %+v", mapKeyFieldNames, curDocWithTS.Doc)
 		}
 
-		mapKey := getMapKey(docKeyValues)
+		mapKeyBytes = mapKeyBytes[:0]
+		mapKey := getMapKey(mapKeyBytes, docKeyValues)
 
 		var ourMap, theirMap map[string]compare.DocWithTS
 
@@ -572,8 +579,7 @@ func iterateCursorToChannel(
 	return errors.Wrap(cursor.Err(), "failed to iterate cursor")
 }
 
-func getMapKey(docKeyValues []bson.RawValue) string {
-	var buf []byte
+func getMapKey(buf []byte, docKeyValues []bson.RawValue) string {
 	for _, value := range docKeyValues {
 		buf = rvToMapKey(buf, value)
 	}

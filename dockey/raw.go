@@ -10,20 +10,18 @@ import (
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
-// ExtractTrueDocKeyFromDoc extracts the document key from a document
-// given its field names.
+// AppendDocKeyFields extracts the document key fields from a document
+// given its field names and appends them to the given slice. The same
+// slice (possibly re-allocated) is returned.
 //
 // NB: This avoids the problem documented in SERVER-109340; as a result,
 // the returned key may not always match the change stream’s `documentKey`
 // (because the server misreports its own sharding logic).
-func ExtractTrueDocKeyFromDoc(
-	fieldNames []string,
+func AppendDocKeyFields(
+	in []bson.RawValue,
 	doc bson.Raw,
-) (bson.Raw, error) {
-	assertFieldNameUniqueness(fieldNames)
-
-	docBuilder := bsoncore.NewDocumentBuilder()
-
+	fieldNames []string,
+) ([]bson.RawValue, error) {
 	for _, field := range fieldNames {
 		var val bson.RawValue
 
@@ -32,19 +30,44 @@ func ExtractTrueDocKeyFromDoc(
 		parts := strings.Split(field, ".")
 		val, err := doc.LookupErr(parts...)
 
-		if errors.Is(err, bsoncore.ErrElementNotFound) || errors.As(err, &bsoncore.InvalidDepthTraversalError{}) {
-			// If the document lacks a value for this field
-			// then make it null in the document key.
-			val = bson.RawValue{Type: bson.TypeNull}
-		} else if err != nil {
-			return nil, errors.Wrapf(err, "extracting doc key field %#q from doc %+v", field, doc)
+		if err != nil {
+			if errors.Is(err, bsoncore.ErrElementNotFound) || errors.As(err, &bsoncore.InvalidDepthTraversalError{}) {
+				// If the document lacks a value for this field
+				// then make it null in the document key.
+				val = bson.RawValue{Type: bson.TypeNull}
+			} else {
+				return nil, errors.Wrapf(err, "extracting doc key field %#q from doc %+v", field, doc)
+			}
 		}
 
+		in = append(in, val)
+	}
+
+	return in, nil
+}
+
+// ExtractTrueDocKeyFromDoc is like AppendDocKeyFields, but it creates a
+// full BSON document.
+func ExtractTrueDocKeyFromDoc(
+	fieldNames []string,
+	doc bson.Raw,
+) (bson.Raw, error) {
+	assertFieldNameUniqueness(fieldNames)
+
+	docBuilder := bsoncore.NewDocumentBuilder()
+
+	vals := make([]bson.RawValue, 0, len(fieldNames))
+	vals, err := AppendDocKeyFields(vals, doc, fieldNames)
+	if err != nil {
+		return nil, errors.Wrapf(err, "fetch document key values")
+	}
+
+	for i, field := range fieldNames {
 		docBuilder.AppendValue(
 			field,
 			bsoncore.Value{
-				Type: bsoncore.Type(val.Type),
-				Data: val.Value,
+				Type: bsoncore.Type(vals[i].Type),
+				Data: vals[i].Value,
 			},
 		)
 	}
