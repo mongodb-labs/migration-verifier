@@ -601,7 +601,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				Int("idsInQuery", len(docIDs)).
 				Msg("Iterating dst cursor.")
 
-			sentCount, err := iterateCursorToChannel(sctx, state, cursor, dstToCompareChannel)
+			dstDocsFound, err := iterateCursorToChannel(sctx, state, cursor, dstToCompareChannel)
 
 			if err != nil {
 				return errors.Wrap(
@@ -612,16 +612,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 
 			verifier.logger.Debug().
 				Any("task", task.PrimaryKey).
-				Int("count", sentCount).
+				Int("docsFound", dstDocsFound).
 				Stringer("elapsed", time.Since(cursorStartTime)).
 				Msg("Done iterating dst cursor.")
-
-			lo.Assertf(
-				sentCount <= len(docIDs),
-				"dest docs (%d) must be <= source docs (%d)",
-				sentCount,
-				len(docIDs),
-			)
 
 			// The compare thread, to prevent OOMs, always reads documents
 			// from the src & dst together. It only stops listening on one
@@ -634,7 +627,14 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			// So if there are missing documents on the destination, we’ll
 			// block the compare thread unless the destination “compensates”
 			// by sending dummy values. We do that here.
-			missingDocsCount := len(docIDs) - sentCount
+			missingDocsCount := len(docIDs) - dstDocsFound
+
+			lo.Assertf(
+				missingDocsCount >= 0,
+				"dest docs (%d) must be <= source docs (%d)",
+				dstDocsFound,
+				len(docIDs),
+			)
 
 			if missingDocsCount > 0 {
 				verifier.logger.Debug().

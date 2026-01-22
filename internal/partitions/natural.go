@@ -28,6 +28,9 @@ const (
 // PartitionCollectionNaturalOrder spawns a goroutine that partitions the
 // collection in natural order.
 //
+// Callers should parse the Partition structs from the returned channel.
+// Each Partition gets a dedicated task.
+//
 // NB: This ignores document filtering because we’re doing a collection
 // scan anyway later on to compare the documents.
 func PartitionCollectionNaturalOrder(
