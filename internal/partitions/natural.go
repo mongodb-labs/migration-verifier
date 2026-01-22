@@ -90,6 +90,9 @@ func PartitionCollectionNaturalOrder(
 		// Discard the actual document. All we want are the resume tokens.
 		{"projection", bson.D{
 			{"_id", 0},
+
+			// This is here to make the server suppress the other fields, too.
+			// (Without this, we’ll still get full documents sans _id.)
 			{"_", bson.D{{"$literal", true}}},
 		}},
 
