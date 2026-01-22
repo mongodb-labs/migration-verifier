@@ -212,8 +212,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 		delete(theirMap, mapKey)
 
 		// We can also schedule the release of the documents’ buffers.
-		defer curDocWithTS.Release()
-		defer theirDocWithTS.Release()
+		defer curDocWithTS.Free()
+		defer theirDocWithTS.Free()
 
 		// Now we determine which document came from whom.
 		var srcDoc, dstDoc compare.DocWithTS
@@ -400,7 +400,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 			},
 		)
 
-		docWithTS.Release()
+		docWithTS.Free()
 	}
 
 	for _, docWithTS := range dstCache {
@@ -422,7 +422,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 			},
 		)
 
-		docWithTS.Release()
+		docWithTS.Free()
 	}
 
 	verifier.docsComparedHistory.Add(curHistoryDocCount)
@@ -585,7 +585,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			)
 
 			for _, id := range docIDs {
-				id.Release()
+				id.Free()
 			}
 
 			if err != nil {

@@ -26,8 +26,8 @@ func NewDocID(rv bson.RawValue) DocID {
 	return docID
 }
 
-// Release releases the memory allocated to hold the document ID’s value.
-func (d DocID) Release() {
+// Free releases the memory allocated to hold the document ID’s value.
+func (d DocID) Free() {
 	if len(d.ID.Value) > 0 {
 		pool.Put(d.ID.Value)
 	}
@@ -57,9 +57,9 @@ func NewDocWithTS(doc bson.Raw, ts bson.Timestamp) DocWithTS {
 	}
 }
 
-// Release releases the memory allocated to hold the document.
+// Free releases the memory allocated to hold the document.
 // If the struct was not created with NewDocWithTS, this panics.
-func (d DocWithTS) Release() {
+func (d DocWithTS) Free() {
 	lo.Assertf(
 		d.manual,
 		"Release() called on auto-managed %T",
