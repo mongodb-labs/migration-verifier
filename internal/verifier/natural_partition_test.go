@@ -456,8 +456,10 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 				cur, err := cursor.New(coll.Database(), resp, nil)
 				require.NoError(t, err, "should open cursor")
 				for !cur.IsFinished() {
-					rt, err := cursor.GetResumeToken(cur)
+					rtOpt, err := cursor.GetResumeToken(cur)
 					require.NoError(t, err)
+
+					rt := rtOpt.MustGetf("must have resume token")
 
 					resumeTokens = append(resumeTokens, rt)
 

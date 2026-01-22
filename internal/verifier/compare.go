@@ -479,26 +479,24 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
 ) {
-	var client *mongo.Client
+	hostname := task.QueryFilter.Partition.HostnameAndPort.MustGetf(
+		"hostname/port missing; this is required for natural partitions",
+	)
 
-	if hostname, has := task.QueryFilter.Partition.HostnameAndPort.Get(); has {
-		connstr, err := compare.SetDirectHostInConnectionString(
-			verifier.srcURI,
-			hostname,
-		)
-		if err != nil {
-			return nil, nil, nil, nil, errors.Wrapf(err, "setting source connstr to connect directly to %#q", hostname)
-		}
+	connstr, err := compare.SetDirectHostInConnectionString(
+		verifier.srcURI,
+		hostname,
+	)
+	if err != nil {
+		return nil, nil, nil, nil, errors.Wrapf(err, "setting source connstr to connect directly to %#q", hostname)
+	}
 
-		client, err = mongo.Connect(options.Client().
-			ApplyURI(connstr).
-			SetAppName(clientAppName),
-		)
-		if err != nil {
-			return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
-		}
-	} else {
-		client = verifier.srcClient
+	client, err := mongo.Connect(options.Client().
+		ApplyURI(connstr).
+		SetAppName(clientAppName),
+	)
+	if err != nil {
+		return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
 	}
 
 	srcToCompareChannel := make(chan compare.DocWithTS)
