@@ -6,6 +6,12 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+const (
+	// ToComparatorBatchSize is the max # of docs that readers send
+	// to the comparator thread at once.
+	ToComparatorBatchSize = 100
+)
+
 // DocID is how natural partitioning sends document IDs from the
 // source-reader thread to the destination. This wraps a document ID
 // with a struct that simplifies memory management.

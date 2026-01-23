@@ -42,7 +42,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	types.ByteCount,
 	error,
 ) {
-	var srcChannel, dstChannel <-chan compare.DocWithTS
+	var srcChannel, dstChannel <-chan []compare.DocWithTS
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
 	results := []VerificationResult{}
@@ -134,7 +134,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	workerNum int,
 	fi retry.SuccessNotifier,
 	task *tasks.Task,
-	srcChannel, dstChannel <-chan compare.DocWithTS,
+	srcChannel, dstChannel <-chan []compare.DocWithTS,
 ) (
 	[]VerificationResult,
 	types.DocumentCount,
@@ -271,7 +271,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	for !srcClosed || !dstClosed {
 		simpleTimerReset(readTimer, readTimeout)
 
-		var srcDocWithTS, dstDocWithTS compare.DocWithTS
+		var srcDocsWithTS, dstDocsWithTS []compare.DocWithTS
 
 		eg, egCtx := contextplus.ErrGroup(ctx)
 
@@ -286,7 +286,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 						"failed to read from source after %s",
 						readTimeout,
 					)
-				case srcDocWithTS, alive = <-srcChannel:
+				case srcDocsWithTS, alive = <-srcChannel:
 					if !alive {
 						srcClosed = true
 						break
@@ -294,24 +294,27 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 					fi.NoteSuccess("received document from source")
 
-					taskSrcDocCount++
-					taskSrcByteCount += types.ByteCount(len(srcDocWithTS.Doc))
+					taskSrcDocCount += types.DocumentCount(len(srcDocsWithTS))
+					curHistoryDocCount += types.DocumentCount(len(srcDocsWithTS))
+
+					for _, docWithTS := range srcDocsWithTS {
+						taskSrcByteCount += types.ByteCount(len(docWithTS.Doc))
+
+						curHistoryByteCount += types.ByteCount(len(docWithTS.Doc))
+						if curHistoryDocCount >= comparisonHistoryThreshold {
+							verifier.docsComparedHistory.Add(curHistoryDocCount)
+							verifier.bytesComparedHistory.Add(curHistoryByteCount)
+
+							curHistoryDocCount = 0
+							curHistoryByteCount = 0
+						}
+					}
 
 					verifier.workerTracker.SetSrcCounts(
 						workerNum,
 						taskSrcDocCount,
 						taskSrcByteCount,
 					)
-
-					curHistoryDocCount++
-					curHistoryByteCount += types.ByteCount(len(srcDocWithTS.Doc))
-					if curHistoryDocCount >= comparisonHistoryThreshold {
-						verifier.docsComparedHistory.Add(curHistoryDocCount)
-						verifier.bytesComparedHistory.Add(curHistoryByteCount)
-
-						curHistoryDocCount = 0
-						curHistoryByteCount = 0
-					}
 				}
 
 				return nil
@@ -329,7 +332,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 						"failed to read from destination after %s",
 						readTimeout,
 					)
-				case dstDocWithTS, alive = <-dstChannel:
+				case dstDocsWithTS, alive = <-dstChannel:
 					if !alive {
 						dstClosed = true
 						break
@@ -349,32 +352,41 @@ func (verifier *Verifier) compareDocsFromChannels(
 			)
 		}
 
-		if srcDocWithTS.Doc != nil {
-			err := handleNewDoc(srcDocWithTS, true)
+		for len(srcDocsWithTS)+len(dstDocsWithTS) > 0 {
+			if len(srcDocsWithTS) > 0 {
+				srcDoc := srcDocsWithTS[0]
+				srcDocsWithTS = srcDocsWithTS[1:]
 
-			if err != nil {
+				err := handleNewDoc(srcDoc, true)
 
-				return nil, 0, 0, errors.Wrapf(
-					err,
-					"comparer thread failed to handle %#q's source doc (task: %s) with ID %v",
-					namespace,
-					task.PrimaryKey,
-					srcDocWithTS.Doc.Lookup("_id"),
-				)
+				if err != nil {
+
+					return nil, 0, 0, errors.Wrapf(
+						err,
+						"comparer thread failed to handle %#q's source doc (task: %s) with ID %v",
+						namespace,
+						task.PrimaryKey,
+						srcDoc.Doc.Lookup("_id"),
+					)
+				}
 			}
-		}
 
-		if dstDocWithTS.Doc != nil {
-			err := handleNewDoc(dstDocWithTS, false)
+			if len(dstDocsWithTS) > 0 {
+				dstDoc := dstDocsWithTS[0]
+				dstDocsWithTS = dstDocsWithTS[1:]
 
-			if err != nil {
-				return nil, 0, 0, errors.Wrapf(
-					err,
-					"comparer thread failed to handle %#q's destination doc (task: %s) with ID %v",
-					namespace,
-					task.PrimaryKey,
-					dstDocWithTS.Doc.Lookup("_id"),
-				)
+				err := handleNewDoc(dstDoc, false)
+
+				if err != nil {
+
+					return nil, 0, 0, errors.Wrapf(
+						err,
+						"comparer thread failed to handle %#q's destination doc (task: %s) with ID %v",
+						namespace,
+						task.PrimaryKey,
+						dstDoc.Doc.Lookup("_id"),
+					)
+				}
 			}
 		}
 	}
@@ -462,8 +474,8 @@ func simpleTimerReset(t *time.Timer, dur time.Duration) {
 func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 	task *tasks.Task,
 ) (
-	<-chan compare.DocWithTS,
-	<-chan compare.DocWithTS,
+	<-chan []compare.DocWithTS,
+	<-chan []compare.DocWithTS,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
@@ -480,8 +492,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	task *tasks.Task,
 ) (
-	<-chan compare.DocWithTS,
-	<-chan compare.DocWithTS,
+	<-chan []compare.DocWithTS,
+	<-chan []compare.DocWithTS,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
@@ -506,8 +518,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 		return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
 	}
 
-	srcToCompareChannel := make(chan compare.DocWithTS)
-	dstToCompareChannel := make(chan compare.DocWithTS)
+	srcToCompareChannel := make(chan []compare.DocWithTS)
+	dstToCompareChannel := make(chan []compare.DocWithTS)
 
 	srcToDstChannel := make(chan []compare.DocID, 1_000)
 
@@ -679,13 +691,13 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 	task *tasks.Task,
 ) (
-	<-chan compare.DocWithTS,
-	<-chan compare.DocWithTS,
+	<-chan []compare.DocWithTS,
+	<-chan []compare.DocWithTS,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 ) {
-	srcChannel := make(chan compare.DocWithTS)
-	dstChannel := make(chan compare.DocWithTS)
+	srcChannel := make(chan []compare.DocWithTS)
+	dstChannel := make(chan []compare.DocWithTS)
 
 	readSrcCallback := func(ctx context.Context, state retry.SuccessNotifier) error {
 		// We open a session here so that we can read the session’s cluster
@@ -776,7 +788,7 @@ func iterateCursorToChannel(
 	sctx context.Context,
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
-	writer chan<- compare.DocWithTS,
+	writer chan<- []compare.DocWithTS,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
 	if sess == nil {
