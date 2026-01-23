@@ -1620,6 +1620,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 					func(ctx context.Context, fi *retry.FuncInfo) error {
 						var err error
 
+						verifier.workerTracker.Set(0, fauxTask)
 						results, docCount, byteCount, err = verifier.compareDocsFromChannels(
 							ctx,
 							0,
