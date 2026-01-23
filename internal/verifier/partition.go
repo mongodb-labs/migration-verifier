@@ -158,6 +158,12 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 	idealNumPartitions := util.DivideToF64(collBytes, idealPartitionBytes)
 
+	verifier.workerTracker.SetPartitionCounts(
+		task.PrimaryKey,
+		0,
+		int(idealNumPartitions),
+	)
+
 	createAndInsertPartition := func(lowerBound, upperBound bson.RawValue) error {
 		partition := partitions.Partition{
 			Key: partitions.PartitionKey{
