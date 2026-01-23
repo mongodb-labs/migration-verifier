@@ -1554,15 +1554,18 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	namespace := "testdb.testns"
 
-	makeDocChannel := func(docs []bson.D) <-chan compare.DocWithTS {
-		theChan := make(chan compare.DocWithTS, len(docs))
+	makeDocBatchChannel := func(docs []bson.D) <-chan []compare.DocWithTS {
+		theChan := make(chan []compare.DocWithTS, len(docs))
 
-		for d, doc := range docs {
-			theChan <- compare.NewDocWithTS(
-				testutil.MustMarshal(doc),
-				bson.Timestamp{1, uint32(d)},
-			)
-		}
+		theChan <- lo.Map(
+			docs,
+			func(doc bson.D, i int) compare.DocWithTS {
+				return compare.NewDocWithTS(
+					testutil.MustMarshal(doc),
+					bson.Timestamp{1, uint32(i)},
+				)
+			},
+		)
 
 		close(theChan)
 
@@ -1594,8 +1597,8 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 			dstPermute := permute.Slice(dstDocs)
 			for dstPermute.Permute() {
-				srcChannel := makeDocChannel(srcDocs)
-				dstChannel := makeDocChannel(dstDocs)
+				srcChannel := makeDocBatchChannel(srcDocs)
+				dstChannel := makeDocBatchChannel(dstDocs)
 
 				fauxTask := tasks.Task{
 					PrimaryKey: bson.NewObjectID(),

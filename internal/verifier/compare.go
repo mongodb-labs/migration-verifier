@@ -622,7 +622,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				Msg("Iterating dst cursor.")
 
 			dstDocsFound, err := iterateCursorToChannel(sctx, state, cursor, dstToCompareChannel)
-
 			if err != nil {
 				return errors.Wrap(
 					err,
@@ -663,11 +662,19 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 					Msg("Sending dummy dst docs to compare thread.")
 			}
 
-			for i := range missingDocsCount {
+			// Reader threads send documents to the comparator in slices rather
+			// than individually. We could send 1 slice per document, but if
+			// there are 1,000 documents missing then we’re sending 1,000
+			// messages, which is a bit unideal. We thus optimize by sending
+			// only as many dummy messages as we need to unblock the comparator.
+			srcBatchesSent := compare.ToComparatorBatchCount(len(docIDs))
+			dstBatchesSent := compare.ToComparatorBatchCount(dstDocsFound)
+
+			for i := range srcBatchesSent - dstBatchesSent {
 				err := chanutil.WriteWithDoneCheck(
 					ctx,
 					dstToCompareChannel,
-					compare.DocWithTS{},
+					nil,
 				)
 				if err != nil {
 					return errors.Wrapf(err, "sending dummy doc %d of %d dst->compare", 1+i, missingDocsCount)
@@ -784,6 +791,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 	return srcChannel, dstChannel, readSrcCallback, readDstCallback
 }
 
+// This returns the # of documents sent to the comparator and # of batches
+// used to send those documents.
 func iterateCursorToChannel(
 	sctx context.Context,
 	state retry.SuccessNotifier,
@@ -795,29 +804,48 @@ func iterateCursorToChannel(
 		panic("need a session")
 	}
 
-	docs := 0
+	docsCount := 0
+
+	var docsWithTSCache []compare.DocWithTS
+
+	flush := func() error {
+		err := chanutil.WriteWithDoneCheck(
+			sctx,
+			writer,
+			docsWithTSCache,
+		)
+
+		if err != nil {
+			return errors.Wrapf(err, "sending %d documents to compare thread", len(docsWithTSCache))
+		}
+
+		state.NoteSuccess("sent %d documents to compare thread", len(docsWithTSCache))
+
+		docsWithTSCache = docsWithTSCache[:0]
+
+		return nil
+	}
 
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
 
-		docs++
+		docsCount++
 
 		clusterTime, err := util.GetClusterTimeFromSession(sess)
 		if err != nil {
 			return 0, errors.Wrap(err, "reading cluster time from session")
 		}
 
-		err = chanutil.WriteWithDoneCheck(
-			sctx,
-			writer,
+		docsWithTSCache = append(
+			docsWithTSCache,
 			compare.NewDocWithTS(cursor.Current, clusterTime),
 		)
 
-		if err != nil {
-			return 0, errors.Wrapf(err, "sending document to compare thread")
+		if len(docsWithTSCache) == compare.ToComparatorBatchSize {
+			if err := flush(); err != nil {
+				return 0, err
+			}
 		}
-
-		state.NoteSuccess("sent a document to compare thread")
 	}
 
 	if cursor.Err() != nil {
@@ -826,7 +854,13 @@ func iterateCursorToChannel(
 
 	state.NoteSuccess("exhausted cursor")
 
-	return docs, nil
+	if len(docsWithTSCache) > 0 {
+		if err := flush(); err != nil {
+			return 0, err
+		}
+	}
+
+	return docsCount, nil
 }
 
 func getMapKey(buf []byte, docKeyValues []bson.RawValue) string {

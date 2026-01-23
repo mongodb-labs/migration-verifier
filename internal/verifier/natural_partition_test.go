@@ -173,7 +173,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
 				var taskDocCounter int
 
 				for _, task := range theTasks {
-					toCompare := make(chan compare.DocWithTS, len(undeletedDocs))
+					toCompare := make(chan []compare.DocWithTS, len(undeletedDocs))
 					toDst := make(chan []compare.DocID, len(undeletedDocs))
 
 					err = compare.ReadNaturalPartitionFromSource(
@@ -190,18 +190,22 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
 					)
 					require.NoError(t, err, "should read")
 
-					for d := range toCompare {
-						var doc bson.D
-						suite.Require().NoError(bson.Unmarshal(d.Doc, &doc), "unmarshal")
+					for batch := range toCompare {
+						assert.LessOrEqual(t, len(batch), compare.ToComparatorBatchCount)
 
-						suite.Require().Equal(
-							undeletedDocs[taskDocCounter],
-							doc,
-							"doc %d",
-							taskDocCounter,
-						)
+						for _, d := range batch {
+							var doc bson.D
+							suite.Require().NoError(bson.Unmarshal(d.Doc, &doc), "unmarshal")
 
-						taskDocCounter++
+							suite.Require().Equal(
+								undeletedDocs[taskDocCounter],
+								doc,
+								"doc %d",
+								taskDocCounter,
+							)
+
+							taskDocCounter++
+						}
 					}
 				}
 			},
@@ -485,7 +489,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							},
 						}
 
-						toCompare := make(chan compare.DocWithTS, 100)
+						toCompare := make(chan []compare.DocWithTS, 100)
 						toDst := make(chan []compare.DocID, 100)
 
 						err = compare.ReadNaturalPartitionFromSource(
@@ -502,7 +506,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 						)
 						require.NoError(t, err, "should read")
 
-						compared := lo.ChannelToSlice(toCompare)
+						compared := lo.Flatten(lo.ChannelToSlice(toCompare))
 						dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
 						defer func() {
@@ -567,7 +571,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							},
 						}
 
-						toCompare := make(chan compare.DocWithTS, 100)
+						toCompare := make(chan []compare.DocWithTS, 100)
 						toDst := make(chan []compare.DocID, 100)
 
 						err = compare.ReadNaturalPartitionFromSource(
@@ -584,7 +588,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 						)
 						require.NoError(t, err, "should read")
 
-						compared := lo.ChannelToSlice(toCompare)
+						compared := lo.Flatten(lo.ChannelToSlice(toCompare))
 						dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
 						defer func() {
@@ -651,7 +655,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							},
 						}
 
-						toCompare := make(chan compare.DocWithTS, 100)
+						toCompare := make(chan []compare.DocWithTS, 100)
 						toDst := make(chan []compare.DocID, 100)
 
 						err = compare.ReadNaturalPartitionFromSource(
@@ -668,7 +672,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 						)
 						require.NoError(t, err, "should read")
 
-						compared := lo.ChannelToSlice(toCompare)
+						compared := lo.Flatten(lo.ChannelToSlice(toCompare))
 						dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
 						defer func() {
@@ -738,7 +742,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							},
 						}
 
-						toCompare := make(chan compare.DocWithTS, 100)
+						toCompare := make(chan []compare.DocWithTS, 100)
 						toDst := make(chan []compare.DocID, 100)
 
 						err = compare.ReadNaturalPartitionFromSource(
@@ -755,7 +759,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 						)
 						require.NoError(t, err, "should read")
 
-						compared := lo.ChannelToSlice(toCompare)
+						compared := lo.Flatten(lo.ChannelToSlice(toCompare))
 						dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
 						defer func() {
