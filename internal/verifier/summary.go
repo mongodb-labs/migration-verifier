@@ -580,7 +580,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		var docsDescr string
 
 		if result.TotalDocs > 0 {
-			docsDescr = fmt.Sprintf("%s of %s documents (%s%%)",
+			docsDescr = fmt.Sprintf("• %s of %s documents (%s%%)",
 				reportutils.FmtReal(docsCompared),
 				reportutils.FmtReal(result.TotalDocs),
 				reportutils.FmtPercent(docsCompared, result.TotalDocs),
@@ -597,7 +597,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 			if result.TotalBytes > 0 {
 				dataUnit := reportutils.FindBestUnit(result.TotalBytes)
 
-				dataDescr = fmt.Sprintf("%s of %s %s (%s%%)",
+				dataDescr = fmt.Sprintf("• %s of %s %s (%s%%)",
 					reportutils.BytesToUnit(bytesCompared, dataUnit),
 					reportutils.BytesToUnit(result.TotalBytes, dataUnit),
 					dataUnit,
@@ -621,7 +621,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 			// Only in generation 0 should metadata tasks be long-lived.
 			if generation == 0 {
 				partitionsDescr := fmt.Sprintf(
-					"%s partitions created (goal: %s)",
+					"• %s partitions created (goal: %s)",
 					reportutils.FmtReal(partitionsCreated),
 					reportutils.FmtReal(idealParititionsCount),
 				)
