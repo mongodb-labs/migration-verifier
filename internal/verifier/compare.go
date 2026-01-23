@@ -812,7 +812,7 @@ func iterateCursorToChannel(
 		err := chanutil.WriteWithDoneCheck(
 			sctx,
 			writer,
-			docsWithTSCache,
+			slices.Clone(docsWithTSCache),
 		)
 
 		if err != nil {
