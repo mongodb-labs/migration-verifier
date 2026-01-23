@@ -292,6 +292,13 @@ func (verifier *Verifier) compareDocsFromChannels(
 						break
 					}
 
+					lo.Assertf(
+						len(srcDocsWithTS) <= compare.ToComparatorBatchSize,
+						"dst reader should send <= %d docs but sent %d",
+						compare.ToComparatorBatchSize,
+						len(srcDocsWithTS),
+					)
+
 					fi.NoteSuccess("received document from source")
 
 					taskSrcDocCount += types.DocumentCount(len(srcDocsWithTS))
@@ -337,6 +344,13 @@ func (verifier *Verifier) compareDocsFromChannels(
 						dstClosed = true
 						break
 					}
+
+					lo.Assertf(
+						len(dstDocsWithTS) <= compare.ToComparatorBatchSize,
+						"dst reader should send <= %d docs but sent %d",
+						compare.ToComparatorBatchSize,
+						len(dstDocsWithTS),
+					)
 
 					fi.NoteSuccess("received document from destination")
 				}

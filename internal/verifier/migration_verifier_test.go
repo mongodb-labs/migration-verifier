@@ -1428,6 +1428,8 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 }
 
 func TestVerifierCompareDocs(t *testing.T) {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
 	id := rand.Intn(1000)
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	verifier.SetDocCompareMethod(compare.IgnoreOrder)
@@ -1555,7 +1557,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 	namespace := "testdb.testns"
 
 	makeDocBatchChannel := func(docs []bson.D) <-chan []compare.DocWithTS {
-		theChan := make(chan []compare.DocWithTS, len(docs))
+		theChan := make(chan []compare.DocWithTS, 1)
 
 		theChan <- lo.Map(
 			docs,
