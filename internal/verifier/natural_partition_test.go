@@ -165,8 +165,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 		suite.srcConnStr,
 	)
 
-	// for _, clustered := range mslices.Of(false, true) {
-	for _, clustered := range mslices.Of(false) {
+	for _, clustered := range mslices.Of(false, true) {
 		suite.Run(
 			fmt.Sprintf("clustered %t", clustered),
 			func() {
