@@ -244,7 +244,7 @@ func ReadNaturalPartitionFromSource(
 		toCompareStart := time.Now()
 
 		// Now send documents  to the comparison thread.
-		for chunk := range mslices.Chunk(batch, ToComparatorBatchSize) {
+		for chunk := range mslices.Chunk(slices.Clone(batch), ToComparatorBatchSize) {
 			err = chanutil.WriteWithDoneCheck(
 				ctx,
 				toCompare,

@@ -1,8 +1,10 @@
 package mslices
 
 import (
+	"slices"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -47,4 +49,26 @@ func (s *mySuite) Test_ToMap() {
 		},
 		myMap,
 	)
+}
+
+func (s *mySuite) Test_Chunk() {
+	chunkSize := 7
+
+	nums := lo.Range(97)
+
+	seq := Chunk(nums, chunkSize)
+
+	chunks := slices.Collect(seq)
+
+	s.Assert().Equal(
+		nums,
+		lo.Flatten(chunks),
+		"values preserved",
+	)
+
+	for _, nonfinal := range chunks[:len(chunks)-1] {
+		s.Assert().Len(nonfinal, chunkSize)
+	}
+
+	s.Assert().LessOrEqual(len(lo.LastOrEmpty(chunks)), chunkSize)
 }

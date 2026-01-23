@@ -85,6 +85,9 @@ func Map1[T any, V any](s []T, cb func(T) V) []V {
 }
 
 // Chunk is like lo.Chunk but returns an iterator.
+//
+// Note that this does NO CLONING. So if you’re reusing the given slice,
+// be sure to clone it beforehand.
 func Chunk[T any, Slice ~[]T](collection Slice, size int) iter.Seq[Slice] {
 	return func(yield func(Slice) bool) {
 		i := 0

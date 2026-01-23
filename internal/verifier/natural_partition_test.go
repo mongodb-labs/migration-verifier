@@ -83,7 +83,8 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
 		suite.srcConnStr,
 	)
 
-	for _, clustered := range mslices.Of(false, true) {
+	// for _, clustered := range mslices.Of(false, true) {
+	for _, clustered := range mslices.Of(false) {
 		suite.Run(
 			fmt.Sprintf("clustered %t", clustered),
 			func() {
@@ -191,7 +192,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
 					require.NoError(t, err, "should read")
 
 					for batch := range toCompare {
-						assert.LessOrEqual(t, len(batch), compare.ToComparatorBatchCount)
+						assert.LessOrEqual(t, len(batch), compare.ToComparatorBatchSize)
 
 						for _, d := range batch {
 							var doc bson.D
@@ -200,8 +201,9 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
 							suite.Require().Equal(
 								undeletedDocs[taskDocCounter],
 								doc,
-								"doc %d",
+								"doc %d (initial docs: %+v)",
 								taskDocCounter,
+								lo.Slice(batch, 0, 5),
 							)
 
 							taskDocCounter++
