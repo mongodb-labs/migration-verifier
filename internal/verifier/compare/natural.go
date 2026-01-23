@@ -16,6 +16,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
@@ -62,7 +63,7 @@ func ReadNaturalPartitionFromSource(
 	task *tasks.Task,
 	docFilter option.Option[bson.D],
 	compareMethod Method,
-	toCompare chan<- DocWithTS,
+	toCompare chan<- []DocWithTS,
 	toDst chan<- []DocID,
 ) error {
 	defer close(toCompare)
@@ -242,21 +243,21 @@ func ReadNaturalPartitionFromSource(
 
 		toCompareStart := time.Now()
 
-		// Now send documents (one by one) to the comparison thread.
-		for d, docAndTS := range batch {
-			err := chanutil.WriteWithDoneCheck(
+		// Now send documents  to the comparison thread.
+		for chunk := range mslices.Chunk(slices.Clone(batch), ToComparatorBatchSize) {
+			err = chanutil.WriteWithDoneCheck(
 				ctx,
 				toCompare,
-				docAndTS,
+				chunk,
 			)
 			if err != nil {
 				// NB: This leaks memory, but that shouldn’t matter because
 				// this error should crash the verifier.
-				return errors.Wrapf(err, "sending src doc %d of %d to compare", 1+d, len(batch))
+				return errors.Wrapf(err, "sending %d of %d src docs to compare", len(chunk), len(batch))
 			}
-
-			retryState.NoteSuccess("sent doc #%d of %d to compare thread", 1+d, len(batch))
 		}
+
+		retryState.NoteSuccess("sent %d src docs to compare thread", len(batch))
 
 		logger.Trace().
 			Any("task", task.PrimaryKey).
