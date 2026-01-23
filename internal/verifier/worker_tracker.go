@@ -71,7 +71,7 @@ func (wt *WorkerTracker) SetPartitionCounts(taskID bson.ObjectID, soFar int, tar
 
 			lo.Assertf(
 				status.TaskType == tasks.VerifyCollection,
-				"task (type: %#q) must be collection metadata",
+				"task type must be collection metadata (found %#q)",
 				status.TaskType,
 			)
 
@@ -92,7 +92,7 @@ func (wt *WorkerTracker) SetSrcCounts(workerNum int, docs types.DocumentCount, b
 
 		lo.Assertf(
 			status.TaskType == tasks.VerifyDocuments,
-			"task (type: %#q) must be document comparison",
+			"task type must be document comparison (found %#q)",
 			status.TaskType,
 		)
 
