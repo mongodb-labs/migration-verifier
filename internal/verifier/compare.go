@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
@@ -847,9 +848,10 @@ func (verifier *Verifier) getDocumentsCursor(
 			// default. There are decent odds, though, that a single response
 			// can fit all of the needed documents, so we override that default.
 			//
-			// 100 is “just in case” headroom. (See SERVER-57067 for a case
-			// where the headroom actually mattered.)
-			{"batchSize", 100 + len(task.Ids)},
+			// We could derive the batch size from len(task.Ids), but just in
+			// case there are duplicate `_id`s across shards we might as well
+			// just set a “really high” batch size.
+			{"batchSize", math.MaxInt32},
 		}
 	} else {
 		pqp, err := task.QueryFilter.Partition.GetQueryParameters(
