@@ -156,6 +156,14 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 	lowerBound := lowerBoundOpt.OrElse(bsontools.ToRawValue(bson.MinKey{}))
 
+	idealNumPartitions := util.DivideToF64(collBytes, idealPartitionBytes)
+
+	verifier.workerTracker.SetPartitionCounts(
+		task.PrimaryKey,
+		0,
+		int(idealNumPartitions),
+	)
+
 	createAndInsertPartition := func(lowerBound, upperBound bson.RawValue) error {
 		partition := partitions.Partition{
 			Key: partitions.PartitionKey{
@@ -185,12 +193,16 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 		partitionsCount++
 
+		verifier.workerTracker.SetPartitionCounts(
+			task.PrimaryKey,
+			partitionsCount,
+			int(idealNumPartitions),
+		)
+
 		fi.NoteSuccess("inserted partition #%d", partitionsCount)
 
 		return nil
 	}
-
-	idealNumPartitions := util.DivideToF64(collBytes, idealPartitionBytes)
 
 	docsPerPartition := util.DivideToF64(docsCount, idealNumPartitions)
 
