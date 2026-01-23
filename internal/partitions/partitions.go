@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -18,6 +19,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
+
+type Scheme string
 
 const (
 	//
@@ -70,7 +73,16 @@ const (
 	// for how large partitions will be, regardless of average document size.
 	//
 	DefaultPartitionMiB = 400
+
+	SchemeID      Scheme = "_id"
+	SchemeNatural Scheme = "natural"
 )
+
+var Schemes = mslices.Of(
+	string(SchemeID),
+	string(SchemeNatural),
+)
+var SchemeDefault = Schemes[0]
 
 // Partitions is a slice of partitions.
 type Partitions struct {
@@ -131,7 +143,7 @@ func PartitionCollectionWithSize(
 	)
 
 	// Handle timeout errors by partitioning without filtering.
-	if mongo.IsTimeout(err) {
+	if mongo.IsTimeout(err) && globalFilter != nil {
 		subLogger.Debug().
 			Err(err).
 			Str("filter", fmt.Sprintf("%+v", globalFilter)).

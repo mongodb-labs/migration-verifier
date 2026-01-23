@@ -75,6 +75,50 @@ func TestIntegration(t *testing.T) {
 	suite.Run(t, testSuite)
 }
 
+// This test will fail if the collection in question is ever verified with
+// natural partitioning (due to how our implementation misses extra docs on
+// the destination).
+func (suite *IntegrationTestSuite) TestEmptyExceptDestination() {
+	ctx := suite.Context()
+	require := require.New(suite.T())
+
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	collName := "stuff"
+	require.NoError(db.CreateCollection(ctx, collName))
+
+	dstDB := suite.dstMongoClient.Database(db.Name())
+	require.NoError(dstDB.CreateCollection(ctx, collName))
+
+	_, err := dstDB.Collection(collName).InsertMany(
+		ctx,
+		[]bson.D{
+			{{"foo", "bar"}},
+			{{"baz", "qux"}},
+		},
+	)
+	require.NoError(err)
+
+	verifier := suite.BuildVerifier()
+
+	verifier.SetVerifyAll(true)
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	status, err := verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+
+	assert.Equal(
+		suite.T(),
+		&VerificationStatus{
+			TotalTasks:     2,
+			CompletedTasks: 1,
+			FailedTasks:    1,
+		},
+		status,
+		"expected task status",
+	)
+}
+
 func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
 	ctx := suite.Context()
 	require := require.New(suite.T())
@@ -581,6 +625,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 		},
 	)
 
+	suite.Require().NotEmpty(mismatches, "we expect a mismatch")
 	firstMismatchTime := mismatches[0].Detail.MismatchHistory.First
 
 	_, err = suite.srcMongoClient.
@@ -2464,11 +2509,11 @@ func (suite *IntegrationTestSuite) TestMetadataMismatchAndPartitioning() {
 	var theTasks []tasks.Task
 	suite.Require().NoError(cursor.All(ctx, &theTasks))
 
-	suite.Require().Len(theTasks, 2)
-	suite.Require().Equal(tasks.VerifyDocuments, theTasks[0].Type)
-	suite.Require().Equal(tasks.Completed, theTasks[0].Status, "docs task should be done")
-	suite.Require().Equal(tasks.VerifyCollection, theTasks[1].Type)
-	suite.Require().Equal(tasks.MetadataMismatch, theTasks[1].Status, "collection task should be done")
+	suite.Require().Len(theTasks, 2, "tasks: %+v", theTasks)
+	suite.Assert().Equal(tasks.VerifyDocuments, theTasks[0].Type)
+	suite.Assert().Equal(tasks.Completed, theTasks[0].Status, "docs task should be done")
+	suite.Assert().Equal(tasks.VerifyCollection, theTasks[1].Type)
+	suite.Assert().Equal(tasks.MetadataMismatch, theTasks[1].Status, "collection task should be done")
 
 	// When tailing the oplog sometimes the verifier starts up “in the past”,
 	// which can cause extra rechecks that we wouldn’t normally expect. This

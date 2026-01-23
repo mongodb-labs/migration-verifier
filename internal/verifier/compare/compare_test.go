@@ -17,7 +17,7 @@ func TestDocWithTS(t *testing.T) {
 		doc,
 		bson.Timestamp{123, 234},
 	)
-	defer d.Release()
+	defer d.Free()
 
 	doc[0] = 0xff
 

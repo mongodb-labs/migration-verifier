@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
@@ -32,6 +33,7 @@ import (
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -97,6 +99,7 @@ type Verifier struct {
 	running            bool
 	generation         int
 	port               int
+	srcURI             string
 	metaURI            string
 	metaClient         *mongo.Client
 	srcClient          *mongo.Client
@@ -123,6 +126,7 @@ type Verifier struct {
 	generationPauseDelay time.Duration
 	workerSleepDelay     time.Duration
 	docCompareMethod     compare.Method
+	partitioningScheme   partitions.Scheme
 	verifyAll            bool
 	startClean           bool
 
@@ -386,6 +390,10 @@ func (verifier *Verifier) SetMetaDBName(arg string) {
 
 func (verifier *Verifier) SetDocCompareMethod(method compare.Method) {
 	verifier.docCompareMethod = method
+}
+
+func (verifier *Verifier) SetPartitioningScheme(method partitions.Scheme) {
+	verifier.partitioningScheme = method
 }
 
 func (verifier *Verifier) SetSrcChangeReaderMethod(method string) error {
@@ -1328,10 +1336,17 @@ func (verifier *Verifier) partitionCollection(
 	docsCount types.DocumentCount,
 	isCapped bool,
 ) error {
+	lo.Assertf(
+		task.Generation == 0,
+		"generation should be 0 (task: %+v)",
+		task,
+	)
+
 	srcColl := verifier.srcClientCollection(task)
-	dstColl := verifier.dstClientCollection(task)
 	srcNs := FullName(srcColl)
-	dstNs := FullName(dstColl)
+	dstNs := FullName(verifier.dstClientCollection(task))
+
+	var partitionsCount int
 
 	shardKeyFields, err := verifier.getShardKeyFields(
 		ctx,
@@ -1394,38 +1409,108 @@ func (verifier *Verifier) partitionCollection(
 		Float64("idealPartitionsCount", idealNumPartitions).
 		Msg("Partitioning collection.")
 
-	var partitionsCount int
+	switch verifier.partitioningScheme {
 
-	if verifier.srcHasSampleRate() {
-		var err error
-		partitionsCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task, shardKeyFields)
-		if err != nil {
-			return errors.Wrapf(err, "partitioning %#q via $sampleRate", srcNs)
+	case partitions.SchemeID:
+		if verifier.srcHasSampleRate() {
+			var err error
+			partitionsCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task, shardKeyFields)
+			if err != nil {
+				return errors.Wrapf(err, "partitioning %#q via $sampleRate", srcNs)
+			}
+		} else {
+			verifier.logger.Warn().
+				Msg("Source MongoDB version lacks $sampleRate. Using legacy partitioning logic. This may cause imbalanced partitions, which will impede performance.")
+
+			var partitions []*partitions.Partition
+			var shardKeys []string
+
+			partitions, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
+			if err != nil {
+				return errors.Wrapf(err, "partitioning %#q via $sample", srcNs)
+			}
+
+			partitionsCount = len(partitions)
+
+			for _, partition := range partitions {
+				_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeys, dstNs)
+				if err != nil {
+					return errors.Wrapf(
+						err,
+						"failed to insert a partition task for namespace %#q",
+						srcNs,
+					)
+				}
+			}
 		}
-	} else {
-		verifier.logger.Warn().
-			Msg("Source MongoDB version lacks $sampleRate. Using legacy partitioning logic. This may cause imbalanced partitions, which will impede performance.")
-
-		var partitions []*partitions.Partition
-		var shardKeys []string
-
-		partitions, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
+	case partitions.SchemeNatural:
+		clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.srcClient)
 		if err != nil {
-			return errors.Wrapf(err, "partitioning %#q via $sample", srcNs)
+			return errors.Wrapf(err, "reading source cluster info")
 		}
 
-		partitionsCount = len(partitions)
+		if clusterInfo.Topology != util.TopologyReplset {
+			return fmt.Errorf("resumable natural scan requires a replica set")
+		} else {
+			err = mmongo.WhyFindCannotResume([2]int(verifier.srcClusterInfo.VersionArray))
 
-		for _, partition := range partitions {
-			_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeys, dstNs)
+			if err != nil {
+				return err
+			}
+		}
+
+		shardKeys, err := verifier.getShardKeyFields(
+			ctx,
+			&uuidutil.NamespaceAndUUID{
+				DBName:   srcColl.Database().Name(),
+				CollName: srcColl.Name(),
+			},
+		)
+		if err != nil {
+			return errors.Wrapf(err, "getting %#q’s shard key", srcNs)
+		}
+
+		var pChan chan mo.Result[partitions.Partition]
+		pChan, err = partitions.PartitionCollectionNaturalOrder(
+			ctx,
+			srcColl,
+			verifier.partitionSizeInBytes,
+			verifier.logger,
+		)
+		if err != nil {
+			return fmt.Errorf("starting natural partitioning: %w", err)
+		}
+
+		for {
+			resultOpt, err := chanutil.ReadWithDoneCheck(ctx, pChan)
+			if err != nil {
+				return fmt.Errorf("reading natural partition: %w", err)
+			}
+
+			result, has := resultOpt.Get()
+			if !has {
+				break
+			}
+
+			partition, err := result.Get()
+			if err != nil {
+				return fmt.Errorf("reading natural partition: %w", err)
+			}
+
+			partitionsCount++
+
+			_, err = verifier.InsertPartitionVerificationTask(ctx, &partition, shardKeys, dstNs)
 			if err != nil {
 				return errors.Wrapf(
 					err,
-					"failed to insert a partition task for namespace %#q",
+					"inserting a partition task (%+v) for namespace %#q",
+					partition,
 					srcNs,
 				)
 			}
 		}
+	default:
+		panic(fmt.Sprintf("bad partition method (%#q); how did that happen?!?", verifier.partitioningScheme))
 	}
 
 	verifier.logger.Debug().
