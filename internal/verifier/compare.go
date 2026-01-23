@@ -841,7 +841,15 @@ func (verifier *Verifier) getDocumentsCursor(
 		filter := bson.D{{"$and", andPredicates}}
 
 		findOptions = bson.D{
-			bson.E{"filter", filter},
+			{"filter", filter},
+
+			// The server limits the initial response to 101 documents by
+			// default. There are decent odds, though, that a single response
+			// can fit all of the needed documents, so we override that default.
+			//
+			// 100 is “just in case” headroom. (See SERVER-57067 for a case
+			// where the headroom actually mattered.)
+			{"batchSize", 100 + len(task.Ids)},
 		}
 	} else {
 		pqp, err := task.QueryFilter.Partition.GetQueryParameters(
