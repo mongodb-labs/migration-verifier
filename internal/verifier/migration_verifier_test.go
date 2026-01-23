@@ -334,6 +334,7 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: dbName + "." + collName,
 			To:        dbName + "." + collName,
@@ -408,6 +409,7 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
 		Ids: mslices.Of(
 			mbson.ToRawValue(id1),
 			mbson.ToRawValue(id2),
@@ -445,6 +447,7 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "keyhole.dealers",
 			To:        "keyhole.dealers",
@@ -817,6 +820,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
 		Generation: 1,
 		Ids: mslices.Of(
 			mbson.ToRawValue(id),
@@ -902,6 +906,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	suite.Require().NoError(err)
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
 		Generation: 1,
 		Ids: mslices.Of(
 			mbson.ToRawValue(id),
@@ -1607,6 +1612,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 				fauxTask := tasks.Task{
 					PrimaryKey: bson.NewObjectID(),
+					Type:       tasks.VerifyDocuments,
 					QueryFilter: tasks.QueryFilter{
 						Namespace: namespace,
 						ShardKeys: indexFields,
