@@ -58,6 +58,9 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 
 		var done atomic.Bool
 		go func() {
+			// Needed or else a panic happens.
+			verifier.workerTracker.Set(0, task)
+
 			_, _, _, err := verifier.FetchAndCompareDocuments(
 				cancelableCtx,
 				0,
