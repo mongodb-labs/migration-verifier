@@ -61,6 +61,7 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 			// Needed or else a panic happens.
 			verifier.workerTracker.Set(0, task)
 
+			verifier.workerTracker.Set(0, task)
 			_, _, _, err := verifier.FetchAndCompareDocuments(
 				cancelableCtx,
 				0,
