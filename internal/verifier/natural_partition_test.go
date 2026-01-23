@@ -1,8 +1,10 @@
 package verifier
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,7 +48,87 @@ func (suite *IntegrationTestSuite) skipUnlessCanPartitionNatural() [3]int {
 	return version
 }
 
-func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
+func (suite *IntegrationTestSuite) TestFetchAndCompareAllDstDocsGone() {
+	suite.skipUnlessCanPartitionNatural()
+
+	ctx := suite.T().Context()
+	t := suite.T()
+
+	// Insert ~40 MiB of data into the collection.
+	// Each document is roughly 220 bytes.
+	docs := lo.RepeatBy(
+		200_000,
+		func(i int) bson.D {
+			return bson.D{
+				{"_id", i},
+				{"str", strings.Repeat("x", 200)},
+			}
+		},
+	)
+
+	srcColl := suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection("coll")
+
+	_, err := srcColl.InsertMany(ctx, docs)
+	require.NoError(t, err)
+
+	// No documents on the destination … but we need to create the collection.
+
+	err = suite.dstMongoClient.
+		Database(suite.DBNameForTest()).
+		CreateCollection(ctx, "coll")
+	require.NoError(t, err)
+
+	verifier := suite.BuildVerifier()
+
+	verifier.SetPartitioningScheme(partitions.SchemeNatural)
+	verifier.SetPartitionSizeMB(1)
+
+	// needed for comparison:
+	require.NoError(t, verifier.startChangeHandling(ctx))
+
+	task := &tasks.Task{
+		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
+		QueryFilter: tasks.QueryFilter{
+			Namespace: FullName(srcColl),
+		},
+	}
+
+	results, _, _, err := verifier.FetchAndCompareDocuments(
+		ctx,
+		0,
+		task,
+	)
+	require.NoError(t, err)
+
+	assert.Len(t, results, len(docs), "every doc should trigger a result")
+
+	slices.SortFunc(
+		results,
+		func(a, b VerificationResult) int {
+			return cmp.Compare(
+				lo.Must(bsontools.RawValueTo[int](a.ID)),
+				lo.Must(bsontools.RawValueTo[int](b.ID)),
+			)
+		},
+	)
+
+	for i, r := range results {
+		resultDocID, err := bsontools.RawValueTo[int32](r.ID)
+		require.NoError(t, err)
+
+		assert.EqualValues(t, docs[i][0].Value, resultDocID)
+
+		assert.True(t, r.DocumentIsMissing(), "results[%d]: should be doc-missing")
+		assert.EqualValues(t, ClusterTarget, r.Cluster)
+	}
+}
+
+// TestNaturalPartitionSourceE2E confirms that we can partition and
+// read document correctly.
+func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 	version := suite.skipUnlessCanPartitionNatural()
 
 	ctx := suite.T().Context()
