@@ -1599,41 +1599,6 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 			dstPermute := permute.Slice(dstDocs)
 			for dstPermute.Permute() {
-				srcChannel := makeDocBatchChannel(srcDocs)
-				dstChannel := makeDocBatchChannel(dstDocs)
-
-				fauxTask := tasks.Task{
-					PrimaryKey: bson.NewObjectID(),
-					QueryFilter: tasks.QueryFilter{
-						Namespace: namespace,
-						ShardKeys: indexFields,
-					},
-				}
-				var results []VerificationResult
-				var docCount types.DocumentCount
-				var byteCount types.ByteCount
-
-				err := retry.New().WithCallback(
-					func(ctx context.Context, fi *retry.FuncInfo) error {
-						var err error
-
-						results, docCount, byteCount, err = verifier.compareDocsFromChannels(
-							ctx,
-							0,
-							fi,
-							&fauxTask,
-							srcChannel,
-							dstChannel,
-						)
-
-						return err
-					},
-					"comparing documents",
-				).Run(context.Background(), logger.NewDefaultLogger())
-
-				assert.EqualValues(t, len(srcDocs), docCount)
-				assert.Equal(t, len(srcDocs) > 0, byteCount > 0, "byte count should match docs")
-
 				label := curTest.label
 				if permuted {
 					curPermutation++
@@ -1643,6 +1608,41 @@ func TestVerifierCompareDocs(t *testing.T) {
 				ok := t.Run(
 					label,
 					func(t *testing.T) {
+						srcChannel := makeDocBatchChannel(srcDocs)
+						dstChannel := makeDocBatchChannel(dstDocs)
+
+						fauxTask := tasks.Task{
+							PrimaryKey: bson.NewObjectID(),
+							QueryFilter: tasks.QueryFilter{
+								Namespace: namespace,
+								ShardKeys: indexFields,
+							},
+						}
+						var results []VerificationResult
+						var docCount types.DocumentCount
+						var byteCount types.ByteCount
+
+						err := retry.New().WithCallback(
+							func(ctx context.Context, fi *retry.FuncInfo) error {
+								var err error
+
+								results, docCount, byteCount, err = verifier.compareDocsFromChannels(
+									ctx,
+									0,
+									fi,
+									&fauxTask,
+									srcChannel,
+									dstChannel,
+								)
+
+								return err
+							},
+							"comparing documents",
+						).Run(context.Background(), logger.NewDefaultLogger())
+
+						assert.EqualValues(t, len(srcDocs), docCount)
+						assert.Equal(t, len(srcDocs) > 0, byteCount > 0, "byte count should match docs")
+
 						require.NoError(t, err)
 						curTest.compareFn(t, results)
 					},
