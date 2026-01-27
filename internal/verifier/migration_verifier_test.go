@@ -1428,6 +1428,8 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 }
 
 func TestVerifierCompareDocs(t *testing.T) {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
 	id := rand.Intn(1000)
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	verifier.SetDocCompareMethod(compare.IgnoreOrder)
@@ -1554,15 +1556,18 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	namespace := "testdb.testns"
 
-	makeDocChannel := func(docs []bson.D) <-chan compare.DocWithTS {
-		theChan := make(chan compare.DocWithTS, len(docs))
+	makeDocBatchChannel := func(docs []bson.D) <-chan []compare.DocWithTS {
+		theChan := make(chan []compare.DocWithTS, 1)
 
-		for d, doc := range docs {
-			theChan <- compare.NewDocWithTS(
-				testutil.MustMarshal(doc),
-				bson.Timestamp{1, uint32(d)},
-			)
-		}
+		theChan <- lo.Map(
+			docs,
+			func(doc bson.D, i int) compare.DocWithTS {
+				return compare.NewDocWithTS(
+					testutil.MustMarshal(doc),
+					bson.Timestamp{1, uint32(i)},
+				)
+			},
+		)
 
 		close(theChan)
 
@@ -1594,41 +1599,6 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 			dstPermute := permute.Slice(dstDocs)
 			for dstPermute.Permute() {
-				srcChannel := makeDocChannel(srcDocs)
-				dstChannel := makeDocChannel(dstDocs)
-
-				fauxTask := tasks.Task{
-					PrimaryKey: bson.NewObjectID(),
-					QueryFilter: tasks.QueryFilter{
-						Namespace: namespace,
-						ShardKeys: indexFields,
-					},
-				}
-				var results []VerificationResult
-				var docCount types.DocumentCount
-				var byteCount types.ByteCount
-
-				err := retry.New().WithCallback(
-					func(ctx context.Context, fi *retry.FuncInfo) error {
-						var err error
-
-						results, docCount, byteCount, err = verifier.compareDocsFromChannels(
-							ctx,
-							0,
-							fi,
-							&fauxTask,
-							srcChannel,
-							dstChannel,
-						)
-
-						return err
-					},
-					"comparing documents",
-				).Run(context.Background(), logger.NewDefaultLogger())
-
-				assert.EqualValues(t, len(srcDocs), docCount)
-				assert.Equal(t, len(srcDocs) > 0, byteCount > 0, "byte count should match docs")
-
 				label := curTest.label
 				if permuted {
 					curPermutation++
@@ -1638,6 +1608,41 @@ func TestVerifierCompareDocs(t *testing.T) {
 				ok := t.Run(
 					label,
 					func(t *testing.T) {
+						srcChannel := makeDocBatchChannel(srcDocs)
+						dstChannel := makeDocBatchChannel(dstDocs)
+
+						fauxTask := tasks.Task{
+							PrimaryKey: bson.NewObjectID(),
+							QueryFilter: tasks.QueryFilter{
+								Namespace: namespace,
+								ShardKeys: indexFields,
+							},
+						}
+						var results []VerificationResult
+						var docCount types.DocumentCount
+						var byteCount types.ByteCount
+
+						err := retry.New().WithCallback(
+							func(ctx context.Context, fi *retry.FuncInfo) error {
+								var err error
+
+								results, docCount, byteCount, err = verifier.compareDocsFromChannels(
+									ctx,
+									0,
+									fi,
+									&fauxTask,
+									srcChannel,
+									dstChannel,
+								)
+
+								return err
+							},
+							"comparing documents",
+						).Run(context.Background(), logger.NewDefaultLogger())
+
+						assert.EqualValues(t, len(srcDocs), docCount)
+						assert.Equal(t, len(srcDocs) > 0, byteCount > 0, "byte count should match docs")
+
 						require.NoError(t, err)
 						curTest.compareFn(t, results)
 					},
