@@ -180,6 +180,13 @@ var jsonTemplate *template.Template
 func (verifier *Verifier) GetPersistedNamespaceStatistics(ctx context.Context) ([]NamespaceStats, error) {
 	generation, _ := verifier.getGeneration()
 
+	return verifier.GetPersistedNamespaceStatisticsForGeneration(ctx, generation)
+}
+
+func (verifier *Verifier) GetPersistedNamespaceStatisticsForGeneration(
+	ctx context.Context,
+	generation int,
+) ([]NamespaceStats, error) {
 	templateOnce.Do(func() {
 		tmpl, err := template.New("").Parse(perNsStatsPipelineTemplate)
 		if err != nil {

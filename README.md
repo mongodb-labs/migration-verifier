@@ -106,24 +106,49 @@ metaURI: mongodb://localhost:28012
 The verifier will now check to completion to make sure that there are no inconsistencies. The command you need to send the verifier here is `writesOff`. The command doesn’t block. This means that you will have to poll the verifier, or watch its logs, to see the status of the verification (see `progress`).
 
     ```
-    curl -H "Content-Type: application/json" -X POST -d '{}' http://127.0.0.1:27020/api/v1/writesOff
+    curl -H "Content-Type: application/json" -d '{}' http://127.0.0.1:27020/api/v1/writesOff
     ```
 
 
-3. You can poll the status of the verification by hitting the `progress`endpoint. In particular, the `phase`should reveal whether the verifier is done verifying; once the `phase`is `idle`the verification has completed. When the `phase`has reached `idle`, the `error`field should be `null`and the `failedTasks`field should be `0`, if the verification was successful. A non-`null``error`field indicates that the verifier itself ran into an error. `failedTasks`being non-`0`indicates that there was an inconsistency. The logs printed by the verifier itself should have more information regarding what the inconsistencies are.
+3. You can poll the status of the verification by hitting the `progress` endpoint. In particular, the `phase` should reveal whether the verifier is done verifying. Once the `phase` is `idle`, the verification has completed. At that point the `error` field should be `null`, and the `failedTasks` field should be `0`, if the verification was successful. A non-`null` `error` field indicates that the verifier itself ran into an error. `failedTasks` being non-`0` indicates that there was an inconsistency. See below for how to investigate mismatches.
 
-    ```
-    curl -H "Content-Type: application/json" -X GET http://127.0.0.1:27020/api/v1/progress
+```
+curl http://127.0.0.1:27020/api/v1/progress
+```
 
-    ```
+### `/progress` API Response Contents
 
+In the below a “timestamp” is an object with `T` and `I` unsigned integers.
+These represent a logical time in MongoDB’s replication protocol.
 
-	
-
-	This is a sample output when inconsistencies are present:
-
-
-    	`{"progress":{"phase":"idle","error":null,"verificationStatus":{"totalTasks":1,"addedTasks":0,"processingTasks":0,"failedTasks":1,"completedTasks":0,"metadataMismatchTasks":0,"recheckTasks":0}}}`
+- `progress`
+  - `phase` (string): either `idle`, `check`, or `recheck`
+  - `generation` (unsigned integer)
+  - `generationStats`
+    - `timeElapsed` (string, [Go Duration format](https://pkg.go.dev/time#ParseDuration))
+    - `activeWorkers` (unsigned integer)
+    - `docsCompared` (unsigned integer)
+    - `totalDocs` (unsigned integer)
+    - `srcBytesCompared` (unsigned integer)
+    - `totalSrcBytes` (unsigned integer, only present in `check` phase)
+    - `priorMismatches` (unsigned integer, optional, mismatches seen in prior generation)
+    - `mismatchesFound` (unsigned integer)
+    - `rechecksEnqueued` (unsigned integer)
+  - `srcChangeStats`
+    - `eventsPerSecond` (nonnegative float, optional)
+    - `currentTimes` (optional)
+      - `lastHandledTime` (timestamp)
+      - `lastClusterTime` (timestamp)
+    - `bufferSaturation` (nonnegative float)
+  - `dstChangeStats` (same fields as `srcChangeStats`)
+  - `error` (string, optional)
+  - `verificationStatus` (tasks for the current generation)
+    - `totalTasks` (unsigned integer)
+    - `addedTasks` (unsigned integer, unstarted tasks)
+    - `processingTasks` (unsigned integer, in-progress tasks)
+    - `failedTasks` (unsigned integer, tasks that found a document mismatch)
+    - `completedTasks` (unsigned integer, tasks that found no problems)
+    - `metadataMismatchTasks` (unsigned integer, tasks that found a collection metadata mismatch)
 
 
 # CLI Options
