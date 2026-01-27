@@ -1,8 +1,10 @@
 package verifier
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,7 +48,87 @@ func (suite *IntegrationTestSuite) skipUnlessCanPartitionNatural() [3]int {
 	return version
 }
 
-func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
+func (suite *IntegrationTestSuite) TestFetchAndCompareAllDstDocsGone() {
+	suite.skipUnlessCanPartitionNatural()
+
+	ctx := suite.T().Context()
+	t := suite.T()
+
+	// Insert ~40 MiB of data into the collection.
+	// Each document is roughly 220 bytes.
+	docs := lo.RepeatBy(
+		200_000,
+		func(i int) bson.D {
+			return bson.D{
+				{"_id", i},
+				{"str", strings.Repeat("x", 200)},
+			}
+		},
+	)
+
+	srcColl := suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection("coll")
+
+	_, err := srcColl.InsertMany(ctx, docs)
+	require.NoError(t, err)
+
+	// No documents on the destination … but we need to create the collection.
+
+	err = suite.dstMongoClient.
+		Database(suite.DBNameForTest()).
+		CreateCollection(ctx, "coll")
+	require.NoError(t, err)
+
+	verifier := suite.BuildVerifier()
+
+	verifier.SetPartitioningScheme(partitions.SchemeNatural)
+	verifier.SetPartitionSizeMB(1)
+
+	// needed for comparison:
+	require.NoError(t, verifier.startChangeHandling(ctx))
+
+	task := &tasks.Task{
+		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
+		QueryFilter: tasks.QueryFilter{
+			Namespace: FullName(srcColl),
+		},
+	}
+
+	results, _, _, err := verifier.FetchAndCompareDocuments(
+		ctx,
+		0,
+		task,
+	)
+	require.NoError(t, err)
+
+	assert.Len(t, results, len(docs), "every doc should trigger a result")
+
+	slices.SortFunc(
+		results,
+		func(a, b VerificationResult) int {
+			return cmp.Compare(
+				lo.Must(bsontools.RawValueTo[int](a.ID)),
+				lo.Must(bsontools.RawValueTo[int](b.ID)),
+			)
+		},
+	)
+
+	for i, r := range results {
+		resultDocID, err := bsontools.RawValueTo[int32](r.ID)
+		require.NoError(t, err)
+
+		assert.EqualValues(t, docs[i][0].Value, resultDocID)
+
+		assert.True(t, r.DocumentIsMissing(), "results[%d]: should be doc-missing")
+		assert.EqualValues(t, ClusterTarget, r.Cluster)
+	}
+}
+
+// TestNaturalPartitionSourceE2E confirms that we can partition and
+// read document correctly.
+func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 	version := suite.skipUnlessCanPartitionNatural()
 
 	ctx := suite.T().Context()
@@ -173,7 +255,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
 				var taskDocCounter int
 
 				for _, task := range theTasks {
-					toCompare := make(chan compare.DocWithTS, len(undeletedDocs))
+					toCompare := make(chan []compare.DocWithTS, len(undeletedDocs))
 					toDst := make(chan []compare.DocID, len(undeletedDocs))
 
 					err = compare.ReadNaturalPartitionFromSource(
@@ -190,18 +272,23 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionE2E() {
 					)
 					require.NoError(t, err, "should read")
 
-					for d := range toCompare {
-						var doc bson.D
-						suite.Require().NoError(bson.Unmarshal(d.Doc, &doc), "unmarshal")
+					for batch := range toCompare {
+						assert.LessOrEqual(t, len(batch), compare.ToComparatorBatchSize)
 
-						suite.Require().Equal(
-							undeletedDocs[taskDocCounter],
-							doc,
-							"doc %d",
-							taskDocCounter,
-						)
+						for _, d := range batch {
+							var doc bson.D
+							suite.Require().NoError(bson.Unmarshal(d.Doc, &doc), "unmarshal")
 
-						taskDocCounter++
+							suite.Require().Equal(
+								undeletedDocs[taskDocCounter],
+								doc,
+								"doc %d (initial docs: %+v)",
+								taskDocCounter,
+								lo.Slice(batch, 0, 5),
+							)
+
+							taskDocCounter++
+						}
 					}
 				}
 			},
@@ -283,11 +370,36 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 
 		tasksColl := coll.Database().Collection("tasks")
 
+		lastUpperBound := bsontools.ToRawValue(bson.Null{})
+
 		for i, result := range results {
 			partition, err := result.Get()
 			require.NoError(t, err, "should create partition")
 
-			// TODO: Ensure that partitions are non-overlapping.
+			if lastUpperBound.Type == bson.TypeNull {
+				assert.Equal(
+					t,
+					bson.TypeNull,
+					partition.Key.Lower.Type,
+					"",
+				)
+			} else {
+				lower, err := bsontools.RawValueTo[bson.Raw](partition.Key.Lower)
+				require.NoError(t, err)
+
+				lowerRecID, err := lower.LookupErr(partitions.RecordID)
+				require.NoError(t, err)
+
+				assert.True(
+					t,
+					lastUpperBound.Equal(lowerRecID),
+					"lower bound rec ID (%s) should match last upper bound (%s)",
+					lowerRecID.String(),
+					lastUpperBound.String(),
+				)
+			}
+
+			lastUpperBound = partition.Upper
 
 			task := tasks.Task{
 				PrimaryKey: bson.NewObjectID(),
@@ -433,8 +545,10 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 				cur, err := cursor.New(coll.Database(), resp, nil)
 				require.NoError(t, err, "should open cursor")
 				for !cur.IsFinished() {
-					rt, err := cursor.GetResumeToken(cur)
+					rtOpt, err := cursor.GetResumeToken(cur)
 					require.NoError(t, err)
+
+					rt := rtOpt.MustGetf("must have resume token")
 
 					resumeTokens = append(resumeTokens, rt)
 
@@ -458,7 +572,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							},
 						}
 
-						toCompare := make(chan compare.DocWithTS, 100)
+						toCompare := make(chan []compare.DocWithTS, 100)
 						toDst := make(chan []compare.DocID, 100)
 
 						err = compare.ReadNaturalPartitionFromSource(
@@ -475,16 +589,16 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 						)
 						require.NoError(t, err, "should read")
 
-						compared := lo.ChannelToSlice(toCompare)
+						compared := lo.Flatten(lo.ChannelToSlice(toCompare))
 						dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
 						defer func() {
 							for _, c := range compared {
-								c.Release()
+								c.Free()
 							}
 
 							for _, d := range dstFetches {
-								d.Release()
+								d.Free()
 							}
 						}()
 
@@ -540,7 +654,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							},
 						}
 
-						toCompare := make(chan compare.DocWithTS, 100)
+						toCompare := make(chan []compare.DocWithTS, 100)
 						toDst := make(chan []compare.DocID, 100)
 
 						err = compare.ReadNaturalPartitionFromSource(
@@ -557,16 +671,16 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 						)
 						require.NoError(t, err, "should read")
 
-						compared := lo.ChannelToSlice(toCompare)
+						compared := lo.Flatten(lo.ChannelToSlice(toCompare))
 						dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
 						defer func() {
 							for _, c := range compared {
-								c.Release()
+								c.Free()
 							}
 
 							for _, d := range dstFetches {
-								d.Release()
+								d.Free()
 							}
 						}()
 
@@ -624,7 +738,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							},
 						}
 
-						toCompare := make(chan compare.DocWithTS, 100)
+						toCompare := make(chan []compare.DocWithTS, 100)
 						toDst := make(chan []compare.DocID, 100)
 
 						err = compare.ReadNaturalPartitionFromSource(
@@ -641,16 +755,16 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 						)
 						require.NoError(t, err, "should read")
 
-						compared := lo.ChannelToSlice(toCompare)
+						compared := lo.Flatten(lo.ChannelToSlice(toCompare))
 						dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
 						defer func() {
 							for _, c := range compared {
-								c.Release()
+								c.Free()
 							}
 
 							for _, d := range dstFetches {
-								d.Release()
+								d.Free()
 							}
 						}()
 
@@ -711,7 +825,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							},
 						}
 
-						toCompare := make(chan compare.DocWithTS, 100)
+						toCompare := make(chan []compare.DocWithTS, 100)
 						toDst := make(chan []compare.DocID, 100)
 
 						err = compare.ReadNaturalPartitionFromSource(
@@ -728,16 +842,16 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 						)
 						require.NoError(t, err, "should read")
 
-						compared := lo.ChannelToSlice(toCompare)
+						compared := lo.Flatten(lo.ChannelToSlice(toCompare))
 						dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
 						defer func() {
 							for _, c := range compared {
-								c.Release()
+								c.Free()
 							}
 
 							for _, d := range dstFetches {
-								d.Release()
+								d.Free()
 							}
 						}()
 

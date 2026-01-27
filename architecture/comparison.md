@@ -9,7 +9,7 @@ another to read documents from the destination, and a third that does the
 actual comparison. The document-reader threads feed the comparison thread
 (“comparator”).
 
-## Memory usage
+## Memory & CPU usage
 
 All mismatches for a given task are buffered in memory. Once the task
 finishes, the task thread—i.e., the thread that invokes the comparison—writes
@@ -31,6 +31,17 @@ missing/extra.
 To minimize GC (garbage collection) pressure, a memory pool is used to copy
 documents from the cursors. The comparator frees that memory either
 after comparing documents or after marking them as missing/extra.
+
+### Batching
+
+If the readers sent documents individually to the comparator, there would be
+high contention among the threads due to a large number of messages being sent.
+
+At the same time, if the batches grow too big, memory usage will spike, which
+would create GC pressure.
+
+Verifier strikes a balance, then, by setting a static limit on the number of
+documents sent to the comparator at once.
 
 ## Generation 0: Partitioning by document `_id`
 
@@ -60,11 +71,10 @@ destination, even though the comparator still compares their results
 together.
 
 Also note that, unlike with `_id` partitioning, the destination here opens a
-separate cursor for each  batch of `_id`s it receives from the source. This
+separate cursor for each batch of `_id`s it receives from the source. This
 means we cannot close the dst->comparator channel after a cursor closes.
-Instead, the destination reader counts the number of `_id`s it received from
-the source and subtracts the number of documents read from the destination.
-It then sends that many “dummy” documents to the comparator.
+Instead, the destination reader sends enough 0-length document batches to the
+comparator to avoid blocking.
 
 ### Direct connection requirement
 

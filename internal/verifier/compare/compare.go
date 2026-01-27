@@ -1,10 +1,22 @@
 package compare
 
 import (
+	"math"
+
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
+
+const (
+	// ToComparatorBatchSize is the max # of docs that readers send
+	// to the comparator thread at once.
+	ToComparatorBatchSize = 100
+)
+
+func ToComparatorBatchCount(totalDocs int) int {
+	return int(math.Ceil(float64(totalDocs) / ToComparatorBatchSize))
+}
 
 // DocID is how natural partitioning sends document IDs from the
 // source-reader thread to the destination. This wraps a document ID
@@ -26,8 +38,8 @@ func NewDocID(rv bson.RawValue) DocID {
 	return docID
 }
 
-// Release releases the memory allocated to hold the document ID’s value.
-func (d DocID) Release() {
+// Free releases the memory allocated to hold the document ID’s value.
+func (d DocID) Free() {
 	if len(d.ID.Value) > 0 {
 		pool.Put(d.ID.Value)
 	}
@@ -57,9 +69,9 @@ func NewDocWithTS(doc bson.Raw, ts bson.Timestamp) DocWithTS {
 	}
 }
 
-// Release releases the memory allocated to hold the document.
+// Free releases the memory allocated to hold the document.
 // If the struct was not created with NewDocWithTS, this panics.
-func (d DocWithTS) Release() {
+func (d DocWithTS) Free() {
 	lo.Assertf(
 		d.manual,
 		"Release() called on auto-managed %T",

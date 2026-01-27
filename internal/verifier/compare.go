@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
@@ -42,7 +43,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	types.ByteCount,
 	error,
 ) {
-	var srcChannel, dstChannel <-chan compare.DocWithTS
+	var srcChannel, dstChannel <-chan []compare.DocWithTS
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
 	results := []VerificationResult{}
@@ -134,7 +135,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	workerNum int,
 	fi retry.SuccessNotifier,
 	task *tasks.Task,
-	srcChannel, dstChannel <-chan compare.DocWithTS,
+	srcChannel, dstChannel <-chan []compare.DocWithTS,
 ) (
 	[]VerificationResult,
 	types.DocumentCount,
@@ -166,13 +167,19 @@ func (verifier *Verifier) compareDocsFromChannels(
 		docCompareMethod: verifier.docCompareMethod,
 	}
 
+	// A reusable slice of doc key values.
+	var docKeyValues []bson.RawValue
+	var mapKeyBytes []byte
+
 	// This is the core document-handling logic. It either:
 	//
 	// a) caches the new document if its mapKey is unseen, or
 	// b) compares the new doc against its previously-received, cached
 	//    counterpart and records any mismatch.
 	handleNewDoc := func(curDocWithTS compare.DocWithTS, isSrc bool) error {
+		docKeyValues = docKeyValues[:0]
 		docKeyValues, err := verifier.docCompareMethod.GetDocKeyValues(
+			docKeyValues,
 			curDocWithTS.Doc,
 			mapKeyFieldNames,
 		)
@@ -180,7 +187,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 			return errors.Wrapf(err, "extracting doc key (fields: %v) values from doc %+v", mapKeyFieldNames, curDocWithTS.Doc)
 		}
 
-		mapKey := getMapKey(docKeyValues)
+		mapKeyBytes = mapKeyBytes[:0]
+		mapKey := getMapKey(mapKeyBytes, docKeyValues)
 
 		var ourMap, theirMap map[string]compare.DocWithTS
 
@@ -212,8 +220,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 		delete(theirMap, mapKey)
 
 		// We can also schedule the release of the documents’ buffers.
-		defer curDocWithTS.Release()
-		defer theirDocWithTS.Release()
+		defer curDocWithTS.Free()
+		defer theirDocWithTS.Free()
 
 		// Now we determine which document came from whom.
 		var srcDoc, dstDoc compare.DocWithTS
@@ -264,7 +272,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	for !srcClosed || !dstClosed {
 		simpleTimerReset(readTimer, readTimeout)
 
-		var srcDocWithTS, dstDocWithTS compare.DocWithTS
+		var srcDocsWithTS, dstDocsWithTS []compare.DocWithTS
 
 		eg, egCtx := contextplus.ErrGroup(ctx)
 
@@ -279,32 +287,42 @@ func (verifier *Verifier) compareDocsFromChannels(
 						"failed to read from source after %s",
 						readTimeout,
 					)
-				case srcDocWithTS, alive = <-srcChannel:
+				case srcDocsWithTS, alive = <-srcChannel:
 					if !alive {
 						srcClosed = true
 						break
 					}
 
+					lo.Assertf(
+						len(srcDocsWithTS) <= compare.ToComparatorBatchSize,
+						"dst reader should send <= %d docs but sent %d",
+						compare.ToComparatorBatchSize,
+						len(srcDocsWithTS),
+					)
+
 					fi.NoteSuccess("received document from source")
 
-					taskSrcDocCount++
-					taskSrcByteCount += types.ByteCount(len(srcDocWithTS.Doc))
+					taskSrcDocCount += types.DocumentCount(len(srcDocsWithTS))
+					curHistoryDocCount += types.DocumentCount(len(srcDocsWithTS))
+
+					for _, docWithTS := range srcDocsWithTS {
+						taskSrcByteCount += types.ByteCount(len(docWithTS.Doc))
+
+						curHistoryByteCount += types.ByteCount(len(docWithTS.Doc))
+						if curHistoryDocCount >= comparisonHistoryThreshold {
+							verifier.docsComparedHistory.Add(curHistoryDocCount)
+							verifier.bytesComparedHistory.Add(curHistoryByteCount)
+
+							curHistoryDocCount = 0
+							curHistoryByteCount = 0
+						}
+					}
 
 					verifier.workerTracker.SetSrcCounts(
 						workerNum,
 						taskSrcDocCount,
 						taskSrcByteCount,
 					)
-
-					curHistoryDocCount++
-					curHistoryByteCount += types.ByteCount(len(srcDocWithTS.Doc))
-					if curHistoryDocCount >= comparisonHistoryThreshold {
-						verifier.docsComparedHistory.Add(curHistoryDocCount)
-						verifier.bytesComparedHistory.Add(curHistoryByteCount)
-
-						curHistoryDocCount = 0
-						curHistoryByteCount = 0
-					}
 				}
 
 				return nil
@@ -322,11 +340,18 @@ func (verifier *Verifier) compareDocsFromChannels(
 						"failed to read from destination after %s",
 						readTimeout,
 					)
-				case dstDocWithTS, alive = <-dstChannel:
+				case dstDocsWithTS, alive = <-dstChannel:
 					if !alive {
 						dstClosed = true
 						break
 					}
+
+					lo.Assertf(
+						len(dstDocsWithTS) <= compare.ToComparatorBatchSize,
+						"dst reader should send <= %d docs but sent %d",
+						compare.ToComparatorBatchSize,
+						len(dstDocsWithTS),
+					)
 
 					fi.NoteSuccess("received document from destination")
 				}
@@ -342,32 +367,41 @@ func (verifier *Verifier) compareDocsFromChannels(
 			)
 		}
 
-		if srcDocWithTS.Doc != nil {
-			err := handleNewDoc(srcDocWithTS, true)
+		for len(srcDocsWithTS)+len(dstDocsWithTS) > 0 {
+			if len(srcDocsWithTS) > 0 {
+				srcDoc := srcDocsWithTS[0]
+				srcDocsWithTS = srcDocsWithTS[1:]
 
-			if err != nil {
+				err := handleNewDoc(srcDoc, true)
 
-				return nil, 0, 0, errors.Wrapf(
-					err,
-					"comparer thread failed to handle %#q's source doc (task: %s) with ID %v",
-					namespace,
-					task.PrimaryKey,
-					srcDocWithTS.Doc.Lookup("_id"),
-				)
+				if err != nil {
+
+					return nil, 0, 0, errors.Wrapf(
+						err,
+						"comparer thread failed to handle %#q's source doc (task: %s) with ID %v",
+						namespace,
+						task.PrimaryKey,
+						srcDoc.Doc.Lookup("_id"),
+					)
+				}
 			}
-		}
 
-		if dstDocWithTS.Doc != nil {
-			err := handleNewDoc(dstDocWithTS, false)
+			if len(dstDocsWithTS) > 0 {
+				dstDoc := dstDocsWithTS[0]
+				dstDocsWithTS = dstDocsWithTS[1:]
 
-			if err != nil {
-				return nil, 0, 0, errors.Wrapf(
-					err,
-					"comparer thread failed to handle %#q's destination doc (task: %s) with ID %v",
-					namespace,
-					task.PrimaryKey,
-					dstDocWithTS.Doc.Lookup("_id"),
-				)
+				err := handleNewDoc(dstDoc, false)
+
+				if err != nil {
+
+					return nil, 0, 0, errors.Wrapf(
+						err,
+						"comparer thread failed to handle %#q's destination doc (task: %s) with ID %v",
+						namespace,
+						task.PrimaryKey,
+						dstDoc.Doc.Lookup("_id"),
+					)
+				}
 			}
 		}
 	}
@@ -400,7 +434,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 			},
 		)
 
-		docWithTS.Release()
+		docWithTS.Free()
 	}
 
 	for _, docWithTS := range dstCache {
@@ -422,7 +456,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 			},
 		)
 
-		docWithTS.Release()
+		docWithTS.Free()
 	}
 
 	verifier.docsComparedHistory.Add(curHistoryDocCount)
@@ -455,8 +489,8 @@ func simpleTimerReset(t *time.Timer, dur time.Duration) {
 func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 	task *tasks.Task,
 ) (
-	<-chan compare.DocWithTS,
-	<-chan compare.DocWithTS,
+	<-chan []compare.DocWithTS,
+	<-chan []compare.DocWithTS,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
@@ -473,33 +507,34 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	task *tasks.Task,
 ) (
-	<-chan compare.DocWithTS,
-	<-chan compare.DocWithTS,
+	<-chan []compare.DocWithTS,
+	<-chan []compare.DocWithTS,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
 ) {
-	var client *mongo.Client
+	hostname := task.QueryFilter.Partition.HostnameAndPort.MustGetf(
+		"hostname/port missing; this is required for natural partitions",
+	)
 
-	if hostname, has := task.QueryFilter.Partition.HostnameAndPort.Get(); has {
-		connstr, err := compare.SetDirectHostInConnectionString(
-			verifier.srcURI,
-			hostname,
-		)
-		if err != nil {
-			return nil, nil, nil, nil, errors.Wrapf(err, "setting source connstr to connect directly to %#q", hostname)
-		}
-
-		client, err = mongo.Connect(options.Client().ApplyURI(connstr))
-		if err != nil {
-			return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
-		}
-	} else {
-		client = verifier.srcClient
+	connstr, err := compare.SetDirectHostInConnectionString(
+		verifier.srcURI,
+		hostname,
+	)
+	if err != nil {
+		return nil, nil, nil, nil, errors.Wrapf(err, "setting source connstr to connect directly to %#q", hostname)
 	}
 
-	srcToCompareChannel := make(chan compare.DocWithTS)
-	dstToCompareChannel := make(chan compare.DocWithTS)
+	client, err := mongo.Connect(options.Client().
+		ApplyURI(connstr).
+		SetAppName(clientAppName),
+	)
+	if err != nil {
+		return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
+	}
+
+	srcToCompareChannel := make(chan []compare.DocWithTS)
+	dstToCompareChannel := make(chan []compare.DocWithTS)
 
 	srcToDstChannel := make(chan []compare.DocID, 1_000)
 
@@ -576,6 +611,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				Int("count", len(docIDs)).
 				Msg("Querying dst for documents.")
 
+			cursorStartTime := time.Now()
+
 			cursor, err := verifier.getDocumentsCursor(
 				sctx,
 				coll,
@@ -585,7 +622,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			)
 
 			for _, id := range docIDs {
-				id.Release()
+				id.Free()
 			}
 
 			if err != nil {
@@ -596,22 +633,22 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 
 			verifier.logger.Trace().
 				Any("task", task.PrimaryKey).
-				Int("count", len(docIDs)).
+				Int("idsInQuery", len(docIDs)).
 				Msg("Iterating dst cursor.")
 
-			sentCount, err := iterateCursorToChannel(sctx, state, cursor, dstToCompareChannel)
-
-			verifier.logger.Trace().
-				Any("task", task.PrimaryKey).
-				Int("count", len(docIDs)).
-				Msg("Done iterating dst cursor.")
-
+			dstDocsFound, err := iterateCursorToChannel(sctx, state, cursor, dstToCompareChannel)
 			if err != nil {
 				return errors.Wrap(
 					err,
 					"failed to send documents from destination to compare",
 				)
 			}
+
+			verifier.logger.Trace().
+				Any("task", task.PrimaryKey).
+				Int("docsFound", dstDocsFound).
+				Stringer("elapsed", time.Since(cursorStartTime)).
+				Msg("Done iterating dst cursor.")
 
 			// The compare thread, to prevent OOMs, always reads documents
 			// from the src & dst together. It only stops listening on one
@@ -624,18 +661,45 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			// So if there are missing documents on the destination, we’ll
 			// block the compare thread unless the destination “compensates”
 			// by sending dummy values. We do that here.
-			missingDocsCount := len(docIDs) - sentCount
+			missingDocsCount := len(docIDs) - dstDocsFound
+
+			lo.Assertf(
+				missingDocsCount >= 0,
+				"dest docs (%d) must be <= source docs (%d)",
+				dstDocsFound,
+				len(docIDs),
+			)
+
 			if missingDocsCount > 0 {
-				for i := range missingDocsCount {
-					err := chanutil.WriteWithDoneCheck(
-						ctx,
-						dstToCompareChannel,
-						compare.DocWithTS{},
-					)
-					if err != nil {
-						return errors.Wrapf(err, "sending dummy docs %d of %d dst->compare", 1+i, missingDocsCount)
-					}
+				verifier.logger.Trace().
+					Any("task", task.PrimaryKey).
+					Int("count", missingDocsCount).
+					Msg("Sending dummy dst docs to compare thread.")
+			}
+
+			// Reader threads send documents to the comparator in slices rather
+			// than individually. We could send 1 slice per document, but if
+			// there are 1,000 documents missing then we’re sending 1,000
+			// messages, which is a bit unideal. We thus optimize by sending
+			// only as many dummy messages as we need to unblock the comparator.
+			srcBatchesSent := compare.ToComparatorBatchCount(len(docIDs))
+			dstBatchesSent := compare.ToComparatorBatchCount(dstDocsFound)
+
+			for i := range srcBatchesSent - dstBatchesSent {
+				err := chanutil.WriteWithDoneCheck(
+					ctx,
+					dstToCompareChannel,
+					nil,
+				)
+				if err != nil {
+					return errors.Wrapf(err, "sending dummy doc %d of %d dst->compare", 1+i, missingDocsCount)
 				}
+
+				state.NoteSuccess(
+					"sent dummy doc #%d of %d to compare thread",
+					1+i,
+					missingDocsCount,
+				)
 			}
 
 		}
@@ -649,13 +713,13 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 	task *tasks.Task,
 ) (
-	<-chan compare.DocWithTS,
-	<-chan compare.DocWithTS,
+	<-chan []compare.DocWithTS,
+	<-chan []compare.DocWithTS,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 ) {
-	srcChannel := make(chan compare.DocWithTS)
-	dstChannel := make(chan compare.DocWithTS)
+	srcChannel := make(chan []compare.DocWithTS)
+	dstChannel := make(chan []compare.DocWithTS)
 
 	readSrcCallback := func(ctx context.Context, state retry.SuccessNotifier) error {
 		// We open a session here so that we can read the session’s cluster
@@ -742,45 +806,79 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 	return srcChannel, dstChannel, readSrcCallback, readDstCallback
 }
 
+// This returns the # of documents sent to the comparator and # of batches
+// used to send those documents.
 func iterateCursorToChannel(
 	sctx context.Context,
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
-	writer chan<- compare.DocWithTS,
+	writer chan<- []compare.DocWithTS,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
 	if sess == nil {
 		panic("need a session")
 	}
 
-	docs := 0
+	docsCount := 0
+
+	var docsWithTSCache []compare.DocWithTS
+
+	flush := func() error {
+		err := chanutil.WriteWithDoneCheck(
+			sctx,
+			writer,
+			slices.Clone(docsWithTSCache),
+		)
+
+		if err != nil {
+			return errors.Wrapf(err, "sending %d documents to compare thread", len(docsWithTSCache))
+		}
+
+		state.NoteSuccess("sent %d documents to compare thread", len(docsWithTSCache))
+
+		docsWithTSCache = docsWithTSCache[:0]
+
+		return nil
+	}
 
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
 
-		docs++
+		docsCount++
 
 		clusterTime, err := util.GetClusterTimeFromSession(sess)
 		if err != nil {
 			return 0, errors.Wrap(err, "reading cluster time from session")
 		}
 
-		err = chanutil.WriteWithDoneCheck(
-			sctx,
-			writer,
+		docsWithTSCache = append(
+			docsWithTSCache,
 			compare.NewDocWithTS(cursor.Current, clusterTime),
 		)
 
-		if err != nil {
-			return 0, errors.Wrapf(err, "sending document to compare thread")
+		if len(docsWithTSCache) == compare.ToComparatorBatchSize {
+			if err := flush(); err != nil {
+				return 0, err
+			}
 		}
 	}
 
-	return 0, errors.Wrap(cursor.Err(), "failed to iterate cursor")
+	if cursor.Err() != nil {
+		return 0, errors.Wrap(cursor.Err(), "failed to iterate cursor")
+	}
+
+	state.NoteSuccess("exhausted cursor")
+
+	if len(docsWithTSCache) > 0 {
+		if err := flush(); err != nil {
+			return 0, err
+		}
+	}
+
+	return docsCount, nil
 }
 
-func getMapKey(docKeyValues []bson.RawValue) string {
-	var buf []byte
+func getMapKey(buf []byte, docKeyValues []bson.RawValue) string {
 	for _, value := range docKeyValues {
 		buf = rvToMapKey(buf, value)
 	}
@@ -804,7 +902,16 @@ func (verifier *Verifier) getDocumentsCursor(
 		filter := bson.D{{"$and", andPredicates}}
 
 		findOptions = bson.D{
-			bson.E{"filter", filter},
+			{"filter", filter},
+
+			// The server limits the initial response to 101 documents by
+			// default. There are decent odds, though, that a single response
+			// can fit all of the needed documents, so we override that default.
+			//
+			// We could derive the batch size from len(task.Ids), but just in
+			// case there are duplicate `_id`s across shards we might as well
+			// just set a “really high” batch size.
+			{"batchSize", math.MaxInt32},
 		}
 	} else {
 		pqp, err := task.QueryFilter.Partition.GetQueryParameters(
@@ -819,7 +926,10 @@ func (verifier *Verifier) getDocumentsCursor(
 	}
 
 	cmd := append(
-		bson.D{{"find", collection.Name()}},
+		bson.D{
+			{"find", collection.Name()},
+			{"comment", fmt.Sprintf("task %v", task.PrimaryKey)},
+		},
 		findOptions...,
 	)
 

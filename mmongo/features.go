@@ -23,13 +23,13 @@ func FindCanUseStartAt(
 
 	switch version[0] {
 	case 7:
-		return version[1] == 0 && version[2] >= 26
+		return VersionAtLeast(version[:], 7, 0, 26)
 	case 8:
 		switch version[1] {
 		case 0:
-			return version[2] >= 14
-		case 2:
-			return version[2] >= 1
+			return VersionAtLeast(version[:], 8, 0, 14)
+		default:
+			return VersionAtLeast(version[:], 8, 2, 1)
 		}
 	}
 

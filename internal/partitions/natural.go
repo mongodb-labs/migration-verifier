@@ -28,6 +28,9 @@ const (
 // PartitionCollectionNaturalOrder spawns a goroutine that partitions the
 // collection in natural order.
 //
+// Callers should parse the Partition structs from the returned channel.
+// Each Partition gets a dedicated task.
+//
 // NB: This ignores document filtering because we’re doing a collection
 // scan anyway later on to compare the documents.
 func PartitionCollectionNaturalOrder(
@@ -36,10 +39,34 @@ func PartitionCollectionNaturalOrder(
 	idealPartitionBytes types.ByteCount,
 	subLogger *logger.Logger,
 ) (chan mo.Result[Partition], error) {
+	pChan := make(chan mo.Result[Partition])
+
+	// Avoid storing a null upper limit. See architecture
+	// documentation for rationale.
+	topRecordIDOpt, err := GetTopRecordID(ctx, coll)
+	if err != nil {
+		return nil, errors.Wrapf(err, "fetching top record ID")
+	}
+
+	if !topRecordIDOpt.IsSome() {
+		// If the collection is empty then there’s no point in partitioning it.
+		// Any documents created during generation 0 will be rechecked in
+		// generation 1.
+		close(pChan)
+
+		return pChan, nil
+	}
 
 	collSizeInBytes, docCount, _, err := GetSizeAndDocumentCount(ctx, subLogger, coll)
 	if err != nil {
 		return nil, errors.Wrapf(err, "getting collection size & count")
+	}
+
+	if docCount == 0 {
+		// Again: if the collection is empty, there’s no point in partitioning.
+		close(pChan)
+
+		return pChan, nil
 	}
 
 	idealNumPartitions := util.DivideToF64(collSizeInBytes, idealPartitionBytes)
@@ -63,8 +90,13 @@ func PartitionCollectionNaturalOrder(
 		// Discard the actual document. All we want are the resume tokens.
 		{"projection", bson.D{
 			{"_id", 0},
+
+			// This is here to make the server suppress the other fields, too.
+			// (Without this, we’ll still get full documents sans _id.)
 			{"_", bson.D{{"$literal", true}}},
 		}},
+
+		{"comment", "partition"},
 	}
 
 	sess, err := coll.Database().Client().StartSession()
@@ -81,12 +113,13 @@ func PartitionCollectionNaturalOrder(
 		return nil, errors.Wrapf(err, "opening partition query (%+v)", cmd)
 	}
 
-	// Confirm that we can, in fact, partition this collection naturally:
-	curToken, err := cursor.GetResumeToken(c)
+	curTokenOpt, err := cursor.GetResumeToken(c)
 	if err != nil {
 		return nil, errors.Wrapf(err, "extracting resume token")
 	}
-	if !c.IsFinished() {
+
+	// Confirm that we can, in fact, partition this collection naturally:
+	if curToken, hasToken := curTokenOpt.Get(); hasToken {
 		recIDRV, err := curToken.LookupErr(RecordID)
 		if err != nil {
 			return nil, errors.Wrapf(err, "extracting record ID from resume token (%v)", curToken)
@@ -122,34 +155,22 @@ func PartitionCollectionNaturalOrder(
 		return nil, errors.Wrapf(err, "parsing hostname in isMaster")
 	}
 
-	pChan := make(chan mo.Result[Partition])
-
-	// Avoid storing a null upper limit. See architecture
-	// documentation for rationale.
-	topRecordIDOpt, err := GetTopRecordID(ctx, coll)
-	if err != nil {
-		return nil, errors.Wrapf(err, "fetching top record ID")
-	}
-
-	if !topRecordIDOpt.IsSome() {
-		// If the collection is empty then there’s no point in partitioning it.
-		// Any documents created during generation 0 will be rechecked in
-		// generation 1.
-		close(pChan)
-		return pChan, nil
-	}
-
 	go func() {
 		defer close(pChan)
 
 		priorToken := bsontools.ToRawValue(bson.Null{})
-		var curToken bson.Raw
 		var err error
 
-		for {
-			curToken, err = cursor.GetResumeToken(c)
+		for !c.IsFinished() {
+			var curTokenOpt option.Option[bson.Raw]
+			curTokenOpt, err = cursor.GetResumeToken(c)
 			if err != nil {
 				err = errors.Wrapf(err, "reading resume token from server response")
+				break
+			}
+
+			curToken, hasToken := curTokenOpt.Get()
+			if !hasToken {
 				break
 			}
 

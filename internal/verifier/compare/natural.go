@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/internal/logger"
@@ -15,6 +16,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
@@ -61,7 +63,7 @@ func ReadNaturalPartitionFromSource(
 	task *tasks.Task,
 	docFilter option.Option[bson.D],
 	compareMethod Method,
-	toCompare chan<- DocWithTS,
+	toCompare chan<- []DocWithTS,
 	toDst chan<- []DocID,
 ) error {
 	defer close(toCompare)
@@ -166,6 +168,7 @@ func ReadNaturalPartitionFromSource(
 				{"_id", 0},
 				{"doc", docProjection},
 			}},
+			{"comment", fmt.Sprintf("task %v", task.PrimaryKey)},
 		}
 
 		if token, has := resumeTokenOpt.Get(); has {
@@ -215,7 +218,7 @@ func ReadNaturalPartitionFromSource(
 			Any("task", task.PrimaryKey).
 			Str("namespace", task.QueryFilter.Namespace).
 			Int("count", len(batchDocIDs)).
-			Msg("Flushing to dst.")
+			Msg("Flushing source document IDs to dst.")
 
 		err := chanutil.WriteWithDoneCheck(
 			ctx,
@@ -236,28 +239,31 @@ func ReadNaturalPartitionFromSource(
 			Any("task", task.PrimaryKey).
 			Str("namespace", task.QueryFilter.Namespace).
 			Int("count", len(batch)).
-			Msg("Flushing to compare.")
+			Msg("Flushing source documents to compare.")
 
-		// Now send documents (one by one) to the comparison thread.
-		for d, docAndTS := range batch {
-			err := chanutil.WriteWithDoneCheck(
+		toCompareStart := time.Now()
+
+		// Now send documents  to the comparison thread.
+		for chunk := range mslices.Chunk(slices.Clone(batch), ToComparatorBatchSize) {
+			err = chanutil.WriteWithDoneCheck(
 				ctx,
 				toCompare,
-				docAndTS,
+				chunk,
 			)
 			if err != nil {
 				// NB: This leaks memory, but that shouldn’t matter because
 				// this error should crash the verifier.
-				return errors.Wrapf(err, "sending src doc %d of %d to compare", 1+d, len(batch))
+				return errors.Wrapf(err, "sending %d of %d src docs to compare", len(chunk), len(batch))
 			}
-
-			retryState.NoteSuccess("sent doc #%d of %d to compare thread", 1+d, len(batch))
 		}
+
+		retryState.NoteSuccess("sent %d src docs to compare thread", len(batch))
 
 		logger.Trace().
 			Any("task", task.PrimaryKey).
 			Int("count", len(batch)).
-			Msg("Done flushing to compare.")
+			Stringer("elapsed", time.Since(toCompareStart)).
+			Msg("Done flushing source documents to compare.")
 
 		retryState.NoteSuccess("sent %d docs to compare", len(batch))
 
@@ -275,6 +281,8 @@ cursorLoop:
 
 			break
 		}
+
+		retryState.NoteSuccess("received a document")
 
 		opTime := sess.OperationTime()
 		if opTime == nil {
@@ -336,6 +344,8 @@ cursorLoop:
 			}
 		}
 	}
+
+	retryState.NoteSuccess("reached end of cursor")
 
 	if len(batch) > 0 {
 		if err := flush(ctx); err != nil {
