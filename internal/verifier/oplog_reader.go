@@ -403,13 +403,6 @@ func (o *OplogReader) readAndHandleOneBatch(
 
 	o.updateTimes(sess, resumeToken)
 
-	// NB: events can legitimately be empty here because we might only have
-	// gotten op=n oplog entries, which we just use to advance the reader.
-	// (Similar to a change stream’s post-batch resume token.)
-	if len(events) > 0 {
-		o.batchSizeHistory.Add(len(events))
-	}
-
 	select {
 	case <-sctx.Done():
 		return err
