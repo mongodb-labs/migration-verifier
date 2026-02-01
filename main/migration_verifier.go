@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/verifier"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
@@ -23,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/urfave/cli"
 	"github.com/urfave/cli/altsrc"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const (
@@ -279,6 +281,34 @@ func handleLogLevelArg(cCtx *cli.Context) error {
 	return nil
 }
 
+// logConfig iterates through all set flags and logs them as a nested dictionary
+func logConfig(c *cli.Context, logger *logger.Logger) {
+	event := logger.Info()
+
+	// Create a sub-dictionary for the config values
+	dict := zerolog.Dict()
+
+	for _, flagName := range c.GlobalFlagNames() {
+		/*
+			if !c.GlobalIsSet(flagName) && !c.IsSet(flagName) {
+				continue
+			}
+		*/
+
+		val := c.String(flagName)
+
+		if slices.Contains([]string{"srcURI", "dstURI", "metaURI"}, flagName) {
+			opts := options.Client().ApplyURI(val)
+
+			dict.Strs(flagName+"-hosts", opts.Hosts)
+		} else {
+			dict.Str(flagName, val)
+		}
+	}
+
+	event.Dict("config", dict).Msg("Parsed CLI parameters")
+}
+
 func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, error) {
 	verifierSettings := verifier.VerifierSettings{}
 	if cCtx.Bool(ignoreReadConcernFlag) {
@@ -300,11 +330,15 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 
 	v := verifier.NewVerifier(verifierSettings, logPath)
 
-	v.GetLogger().Info().
+	logger := v.GetLogger()
+
+	logger.Info().
 		Str("revision", Revision).
 		Str("buildTime", BuildTime).
 		Int("processID", os.Getpid()).
 		Msg("migration-verifier started.")
+
+	logConfig(cCtx, logger)
 
 	srcConnStr := cCtx.String(srcURI)
 	_, srcConnStr, err := mmongo.MaybeAddDirectConnection(srcConnStr)
