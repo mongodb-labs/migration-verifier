@@ -285,9 +285,6 @@ func handleLogLevelArg(cCtx *cli.Context) error {
 func logConfig(c *cli.Context, logger *logger.Logger) {
 	event := logger.Info()
 
-	// Create a sub-dictionary for the config values
-	dict := zerolog.Dict()
-
 	for _, flagName := range c.GlobalFlagNames() {
 		/*
 			if !c.GlobalIsSet(flagName) && !c.IsSet(flagName) {
@@ -300,13 +297,13 @@ func logConfig(c *cli.Context, logger *logger.Logger) {
 		if slices.Contains([]string{"srcURI", "dstURI", "metaURI"}, flagName) {
 			opts := options.Client().ApplyURI(val)
 
-			dict.Strs(flagName+"-hosts", opts.Hosts)
+			event.Strs(flagName+"-hosts", opts.Hosts)
 		} else {
-			dict.Str(flagName, val)
+			event.Str(flagName, val)
 		}
 	}
 
-	event.Dict("config", dict).Msg("Parsed CLI parameters")
+	event.Msg("Active configuration")
 }
 
 func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, error) {
