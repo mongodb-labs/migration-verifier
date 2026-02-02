@@ -286,12 +286,6 @@ func logConfig(c *cli.Context, logger *logger.Logger) {
 	event := logger.Info()
 
 	for _, flagName := range c.GlobalFlagNames() {
-		/*
-			if !c.GlobalIsSet(flagName) && !c.IsSet(flagName) {
-				continue
-			}
-		*/
-
 		val := c.String(flagName)
 
 		if slices.Contains([]string{"srcURI", "dstURI", "metaURI"}, flagName) {
