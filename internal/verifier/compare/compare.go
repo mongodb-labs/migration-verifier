@@ -22,11 +22,19 @@ func ToComparatorBatchCount(totalDocs int) int {
 // source-reader thread to the destination. This wraps a document ID
 // with a struct that simplifies memory management.
 type DocID struct {
-	ID bson.RawValue
+	ID       bson.RawValue
+	fromPool bool
 }
 
-func NewDocID(rv bson.RawValue) DocID {
-	docID := DocID{rv}
+// NewDocIDFromPool copies the value to a memory pool and returns a struct
+// based on that buffer.
+//
+// Once done with this struct, callers should call BackToPool() on it.
+func NewDocIDFromPool(rv bson.RawValue) DocID {
+	docID := DocID{
+		ID:       rv,
+		fromPool: true,
+	}
 
 	if len(docID.ID.Value) > 0 {
 		copiedValue := pool.Get(len(rv.Value))
@@ -38,8 +46,17 @@ func NewDocID(rv bson.RawValue) DocID {
 	return docID
 }
 
-// Free releases the memory allocated to hold the document ID’s value.
-func (d DocID) Free() {
+// BackToPool puts the underlying buffer into the buffer pool.
+// Call this on all pool-created structs once you finish with them.
+//
+// If the struct was not created with NewDocIDFromPool, this panics.
+func (d DocID) BackToPool() {
+	lo.Assertf(
+		d.fromPool,
+		"BackToPool() called on non-pool %T",
+		d,
+	)
+
 	if len(d.ID.Value) > 0 {
 		pool.Put(d.ID.Value)
 	}
@@ -48,33 +65,34 @@ func (d DocID) Free() {
 // DocWithTS holds a document that’s to be compared with its peer’s or, if not,
 // marked as missing/extra on the destination.
 type DocWithTS struct {
-	Doc    bson.Raw
-	TS     bson.Timestamp
-	manual bool
+	Doc      bson.Raw
+	TS       bson.Timestamp
+	fromPool bool
 }
 
-// NewDocWithTS copies the given document to a manually-managed memory pool
+// NewDocWithTSFromPool copies the given document to a memory pool
 // then returns a struct containing that copy.
 //
-// IMPORTANT: You *MUST* call Release() on the returned struct, or else
-// you’ll leak memory.
-func NewDocWithTS(doc bson.Raw, ts bson.Timestamp) DocWithTS {
+// Once done with this struct, callers should call BackToPool() on it.
+func NewDocWithTSFromPool(doc bson.Raw, ts bson.Timestamp) DocWithTS {
 	copiedDoc := pool.Get(len(doc))
 	copy(copiedDoc, doc)
 
 	return DocWithTS{
-		Doc:    copiedDoc,
-		TS:     ts,
-		manual: true,
+		Doc:      copiedDoc,
+		TS:       ts,
+		fromPool: true,
 	}
 }
 
-// Free releases the memory allocated to hold the document.
-// If the struct was not created with NewDocWithTS, this panics.
-func (d DocWithTS) Free() {
+// BackToPool puts the underlying buffer into the buffer pool.
+// Call this on all pool-created structs once you finish with them.
+//
+// If the struct was not created with NewDocWithTSFromPool, this panics.
+func (d DocWithTS) BackToPool() {
 	lo.Assertf(
-		d.manual,
-		"Release() called on auto-managed %T",
+		d.fromPool,
+		"BackToPool() called on non-pool %T",
 		d,
 	)
 

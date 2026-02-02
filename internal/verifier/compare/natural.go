@@ -327,7 +327,7 @@ cursorLoop:
 			return errors.Wrapf(err, "parsing user document")
 		}
 
-		batch = append(batch, NewDocWithTS(userDoc, *opTime))
+		batch = append(batch, NewDocWithTSFromPool(userDoc, *opTime))
 
 		docID, err := compareMethod.RawDocIDForComparison(
 			userDoc,
@@ -336,7 +336,7 @@ cursorLoop:
 			return errors.Wrapf(err, "parsing doc ID for comparison")
 		}
 
-		batchDocIDs = append(batchDocIDs, NewDocID(docID))
+		batchDocIDs = append(batchDocIDs, NewDocIDFromPool(docID))
 
 		if cursor.RemainingBatchLength() == 0 {
 			if err := flush(ctx); err != nil {
