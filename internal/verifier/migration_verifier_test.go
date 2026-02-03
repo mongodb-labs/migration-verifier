@@ -1562,7 +1562,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 		theChan <- lo.Map(
 			docs,
 			func(doc bson.D, i int) compare.DocWithTS {
-				return compare.NewDocWithTS(
+				return compare.NewDocWithTSFromPool(
 					testutil.MustMarshal(doc),
 					bson.Timestamp{1, uint32(i)},
 				)

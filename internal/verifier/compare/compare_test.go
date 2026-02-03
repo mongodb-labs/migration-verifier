@@ -13,11 +13,11 @@ func TestDocWithTS(t *testing.T) {
 	doc := lo.Must(bson.Marshal(bson.D{{"foo", 123}}))
 	origDoc := bson.Raw(slices.Clone(doc))
 
-	d := NewDocWithTS(
+	d := NewDocWithTSFromPool(
 		doc,
 		bson.Timestamp{123, 234},
 	)
-	defer d.Free()
+	defer d.PutInPool()
 
 	doc[0] = 0xff
 
