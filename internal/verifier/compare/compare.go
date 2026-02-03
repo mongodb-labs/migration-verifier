@@ -29,7 +29,7 @@ type DocID struct {
 // NewDocIDFromPool copies the value to a memory pool and returns a struct
 // based on that buffer.
 //
-// Once done with this struct, callers should call BackToPool() on it.
+// Once done with this struct, callers should call PutInPool() on it.
 func NewDocIDFromPool(rv bson.RawValue) DocID {
 	docID := DocID{
 		ID:       rv,
@@ -46,11 +46,11 @@ func NewDocIDFromPool(rv bson.RawValue) DocID {
 	return docID
 }
 
-// BackToPool puts the underlying buffer into the buffer pool.
+// PutInPool puts the underlying buffer into the buffer pool.
 // Call this on all pool-created structs once you finish with them.
 //
 // If the struct was not created with NewDocIDFromPool, this panics.
-func (d DocID) BackToPool() {
+func (d DocID) PutInPool() {
 	lo.Assertf(
 		d.fromPool,
 		"BackToPool() called on non-pool %T",
@@ -73,7 +73,7 @@ type DocWithTS struct {
 // NewDocWithTSFromPool copies the given document to a memory pool
 // then returns a struct containing that copy.
 //
-// Once done with this struct, callers should call BackToPool() on it.
+// Once done with this struct, callers should call PutInPool() on it.
 func NewDocWithTSFromPool(doc bson.Raw, ts bson.Timestamp) DocWithTS {
 	copiedDoc := pool.Get(len(doc))
 	copy(copiedDoc, doc)
@@ -85,11 +85,11 @@ func NewDocWithTSFromPool(doc bson.Raw, ts bson.Timestamp) DocWithTS {
 	}
 }
 
-// BackToPool puts the underlying buffer into the buffer pool.
+// PutInPool puts the underlying buffer into the buffer pool.
 // Call this on all pool-created structs once you finish with them.
 //
 // If the struct was not created with NewDocWithTSFromPool, this panics.
-func (d DocWithTS) BackToPool() {
+func (d DocWithTS) PutInPool() {
 	lo.Assertf(
 		d.fromPool,
 		"BackToPool() called on non-pool %T",
