@@ -240,83 +240,54 @@ func getDocumentMismatchReportData(
 	taskIDs []bson.ObjectID,
 	limit int64,
 ) (mismatchReportData, error) {
-	pl := mongo.Pipeline{
-		{{"$match", bson.D{
-			{"task", bson.D{{"$in", taskIDs}}},
-		}}},
-		{{"$addFields", bson.D{
-			{"_category", agg.Switch{
-				Branches: []agg.SwitchCase{
-					{Case: contentDiffersFilter, Then: "contentDiffers"},
-					{Case: missingOnDstFilter, Then: "missingOnDst"},
-					{Case: extraOnDstFilter, Then: "extraOnDst"},
-				},
-			}},
-		}}},
-		{{"$group", bson.D{
-			{"_id", "$_category"},
-			{"docs", accum.TopN{
-				N: limit,
-				SortBy: bson.D{
-					{"detail.mismatchHistory.durationMS", -1},
-					{"detail.id", 1},
-				},
-				Output: "$$ROOT",
-			}},
-		}}},
-		{{"$group", bson.D{
-			{"_id", nil},
-			{"result", accum.Push{
-				bson.D{
-					{"k", "$_id"},
-					{"v", "$docs"},
-				},
-			}},
-		}}},
-		{{"$replaceWith", bson.D{
-			{"$arrayToObject", "$result"},
-		}}},
-	}
-
 	eg, egCtx := contextplus.ErrGroup(ctx)
 
-	var results []mismatchReportData
+	var reportData mismatchReportData
+
+	mismatchesColl := db.Collection(mismatchesCollectionName)
+
+	for _, categoryParts := range []struct {
+		label  string
+		ptr    *[]MismatchInfo
+		filter any
+	}{
+		{"mismatched content", &reportData.ContentDiffers, contentDiffersFilter},
+		{"missing on dst", &reportData.MissingOnDst, missingOnDstFilter},
+		{"extra on dst", &reportData.ExtraOnDst, extraOnDstFilter},
+	} {
+		eg.Go(
+			func() error {
+				cursor, err := mismatchesColl.Find(
+					egCtx,
+					bson.D{{"$expr", categoryParts.filter}},
+					options.Find().
+						SetSort(
+							bson.D{
+								{"detail.mismatchHistory.durationMS", -1},
+								{"detail.id", 1},
+							},
+						).
+						SetLimit(limit),
+				)
+
+				if err != nil {
+					return errors.Wrapf(err, "fetching %#q", categoryParts.label)
+				}
+
+				if err := cursor.All(egCtx, categoryParts.ptr); err != nil {
+					return errors.Wrapf(err, "reading %#q", categoryParts.label)
+				}
+
+				return nil
+			},
+		)
+	}
 
 	eg.Go(
 		func() error {
-			cursor, err := db.Collection(mismatchesCollectionName).Aggregate(
-				egCtx,
-				pl,
+			counts, err := countMismatchesForTasks(ctx, db, taskIDs)
 
-				// By default the server will traverse the detail index
-				// due to SERVER-12923. It’s much more efficient for this query
-				// to use the type index.
-				options.Aggregate().SetHint(bson.D{{"task", 1}}),
-			)
-
-			if err != nil {
-				return errors.Wrapf(err, "fetching %d tasks' discrepancies", len(taskIDs))
-			}
-
-			if err := cursor.All(egCtx, &results); err != nil {
-				return errors.Wrapf(err, "reading mismatch aggregation")
-			}
-
-			if len(results) != 1 {
-				panic(fmt.Sprintf("got != 1 result: %+v", results))
-			}
-
-			return nil
-		},
-	)
-
-	var counts mismatchCountsPerType
-
-	eg.Go(
-		func() error {
-			var err error
-
-			counts, err = countMismatchesForTasks(ctx, db, taskIDs)
+			reportData.Counts = counts
 
 			return errors.Wrapf(err, "counting mismatches")
 		},
@@ -326,9 +297,7 @@ func getDocumentMismatchReportData(
 		return mismatchReportData{}, err
 	}
 
-	results[0].Counts = counts
-
-	return results[0], nil
+	return reportData, nil
 }
 
 func recordMismatches(
