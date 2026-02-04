@@ -259,7 +259,10 @@ func getDocumentMismatchReportData(
 			func() error {
 				cursor, err := mismatchesColl.Find(
 					egCtx,
-					bson.D{{"$expr", categoryParts.filter}},
+					bson.D{{"$expr", agg.And{
+						categoryParts.filter,
+						agg.In("$task", taskIDs),
+					}}},
 					options.Find().
 						SetSort(
 							bson.D{
@@ -296,6 +299,8 @@ func getDocumentMismatchReportData(
 	if err := eg.Wait(); err != nil {
 		return mismatchReportData{}, err
 	}
+
+	fmt.Printf("------------ mismatch report: %+v\n\n", reportData)
 
 	return reportData, nil
 }
