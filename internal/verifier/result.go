@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -62,25 +63,24 @@ func (vr VerificationResult) MismatchDuration() time.Duration {
 
 // Returns an agg expression that indicates whether the VerificationResult
 // refers to a missing document.
-func getResultDocMissingAggExpr(docExpr any) bson.D {
-	return bson.D{
-		{"$and", []bson.D{
-			{{"$eq", bson.A{
-				Missing,
-				bson.D{{"$getField", bson.D{
-					{"input", docExpr},
-					{"field", "details"},
-				}}},
-			}}},
-			{{"$eq", bson.A{
-				"",
-				bson.D{{"$getField", bson.D{
-					{"input", docExpr},
-					{"field", "field"},
-				}}},
-			}}},
-		}},
+func getResultDocMissingAggExpr(docExpr any) any {
+	return agg.And{
+		agg.Eq{
+			agg.GetField{
+				Input: docExpr,
+				Field: "details",
+			},
+			Missing,
+		},
+		agg.Eq{
+			agg.GetField{
+				Input: docExpr,
+				Field: "field",
+			},
+			"",
+		},
 	}
+
 }
 
 var _ bson.Marshaler = VerificationResult{}

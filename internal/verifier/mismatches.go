@@ -28,12 +28,12 @@ type MismatchInfo struct {
 
 // Returns an aggregation that indicates whether the MismatchInfo refers to
 // a missing document.
-func getMismatchDocMissingAggExpr(docExpr any) bson.D {
+func getMismatchDocMissingAggExpr(docExpr any) any {
 	return getResultDocMissingAggExpr(
-		bson.D{{"$getField", bson.D{
-			{"input", docExpr},
-			{"field", "detail"},
-		}}},
+		agg.GetField{
+			Input: docExpr,
+			Field: "detail",
+		},
 	)
 }
 
@@ -253,40 +253,28 @@ func getDocumentMismatchReportData(
 				},
 			}},
 		}}},
-		{{"$setWindowFields", bson.D{
-			{"partitionBy", "_category"},
-			{"sortBy", bson.D{
-				{"detail.mismatchHistory.durationMS", -1},
-			}},
-			{"output", bson.D{
-				{"num", bson.D{{"$denseRank", bson.D{}}}},
-			}},
-		}}},
-		{{"$match", bson.D{
-			{"num", bson.D{{"$lte", limit}}},
-		}}},
-		{{"$addFields", bson.D{
-			{"num", "$$REMOVE"},
-		}}},
-		{{"$sort", bson.D{
-			{"detail.mismatchHistory.durationMS", -1},
-			{"detail.id", 1},
-		}}},
 		{{"$group", bson.D{
 			{"_id", "$_category"},
-			{"docs", bson.D{{"$push", "$$ROOT"}}},
+			{"docs", accum.TopN{
+				N: limit,
+				SortBy: bson.D{
+					{"detail.mismatchHistory.durationMS", -1},
+					{"detail.id", 1},
+				},
+				Output: "$$ROOT",
+			}},
 		}}},
 		{{"$group", bson.D{
 			{"_id", nil},
-			{"result", bson.D{{"$push", bson.D{
-				{"k", "$_id"},
-				{"v", "$docs"},
-			}}}},
-		}}},
-		{{"$replaceRoot", bson.D{
-			{"newRoot", bson.D{
-				{"$arrayToObject", "$result"},
+			{"result", accum.Push{
+				bson.D{
+					{"k", "$_id"},
+					{"v", "$docs"},
+				},
 			}},
+		}}},
+		{{"$replaceWith", bson.D{
+			{"$arrayToObject", "$result"},
 		}}},
 	}
 
