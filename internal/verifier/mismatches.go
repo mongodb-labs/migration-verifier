@@ -257,7 +257,6 @@ func getDocumentMismatchReportData(
 			{"partitionBy", "_category"},
 			{"sortBy", bson.D{
 				{"detail.mismatchHistory.durationMS", -1},
-				{"detail.id", 1},
 			}},
 			{"output", bson.D{
 				{"num", bson.D{{"$denseRank", bson.D{}}}},
@@ -269,8 +268,12 @@ func getDocumentMismatchReportData(
 		{{"$addFields", bson.D{
 			{"num", "$$REMOVE"},
 		}}},
+		{{"$sort", bson.D{
+			{"detail.mismatchHistory.durationMS", -1},
+			{"detail.id", 1},
+		}}},
 		{{"$group", bson.D{
-			{"_id", "$type"},
+			{"_id", "$_category"},
 			{"docs", bson.D{{"$push", "$$ROOT"}}},
 		}}},
 		{{"$group", bson.D{
