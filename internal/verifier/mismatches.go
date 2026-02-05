@@ -7,6 +7,7 @@ import (
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -27,12 +28,12 @@ type MismatchInfo struct {
 
 // Returns an aggregation that indicates whether the MismatchInfo refers to
 // a missing document.
-func getMismatchDocMissingAggExpr(docExpr any) bson.D {
+func getMismatchDocMissingAggExpr(docExpr any) any {
 	return getResultDocMissingAggExpr(
-		bson.D{{"$getField", bson.D{
-			{"input", docExpr},
-			{"field", "detail"},
-		}}},
+		agg.GetField{
+			Input: docExpr,
+			Field: "detail",
+		},
 	)
 }
 
@@ -163,23 +164,18 @@ func getMismatchesForTasks(
 	return result, nil
 }
 
-func getDocumentMismatchReportData(
-	ctx context.Context,
-	db *mongo.Database,
-	taskIDs []bson.ObjectID,
-	limit int64,
-) (mismatchReportData, error) {
+var (
 	// A filter to identify docs marked “missing” (on either src or dst)
-	missingFilter := getMismatchDocMissingAggExpr("$$ROOT")
+	missingFilter = getMismatchDocMissingAggExpr("$$ROOT")
 
-	missingOnDstFilter := agg.And{
+	missingOnDstFilter = agg.And{
 		missingFilter,
 		agg.Eq{
 			"$detail.cluster",
 			ClusterTarget,
 		},
 	}
-	extraOnDstFilter := agg.And{
+	extraOnDstFilter = agg.And{
 		missingFilter,
 		agg.Eq{
 			"$detail.cluster",
@@ -187,84 +183,126 @@ func getDocumentMismatchReportData(
 		},
 	}
 
-	contentDiffersFilter := agg.Not{missingFilter}
+	contentDiffersFilter = agg.Not{missingFilter}
+)
 
+func countMismatchesForTasks(
+	ctx context.Context,
+	db *mongo.Database,
+	taskIDs []bson.ObjectID,
+) (mismatchCountsPerType, error) {
 	pl := mongo.Pipeline{
 		{{"$match", bson.D{
 			{"task", bson.D{{"$in", taskIDs}}},
 		}}},
-		{{"$sort", bson.D{
-			{"detail.mismatchHistory.durationMS", -1},
-			{"detail.id", 1},
-		}}},
-		{{"$facet", bson.D{
-			{"counts", mongo.Pipeline{
-				{{"$group", bson.D{
-					{"_id", nil},
+		{{"$group", bson.D{
+			{"_id", nil},
 
-					{"contentDiffers", accum.Sum{agg.Cond{
-						If:   contentDiffersFilter,
-						Then: 1,
-						Else: 0,
-					}}},
-					{"missingOnDst", accum.Sum{agg.Cond{
-						If:   missingOnDstFilter,
-						Then: 1,
-						Else: 0,
-					}}},
-					{"extraOnDst", accum.Sum{agg.Cond{
-						If:   extraOnDstFilter,
-						Then: 1,
-						Else: 0,
-					}}},
-				}}},
-			}},
-			{"contentDiffers", mongo.Pipeline{
-				{{"$match", bson.D{{"$expr", contentDiffersFilter}}}},
-				{{"$limit", limit}},
-			}},
-			{"missingOnDst", mongo.Pipeline{
-				{{"$match", bson.D{{"$expr", missingOnDstFilter}}}},
-				{{"$limit", limit}},
-			}},
-			{"extraOnDst", mongo.Pipeline{
-				{{"$match", bson.D{{"$expr", extraOnDstFilter}}}},
-				{{"$limit", limit}},
-			}},
-		}}},
-		{{"$addFields", bson.D{
-			{"counts", agg.ArrayElemAt{
-				Array: "$counts",
-				Index: 0,
-			}},
+			{"contentDiffers", accum.Sum{agg.Cond{
+				If:   contentDiffersFilter,
+				Then: 1,
+				Else: 0,
+			}}},
+			{"missingOnDst", accum.Sum{agg.Cond{
+				If:   missingOnDstFilter,
+				Then: 1,
+				Else: 0,
+			}}},
+			{"extraOnDst", accum.Sum{agg.Cond{
+				If:   extraOnDstFilter,
+				Then: 1,
+				Else: 0,
+			}}},
 		}}},
 	}
 
-	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(
-		ctx,
-		pl,
-
-		// By default the server will traverse the detail index
-		// due to SERVER-12923. It’s much more efficient for this query
-		// to use the type index.
-		options.Aggregate().SetHint(bson.D{{"task", 1}}),
-	)
-
+	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(ctx, pl)
 	if err != nil {
-		return mismatchReportData{}, errors.Wrapf(err, "fetching %d tasks' discrepancies", len(taskIDs))
+		return mismatchCountsPerType{}, errors.Wrapf(err, "counting %d tasks’ discrepancies", len(taskIDs))
 	}
 
-	var results []mismatchReportData
+	var results []mismatchCountsPerType
 
 	if err := cursor.All(ctx, &results); err != nil {
-		return mismatchReportData{}, errors.Wrapf(err, "reading mismatch aggregation")
+		return mismatchCountsPerType{}, errors.Wrapf(err, "reading mismatch aggregation")
 	}
 
 	if len(results) != 1 {
-		panic(fmt.Sprintf("got != 1 result: %+v", results))
+		return mismatchCountsPerType{}, fmt.Errorf("surprise agg results count: %+v", results)
 	}
 
 	return results[0], nil
+}
+
+func getDocumentMismatchReportData(
+	ctx context.Context,
+	db *mongo.Database,
+	taskIDs []bson.ObjectID,
+	limit int64,
+) (mismatchReportData, error) {
+	eg, egCtx := contextplus.ErrGroup(ctx)
+
+	var reportData mismatchReportData
+
+	mismatchesColl := db.Collection(mismatchesCollectionName)
+
+	for _, categoryParts := range []struct {
+		label  string
+		ptr    *[]MismatchInfo
+		filter any
+	}{
+		{"mismatched content", &reportData.ContentDiffers, contentDiffersFilter},
+		{"missing on dst", &reportData.MissingOnDst, missingOnDstFilter},
+		{"extra on dst", &reportData.ExtraOnDst, extraOnDstFilter},
+	} {
+		eg.Go(
+			func() error {
+				cursor, err := mismatchesColl.Find(
+					egCtx,
+					bson.D{{"$expr", agg.And{
+						categoryParts.filter,
+						agg.In("$task", taskIDs),
+					}}},
+					options.Find().
+						SetSort(
+							bson.D{
+								{"detail.mismatchHistory.durationMS", -1},
+								{"detail.id", 1},
+							},
+						).
+						SetLimit(limit),
+				)
+
+				if err != nil {
+					return errors.Wrapf(err, "fetching %#q", categoryParts.label)
+				}
+
+				if err := cursor.All(egCtx, categoryParts.ptr); err != nil {
+					return errors.Wrapf(err, "reading %#q", categoryParts.label)
+				}
+
+				return nil
+			},
+		)
+	}
+
+	eg.Go(
+		func() error {
+			counts, err := countMismatchesForTasks(ctx, db, taskIDs)
+
+			reportData.Counts = counts
+
+			return errors.Wrapf(err, "counting mismatches")
+		},
+	)
+
+	if err := eg.Wait(); err != nil {
+		return mismatchReportData{}, err
+	}
+
+	fmt.Printf("------------ mismatch report: %+v\n\n", reportData)
+
+	return reportData, nil
 }
 
 func recordMismatches(
