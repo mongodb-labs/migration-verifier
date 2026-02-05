@@ -433,8 +433,8 @@ The following caveats apply:
 
 ### Unsupported configurations
 
-This scheme requires MongoDB 4.4+ and only works with replica set
-sources. (The destination can be sharded, but not the source.)
+This scheme requires MongoDB 4.4+ and only works when connecting to a replica set
+(i.e., not a mongos).
 
 ### Lost checks
 

@@ -219,9 +219,10 @@ func (verifier *Verifier) compareDocsFromChannels(
 		// channels, which documents were missing on one side or the other.
 		delete(theirMap, mapKey)
 
-		// We can also schedule the release of the documents’ buffers.
-		defer curDocWithTS.Free()
-		defer theirDocWithTS.Free()
+		// After the below we’ll be done with these documents, so we can
+		// schedule putting their buffers into the memory pool.
+		defer curDocWithTS.PutInPool()
+		defer theirDocWithTS.PutInPool()
 
 		// Now we determine which document came from whom.
 		var srcDoc, dstDoc compare.DocWithTS
@@ -434,7 +435,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 			},
 		)
 
-		docWithTS.Free()
+		docWithTS.PutInPool()
 	}
 
 	for _, docWithTS := range dstCache {
@@ -456,7 +457,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 			},
 		)
 
-		docWithTS.Free()
+		docWithTS.PutInPool()
 	}
 
 	verifier.docsComparedHistory.Add(curHistoryDocCount)
@@ -622,7 +623,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			)
 
 			for _, id := range docIDs {
-				id.Free()
+				id.PutInPool()
 			}
 
 			if err != nil {
@@ -853,7 +854,7 @@ func iterateCursorToChannel(
 
 		docsWithTSCache = append(
 			docsWithTSCache,
-			compare.NewDocWithTS(cursor.Current, clusterTime),
+			compare.NewDocWithTSFromPool(cursor.Current, clusterTime),
 		)
 
 		if len(docsWithTSCache) == compare.ToComparatorBatchSize {
