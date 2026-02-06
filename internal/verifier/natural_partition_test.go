@@ -466,13 +466,12 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
 	ctx := suite.T().Context()
-	t := suite.T()
 
 	version, err := mmongo.GetVersionArray(
 		ctx,
 		suite.srcMongoClient,
 	)
-	require.NoError(t, err)
+	suite.Require().NoError(err)
 
 	dbName := suite.DBNameForTest()
 
@@ -482,414 +481,470 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 
 	client := suite.srcMongoClient
 
-	directClient, hostname := getDirectClientAndHostname(ctx, t, client, suite.srcConnStr)
+	directClient, hostname := getDirectClientAndHostname(ctx, suite.T(), client, suite.srcConnStr)
 
 	for _, clustered := range mslices.Of(true, false) {
-		suite.Run(
-			lo.Ternary(clustered, "clustered", "nonclustered"),
-			func() {
-				if clustered && version[0] < 6 {
-					suite.T().Skip("clustered requires v6+")
-				}
+		for _, compareMethod := range mslices.Of(compare.Binary, compare.ToHashedIndexKey) {
+			suite.Run(
+				string(compareMethod)+"-"+lo.Ternary(clustered, "clustered", "nonclustered"),
+				func() {
+					if clustered && version[0] < 6 {
+						suite.T().Skip("clustered requires v6+")
+					}
 
-				coll := client.Database(dbName).Collection("plain")
+					coll := client.Database(dbName).Collection("plain")
 
-				require.NoError(t, coll.Drop(ctx))
+					suite.Require().NoError(coll.Drop(ctx))
 
-				if clustered {
-					require.NoError(
-						t,
-						coll.Database().CreateCollection(
-							ctx,
-							coll.Name(),
-							options.CreateCollection().SetClusteredIndex(
-								bson.D{
-									{"key", bson.D{{"_id", 1}}},
-									{"unique", true},
-								},
+					if clustered {
+						suite.Require().NoError(
+							coll.Database().CreateCollection(
+								ctx,
+								coll.Name(),
+								options.CreateCollection().SetClusteredIndex(
+									bson.D{
+										{"key", bson.D{{"_id", 1}}},
+										{"unique", true},
+									},
+								),
 							),
-						),
+						)
+					}
+
+					docs := lo.RepeatBy(
+						10,
+						func(index int) bson.D {
+							return bson.D{{"_id", int32(index)}}
+						},
 					)
-				}
 
-				docs := lo.RepeatBy(
-					10,
-					func(index int) bson.D {
-						return bson.D{{"_id", int32(index)}}
-					},
-				)
+					for i := range 10 {
+						_, err := coll.InsertOne(ctx, docs[i])
+						suite.Require().NoError(err)
+					}
 
-				for i := range 10 {
-					_, err := coll.InsertOne(ctx, docs[i])
-					require.NoError(t, err)
-				}
+					topRecordOpt, err := partitions.GetTopRecordID(
+						ctx,
+						coll,
+					)
+					suite.Require().NoError(err)
 
-				topRecordOpt, err := partitions.GetTopRecordID(
-					ctx,
-					coll,
-				)
-				suite.Require().NoError(err)
+					resumeTokens := []bson.Raw{}
 
-				resumeTokens := []bson.Raw{}
+					resp := coll.Database().RunCommand(
+						ctx,
+						bson.D{
+							{"find", coll.Name()},
+							{"batchSize", 1},
+							{"$_requestResumeToken", true},
+							{"hint", bson.D{{"$natural", 1}}},
+						},
+					)
 
-				resp := coll.Database().RunCommand(
-					ctx,
-					bson.D{
-						{"find", coll.Name()},
-						{"batchSize", 1},
-						{"$_requestResumeToken", true},
-						{"hint", bson.D{{"$natural", 1}}},
-					},
-				)
+					cur, err := cursor.New(coll.Database(), resp, nil)
+					suite.Require().NoError(err, "should open cursor")
+					for !cur.IsFinished() {
+						rtOpt, err := cursor.GetResumeToken(cur)
+						suite.Require().NoError(err)
 
-				cur, err := cursor.New(coll.Database(), resp, nil)
-				require.NoError(t, err, "should open cursor")
-				for !cur.IsFinished() {
-					rtOpt, err := cursor.GetResumeToken(cur)
-					require.NoError(t, err)
+						rt := rtOpt.MustGetf("must have resume token")
 
-					rt := rtOpt.MustGetf("must have resume token")
+						resumeTokens = append(resumeTokens, rt)
 
-					resumeTokens = append(resumeTokens, rt)
+						suite.Require().NoError(cur.GetNext(ctx, bson.E{"batchSize", 1}))
+					}
 
-					require.NoError(t, cur.GetNext(ctx, bson.E{"batchSize", 1}))
-				}
-
-				suite.Run(
-					"0 to 4",
-					func() {
-						task := &tasks.Task{
-							PrimaryKey: bson.NewObjectID(),
-							Type:       tasks.VerifyDocuments,
-							Status:     tasks.Processing,
-							QueryFilter: tasks.QueryFilter{
-								Namespace: FullName(coll),
-								Partition: &partitions.Partition{
-									Natural:         true,
-									HostnameAndPort: option.Some(hostname),
-									Upper:           lo.Must(resumeTokens[3].LookupErr(partitions.RecordID)),
-								},
-							},
-						}
-
-						toCompare := make(chan []compare.DocWithTS, 100)
-						toDst := make(chan []compare.DocID, 100)
-
-						err = compare.ReadNaturalPartitionFromSource(
-							ctx,
-							logger,
-							&MockSuccessNotifier{},
-							directClient,
-							coll,
-							task,
-							option.None[bson.D](),
-							compare.Binary,
-							toCompare,
-							toDst,
-						)
-						require.NoError(t, err, "should read")
-
-						compared := lo.Flatten(lo.ChannelToSlice(toCompare))
-						dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
-
-						defer func() {
-							for _, c := range compared {
-								c.PutInPool()
-							}
-
-							for _, d := range dstFetches {
-								d.PutInPool()
-							}
-						}()
-
-						assert.Equal(
-							t,
-							docs[:4],
-							lo.Map(
-								compared,
-								func(d compare.DocWithTS, _ int) bson.D {
-									var doc bson.D
-									require.NoError(t, bson.Unmarshal(d.Doc, &doc))
-
-									return doc
-								},
-							),
-							"compare thread should receive expected docs",
-						)
-
-						assert.Equal(
-							t,
-							lo.Range(4),
-							lo.Map(
-								dstFetches,
-								func(d compare.DocID, _ int) int {
-									id, err := bsontools.RawValueTo[int](d.ID)
-									require.NoError(t, err)
-
-									return id
-								},
-							),
-							"dst reader thread should receive expected doc IDs",
-						)
-					},
-				)
-
-				suite.Run(
-					"4 to 8",
-					func() {
-						task := &tasks.Task{
-							PrimaryKey: bson.NewObjectID(),
-							Type:       tasks.VerifyDocuments,
-							Status:     tasks.Processing,
-							QueryFilter: tasks.QueryFilter{
-								Namespace: FullName(coll),
-								Partition: &partitions.Partition{
-									Natural:         true,
-									HostnameAndPort: option.Some(hostname),
-									Key: partitions.PartitionKey{
-										Lower: bsontools.ToRawValue(resumeTokens[3]),
+					suite.Run(
+						"0 to 4",
+						func() {
+							task := &tasks.Task{
+								PrimaryKey: bson.NewObjectID(),
+								Type:       tasks.VerifyDocuments,
+								Status:     tasks.Processing,
+								QueryFilter: tasks.QueryFilter{
+									Namespace: FullName(coll),
+									Partition: &partitions.Partition{
+										Natural:         true,
+										HostnameAndPort: option.Some(hostname),
+										Upper:           lo.Must(resumeTokens[3].LookupErr(partitions.RecordID)),
 									},
-									Upper: lo.Must(resumeTokens[7].LookupErr(partitions.RecordID)),
 								},
-							},
-						}
-
-						toCompare := make(chan []compare.DocWithTS, 100)
-						toDst := make(chan []compare.DocID, 100)
-
-						err = compare.ReadNaturalPartitionFromSource(
-							ctx,
-							logger,
-							notifier,
-							directClient,
-							coll,
-							task,
-							option.None[bson.D](),
-							compare.Binary,
-							toCompare,
-							toDst,
-						)
-						require.NoError(t, err, "should read")
-
-						compared := lo.Flatten(lo.ChannelToSlice(toCompare))
-						dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
-
-						defer func() {
-							for _, c := range compared {
-								c.PutInPool()
 							}
 
-							for _, d := range dstFetches {
-								d.PutInPool()
+							toCompare := make(chan []compare.DocWithTS, 100)
+							toDst := make(chan []compare.DocID, 100)
+
+							err = compare.ReadNaturalPartitionFromSource(
+								ctx,
+								logger,
+								&MockSuccessNotifier{},
+								directClient,
+								coll,
+								task,
+								option.None[bson.D](),
+								compareMethod,
+								toCompare,
+								toDst,
+							)
+							suite.Require().NoError(err, "should read")
+
+							compared := lo.Flatten(lo.ChannelToSlice(toCompare))
+							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
+
+							defer func() {
+								for _, c := range compared {
+									c.PutInPool()
+								}
+
+								for _, d := range dstFetches {
+									d.PutInPool()
+								}
+							}()
+
+							switch compareMethod {
+							case compare.Binary:
+								suite.Assert().Equal(
+									docs[:4],
+									lo.Map(
+										compared,
+										func(d compare.DocWithTS, _ int) bson.D {
+											var doc bson.D
+											suite.Require().NoError(bson.Unmarshal(d.Doc, &doc))
+
+											return doc
+										},
+									),
+									"compare thread should receive expected docs",
+								)
+							case compare.ToHashedIndexKey:
+								for i, origDoc := range docs[:4] {
+									idRV, err := compared[i].Doc.LookupErr("k", "_id")
+									suite.Require().NoError(err, "need _id")
+
+									suite.Assert().Equal(
+										origDoc[0].Value,
+										lo.Must(bsontools.RawValueTo[int32](idRV)),
+										"_id should match",
+									)
+								}
+							default:
+								lo.Assertf(false, "bad compare method: %s", compareMethod)
 							}
-						}()
 
-						assert.Equal(
-							t,
-							docs[4:8],
-							lo.Map(
-								compared,
-								func(d compare.DocWithTS, _ int) bson.D {
-									var doc bson.D
-									require.NoError(t, bson.Unmarshal(d.Doc, &doc))
+							suite.Assert().Equal(
+								lo.Range(4),
+								lo.Map(
+									dstFetches,
+									func(d compare.DocID, _ int) int {
+										id, err := bsontools.RawValueTo[int](d.ID)
+										suite.Require().NoError(err)
 
-									return doc
-								},
-							),
-							"compare thread should receive expected docs",
-						)
-
-						assert.Equal(
-							t,
-							lo.RepeatBy(4, func(i int) int {
-								return 4 + i
-							}),
-							lo.Map(
-								dstFetches,
-								func(d compare.DocID, _ int) int {
-									id, err := bsontools.RawValueTo[int](d.ID)
-									require.NoError(t, err)
-
-									return id
-								},
-							),
-							"dst reader thread should receive expected doc IDs",
-						)
-					},
-				)
-
-				suite.Run(
-					"8 to end",
-					func() {
-						task := &tasks.Task{
-							PrimaryKey: bson.NewObjectID(),
-							Type:       tasks.VerifyDocuments,
-							Status:     tasks.Processing,
-							QueryFilter: tasks.QueryFilter{
-								Namespace: FullName(coll),
-								Partition: &partitions.Partition{
-									Natural:         true,
-									HostnameAndPort: option.Some(hostname),
-									Key: partitions.PartitionKey{
-										Lower: bsontools.ToRawValue(resumeTokens[7]),
+										return id
 									},
-									Upper: topRecordOpt.MustGetf("must have top record ID"),
-								},
-							},
-						}
+								),
+								"dst reader thread should receive expected doc IDs",
+							)
+						},
+					)
 
-						toCompare := make(chan []compare.DocWithTS, 100)
-						toDst := make(chan []compare.DocID, 100)
-
-						err = compare.ReadNaturalPartitionFromSource(
-							ctx,
-							logger,
-							notifier,
-							directClient,
-							coll,
-							task,
-							option.None[bson.D](),
-							compare.Binary,
-							toCompare,
-							toDst,
-						)
-						require.NoError(t, err, "should read")
-
-						compared := lo.Flatten(lo.ChannelToSlice(toCompare))
-						dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
-
-						defer func() {
-							for _, c := range compared {
-								c.PutInPool()
-							}
-
-							for _, d := range dstFetches {
-								d.PutInPool()
-							}
-						}()
-
-						assert.Equal(
-							t,
-							docs[8:],
-							lo.Map(
-								compared,
-								func(d compare.DocWithTS, _ int) bson.D {
-									var doc bson.D
-									require.NoError(t, bson.Unmarshal(d.Doc, &doc))
-
-									return doc
-								},
-							),
-							"compare thread should receive expected docs",
-						)
-
-						assert.Equal(
-							t,
-							lo.RepeatBy(len(docs)-8, func(i int) int {
-								return 8 + i
-							}),
-							lo.Map(
-								dstFetches,
-								func(d compare.DocID, _ int) int {
-									id, err := bsontools.RawValueTo[int](d.ID)
-									require.NoError(t, err)
-
-									return id
-								},
-							),
-							"dst reader thread should receive expected doc IDs",
-						)
-					},
-				)
-
-				deleted, err := coll.DeleteMany(ctx, bson.D{{"_id", bson.D{{"$lt", 9}}}})
-				require.EqualValues(t, 9, deleted.DeletedCount)
-
-				suite.Run(
-					"8 to end with missing resume token",
-					func() {
-						task := &tasks.Task{
-							PrimaryKey: bson.NewObjectID(),
-							Type:       tasks.VerifyDocuments,
-							Status:     tasks.Processing,
-							QueryFilter: tasks.QueryFilter{
-								Namespace: FullName(coll),
-								Partition: &partitions.Partition{
-									Natural:         true,
-									HostnameAndPort: option.Some(hostname),
-									Key: partitions.PartitionKey{
-										Lower: bsontools.ToRawValue(resumeTokens[7]),
+					suite.Run(
+						"4 to 8",
+						func() {
+							task := &tasks.Task{
+								PrimaryKey: bson.NewObjectID(),
+								Type:       tasks.VerifyDocuments,
+								Status:     tasks.Processing,
+								QueryFilter: tasks.QueryFilter{
+									Namespace: FullName(coll),
+									Partition: &partitions.Partition{
+										Natural:         true,
+										HostnameAndPort: option.Some(hostname),
+										Key: partitions.PartitionKey{
+											Lower: bsontools.ToRawValue(resumeTokens[3]),
+										},
+										Upper: lo.Must(resumeTokens[7].LookupErr(partitions.RecordID)),
 									},
-									Upper: topRecordOpt.MustGetf("must have top record ID"),
 								},
-							},
-						}
-
-						toCompare := make(chan []compare.DocWithTS, 100)
-						toDst := make(chan []compare.DocID, 100)
-
-						err = compare.ReadNaturalPartitionFromSource(
-							ctx,
-							logger,
-							notifier,
-							directClient,
-							coll,
-							task,
-							option.None[bson.D](),
-							compare.Binary,
-							toCompare,
-							toDst,
-						)
-						require.NoError(t, err, "should read")
-
-						compared := lo.Flatten(lo.ChannelToSlice(toCompare))
-						dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
-
-						defer func() {
-							for _, c := range compared {
-								c.PutInPool()
 							}
 
-							for _, d := range dstFetches {
-								d.PutInPool()
+							toCompare := make(chan []compare.DocWithTS, 100)
+							toDst := make(chan []compare.DocID, 100)
+
+							err = compare.ReadNaturalPartitionFromSource(
+								ctx,
+								logger,
+								notifier,
+								directClient,
+								coll,
+								task,
+								option.None[bson.D](),
+								compareMethod,
+								toCompare,
+								toDst,
+							)
+							suite.Require().NoError(err, "should read")
+
+							compared := lo.Flatten(lo.ChannelToSlice(toCompare))
+							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
+
+							defer func() {
+								for _, c := range compared {
+									c.PutInPool()
+								}
+
+								for _, d := range dstFetches {
+									d.PutInPool()
+								}
+							}()
+
+							switch compareMethod {
+							case compare.Binary:
+								suite.Assert().Equal(
+									docs[4:8],
+									lo.Map(
+										compared,
+										func(d compare.DocWithTS, _ int) bson.D {
+											var doc bson.D
+											suite.Require().NoError(bson.Unmarshal(d.Doc, &doc))
+
+											return doc
+										},
+									),
+									"compare thread should receive expected docs",
+								)
+							case compare.ToHashedIndexKey:
+								for i, origDoc := range docs[4:8] {
+									idRV, err := compared[i].Doc.LookupErr("k", "_id")
+									suite.Require().NoError(err, "need _id")
+
+									suite.Assert().Equal(
+										origDoc[0].Value,
+										lo.Must(bsontools.RawValueTo[int32](idRV)),
+										"_id should match",
+									)
+								}
+							default:
+								lo.Assertf(false, "bad compare method: %s", compareMethod)
 							}
-						}()
 
-						assert.Equal(
-							t,
-							docs[9:],
-							lo.Map(
-								compared,
-								func(d compare.DocWithTS, _ int) bson.D {
-									var doc bson.D
-									require.NoError(t, bson.Unmarshal(d.Doc, &doc))
+							suite.Assert().Equal(
+								lo.RepeatBy(4, func(i int) int {
+									return 4 + i
+								}),
+								lo.Map(
+									dstFetches,
+									func(d compare.DocID, _ int) int {
+										id, err := bsontools.RawValueTo[int](d.ID)
+										suite.Require().NoError(err)
 
-									return doc
+										return id
+									},
+								),
+								"dst reader thread should receive expected doc IDs",
+							)
+						},
+					)
+
+					suite.Run(
+						"8 to end",
+						func() {
+							task := &tasks.Task{
+								PrimaryKey: bson.NewObjectID(),
+								Type:       tasks.VerifyDocuments,
+								Status:     tasks.Processing,
+								QueryFilter: tasks.QueryFilter{
+									Namespace: FullName(coll),
+									Partition: &partitions.Partition{
+										Natural:         true,
+										HostnameAndPort: option.Some(hostname),
+										Key: partitions.PartitionKey{
+											Lower: bsontools.ToRawValue(resumeTokens[7]),
+										},
+										Upper: topRecordOpt.MustGetf("must have top record ID"),
+									},
 								},
-							),
-							"compare thread should receive expected docs",
-						)
+							}
 
-						assert.Equal(
-							t,
-							lo.RepeatBy(len(docs)-9, func(i int) int {
-								return 9 + i
-							}),
-							lo.Map(
-								dstFetches,
-								func(d compare.DocID, _ int) int {
-									id, err := bsontools.RawValueTo[int](d.ID)
-									require.NoError(t, err)
+							toCompare := make(chan []compare.DocWithTS, 100)
+							toDst := make(chan []compare.DocID, 100)
 
-									return id
+							err = compare.ReadNaturalPartitionFromSource(
+								ctx,
+								logger,
+								notifier,
+								directClient,
+								coll,
+								task,
+								option.None[bson.D](),
+								compareMethod,
+								toCompare,
+								toDst,
+							)
+							suite.Require().NoError(err, "should read")
+
+							compared := lo.Flatten(lo.ChannelToSlice(toCompare))
+							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
+
+							defer func() {
+								for _, c := range compared {
+									c.PutInPool()
+								}
+
+								for _, d := range dstFetches {
+									d.PutInPool()
+								}
+							}()
+
+							switch compareMethod {
+							case compare.Binary:
+								suite.Assert().Equal(
+									docs[8:],
+									lo.Map(
+										compared,
+										func(d compare.DocWithTS, _ int) bson.D {
+											var doc bson.D
+											suite.Require().NoError(bson.Unmarshal(d.Doc, &doc))
+
+											return doc
+										},
+									),
+									"compare thread should receive expected docs",
+								)
+							case compare.ToHashedIndexKey:
+								for i, origDoc := range docs[8:] {
+									idRV, err := compared[i].Doc.LookupErr("k", "_id")
+									suite.Require().NoError(err, "need _id")
+
+									suite.Assert().Equal(
+										origDoc[0].Value,
+										lo.Must(bsontools.RawValueTo[int32](idRV)),
+										"_id should match",
+									)
+								}
+							default:
+								lo.Assertf(false, "bad compare method: %s", compareMethod)
+							}
+
+							suite.Assert().Equal(
+								lo.RepeatBy(len(docs)-8, func(i int) int {
+									return 8 + i
+								}),
+								lo.Map(
+									dstFetches,
+									func(d compare.DocID, _ int) int {
+										id, err := bsontools.RawValueTo[int](d.ID)
+										suite.Require().NoError(err)
+
+										return id
+									},
+								),
+								"dst reader thread should receive expected doc IDs",
+							)
+						},
+					)
+
+					deleted, err := coll.DeleteMany(ctx, bson.D{{"_id", bson.D{{"$lt", 9}}}})
+					suite.Require().EqualValues(9, deleted.DeletedCount)
+
+					suite.Run(
+						"8 to end with missing resume token",
+						func() {
+							task := &tasks.Task{
+								PrimaryKey: bson.NewObjectID(),
+								Type:       tasks.VerifyDocuments,
+								Status:     tasks.Processing,
+								QueryFilter: tasks.QueryFilter{
+									Namespace: FullName(coll),
+									Partition: &partitions.Partition{
+										Natural:         true,
+										HostnameAndPort: option.Some(hostname),
+										Key: partitions.PartitionKey{
+											Lower: bsontools.ToRawValue(resumeTokens[7]),
+										},
+										Upper: topRecordOpt.MustGetf("must have top record ID"),
+									},
 								},
-							),
-							"dst reader thread should receive expected doc IDs",
-						)
-					},
-				)
-			},
-		)
+							}
 
+							toCompare := make(chan []compare.DocWithTS, 100)
+							toDst := make(chan []compare.DocID, 100)
+
+							err = compare.ReadNaturalPartitionFromSource(
+								ctx,
+								logger,
+								notifier,
+								directClient,
+								coll,
+								task,
+								option.None[bson.D](),
+								compareMethod,
+								toCompare,
+								toDst,
+							)
+							suite.Require().NoError(err, "should read")
+
+							compared := lo.Flatten(lo.ChannelToSlice(toCompare))
+							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
+
+							defer func() {
+								for _, c := range compared {
+									c.PutInPool()
+								}
+
+								for _, d := range dstFetches {
+									d.PutInPool()
+								}
+							}()
+
+							switch compareMethod {
+							case compare.Binary:
+								suite.Assert().Equal(
+									docs[9:],
+									lo.Map(
+										compared,
+										func(d compare.DocWithTS, _ int) bson.D {
+											var doc bson.D
+											suite.Require().NoError(bson.Unmarshal(d.Doc, &doc))
+
+											return doc
+										},
+									),
+									"compare thread should receive expected docs",
+								)
+							case compare.ToHashedIndexKey:
+								for i, origDoc := range docs[9:] {
+									idRV, err := compared[i].Doc.LookupErr("k", "_id")
+									suite.Require().NoError(err, "need _id")
+
+									suite.Assert().Equal(
+										origDoc[0].Value,
+										lo.Must(bsontools.RawValueTo[int32](idRV)),
+										"_id should match",
+									)
+								}
+							default:
+								lo.Assertf(false, "bad compare method: %s", compareMethod)
+							}
+
+							suite.Assert().Equal(
+								lo.RepeatBy(len(docs)-9, func(i int) int {
+									return 9 + i
+								}),
+								lo.Map(
+									dstFetches,
+									func(d compare.DocID, _ int) int {
+										id, err := bsontools.RawValueTo[int](d.ID)
+										suite.Require().NoError(err)
+
+										return id
+									},
+								),
+								"dst reader thread should receive expected doc IDs",
+							)
+						},
+					)
+				},
+			)
+		}
 	}
 }
