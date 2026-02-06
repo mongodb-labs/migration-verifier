@@ -167,20 +167,29 @@ func (o *OplogReader) createCursor(
 		bson.D{{"$expr", agg.Or{
 			// plain ops: one write per op
 			append(
-				agg.And{agg.In("$op", mslices.Of("d", "i", "u"))},
+				agg.And{
+					agg.In("$op", mslices.Of("d", "i", "u")),
+				},
 				o.getNSFilter("$$ROOT")...,
 			),
 
 			// op=n is for no-ops, so we stay up-to-date.
 			agg.Eq{"$op", "n"},
 
-			// op=c is for applyOps, and also to detect forbidden DDL.
+			// op=c is for applyOps & other commands (e.g., most DDL).
 			agg.And{
 				agg.Eq{"$op", "c"},
+
 				agg.Not{helpers.StringHasPrefix{
 					FieldRef: "$ns",
 					Prefix:   "config.",
 				}},
+
+				// For any non-applyOps commands, enforce the namespace filter:
+				agg.Or{
+					"$o.applyOps",
+					o.getNSFilter("$$ROOT"),
+				},
 			},
 		}}},
 	}}}
@@ -675,6 +684,7 @@ func (o *OplogReader) getExcludedNSPrefixes() []string {
 	)
 }
 
+// Returns a filter that only matches ops in appropriate namespaces.
 func (o *OplogReader) getNSFilter(docroot string) agg.And {
 	filter := agg.And(lo.Map(
 		o.getExcludedNSPrefixes(),
