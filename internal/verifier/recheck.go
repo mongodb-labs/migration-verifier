@@ -78,12 +78,6 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	)
 }
 
-type enqueuedRecheckCounts struct {
-	Changed              int64
-	Mismatched           int64
-	ChangedAndMismatched int64
-}
-
 func (verifier *Verifier) countEnqueuedRechecksWhileLocked(
 	ctx context.Context,
 ) (int64, error) {
