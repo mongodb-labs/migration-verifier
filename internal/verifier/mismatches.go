@@ -435,8 +435,6 @@ func getDocumentMismatchReportData(
 		return mismatchReportData{}, err
 	}
 
-	fmt.Printf("------------ mismatch report: %+v\n\n", reportData)
-
 	return reportData, nil
 }
 
