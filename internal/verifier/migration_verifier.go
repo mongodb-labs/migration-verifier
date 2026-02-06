@@ -112,8 +112,8 @@ type Verifier struct {
 	srcChangeReaderMethod string
 	dstChangeReaderMethod string
 
-	lastProcessedSrcOptime *msync.DataGuard[bson.Timestamp]
-	lastProcessedDstOptime *msync.DataGuard[bson.Timestamp]
+	srcLastRecheckedTS *msync.DataGuard[bson.Timestamp]
+	dstLastRecheckedTS *msync.DataGuard[bson.Timestamp]
 
 	changeHandlingErr *util.Eventual[error]
 
@@ -212,8 +212,8 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 
 		changeHandlingErr: util.NewEventual[error](),
 
-		lastProcessedSrcOptime: msync.NewDataGuard(bson.Timestamp{}),
-		lastProcessedDstOptime: msync.NewDataGuard(bson.Timestamp{}),
+		srcLastRecheckedTS: msync.NewDataGuard(bson.Timestamp{}),
+		dstLastRecheckedTS: msync.NewDataGuard(bson.Timestamp{}),
 	}
 }
 

@@ -830,7 +830,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 	_, _, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 
-	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+	verifier.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
 		suite.Assert().Equal(
 			task.SrcTimestamp.MustGet(),
 			t,
@@ -838,7 +838,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 		)
 	})
 
-	verifier.lastProcessedDstOptime.Load(func(t bson.Timestamp) {
+	verifier.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
 		suite.Assert().Equal(
 			task.DstTimestamp.MustGet(),
 			t,
@@ -851,7 +851,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 	_, _, _, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 
-	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+	verifier.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
 		suite.Assert().Equal(
 			bson.Timestamp{123, 234},
 			t,

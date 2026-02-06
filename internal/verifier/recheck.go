@@ -78,6 +78,86 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	)
 }
 
+func (verifier *Verifier) countEnqueuedRechecksWhileLocked(
+	ctx context.Context,
+) (int64, error) {
+	generation, _ := verifier.getGenerationWhileLocked()
+
+	// We enqueue for the generation after the current one.
+	generation++
+
+	genCollection := verifier.getRecheckQueueCollection(generation)
+
+	return genCollection.EstimatedDocumentCount(ctx)
+	/*
+		cursor, err := genCollection.Aggregate(
+			ctx,
+			mongo.Pipeline{
+				{{"$group", bson.D{
+					{"_id", bson.D{
+						{"db", "$_id.db"},
+						{"coll", "$_id.coll"},
+						{"docID", "$_id.docID"},
+					}},
+
+					{"fromChanges", accum.Sum{agg.Cond{
+						If:   agg.Not{helpers.Exists{"$mismatchTimes"}},
+						Then: 1,
+						Else: 0,
+					}}},
+
+					{"fromMismatch", accum.Sum{agg.Cond{
+						If:   helpers.Exists{"$mismatchTimes"},
+						Then: 1,
+						Else: 0,
+					}}},
+				}}},
+				{{"$group", bson.D{
+					{"_id", nil},
+
+					{"changed", accum.Sum{agg.Cond{
+						If:   agg.Gt{"$fromChanges", 0},
+						Then: 1,
+						Else: 0,
+					}}},
+
+					{"mismatched", accum.Sum{agg.Cond{
+						If:   agg.Gt{"$fromMismatch", 0},
+						Then: 1,
+						Else: 0,
+					}}},
+
+					{"changedAndMismatched", accum.Sum{agg.Cond{
+						If: agg.And{
+							agg.Gt{"$fromChanges", 0},
+							agg.Gt{"$fromMismatch", 0},
+						},
+						Then: 1,
+						Else: 0,
+					}}},
+				}}},
+			},
+		)
+		if err != nil {
+			return enqueuedRecheckCounts{}, errors.Wrap(err, "surveying enqueued rechecks")
+		}
+
+		var results []enqueuedRecheckCounts
+		if err := cursor.All(ctx, &results); err != nil {
+			return enqueuedRecheckCounts{}, errors.Wrap(err, "reading survey of enqueued rechecks")
+		}
+
+		switch len(results) {
+		case 0:
+			return enqueuedRecheckCounts{}, nil
+		case 1:
+			return results[0], nil
+		}
+
+		panic(fmt.Sprintf("multiple group results: %+v", results))
+	*/
+}
+
 func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
 	dbNames []string,

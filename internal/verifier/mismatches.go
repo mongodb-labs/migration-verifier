@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -74,6 +76,11 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 			{
 				Keys: bson.D{
 					{"task", 1},
+
+					// This is here so that $lookup against this collection
+					// to determine longest duration can avoid fetching
+					// documents and instead examine just the index.
+					{"detail.mismatchHistory.durationMS", 1},
 				},
 			},
 
@@ -92,6 +99,134 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 	}
 
 	return nil
+}
+
+type recheckCounts struct {
+	// FromMismatch are rechecks in the given generation from mismatches
+	// in the prior generation.
+	FromMismatch int64
+
+	// FromChange are rechecks from changes seen in the prior generation.
+	FromChange int64
+
+	// Total adds up all of the given generation’s rechecks. This will be less
+	// than FromMismatch + FromChange by however many documents both changed
+	// and were seen to mismatch.
+	Total int64
+
+	// NewMismatches are mismatches seen thus far in the current generation
+	// that will be rechecked in the next generation.
+	NewMismatches int64
+
+	// MaxMismatchDuration indicates the longest-lived mismatch, among either
+	// the current or the prior generation.
+	MaxMismatchDuration option.Option[time.Duration]
+}
+
+// NB: This is OK to call for generation==0. In this case it will only
+// add up newly-seen document mismatches.
+func countRechecksForGeneration(
+	ctx context.Context,
+	metaDB *mongo.Database,
+	generation int,
+) (recheckCounts, error) {
+
+	// The numbers we need are:
+	// - the given generation’s total # of docs to recheck
+	// - the # of mismatches found in the prior generation
+	cursor, err := metaDB.Collection(verificationTasksCollection).Aggregate(
+		ctx,
+		mongo.Pipeline{
+			{{"$match", bson.D{
+				{"generation", bson.D{{"$in", []any{generation, generation - 1}}}},
+				{"type", tasks.VerifyDocuments},
+
+				// NB: We don’t filter by task status because we need to count
+				// all rechecks, including those in tasks that turned up no
+				// mismatches.
+			}}},
+			{{"$lookup", bson.D{
+				{"from", mismatchesCollectionName},
+				{"localField", "_id"},
+				{"foreignField", "task"},
+				{"as", "mismatches"},
+				{"pipeline", mongo.Pipeline{
+					{{"$group", bson.D{
+						{"_id", nil},
+						{"maxDurationMS", accum.Max{"$detail.mismatchHistory.durationMS"}},
+					}}},
+				}},
+			}}},
+
+			{{"$addFields", bson.D{
+				// We avoid $unwind here because that’ll erase any tasks that
+				// don’t match up to >=1 mismatch.
+				{"mismatches", agg.ArrayElemAt{
+					Array: "$mismatches",
+					Index: 0,
+				}},
+			}}},
+			{{"$group", bson.D{
+				{"_id", nil},
+				{"maxMismatchDurationMS", accum.Max{"$mismatches.maxDurationMS"}},
+			}}},
+		},
+	)
+	if err != nil {
+		return recheckCounts{}, errors.Wrap(err, "sending query to count last generation’s found mismatches")
+	}
+
+	defer cursor.Close(ctx)
+
+	if !cursor.Next(ctx) {
+		if cursor.Err() != nil {
+			return recheckCounts{}, errors.Wrap(err, "reading count of last generation’s found mismatches")
+		}
+
+		// This happens if there were no failed or in-progress tasks in the queried generations.
+		return recheckCounts{}, nil
+	}
+
+	result := struct {
+		AllRechecks int64
+		//RechecksFromMismatch int64
+		//RechecksFromChange    int64
+		NewMismatches         int64
+		MaxMismatchDurationMS option.Option[int64]
+	}{}
+
+	err = cursor.Decode(&result)
+	if err != nil {
+		return recheckCounts{}, errors.Wrapf(err, "reading mismatches from result (%v)", cursor.Current)
+	}
+
+	/*
+		if result.RechecksFromMismatch > result.AllRechecks {
+			// TODO: fix
+			slog.Warn(
+				fmt.Sprintf(
+					"Mismatches found in generation %d outnumber generation %d’s total docs to recheck. This should be rare.",
+					generation-1,
+					generation,
+				),
+				"priorGenMismatches", result.RechecksFromMismatch,
+				"curGenRechecks", result.AllRechecks,
+			)
+		}
+	*/
+
+	return recheckCounts{
+		Total: result.AllRechecks,
+		//FromMismatch: result.RechecksFromMismatch,
+		//FromChange:    result.RechecksFromChange,
+		NewMismatches: result.NewMismatches,
+		MaxMismatchDuration: option.Map(
+			result.MaxMismatchDurationMS,
+			func(ms int64) time.Duration {
+				return time.Duration(ms) * time.Millisecond
+			},
+		),
+	}, nil
 }
 
 type mismatchCountsPerType struct {

@@ -11,7 +11,9 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/webserver"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -240,12 +242,56 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 	successResponse(c)
 }
 
+type ProgressRechecks struct {
+	// Mismatches counts the # of rechecks from a mismatch.
+	Mismatches int64 `json:"mismatches"`
+
+	// Changes counts the # of rechecks from a change event.
+	Changes int64 `json:"changes"`
+
+	// Total counts all rechecks. This needn’t equal Mismatches + Changes
+	// because a document can both change and be seen to mismatch in the
+	// same generation. (Mismatches + Changes - Total counts those.)
+	Total option.Option[int64] `json:"total,omitzero"`
+}
+
+type ProgressGenerationStats struct {
+	TimeElapsed   option.Option[string] `json:"timeElapsed"`
+	ActiveWorkers int                   `json:"activeWorkers"`
+
+	DocsCompared types.DocumentCount `json:"docsCompared"`
+	TotalDocs    types.DocumentCount `json:"totalDocs"`
+
+	SrcBytesCompared types.ByteCount `json:"srcBytesCompared"`
+	TotalSrcBytes    types.ByteCount `json:"totalSrcBytes,omitempty"`
+
+	CurrentGenerationRechecks option.Option[ProgressRechecks] `json:"currentGenerationRechecks"`
+	NextGenerationRechecks    int64                           `json:"nextGenerationRechecks"`
+	MismatchesFound           int64                           `json:"mismatchesFound"`
+	MaxMismatchDuration       option.Option[string]           `json:"maxMismatchDuration"`
+}
+
+type ProgressChangeStats struct {
+	EventsPerSecond   option.Option[float64]                 `json:"eventsPerSecond"`
+	CurrentTimestamps option.Option[readerCurrentTimestamps] `json:"currentTimestamps"`
+	BufferSaturation  float64                                `json:"bufferSaturation"`
+}
+
 // Progress represents the structure of the JSON response from the Progress end point.
 type Progress struct {
-	Phase      string              `json:"phase"`
-	Generation int                 `json:"generation"`
-	Error      error               `json:"error"`
-	Status     *VerificationStatus `json:"verificationStatus"`
+	Phase string `json:"phase"`
+
+	Generation      int                     `json:"generation"`
+	GenerationStats ProgressGenerationStats `json:"generationStats"`
+
+	SrcLastRecheckedTS *bson.Timestamp `json:"srcLastRecheckedTS"`
+	DstLastRecheckedTS *bson.Timestamp `json:"dstLastRecheckedTS"`
+
+	SrcChangeStats ProgressChangeStats `json:"srcChangeStats"`
+	DstChangeStats ProgressChangeStats `json:"dstChangeStats"`
+
+	Error  error               `json:"error,omitempty"`
+	Status *VerificationStatus `json:"verificationStatus"`
 }
 
 // progressEndpoint implements the gin handle for the progress endpoint.

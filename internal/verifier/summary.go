@@ -642,10 +642,10 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 	var lastSrcOpTime, lastDstOpTime bson.Timestamp
 
-	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+	verifier.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
 		lastSrcOpTime = t
 	})
-	verifier.lastProcessedDstOptime.Load(func(t bson.Timestamp) {
+	verifier.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
 		lastDstOpTime = t
 	})
 
@@ -693,7 +693,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			)
 		}
 
-		times, hasTimes := cluster.csReader.getCurrentTimes().Get()
+		times, hasTimes := cluster.csReader.getCurrentTimestamps().Get()
 
 		if hasTimes {
 			lag := times.Lag()
