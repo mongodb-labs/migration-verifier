@@ -7,7 +7,7 @@ import (
 )
 
 // UnmarshalRaw mimics bson.Unmarshal to a bson.D.
-func UnmarshalRaw(raw bson.Raw) (bson.D, error) {
+func UnmarshalRaw[D ~[]byte](raw D) (bson.D, error) {
 	elsCount := 0
 
 	for _, err := range RawElements(raw) {
