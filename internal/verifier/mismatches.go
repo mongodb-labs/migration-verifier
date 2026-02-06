@@ -153,8 +153,6 @@ func countRechecksForGeneration(
 				{"pipeline", mongo.Pipeline{
 					{{"$group", bson.D{
 						{"_id", nil},
-
-						{"count", accum.Sum{1}},
 						{"maxDurationMS", accum.Max{"$detail.mismatchHistory.durationMS"}},
 					}}},
 				}},
@@ -167,73 +165,9 @@ func countRechecksForGeneration(
 					Array: "$mismatches",
 					Index: 0,
 				}},
-				{"_ids", agg.Cond{
-					If:   agg.Eq{0, "$generation"},
-					Then: 0,
-					Else: agg.Size{"$_ids"},
-				}},
-				/*
-					{"rechecksFromChange", agg.Cond{
-						If: agg.Or{
-							agg.Eq{0, "$generation"},
-							agg.Eq{generation - 1, "$generation"},
-						},
-						Then: 0,
-
-						// _ids is the array of document IDs to recheck.
-						// mismatch_first_seen_at maps indexes of that array to
-						// the document’s first mismatch time. It only contains
-						// entries for documents that mismatched without a change
-						// event. Thus, any _ids member whose index is *not* in
-						// mismatch_first_seen_at was enqueued from a change event.
-						Else: agg.Size{agg.Filter{
-							// This gives us all the array indices.
-							Input: agg.Range{End: agg.Size{"$_ids"}},
-							As:    "idx",
-							Cond: agg.Not{helpers.Exists{
-								agg.GetField{
-									Input: "$mismatch_first_seen_at",
-									Field: agg.ToString{"$$idx"},
-								},
-							}},
-						}},
-					}},
-				*/
 			}}},
 			{{"$group", bson.D{
 				{"_id", nil},
-				{"allRechecks", accum.Sum{
-					agg.Cond{
-						If:   agg.Eq{"$generation", generation},
-						Then: "$_ids",
-						Else: 0,
-					},
-				}},
-				/*
-					{"rechecksFromMismatch", accum.Sum{
-						agg.Cond{
-							If:   agg.Eq{"$generation", generation - 1},
-							Then: "$mismatches.count",
-							Else: 0,
-						},
-					}},
-				*/
-				/*
-					{"rechecksFromChange", accum.Sum{
-						agg.Cond{
-							If:   agg.Eq{"$generation", generation},
-							Then: "$rechecksFromChange",
-							Else: 0,
-						},
-					}},
-				*/
-				{"newMismatches", accum.Sum{
-					agg.Cond{
-						If:   agg.Eq{"$generation", generation},
-						Then: "$mismatches.count",
-						Else: 0,
-					},
-				}},
 				{"maxMismatchDurationMS", accum.Max{"$mismatches.maxDurationMS"}},
 			}}},
 		},
