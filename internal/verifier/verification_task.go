@@ -53,6 +53,24 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 		},
 	}
 
+	srcColl := verifier.srcClientCollection(&verificationTask)
+
+	size, docs, _, err := partitions.GetSizeAndDocumentCount(
+		ctx,
+		verifier.logger,
+		srcColl,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"getting %#q’s size & doc count: %w",
+			srcNamespace,
+			err,
+		)
+	}
+
+	verificationTask.SourceByteCount = size
+	verificationTask.SourceDocumentCount = docs
+
 	logEvent := verifier.logger.Debug().
 		Any("task", verificationTask.PrimaryKey)
 
@@ -67,7 +85,7 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 
 	logEvent.Msg("Adding metadata task.")
 
-	err := retry.New().WithCallback(
+	err = retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			_, err := verifier.verificationTaskCollection().InsertOne(ctx, verificationTask)
 			return err
