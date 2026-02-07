@@ -334,6 +334,7 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: dbName + "." + collName,
 			To:        dbName + "." + collName,
@@ -354,6 +355,7 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 
 	verifier := suite.BuildVerifier()
 	suite.Require().NoError(verifier.startChangeHandling(ctx))
+	verifier.workerTracker.Set(0, *task)
 	results, docCount, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
 	require.NoError(err, "should fetch & compare")
 	assert.EqualValues(suite.T(), len(docs), docCount, "expected # of docs")
@@ -407,6 +409,7 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
 		Ids: mslices.Of(
 			mbson.ToRawValue(id1),
 			mbson.ToRawValue(id2),
@@ -422,6 +425,7 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 
 	verifier.globalFilter = bson.D{{"_id", id1}}
 
+	verifier.workerTracker.Set(0, *task)
 	results, docCount, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
 	require.NoError(t, err, "should fetch & compare")
 	assert.EqualValues(t, 1, docCount, "should compare 1 doc")
@@ -443,6 +447,7 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "keyhole.dealers",
 			To:        "keyhole.dealers",
@@ -528,6 +533,7 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 		suite.Run(
 			curCase.label,
 			func() {
+				verifier.workerTracker.Set(0, *task)
 				results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
 				suite.Require().NoError(err)
 
@@ -814,6 +820,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
 		Generation: 1,
 		Ids: mslices.Of(
 			mbson.ToRawValue(id),
@@ -827,6 +834,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 		DstTimestamp: option.Some(bson.Timestamp{234, 345}),
 	}
 
+	verifier.workerTracker.Set(0, *task)
 	_, _, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 
@@ -848,6 +856,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 
 	task.SrcTimestamp = option.Some(bson.Timestamp{1, 2})
 
+	verifier.workerTracker.Set(0, *task)
 	_, _, _, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 
@@ -897,6 +906,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	suite.Require().NoError(err)
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
 		Generation: 1,
 		Ids: mslices.Of(
 			mbson.ToRawValue(id),
@@ -907,6 +917,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 
 	// Test fetchDocuments without global filter.
 	verifier.globalFilter = nil
+	verifier.workerTracker.Set(0, *task)
 	results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(2, docCount, "should find source docs")
@@ -921,6 +932,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	verifier.globalFilter = bson.D{
 		{"num", map[string]any{"$lt": 100}},
 	}
+	verifier.workerTracker.Set(0, *task)
 	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(1, docCount, "should find source docs")
@@ -940,6 +952,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	verifier.globalFilter = bson.D{
 		{"num", map[string]any{"$lt": 100}},
 	}
+	verifier.workerTracker.Set(0, *task)
 	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(1, docCount, "should find source docs")
@@ -1613,6 +1626,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 						fauxTask := tasks.Task{
 							PrimaryKey: bson.NewObjectID(),
+							Type: tasks.VerifyDocuments,
 							QueryFilter: tasks.QueryFilter{
 								Namespace: namespace,
 								ShardKeys: indexFields,
