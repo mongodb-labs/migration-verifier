@@ -452,6 +452,19 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 				len(verifier.dstNamespaces),
 			)
 		}
+		// Check for database names and append their collections
+		if NamespacesContainsDBName(verifier.srcNamespaces) {
+			namespaces, dbs := ParseDBNamespaces(verifier.srcNamespaces)
+
+			dbNamespaces, err := ListUserCollectionsForDBs(context.Background(), verifier.logger, verifier.srcClient, true /* include views */, dbs)
+			if err != nil {
+				verifier.logger.Error().Msgf("Failed to parse database namespaces: %s", err)
+				return err
+			}
+
+			verifier.srcNamespaces = append(namespaces, dbNamespaces...)
+			verifier.SetNamespaceMap()
+		}
 	}
 	isPrimary, err := verifier.CreatePrimaryTaskIfNeeded(ctx)
 	if err != nil {

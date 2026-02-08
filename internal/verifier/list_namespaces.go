@@ -48,8 +48,14 @@ func ListAllUserNamespaces(
 		Strs("databases", dbNames).
 		Msg("All user databases.")
 
+	return ListUserCollectionsForDBs(ctx, logger, client, includeViews, dbNames)
+}
+
+func ListUserCollectionsForDBs(ctx context.Context, logger *logger.Logger, client *mongo.Client, includeViews bool,
+	databases []string) ([]string, error) {
+
 	collectionNamespaces := []string{}
-	for _, dbName := range dbNames {
+	for _, dbName := range databases {
 		db := client.Database(dbName)
 
 		filter := bson.D{
