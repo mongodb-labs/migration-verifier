@@ -185,10 +185,12 @@ func (o *OplogReader) createCursor(
 					Prefix:   "config.",
 				}},
 
-				// For any non-applyOps commands, enforce the namespace filter:
+				// For any non-applyOps commands, ignore excluded namespaces.
+				// Note that this does NOT exclude out-filter namespaces for
+				// namespace filtering because we want to react to such DDL events.
 				agg.Or{
 					"$o.applyOps",
-					o.getNSFilter("$$ROOT"),
+					o.getNotExcludedNSPrefixFilter("$$ROOT"),
 				},
 			},
 		}}},
@@ -684,9 +686,9 @@ func (o *OplogReader) getExcludedNSPrefixes() []string {
 	)
 }
 
-// Returns a filter that only matches ops in appropriate namespaces.
-func (o *OplogReader) getNSFilter(docroot string) agg.And {
-	filter := agg.And(lo.Map(
+// The returned filter excludes according to getExcludedNSPrefixes().
+func (o *OplogReader) getNotExcludedNSPrefixFilter(docroot string) any {
+	return lo.Map(
 		o.getExcludedNSPrefixes(),
 		func(prefix string, _ int) any {
 			return agg.Not{helpers.StringHasPrefix{
@@ -694,7 +696,12 @@ func (o *OplogReader) getNSFilter(docroot string) agg.And {
 				Prefix:   prefix,
 			}}
 		},
-	))
+	)
+}
+
+// Returns a filter that only matches ops in appropriate namespaces.
+func (o *OplogReader) getNSFilter(docroot string) agg.And {
+	filter := agg.And{o.getNotExcludedNSPrefixFilter(docroot)}
 
 	if len(o.namespaces) > 0 {
 		filter = append(
