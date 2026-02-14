@@ -4,13 +4,113 @@ import (
 	"testing"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/timeseries"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
+
+func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
+	ctx := suite.T().Context()
+
+	if suite.BuildVerifier().srcClusterInfo.VersionArray[0] < 5 {
+		suite.T().Skipf("Need a source version with time-series support.")
+	}
+
+	dbName := suite.DBNameForTest()
+	db := suite.srcMongoClient.Database(dbName)
+	collName := "weather"
+	bucketsCollName := timeseries.BucketPrefix + collName
+
+	suite.Require().NoError(
+		db.CreateCollection(
+			ctx,
+			collName,
+			options.CreateCollection().SetTimeSeriesOptions(
+				options.TimeSeries().
+					SetTimeField("time").
+					SetMetaField("sensor"),
+			),
+		),
+	)
+
+	for sensor := range 100 {
+		measurements := lo.RepeatBy(
+			2_000,
+			func(index int) bson.D {
+				return bson.D{
+					{"time", time.Now()},
+					{"sensor", sensor},
+					{"payload", testutil.RandomString(500)},
+				}
+			},
+		)
+
+		_, err := db.Collection(collName).InsertMany(ctx, measurements)
+		suite.Require().NoError(err, "must insert measurements")
+	}
+
+	collBytes, docsCount, _, err := partitions.GetSizeAndDocumentCount(
+		ctx,
+		logger.NewDebugLogger(),
+		db.Collection(bucketsCollName),
+	)
+	suite.Require().NoError(err)
+
+	task := &tasks.Task{
+		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
+		Generation: 0,
+		QueryFilter: tasks.QueryFilter{
+			Namespace: dbName + "." + bucketsCollName,
+		},
+	}
+
+	verifier := suite.BuildVerifier()
+
+	// Set the verifier to natural partitioning to ensure that timeseries
+	// are ID-partitioned regardless.
+	verifier.SetPartitioningScheme(partitions.SchemeNatural)
+	verifier.SetPartitionSizeMB(1)
+
+	err = verifier.partitionCollection(
+		ctx,
+		task,
+		0,
+		collBytes,
+		docsCount,
+		false,
+	)
+	suite.Require().NoError(err)
+
+	cursor, err := verifier.verificationTaskCollection().Find(
+		ctx,
+		bson.D{
+			{"type", tasks.VerifyDocuments},
+		},
+	)
+	suite.Require().NoError(err)
+
+	var tasks []tasks.Task
+	suite.Require().NoError(cursor.All(ctx, &tasks), "must read")
+
+	suite.Require().NotEmpty(tasks, "need tasks")
+
+	suite.Assert().Greater(len(tasks), 1, "expect multiple tasks")
+	for _, task := range tasks {
+		suite.Assert().False(
+			task.QueryFilter.Partition.Natural,
+			"must be ID-partitioned",
+		)
+	}
+}
 
 // TestTimeSeries_BucketsOnly confirms the verifier’s time-series coverage
 // when only the buckets exist. This is important when verifying shard-to-shard.
@@ -24,7 +124,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_BucketsOnly() {
 	dbName := suite.DBNameForTest()
 	db := suite.srcMongoClient.Database(dbName)
 	collName := "weather"
-	bucketsCollName := timeseriesBucketsPrefix + collName
+	bucketsCollName := timeseries.BucketPrefix + collName
 
 	suite.Require().NoError(
 		db.CreateCollection(
@@ -283,8 +383,8 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 
 	copyDocs(
 		suite.T(),
-		srcDB.Collection("system.buckets."+collName),
-		suite.dstMongoClient.Database(dbName).Collection("system.buckets."+collName),
+		srcDB.Collection(timeseries.BucketPrefix+collName),
+		suite.dstMongoClient.Database(dbName).Collection(timeseries.BucketPrefix+collName),
 	)
 
 	verifier := suite.BuildVerifier()

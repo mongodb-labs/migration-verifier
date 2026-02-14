@@ -1,11 +1,13 @@
 package bsontools
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"slices"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
@@ -35,13 +37,84 @@ type unmarshalTargets interface {
 		time.Time
 }
 
-type cannotCastError struct {
+type cannotCastError[T any] struct {
 	gotBSONType bson.Type
-	toGoType    any
 }
 
-func (ce cannotCastError) Error() string {
-	return fmt.Sprintf("cannot cast BSON %s to Go %T", ce.gotBSONType, ce.toGoType)
+func (ce cannotCastError[T]) Error() string {
+	return fmt.Sprintf("cannot cast BSON %s to Go %T", ce.gotBSONType, *new(T))
+}
+
+// RawValueToString is a more efficient RawValueTo[string].
+func RawValueToString(in bson.RawValue) (string, error) {
+	if str, ok := in.StringValueOK(); ok {
+		return str, nil
+	}
+
+	return "", cannotCastError[string]{in.Type}
+}
+
+// RawValueToInt64 is a more efficient RawValueTo[int64].
+func RawValueToInt64(in bson.RawValue) (int64, error) {
+	if v, ok := in.Int64OK(); ok {
+		return v, nil
+	}
+
+	return 0, cannotCastError[int64]{in.Type}
+}
+
+// RawValueToInt is a more efficient RawValueTo[int].
+func RawValueToInt(in bson.RawValue) (int, error) {
+	if in.Type == bson.TypeInt32 || in.Type == bson.TypeInt64 {
+		if v, ok := in.AsInt64OK(); ok {
+			return safecast.Convert[int](v)
+		}
+	}
+
+	return 0, cannotCastError[int]{in.Type}
+}
+
+// RawValueToTimestamp is a more efficient RawValueTo[bson.Timestamp].
+func RawValueToTimestamp(in bson.RawValue) (bson.Timestamp, error) {
+	if t, i, ok := in.TimestampOK(); ok {
+		return bson.Timestamp{t, i}, nil
+	}
+
+	return bson.Timestamp{}, cannotCastError[bson.Timestamp]{in.Type}
+}
+
+// RawValueToBinary is a more efficient RawValueTo[bson.Binary].
+func RawValueToBinary(in bson.RawValue) (bson.Binary, error) {
+	if subtype, buf, ok := in.BinaryOK(); ok {
+		return bson.Binary{
+			Subtype: subtype,
+			Data:    buf,
+		}, nil
+	}
+
+	return bson.Binary{}, cannotCastError[bson.Binary]{in.Type}
+}
+
+// RawValueToStringBytes is like RawValueToString but returns the raw buffer
+// rather than allocating a new string.
+func RawValueToStringBytes(in bson.RawValue) ([]byte, error) {
+	if in.Type == bson.TypeString {
+
+		// length + trailing NUL
+		if len(in.Value) < 5 {
+			return nil, fmt.Errorf("too few bytes (%d) in BSON string", len(in.Value))
+		}
+
+		strlen := binary.LittleEndian.Uint32(in.Value)
+
+		if len(in.Value)-4 != int(strlen) {
+			return nil, fmt.Errorf("BSON string header says %d bytes but found %d", strlen, len(in.Value))
+		}
+
+		return in.Value[4 : len(in.Value)-1], nil
+	}
+
+	return nil, fmt.Errorf("expected BSON %s but found %s", bson.TypeString, in.Type)
 }
 
 // RawValueTo is a bit like bson.UnmarshalValue, but it’s much faster because
@@ -145,7 +218,8 @@ func RawValueTo[T unmarshalTargets](in bson.RawValue) (T, error) {
 	case int:
 		switch in.Type {
 		case bson.TypeInt32, bson.TypeInt64:
-			return any(int(in.AsInt64())).(T), nil
+			v, err := safecast.Convert[int](in.AsInt64())
+			return any(v).(T), err
 		}
 	case bson.Decimal128:
 		if dec, ok := in.Decimal128OK(); ok {
@@ -169,7 +243,7 @@ func RawValueTo[T unmarshalTargets](in bson.RawValue) (T, error) {
 		panic(fmt.Sprintf("Unrecognized Go type: %T (missing case?)", zero))
 	}
 
-	return zero, cannotCastError{in.Type, zero}
+	return zero, cannotCastError[T]{in.Type}
 }
 
 // ToRawValue is a bit like bson.MarshalValue, but:
