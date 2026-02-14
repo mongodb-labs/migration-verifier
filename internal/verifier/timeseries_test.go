@@ -6,6 +6,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/timeseries"
@@ -34,15 +35,32 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 			collName,
 			options.CreateCollection().SetTimeSeriesOptions(
 				options.TimeSeries().
-					SetTimeField("time"),
+					SetTimeField("time").
+					SetMetaField("sensor"),
 			),
 		),
 	)
 
+	for sensor := range 100 {
+		measurements := lo.RepeatBy(
+			2_000,
+			func(index int) bson.D {
+				return bson.D{
+					{"time", time.Now()},
+					{"sensor", sensor},
+					{"payload", testutil.RandomString(500)},
+				}
+			},
+		)
+
+		_, err := db.Collection(collName).InsertMany(ctx, measurements)
+		suite.Require().NoError(err, "must insert measurements")
+	}
+
 	collBytes, docsCount, _, err := partitions.GetSizeAndDocumentCount(
 		ctx,
 		logger.NewDebugLogger(),
-		db.Collection(collName),
+		db.Collection(bucketsCollName),
 	)
 	suite.Require().NoError(err)
 
@@ -57,6 +75,11 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 
 	verifier := suite.BuildVerifier()
 
+	// Set the verifier to natural partitioning to ensure that timeseries
+	// are ID-partitioned regardless.
+	verifier.SetPartitioningScheme(partitions.SchemeNatural)
+	verifier.SetPartitionSizeMB(1)
+
 	err = verifier.partitionCollection(
 		ctx,
 		task,
@@ -66,6 +89,27 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 		false,
 	)
 	suite.Require().NoError(err)
+
+	cursor, err := verifier.verificationTaskCollection().Find(
+		ctx,
+		bson.D{
+			{"type", tasks.VerifyDocuments},
+		},
+	)
+	suite.Require().NoError(err)
+
+	var tasks []tasks.Task
+	suite.Require().NoError(cursor.All(ctx, &tasks), "must read")
+
+	suite.Require().NotEmpty(tasks, "need tasks")
+
+	suite.Assert().Greater(len(tasks), 1, "expect multiple tasks")
+	for _, task := range tasks {
+		suite.Assert().False(
+			task.QueryFilter.Partition.Natural,
+			"must be ID-partitioned",
+		)
+	}
 }
 
 // TestTimeSeries_BucketsOnly confirms the verifier’s time-series coverage
