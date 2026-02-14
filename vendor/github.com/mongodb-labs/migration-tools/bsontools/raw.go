@@ -8,11 +8,31 @@ import (
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
+// RawLookup extracts & unmarshals a referent value from a BSON document.
+// It’s like bson.Raw.LookupErr combined with RawValueTo.
+func RawLookup[T unmarshalTargets, D ~[]byte](in D, pointer ...string) (T, error) {
+	doc := bson.Raw(in)
+
+	rv, err := doc.LookupErr(pointer...)
+
+	if err != nil {
+		return *new(T), fmt.Errorf("extracting %#q: %w", pointer, err)
+	}
+
+	val, err := RawValueTo[T](rv)
+
+	if err != nil {
+		return *new(T), fmt.Errorf("casting %#q: %w", pointer, err)
+	}
+
+	return val, err
+}
+
 // RawElements returns an iterator over a Raw’s elements.
 //
 // If the iterator returns an error but the caller continues iterating,
 // a panic will ensue.
-func RawElements(doc bson.Raw) iter.Seq2[bson.RawElement, error] {
+func RawElements[D ~[]byte](doc D) iter.Seq2[bson.RawElement, error] {
 	remaining := doc[4:]
 
 	return func(yield func(bson.RawElement, error) bool) {

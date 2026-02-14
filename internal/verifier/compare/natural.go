@@ -1,8 +1,6 @@
 package compare
 
 import (
-	"bytes"
-	"cmp"
 	"context"
 	"fmt"
 	"net/url"
@@ -295,7 +293,7 @@ cursorLoop:
 		}
 
 		if startID, has := startRecordID.Get(); has {
-			val, err := compareRawValues(recIDRV, startID)
+			val, err := bsontools.CompareRawValues(recIDRV, startID)
 			if err != nil {
 				return errors.Wrap(err, "comparing current record ID with start")
 			}
@@ -306,7 +304,7 @@ cursorLoop:
 		}
 
 		// NB: There is always an upper bound.
-		val, err := compareRawValues(recIDRV, upperRecordID)
+		val, err := bsontools.CompareRawValues(recIDRV, upperRecordID)
 		if err != nil {
 			return errors.Wrap(err, "comparing record ID with partition’s upper bound")
 		}
@@ -421,48 +419,4 @@ func openBackupNaturalCursor(
 	}
 
 	return cursor, err
-}
-
-func compareRawValues(a, b bson.RawValue) (int, error) {
-	if a.Type != b.Type {
-		return 0, fmt.Errorf("can’t compare BSON %s against %s", a.Type, b.Type)
-	}
-
-	switch a.Type {
-	case bson.TypeInt64:
-		aI64, err := bsontools.RawValueTo[int64](a)
-		if err != nil {
-			return 0, fmt.Errorf("parsing BSON %T (%s)", a.Type, a)
-		}
-
-		bI64, err := bsontools.RawValueTo[int64](b)
-		if err != nil {
-			return 0, fmt.Errorf("parsing BSON %T (%s)", b.Type, b)
-		}
-
-		return cmp.Compare(aI64, bI64), nil
-	case bson.TypeBinary:
-		aBin, err := bsontools.RawValueTo[bson.Binary](a)
-		if err != nil {
-			return 0, fmt.Errorf("parsing BSON %T (%s)", a.Type, a)
-		}
-
-		bBin, err := bsontools.RawValueTo[bson.Binary](b)
-		if err != nil {
-			return 0, fmt.Errorf("parsing BSON %T (%s)", b.Type, b)
-		}
-
-		if aBin.Subtype != bBin.Subtype {
-			return 0, errors.Wrapf(
-				err,
-				"cannot compare BSON binary subtype %d against %d",
-				aBin.Subtype,
-				bBin.Subtype,
-			)
-		}
-
-		return bytes.Compare(aBin.Data, bBin.Data), nil
-	default:
-		return 0, fmt.Errorf("can’t compare BSON %s (other type: %s)", a.Type, b.Type)
-	}
 }
