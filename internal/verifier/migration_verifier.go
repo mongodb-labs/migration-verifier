@@ -1400,6 +1400,9 @@ func (verifier *Verifier) partitionCollection(
 		return nil
 	}
 
+	// For timeseries collections we always partition by the ID since we’re
+	// actually comparing the buckets, and the buckets’ IDs should always be
+	// in roughly sequential order on disk.
 	schemeToUse := verifier.partitioningScheme
 	if strings.HasPrefix(srcColl.Name(), timeseries.BucketPrefix) {
 		schemeToUse = partitions.SchemeID

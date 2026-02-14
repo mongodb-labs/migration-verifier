@@ -158,7 +158,7 @@ func PartitionCollectionNaturalOrder(
 		return nil, errors.Wrapf(err, "parsing isMaster")
 	}
 
-	hostnameAndPort, err := bsontools.RawValueTo[string](hostnameAndPortRV)
+	hostnameAndPort, err := bsontools.RawValueToString(hostnameAndPortRV)
 	if err != nil {
 		return nil, errors.Wrapf(err, "parsing hostname in isMaster")
 	}
