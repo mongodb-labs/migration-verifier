@@ -3,6 +3,7 @@ package partitions
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/internal/logger"
@@ -10,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mmongo/cursor"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/10gen/migration-verifier/timeseries"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -39,6 +41,15 @@ func PartitionCollectionNaturalOrder(
 	idealPartitionBytes types.ByteCount,
 	subLogger *logger.Logger,
 ) (chan mo.Result[Partition], error) {
+
+	// Time-series bucket collections’ `_id`s are always auto-assigned, which
+	// means we might as well always partition them by ID.
+	lo.Assertf(
+		!strings.HasPrefix(coll.Name(), timeseries.BucketPrefix),
+		"timeseries buckets (%s) must be ID-partitioned",
+		coll.Name(),
+	)
+
 	pChan := make(chan mo.Result[Partition])
 
 	// Avoid storing a null upper limit. See architecture
