@@ -125,12 +125,9 @@ func PartitionCollectionNaturalOrder(
 			return nil, errors.Wrapf(err, "extracting record ID from resume token (%v)", curToken)
 		}
 
-		switch recIDRV.Type {
-		case bson.TypeInt64, bson.TypeBinary, bson.TypeString:
-			// All good! We recognize these record ID types.
-		default:
+		if !bsontools.GetComparableTypes().Contains(recIDRV.Type) {
 			// This likely indicates a new, unexpected collection type.
-			return nil, fmt.Errorf("unknown BSON type (%s) for record ID (%s)", recIDRV.Type, recIDRV)
+			return nil, fmt.Errorf("uncomparable BSON type (%s) for record ID (%s)", recIDRV.Type, recIDRV)
 		}
 	}
 
