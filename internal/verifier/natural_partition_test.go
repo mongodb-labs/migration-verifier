@@ -17,6 +17,7 @@ import (
 	"github.com/10gen/migration-verifier/mmongo/cursor"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
+	ts "github.com/10gen/migration-verifier/timeseries"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -242,7 +243,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 
 				collToPartition := lo.Ternary(
 					cType == timeseries,
-					coll.Database().Collection("system.buckets."+coll.Name()),
+					coll.Database().Collection(ts.BucketPrefix+coll.Name()),
 					coll,
 				)
 

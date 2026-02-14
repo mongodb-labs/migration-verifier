@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/timeseries"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -59,7 +60,7 @@ func ListAllUserNamespaces(
 					mslices.Of(namespaces.ExcludedSystemCollPrefix),
 				),
 				{
-					{"$expr", mmongo.StartsWithAgg("$name", timeseriesBucketsPrefix)},
+					{"$expr", mmongo.StartsWithAgg("$name", timeseries.BucketPrefix)},
 				},
 			}},
 		}

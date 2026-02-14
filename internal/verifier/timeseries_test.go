@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/timeseries"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -24,7 +25,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_BucketsOnly() {
 	dbName := suite.DBNameForTest()
 	db := suite.srcMongoClient.Database(dbName)
 	collName := "weather"
-	bucketsCollName := timeseriesBucketsPrefix + collName
+	bucketsCollName := timeseries.BucketPrefix + collName
 
 	suite.Require().NoError(
 		db.CreateCollection(
@@ -283,8 +284,8 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 
 	copyDocs(
 		suite.T(),
-		srcDB.Collection("system.buckets."+collName),
-		suite.dstMongoClient.Database(dbName).Collection("system.buckets."+collName),
+		srcDB.Collection(timeseries.BucketPrefix+collName),
+		suite.dstMongoClient.Database(dbName).Collection(timeseries.BucketPrefix+collName),
 	)
 
 	verifier := suite.BuildVerifier()

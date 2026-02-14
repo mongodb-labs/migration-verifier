@@ -33,6 +33,16 @@ func (m Max) MarshalBSON() ([]byte, error) {
 
 //----------------------------------------------------------------------
 
+type First [1]any
+
+var _ bson.Marshaler = First{}
+
+func (f First) MarshalBSON() ([]byte, error) {
+	return bson.Marshal(bson.D{{"$first", f[0]}})
+}
+
+// ----------------------------------------------------------------------
+
 type FirstN struct {
 	N     any
 	Input any

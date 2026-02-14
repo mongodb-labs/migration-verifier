@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/10gen/migration-verifier/agg"
+	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
@@ -311,9 +312,10 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 	collName := srcColl.Name()
 
 	value := struct {
-		Size   int64 `bson:"size"`
-		Count  int64 `bson:"count"`
-		Capped bool  `bson:"capped"`
+		Namespace string `bson:"_id"`
+		Size      int64
+		Count     int64
+		Capped    bool
 	}{}
 
 	err := retry.New().WithCallback(
@@ -330,13 +332,14 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 					// each shard) it correctly sums the counts and sizes from each shard.
 					{{"$group", bson.D{
 						{"_id", "$ns"},
-						{"count", bson.D{{"$sum", agg.Cond{
+						{"count", accum.Sum{agg.Cond{
 							If:   "$storageStats.timeseries",
 							Then: "$storageStats.timeseries.bucketCount",
 							Else: "$storageStats.count",
-						}}}},
-						{"size", bson.D{{"$sum", "$storageStats.size"}}},
-						{"capped", bson.D{{"$first", "$capped"}}}}}},
+						}}},
+						{"size", accum.Sum{"$storageStats.size"}},
+						{"capped", accum.First{"$capped"}},
+					}}},
 				}},
 				{"cursor", bson.D{}},
 			}
@@ -368,6 +371,11 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 
 	if err != nil {
 		return 0, 0, false, errors.Wrapf(err, "failed to run aggregation for $collStats for source namespace %s.%s", srcDB.Name(), collName)
+	}
+
+	// This prevents timeseries views.
+	if value.Namespace != util.FullName(srcColl) {
+		return 0, 0, false, fmt.Errorf("queried $collStats on %#q but got %#q", util.FullName(srcColl), value.Namespace)
 	}
 
 	logger.Debug().

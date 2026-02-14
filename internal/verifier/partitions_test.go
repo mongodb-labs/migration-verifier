@@ -5,6 +5,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/timeseries"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -51,13 +52,22 @@ func (suite *IntegrationTestSuite) TestGetSizeAndDocumentCount() {
 		byteSize, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
 			ctx,
 			logger.NewDebugLogger(),
-			db.Collection("system.buckets.weather"),
+			db.Collection(timeseries.BucketPrefix+"weather"),
 		)
 		suite.Require().NoError(err, "must get data")
 
 		suite.Assert().Positive(byteSize, "must have nonzero size")
 		suite.Assert().EqualValues(1, docsCount, "docs count")
 		suite.Assert().False(isCapped, "must say not capped")
+
+		// Ensure that the view triggers an error:
+		_, _, _, err = partitions.GetSizeAndDocumentCount(
+			ctx,
+			logger.NewDebugLogger(),
+			db.Collection("weather"),
+		)
+		suite.Require().Error(err, "fail on timeseries view")
+		suite.Assert().ErrorContains(err, timeseries.BucketPrefix)
 	}
 
 }
