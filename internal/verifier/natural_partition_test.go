@@ -3,13 +3,13 @@ package verifier
 import (
 	"cmp"
 	"context"
-	"math/rand/v2"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
@@ -128,16 +128,6 @@ func (suite *IntegrationTestSuite) TestFetchAndCompareAllDstDocsGone() {
 	}
 }
 
-const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-
-func randomString(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = charset[rand.IntN(len(charset))]
-	}
-	return string(b)
-}
-
 // TestNaturalPartitionSourceE2E confirms that we can partition and
 // read document correctly.
 func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
@@ -158,7 +148,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 			return bson.D{
 				{"_id", i},
 				{"time", bson.NewDateTimeFromTime(time.Now())},
-				{"str", randomString(200)},
+				{"str", testutil.RandomString(200)},
 			}
 		},
 	)

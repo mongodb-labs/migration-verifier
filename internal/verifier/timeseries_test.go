@@ -4,6 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/timeseries"
 	"github.com/samber/lo"
@@ -12,6 +15,58 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
+
+func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
+	ctx := suite.T().Context()
+
+	if suite.BuildVerifier().srcClusterInfo.VersionArray[0] < 5 {
+		suite.T().Skipf("Need a source version with time-series support.")
+	}
+
+	dbName := suite.DBNameForTest()
+	db := suite.srcMongoClient.Database(dbName)
+	collName := "weather"
+	bucketsCollName := timeseries.BucketPrefix + collName
+
+	suite.Require().NoError(
+		db.CreateCollection(
+			ctx,
+			collName,
+			options.CreateCollection().SetTimeSeriesOptions(
+				options.TimeSeries().
+					SetTimeField("time"),
+			),
+		),
+	)
+
+	collBytes, docsCount, _, err := partitions.GetSizeAndDocumentCount(
+		ctx,
+		logger.NewDebugLogger(),
+		db.Collection(collName),
+	)
+	suite.Require().NoError(err)
+
+	task := &tasks.Task{
+		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
+		Generation: 0,
+		QueryFilter: tasks.QueryFilter{
+			Namespace: dbName + "." + bucketsCollName,
+		},
+	}
+
+	verifier := suite.BuildVerifier()
+
+	err = verifier.partitionCollection(
+		ctx,
+		task,
+		0,
+		collBytes,
+		docsCount,
+		false,
+	)
+	suite.Require().NoError(err)
+}
 
 // TestTimeSeries_BucketsOnly confirms the verifier’s time-series coverage
 // when only the buckets exist. This is important when verifying shard-to-shard.
