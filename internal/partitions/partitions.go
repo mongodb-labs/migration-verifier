@@ -86,6 +86,10 @@ var Schemes = mslices.Of(
 )
 var SchemeDefault = Schemes[0]
 
+func (s Scheme) String() string {
+	return string(s)
+}
+
 // Partitions is a slice of partitions.
 type Partitions struct {
 	logger     *logger.Logger

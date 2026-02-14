@@ -28,6 +28,7 @@ import (
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/10gen/migration-verifier/timeseries"
 	"github.com/dustin/go-humanize"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/olekukonko/tablewriter"
@@ -1399,6 +1400,11 @@ func (verifier *Verifier) partitionCollection(
 		return nil
 	}
 
+	schemeToUse := verifier.partitioningScheme
+	if strings.HasPrefix(srcColl.Name(), timeseries.BucketPrefix) {
+		schemeToUse = partitions.SchemeID
+	}
+
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
@@ -1407,10 +1413,10 @@ func (verifier *Verifier) partitionCollection(
 		Int64("collectionBytes", int64(collBytes)).
 		Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
 		Float64("idealPartitionsCount", idealNumPartitions).
+		Stringer("scheme", schemeToUse).
 		Msg("Partitioning collection.")
 
-	switch verifier.partitioningScheme {
-
+	switch schemeToUse {
 	case partitions.SchemeID:
 		if verifier.srcHasSampleRate() {
 			var err error
