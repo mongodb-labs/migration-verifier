@@ -69,7 +69,8 @@ func ReadNaturalPartitionFromSource(
 
 	lo.Assertf(
 		task.QueryFilter.Partition.Natural,
-		"natural partition required",
+		"natural partition required; task: %+v",
+		task,
 	)
 
 	lowerBoundRV := task.QueryFilter.Partition.Key.Lower

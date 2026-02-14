@@ -126,7 +126,7 @@ func PartitionCollectionNaturalOrder(
 		}
 
 		switch recIDRV.Type {
-		case bson.TypeInt64, bson.TypeBinary:
+		case bson.TypeInt64, bson.TypeBinary, bson.TypeString:
 			// All good! We recognize these record ID types.
 		default:
 			// This likely indicates a new, unexpected collection type.
