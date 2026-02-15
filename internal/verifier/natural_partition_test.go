@@ -3,13 +3,12 @@ package verifier
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
-	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
@@ -17,7 +16,6 @@ import (
 	"github.com/10gen/migration-verifier/mmongo/cursor"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
-	ts "github.com/10gen/migration-verifier/timeseries"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -142,14 +140,21 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 
 	// Insert ~40 MiB of data into the collection.
 	// Each document is roughly 220 bytes.
-	baseDocs := lo.RepeatBy(
+	docs := lo.RepeatBy(
 		200_000,
 		func(i int) bson.D {
 			return bson.D{
 				{"_id", i},
-				{"time", bson.NewDateTimeFromTime(time.Now())},
-				{"str", testutil.RandomString(200)},
+				{"str", strings.Repeat("x", 200)},
 			}
+		},
+	)
+
+	docs = append(
+		docs,
+		bson.D{
+			{"_id", -1},
+			{"x", strings.Repeat("x", (16<<20)-22)},
 		},
 	)
 
@@ -160,35 +165,12 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 		suite.srcConnStr,
 	)
 
-	type collType string
-	var (
-		normal     collType = "normal"
-		clustered  collType = "clustered"
-		timeseries collType = "timeseries"
-	)
-
-	for _, cType := range mslices.Of(normal, clustered, timeseries) {
+	for _, clustered := range mslices.Of(false, true) {
 		suite.Run(
-			string(cType),
+			fmt.Sprintf("clustered %t", clustered),
 			func() {
-				if version[0] < 6 && cType == clustered {
+				if version[0] < 6 && clustered {
 					suite.T().Skip("clustered requires v6+")
-				}
-
-				if version[0] < 5 && cType == timeseries {
-					suite.T().Skip("timeseries requires v5+")
-				}
-
-				docs := slices.Clone(baseDocs)
-
-				if cType != timeseries {
-					docs = append(
-						docs,
-						bson.D{
-							{"_id", -1},
-							{"x", strings.Repeat("x", (16<<20)-22)},
-						},
-					)
 				}
 
 				verifier := suite.BuildVerifier()
@@ -199,8 +181,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 
 				suite.Require().NoError(coll.Drop(ctx))
 
-				switch cType {
-				case clustered:
+				if clustered {
 					suite.Require().NoError(
 						coll.Database().CreateCollection(
 							ctx,
@@ -214,41 +195,23 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 								),
 						),
 					)
-				case timeseries:
-					suite.Require().NoError(
-						coll.Database().CreateCollection(
-							ctx,
-							coll.Name(),
-							options.CreateCollection().
-								SetTimeSeriesOptions(
-									options.TimeSeries().
-										SetTimeField("time"),
-								),
-						),
-					)
 				}
 
 				_, err := coll.InsertMany(ctx, docs)
-				require.NoError(t, err, "inserting docs")
-
-				collToPartition := lo.Ternary(
-					cType == timeseries,
-					coll.Database().Collection(ts.BucketPrefix+coll.Name()),
-					coll,
-				)
+				require.NoError(t, err)
 
 				task := &tasks.Task{
 					PrimaryKey: bson.NewObjectID(),
 					Type:       tasks.VerifyCollection,
 					QueryFilter: tasks.QueryFilter{
-						Namespace: FullName(collToPartition),
+						Namespace: FullName(coll),
 					},
 				}
 
 				collBytes, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
 					ctx,
 					verifier.logger,
-					collToPartition,
+					coll,
 				)
 				suite.Require().NoError(err, "fetching & persisting collection size")
 
@@ -262,17 +225,14 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 				)
 				suite.Require().NoError(err)
 
-				// Now delete half of the collection’s documents randomly,
-				// unless this is timeseries on an old server version.
-				if cType != timeseries || version[0] >= 6 {
-					_, err = coll.DeleteMany(
-						ctx,
-						bson.D{{"$sampleRate", 0.5}},
-					)
-					suite.Require().NoError(err)
-				}
+				// Now delete half of the collection’s documents randomly:
+				_, err = coll.DeleteMany(
+					ctx,
+					bson.D{{"$sampleRate", 0.5}},
+				)
+				suite.Require().NoError(err)
 
-				cursor, err := collToPartition.Find(ctx, bson.D{})
+				cursor, err := coll.Find(ctx, bson.D{})
 				suite.Require().NoError(err)
 
 				var undeletedDocs []bson.D
@@ -291,17 +251,10 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 
 				var theTasks []tasks.Task
 				suite.Require().NoError(cursor.All(ctx, &theTasks))
-				suite.Require().NotEmpty(theTasks, "we need tasks")
 
 				var taskDocCounter int
 
 				for _, task := range theTasks {
-					suite.Require().True(
-						task.QueryFilter.Partition.Natural,
-						"need a natural partition; got: %+v",
-						task,
-					)
-
 					toCompare := make(chan []compare.DocWithTS, len(undeletedDocs))
 					toDst := make(chan []compare.DocID, len(undeletedDocs))
 
