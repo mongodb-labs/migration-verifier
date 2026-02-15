@@ -382,8 +382,17 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 		return 0, 0, false, fmt.Errorf("queried $collStats on %#q but got %#q", util.FullName(srcColl), value.Namespace)
 	}
 
+	// If this panics, then the aggregation logic above is wrong.
+	lo.Assertf(
+		(value.Size == 0) == (value.Count == 0),
+		"%#q: size=%d but count=%d; must be both zero or both nonzero",
+		util.FullName(srcColl),
+		value.Size,
+		value.Count,
+	)
+
 	logger.Debug().
-		Str("namespace", srcDB.Name()+"."+collName).
+		Str("namespace", util.FullName(srcColl)).
 		Str("size", reportutils.FmtBytes(value.Size)).
 		Int64("sizeInBytes", value.Size).
 		Int64("docsCount", value.Count).

@@ -73,13 +73,6 @@ func PartitionCollectionNaturalOrder(
 		return nil, errors.Wrapf(err, "getting collection size & count")
 	}
 
-	if docCount == 0 {
-		// Again: if the collection is empty, there’s no point in partitioning.
-		close(pChan)
-
-		return pChan, nil
-	}
-
 	idealNumPartitions := util.DivideToF64(collSizeInBytes, idealPartitionBytes)
 
 	// Use min() to prevent docCount==0 or some other silliness from
