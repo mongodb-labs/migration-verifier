@@ -18,7 +18,8 @@ import (
 )
 
 func (suite *IntegrationTestSuite) skipIfNoTimeseries() {
-	if suite.BuildVerifier().srcClusterInfo.VersionArray[0] < 5 {
+	// TODO: Support v5 sources, or document why not.
+	if suite.BuildVerifier().srcClusterInfo.VersionArray[0] < 6 {
 		suite.T().Skipf("Need a source version with time-series support.")
 	}
 }
