@@ -211,8 +211,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		ctx,
 		pipeline,
 		options.Aggregate().
-			SetBatchSize(1).
-			SetHint(bson.D{{"_id", 1}}),
+			SetBatchSize(1),
 	)
 	if err != nil {
 		return 0, errors.Wrapf(err, "opening %#q’s sampling cursor", srcNs)
