@@ -41,6 +41,8 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 		),
 	)
 
+	// Insert enough measurements to exceed 1 MiB, which below we set as our
+	// partition size.
 	for sensor := range 100 {
 		measurements := lo.RepeatBy(
 			2_000,
@@ -108,6 +110,36 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 		suite.Assert().False(
 			task.QueryFilter.Partition.Natural,
 			"must be ID-partitioned",
+		)
+	}
+
+	// Needed to compare docs:
+	suite.Require().NoError(verifier.startChangeHandling(ctx))
+
+	problems, srcDocs, srcBytes, err := verifier.FetchAndCompareDocuments(
+		ctx,
+		0,
+		&tasks[0],
+	)
+	suite.Require().NoError(err, "must compare OK")
+	suite.Require().NotEmpty(problems, "must find a problem")
+
+	suite.Assert().NotZero(srcDocs, "should give a nonzero doc count")
+	suite.Assert().NotZero(srcBytes, "should give a nonzero byte count")
+
+	for _, prob := range problems {
+		suite.Assert().Equal(
+			Missing,
+			prob.Details,
+			"Details in problem: %+v",
+			prob,
+		)
+
+		suite.Assert().Equal(
+			ClusterTarget,
+			prob.Cluster,
+			"Cluster in problem: %+v",
+			prob,
 		)
 	}
 }
