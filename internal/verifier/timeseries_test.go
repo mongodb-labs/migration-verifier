@@ -17,12 +17,16 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
-	ctx := suite.T().Context()
-
+func (suite *IntegrationTestSuite) skipIfNoTimeseries() {
 	if suite.BuildVerifier().srcClusterInfo.VersionArray[0] < 5 {
 		suite.T().Skipf("Need a source version with time-series support.")
 	}
+}
+
+func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
+	ctx := suite.T().Context()
+
+	suite.skipIfNoTimeseries()
 
 	dbName := suite.DBNameForTest()
 	db := suite.srcMongoClient.Database(dbName)
@@ -149,9 +153,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 func (suite *IntegrationTestSuite) TestTimeSeries_BucketsOnly() {
 	ctx := suite.Context()
 
-	if suite.BuildVerifier().srcClusterInfo.VersionArray[0] < 6 {
-		suite.T().Skipf("Need a source version with time-series support.")
-	}
+	suite.skipIfNoTimeseries()
 
 	dbName := suite.DBNameForTest()
 	db := suite.srcMongoClient.Database(dbName)
@@ -371,9 +373,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_BucketsOnly() {
 func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 	ctx := suite.Context()
 
-	if suite.BuildVerifier().srcClusterInfo.VersionArray[0] < 6 {
-		suite.T().Skipf("Need a source version with time-series support.")
-	}
+	suite.skipIfNoTimeseries()
 
 	dbName := suite.DBNameForTest()
 	collName := "weather"

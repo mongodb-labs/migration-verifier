@@ -160,7 +160,7 @@ func (p *Partition) GetQueryParameters(clusterInfo *util.ClusterInfo, filterAndP
 			lo.ToAnySlice(newPredicates)...,
 		)
 
-		params.hint = option.Some(bson.D{{"_id", 1}})
+		//params.hint = option.Some(bson.D{{"_id", 1}})
 	}
 
 	if len(filterAndPredicates) > 0 {
