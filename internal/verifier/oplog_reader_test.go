@@ -13,12 +13,16 @@ import (
 )
 
 // TestOplogReader_IgnoreMetaDDL verifies that the oplog reader ignores
-// metadata DDL.
+// metadata DDL but catches DDL on other namespaces.
 func (suite *IntegrationTestSuite) TestOplogReader_IgnoreMetaDDL() {
 	ctx := suite.Context()
 
 	verifier := suite.BuildVerifier()
-	verifier.SetVerifyAll(true)
+
+	dbName := suite.DBNameForTest()
+	verifier.SetSrcNamespaces(mslices.Of(dbName + ".coll"))
+	verifier.SetDstNamespaces(mslices.Of(dbName + ".coll"))
+	verifier.SetNamespaceMap()
 
 	if suite.GetTopology(verifier.dstClient) == util.TopologySharded {
 		suite.T().Skipf("oplog mode is only for unsharded clusters")
@@ -34,11 +38,9 @@ func (suite *IntegrationTestSuite) TestOplogReader_IgnoreMetaDDL() {
 	eg, egCtx := contextplus.ErrGroup(ctx)
 	suite.Require().NoError(reader.start(egCtx, eg))
 
-	//suite.Require().NoError(verifier.startChangeHandling(ctx))
-
 	err := verifier.dstClient.Database(verifier.metaDBName).CreateCollection(
 		ctx,
-		"failure_if_seen",
+		"must_not_be_seen",
 	)
 	suite.Require().NoError(err)
 
@@ -61,6 +63,43 @@ func (suite *IntegrationTestSuite) TestOplogReader_IgnoreMetaDDL() {
 	batch := batchOpt.MustGetf("need batch")
 
 	suite.Assert().Empty(batch.events)
+}
+
+// TestOplogReader_NSFilterDDL verifies that the oplog reader fails if it
+// finds a DDL event on the source in an out-filter namespace.
+func (suite *IntegrationTestSuite) TestOplogReader_NSFilterDDL() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+
+	dbName := suite.DBNameForTest()
+	verifier.SetSrcNamespaces(mslices.Of(dbName + ".coll"))
+	verifier.SetDstNamespaces(mslices.Of(dbName + ".coll"))
+	verifier.SetNamespaceMap()
+
+	if suite.GetTopology(verifier.dstClient) == util.TopologySharded {
+		suite.T().Skipf("oplog mode is only for unsharded clusters")
+	}
+
+	var reader changeReader = verifier.newOplogReader(
+		nil,
+		src,
+		verifier.srcClient,
+		*verifier.srcClusterInfo,
+	)
+
+	eg, egCtx := contextplus.ErrGroup(ctx)
+	suite.Require().NoError(reader.start(egCtx, eg))
+
+	err := verifier.srcClient.Database(dbName).CreateCollection(
+		ctx,
+		"out-filter-coll",
+	)
+	suite.Require().NoError(err)
+
+	err = eg.Wait()
+	suite.Require().Error(err, "must fail")
+	suite.Assert().ErrorAs(err, &UnknownEventError{})
 }
 
 // TestOplogReader_SourceDDL verifies that source DDL crashes the oplog reader.
