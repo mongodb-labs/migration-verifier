@@ -601,8 +601,6 @@ func (suite *IntegrationTestSuite) TestChangeStreamDDLError() {
 
 	err := verifierRunner.Await()
 
-	suite.T().Logf("Err: %+v", err)
-
 	suite.Require().ErrorContains(err, "drop")
 	suite.Require().ErrorContains(err, db.Name())
 	suite.Require().ErrorContains(err, "mycoll")
