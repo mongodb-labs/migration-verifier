@@ -20,7 +20,7 @@ type ParsedEvent struct {
 	ClusterTime  *bson.Timestamp                `bson:"clusterTime,omitEmpty"`
 }
 
-func (pe *ParsedEvent) String() string {
+func (pe ParsedEvent) String() string {
 	return fmt.Sprintf("{OpType: %s, namespace: %s, docID: %v, clusterTime: %v}", pe.OpType, pe.Ns, pe.DocID, pe.ClusterTime)
 }
 
