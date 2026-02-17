@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/verifier"
@@ -54,13 +55,7 @@ const (
 	pprofInterval         = "pprofInterval"
 	startFlag             = "start"
 	partitioningScheme    = "partitioningScheme"
-
-	buildVarDefaultStr = "Unknown; build with build.sh."
 )
-
-// These get set at build time, assuming use of build.sh.
-var Revision = buildVarDefaultStr
-var BuildTime = buildVarDefaultStr
 
 var logLevelStrs = lo.Map(
 	mslices.Of(
@@ -222,7 +217,7 @@ func main() {
 	app := &cli.App{
 		Name:    "migration-verifier",
 		Usage:   "verify migration correctness",
-		Version: fmt.Sprintf("%s, built at %s", Revision, BuildTime),
+		Version: fmt.Sprintf("%s, built at %s", buildvar.Revision, buildvar.BuildTime),
 		Flags:   flags,
 		Before: func(cCtx *cli.Context) error {
 			confFile := cCtx.String(configFileFlag)
@@ -324,8 +319,8 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	logger := v.GetLogger()
 
 	logger.Info().
-		Str("revision", Revision).
-		Str("buildTime", BuildTime).
+		Str("revision", buildvar.Revision).
+		Str("buildTime", buildvar.BuildTime).
 		Int("processID", os.Getpid()).
 		Msg("migration-verifier started.")
 

@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/logger"
@@ -75,8 +76,6 @@ const (
 	infoSymbol    = "\u24d8" // circled Latin small letter I
 	maybeOkSymbol = "\u2753" // heavy question mark symbol
 	notOkSymbol   = "\u2757" // heavy exclamation mark symbol
-
-	clientAppName = "Migration Verifier"
 
 	progressReportTimeWarnThreshold = 10 * time.Second
 
@@ -223,7 +222,7 @@ func (verifier *Verifier) ConfigureReadConcern(setting ReadConcernSetting) {
 }
 
 func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
-	appName := clientAppName
+	appName := buildvar.GetClientAppName()
 	opts := &options.ClientOptions{
 		AppName: &appName,
 	}
