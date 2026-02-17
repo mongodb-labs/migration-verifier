@@ -60,7 +60,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_IgnoreMetaDDL() {
 
 	batch := batchOpt.MustGetf("need batch")
 
-	suite.T().Logf("batch: %v", batch)
+	suite.Assert().Empty(batch.events)
 }
 
 // TestOplogReader_SourceDDL verifies that source DDL crashes the oplog reader.
