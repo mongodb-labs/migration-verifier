@@ -18,7 +18,8 @@ import (
 )
 
 func (suite *IntegrationTestSuite) skipIfNoTimeseries() {
-	// TODO: Support v5 sources, or document why not.
+	// NB: MongoDB 5.0 lacked a change stream for time-series buckets,
+	// so v6 is the minimum allowed version for time-series.
 	if suite.BuildVerifier().srcClusterInfo.VersionArray[0] < 6 {
 		suite.T().Skipf("Need a source version with time-series support.")
 	}
