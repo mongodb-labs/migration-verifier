@@ -3,7 +3,7 @@ package buildvar
 import "fmt"
 
 const (
-	buildVarDefaultStr = "Unknown; build with build.sh."
+	buildVarDefaultStr = "(unknown; not build with build.sh)"
 )
 
 // These get set at build time, assuming use of build.sh.
