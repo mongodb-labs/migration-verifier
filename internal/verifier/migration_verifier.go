@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
@@ -602,6 +603,9 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 	if len(problems) == 0 {
 		task.Status = tasks.Completed
 	} else {
+		// We enqueue rechecks and persist mismatches concurrently.
+		eg, egCtx := contextplus.ErrGroup(ctx)
+
 		task.Status = tasks.Failed
 		// We know we won't change lastGeneration while verification tasks are running, so no mutex needed here.
 		if verifier.lastGeneration {
@@ -634,29 +638,40 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 			// Create a task for the next generation to recheck the
 			// mismatched & missing docs.
-			err := verifier.InsertFailedCompareRecheckDocs(ctx, task.QueryFilter.Namespace, idsToRecheck, dataSizes, firstMismatchTimes)
-			if err != nil {
-				return errors.Wrapf(
-					err,
-					"failed to enqueue %d recheck(s) of mismatched documents",
-					len(idsToRecheck),
-				)
-			}
+			eg.Go(
+				func() error {
+					err := verifier.InsertFailedCompareRecheckDocs(egCtx, task.QueryFilter.Namespace, idsToRecheck, dataSizes, firstMismatchTimes)
+
+					return errors.Wrapf(
+						err,
+						"failed to enqueue %d recheck(s) of mismatched documents",
+						len(idsToRecheck),
+					)
+
+				},
+			)
 		}
 
-		err = recordMismatches(
-			ctx,
-			verifier.metaClient.Database(verifier.metaDBName),
-			task.PrimaryKey,
-			problems,
+		eg.Go(
+			func() error {
+				err := recordMismatches(
+					egCtx,
+					verifier.metaClient.Database(verifier.metaDBName),
+					task.PrimaryKey,
+					problems,
+				)
+
+				return errors.Wrapf(
+					err,
+					"recording task %s's %d discrepancies",
+					task.PrimaryKey,
+					len(problems),
+				)
+			},
 		)
-		if err != nil {
-			return errors.Wrapf(
-				err,
-				"recording task %s's %d discrepancies",
-				task.PrimaryKey,
-				len(problems),
-			)
+
+		if err := eg.Wait(); err != nil {
+			return err
 		}
 	}
 
