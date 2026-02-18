@@ -36,24 +36,31 @@ func (pe PointerTooDeepError) Error() string {
 //
 // Example usage (replaces /role/title):
 //
-//	ReplaceInRaw(&rawDoc, newRoleTitle, "role", "title")
-func ReplaceInRaw(rawRef *bson.Raw, newValue bson.RawValue, pointer ...string) (bool, error) {
-	return replaceOrRemoveInRaw(rawRef, &newValue, pointer)
+//	rawDoc, found, err = ReplaceInRaw(rawDoc, newRoleTitle, "role", "title")
+func ReplaceInRaw[T ~[]byte](raw T, newValue bson.RawValue, pointer ...string) (T, bool, error) {
+	return replaceOrRemoveInRaw(raw, &newValue, pointer)
 }
 
 // RemoveFromRaw is like ReplaceInRaw, but it removes the element.
-func RemoveFromRaw(rawRef *bson.Raw, pointer ...string) (bool, error) {
-	return replaceOrRemoveInRaw(rawRef, nil, pointer)
+//
+// Example usage (replaces /role/title):
+//
+//	rawDoc, found, err = RemoveFromRaw(rawDoc, "role", "title")
+func RemoveFromRaw[T ~[]byte](raw T, pointer ...string) (T, bool, error) {
+	return replaceOrRemoveInRaw(raw, nil, pointer)
 }
 
-func replaceOrRemoveInRaw(rawRef *bson.Raw, replacement *bson.RawValue, pointer []string) (bool, error) {
-	sizeFromHeader := int(binary.LittleEndian.Uint32(*rawRef))
+func replaceOrRemoveInRaw[T ~[]byte](raw T, replacement *bson.RawValue, pointer []string) (T, bool, error) {
+	sizeFromHeader, _, ok := bsoncore.ReadLength(raw)
+	if !ok {
+		return nil, false, fmt.Errorf("too few bytes to read BSON length")
+	}
 
 	pos := 4
-	for pos < len(*rawRef)-1 {
-		el, _, ok := bsoncore.ReadElement((*rawRef)[pos:])
+	for pos < len(raw)-1 {
+		el, _, ok := bsoncore.ReadElement(raw[pos:])
 		if !ok {
-			return false, fmt.Errorf("invalid BSON element at offset %d", pos)
+			return nil, false, fmt.Errorf("invalid BSON element at offset %d", pos)
 		}
 
 		keyBytes := el.KeyBytes()
@@ -69,21 +76,21 @@ func replaceOrRemoveInRaw(rawRef *bson.Raw, replacement *bson.RawValue, pointer 
 		bsonType := bson.Type(el[0])
 		valueSize := len(el) - len(keyBytes) - 2
 
-		var bytesAdded int
+		var bytesAdded int32
 
 		// If this is the last node in the doc pointer, then remove/replace
 		// the element.
 		if len(pointer) == 1 {
 			if replacement == nil {
-				*rawRef = slices.Delete(*rawRef, pos, valueAt+valueSize)
-				bytesAdded = -valueSize - len(keyBytes) - 2
+				raw = slices.Delete(raw, pos, valueAt+valueSize)
+				bytesAdded = int32(-valueSize - len(keyBytes) - 2)
 			} else {
-				(*rawRef)[pos] = byte(replacement.Type)
+				raw[pos] = byte(replacement.Type)
 
-				bytesAdded = len(replacement.Value) - valueSize
+				bytesAdded = int32(len(replacement.Value) - valueSize)
 
-				*rawRef = slices.Replace(
-					*rawRef,
+				raw = slices.Replace(
+					raw,
 					valueAt,
 					valueAt+valueSize,
 					replacement.Value...,
@@ -91,17 +98,22 @@ func replaceOrRemoveInRaw(rawRef *bson.Raw, replacement *bson.RawValue, pointer 
 			}
 		} else {
 			if bsonType != bson.TypeArray && bsonType != bson.TypeEmbeddedDocument {
-				return false, PointerTooDeepError{
+				return nil, false, PointerTooDeepError{
 					givenPointer:   slices.Clone(pointer),
 					elementType:    bsonType,
 					elementPointer: slices.Clone(pointer[:1]),
 				}
 			}
 
-			curDoc := (*rawRef)[valueAt:]
-			oldDocSize := int(binary.LittleEndian.Uint32(curDoc))
+			curDoc := raw[valueAt:]
+			oldDocSize, _, ok := bsoncore.ReadLength(curDoc)
+			if !ok {
+				return nil, false, fmt.Errorf("old embedded doc too short to read length")
+			}
 
-			found, err := replaceOrRemoveInRaw(&curDoc, replacement, pointer[1:])
+			var found bool
+			var err error
+			curDoc, found, err = replaceOrRemoveInRaw(curDoc, replacement, pointer[1:])
 			if err != nil {
 				var pe PointerTooDeepError
 				if errors.As(err, &pe) {
@@ -114,28 +126,31 @@ func replaceOrRemoveInRaw(rawRef *bson.Raw, replacement *bson.RawValue, pointer 
 						pe.elementPointer...,
 					)
 
-					return false, pe
+					return raw, false, pe
 				}
 			}
 
 			if !found {
-				return false, nil
+				return raw, false, nil
 			}
 
-			newDocSize := int(binary.LittleEndian.Uint32(curDoc))
+			newDocSize, _, ok := bsoncore.ReadLength(curDoc)
+			if !ok {
+				return nil, false, fmt.Errorf("new embedded doc too short to read length")
+			}
 
 			bytesAdded = newDocSize - oldDocSize
 
-			*rawRef = append(
-				(*rawRef)[:valueAt],
+			raw = append(
+				raw[:valueAt],
 				curDoc...,
 			)
 		}
 
-		binary.LittleEndian.PutUint32(*rawRef, uint32(sizeFromHeader+bytesAdded))
+		binary.LittleEndian.PutUint32(raw, uint32(sizeFromHeader+bytesAdded))
 
-		return true, nil
+		return raw, true, nil
 	}
 
-	return false, nil
+	return raw, false, nil
 }

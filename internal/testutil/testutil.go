@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"log"
+	mrand "math/rand/v2"
 	"testing"
 
 	"github.com/10gen/migration-verifier/internal/util"
@@ -212,4 +213,14 @@ func KillApplicationChangeStreams(
 	}
 
 	return nil
+}
+
+const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+func RandomString(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = charset[mrand.IntN(len(charset))]
+	}
+	return string(b)
 }
