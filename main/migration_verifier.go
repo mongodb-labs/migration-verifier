@@ -16,8 +16,8 @@ import (
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/verifier"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
-	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-tools/mongotools"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -327,7 +327,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	logConfig(cCtx, logger)
 
 	srcConnStr := cCtx.String(srcURI)
-	_, srcConnStr, err := mmongo.MaybeAddDirectConnection(srcConnStr)
+	_, srcConnStr, err := mongotools.MaybeAddDirectConnection(srcConnStr)
 	if err != nil {
 		return nil, errors.Wrap(err, "parsing source connection string")
 	}
@@ -337,7 +337,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 
 	dstConnStr := cCtx.String(dstURI)
-	_, dstConnStr, err = mmongo.MaybeAddDirectConnection(dstConnStr)
+	_, dstConnStr, err = mongotools.MaybeAddDirectConnection(dstConnStr)
 	if err != nil {
 		return nil, errors.Wrap(err, "parsing destination connection string")
 	}
@@ -347,7 +347,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 
 	metaConnStr := cCtx.String(metaURI)
-	_, metaConnStr, err = mmongo.MaybeAddDirectConnection(metaConnStr)
+	_, metaConnStr, err = mongotools.MaybeAddDirectConnection(metaConnStr)
 	if err != nil {
 		return nil, errors.Wrap(err, "parsing metadata connection string")
 	}
