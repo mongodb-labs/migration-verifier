@@ -17,6 +17,7 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/mongodb-labs/migration-tools/mongotools"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -294,7 +295,7 @@ cursorLoop:
 		}
 
 		if startID, has := startRecordID.Get(); has {
-			val, err := bsontools.CompareRawValues(recIDRV, startID)
+			val, err := mongotools.CompareRecordIDs(recIDRV, startID)
 			if err != nil {
 				return errors.Wrap(err, "comparing current record ID with start")
 			}
@@ -305,7 +306,7 @@ cursorLoop:
 		}
 
 		// NB: There is always an upper bound.
-		val, err := bsontools.CompareRawValues(recIDRV, upperRecordID)
+		val, err := mongotools.CompareRecordIDs(recIDRV, upperRecordID)
 		if err != nil {
 			return errors.Wrap(err, "comparing record ID with partition’s upper bound")
 		}
