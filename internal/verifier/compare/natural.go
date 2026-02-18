@@ -32,7 +32,7 @@ func SetDirectHostInConnectionString(connstr, hostname string) (string, error) {
 
 	parsedURI.Host = hostname
 
-	_, connstr, err = mmongo.MaybeAddDirectConnection(parsedURI.String())
+	_, connstr, err = mongotools.MaybeAddDirectConnection(parsedURI.String())
 	if err != nil {
 		return "", errors.Wrapf(err, "tweaking connection string to %#q to ensure direct connection", parsedURI.Host)
 	}
