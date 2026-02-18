@@ -1,4 +1,4 @@
-package mmongo
+package mongotools
 
 import (
 	"fmt"
@@ -14,7 +14,7 @@ import (
 //   - The connection string lacks parameters that contraindicate a
 //     direct connection.
 //
-// This logic mimics mongosh’s behavior. See:
+// This mimics mongosh’s behavior. See:
 // https://github.com/mongodb-js/mongosh/blob/fea739edfa86edc2a60756d9a9d478f87d94ddda/packages/arg-parser/src/uri-generator.ts#L308
 func MaybeAddDirectConnection(in string) (bool, string, error) {
 	cs, err := connstring.ParseAndValidate(in)

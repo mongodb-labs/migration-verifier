@@ -3,7 +3,6 @@ package bsontools
 import (
 	"bytes"
 	"cmp"
-	"fmt"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -52,8 +51,9 @@ func CompareStrings(a, b bson.RawValue) (int, error) {
 	return bytes.Compare(aGo, bGo), nil
 }
 
-// CompareBinaries compares two BSON binary strings.
-// Their subtypes MUST match.
+// CompareBinaries compares two BSON binary strings per [BSON sort order].
+//
+// [BSON sort order]: https://www.mongodb.com/docs/manual/reference/bson-type-comparison-order/
 func CompareBinaries(a, b bson.RawValue) (int, error) {
 	aGo, err := RawValueToBinary(a)
 	if err != nil {
@@ -65,20 +65,13 @@ func CompareBinaries(a, b bson.RawValue) (int, error) {
 		return 0, err
 	}
 
+	if ret := cmp.Compare(len(aGo.Data), len(bGo.Data)); ret != 0 {
+		return ret, nil
+	}
+
+	if ret := cmp.Compare(aGo.Subtype, bGo.Subtype); ret != 0 {
+		return ret, nil
+	}
+
 	return bytes.Compare(aGo.Data, bGo.Data), nil
-}
-
-// CompareRawValues is a convenience around this package’s per-type comparison
-// functions.
-func CompareRawValues(a, b bson.RawValue) (int, error) {
-	if a.Type != b.Type {
-		return 0, fmt.Errorf("can’t compare BSON %s against %s", a.Type, b.Type)
-	}
-
-	comparator, ok := comparatorByType[a.Type]
-	if !ok {
-		return 0, fmt.Errorf("can’t compare BSON %s", a.Type)
-	}
-
-	return comparator(a, b)
 }
