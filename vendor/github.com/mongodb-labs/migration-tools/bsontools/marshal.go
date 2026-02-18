@@ -11,11 +11,11 @@ import (
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
-// MarshalD marshals a bson.D to raw BSON, yielding the same result as
+// MarshalD marshals a bson.D to BSON, yielding the same result as
 // bson.Marshal(). This avoids reflection, though, which significantly
-// reduces CPU load. It also marshals to a preexisting buffer, which lets
+// reduces CPU load. It can also marshal to a preexisting buffer, which lets
 // you minimize GC churn.
-func MarshalD(buf []byte, d bson.D) (bson.Raw, error) {
+func MarshalD[T ~[]byte](buf T, d bson.D) (bson.Raw, error) {
 	sizeAt := len(buf)
 
 	buf = append(buf, 0, 0, 0, 0)
@@ -33,11 +33,11 @@ func MarshalD(buf []byte, d bson.D) (bson.Raw, error) {
 
 	binary.LittleEndian.PutUint32(buf[sizeAt:], uint32(len(buf[sizeAt:])))
 
-	return buf, nil
+	return bson.Raw(buf), nil
 }
 
 // MarshalA is like MarshalD but for a bson.A.
-func MarshalA(buf []byte, a bson.A) (bson.RawArray, error) {
+func MarshalA[T ~[]byte](buf T, a bson.A) (bson.RawArray, error) {
 	sizeAt := len(buf)
 
 	buf = append(buf, 0, 0, 0, 0)
@@ -57,7 +57,7 @@ func MarshalA(buf []byte, a bson.A) (bson.RawArray, error) {
 
 	binary.LittleEndian.PutUint32(buf[sizeAt:], uint32(len(buf[sizeAt:])))
 
-	return buf, nil
+	return bson.RawArray(buf), nil
 }
 
 func marshalEl(buf []byte, key string, val any) ([]byte, error) {
