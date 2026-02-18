@@ -2,6 +2,7 @@ package mmongo
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
@@ -29,15 +30,20 @@ func MaybeAddDirectConnection(in string) (bool, string, error) {
 		return false, "", fmt.Errorf("connection string has no hosts?? (%#q)", in)
 	case 1:
 		if cs.ReplicaSet == "" && !cs.DirectConnectionSet && !cs.LoadBalancedSet {
-			if !strings.Contains(in, "?") {
-				if cs.Database == "" {
-					in += "/"
-				}
-
-				in += "?"
+			uri, err := url.ParseRequestURI(in)
+			if err != nil {
+				return false, "", fmt.Errorf("parsing connection string (%s) as URI: %w", in, err)
 			}
 
-			in += "directConnection=true"
+			if !strings.HasSuffix(uri.Path, "/") {
+				uri.Path += "/"
+			}
+
+			query := uri.Query()
+			query.Add("directConnection", "true")
+			uri.RawQuery = query.Encode()
+
+			in = uri.String()
 
 			added = true
 		}
