@@ -19,7 +19,7 @@ func TestMaybeAddDirectConnection(t *testing.T) {
 		changed, got, err := MaybeAddDirectConnection(cur[0])
 		require.NoError(t, err, "in: %#q", cur[0])
 
-		assert.Equal(t, cur[0] == cur[1], changed, "changed-ness")
+		assert.Equal(t, cur[0] != cur[1], changed, "changed-ness")
 		assert.Equal(t, cur[1], got, "check expected")
 	}
 }
