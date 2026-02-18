@@ -7,6 +7,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/retry"
@@ -528,7 +529,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 
 	client, err := mongo.Connect(options.Client().
 		ApplyURI(connstr).
-		SetAppName(clientAppName),
+		SetAppName(buildvar.GetClientAppName()),
 	)
 	if err != nil {
 		return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")

@@ -80,8 +80,6 @@ github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd h1:TRLaZ9cD/w
 github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=
 github.com/modern-go/reflect2 v1.0.2 h1:xBagoLtFs94CBntxluKeaWgTMpvLxC4ur3nMaC9Gz0M=
 github.com/modern-go/reflect2 v1.0.2/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=
-github.com/mongodb-labs/migration-tools v0.0.0-20260218134246-8dbd3aa3d02c h1:xkIF+BRVDqunveaLVn2+W3BZ8yov8y+FtBVytjCEUMA=
-github.com/mongodb-labs/migration-tools v0.0.0-20260218134246-8dbd3aa3d02c/go.mod h1:gy34Cvg9pf4shOm9SxnQn8kuVsM0ZJjALexKdfCDDVA=
 github.com/mongodb-labs/migration-tools v0.0.0-20260218150938-2b84594a3fb4 h1:zAcGqazEuyaNH77kMnq4FZqRkqS0I3/NTYVLQE7hScw=
 github.com/mongodb-labs/migration-tools v0.0.0-20260218150938-2b84594a3fb4/go.mod h1:gy34Cvg9pf4shOm9SxnQn8kuVsM0ZJjALexKdfCDDVA=
 github.com/olekukonko/tablewriter v0.0.5 h1:P2Ga83D34wi1o9J6Wh1mRuqd4mF/x/lgBS7N7AbDhec=
