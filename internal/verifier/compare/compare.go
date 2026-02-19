@@ -2,9 +2,9 @@ package compare
 
 import (
 	"math"
-	"slices"
 
 	pool "github.com/libp2p/go-buffer-pool"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -13,12 +13,9 @@ const (
 	// to the comparator thread at once.
 	ToComparatorBatchSize = 100
 
-	// ToComparatorByteLimit is the max # of bytes that readers send to
-	// the comparator thread at once.
-	ToComparatorByteLimit = 32 << 20
-
-	// Only retain buffers under this byte limit.
-	poolSizeThreshold = 100_000
+	// ToComparatorByteLimit is the max # of bytes that readers send to the
+	// comparator thread at once.
+	ToComparatorByteLimit = 32 << 20 //  2 cursors’ worth of data
 )
 
 func ToComparatorBatchCount(totalDocs int) int {
@@ -53,10 +50,18 @@ func NewDocIDFromPool(rv bson.RawValue) DocID {
 	return docID
 }
 
-// Done allows reuse of the underlying buffer.
-// It’s a no-op on structs not created with NewDocWithTSFromPool.
-func (d DocID) Done() {
-	if d.fromPool && len(d.ID.Value) > 0 {
+// PutInPool puts the underlying buffer into the buffer pool.
+// Call this on all pool-created structs once you finish with them.
+//
+// If the struct was not created with NewDocIDFromPool, this panics.
+func (d DocID) PutInPool() {
+	lo.Assertf(
+		d.fromPool,
+		"BackToPool() called on non-pool %T",
+		d,
+	)
+
+	if len(d.ID.Value) > 0 {
 		pool.Put(d.ID.Value)
 	}
 }
@@ -74,14 +79,8 @@ type DocWithTS struct {
 //
 // Once done with this struct, callers should call PutInPool() on it.
 func NewDocWithTSFromPool(doc bson.Raw, ts bson.Timestamp) DocWithTS {
-	var copiedDoc []byte
-
-	if len(doc) <= poolSizeThreshold {
-		copiedDoc = pool.Get(len(doc))
-		copy(copiedDoc, doc)
-	} else {
-		copiedDoc = slices.Clone(doc)
-	}
+	copiedDoc := pool.Get(len(doc))
+	copy(copiedDoc, doc)
 
 	return DocWithTS{
 		Doc:      copiedDoc,
@@ -90,10 +89,16 @@ func NewDocWithTSFromPool(doc bson.Raw, ts bson.Timestamp) DocWithTS {
 	}
 }
 
-// Done allows reuse of the underlying buffer.
-// It’s a no-op on structs not created with NewDocWithTSFromPool.
-func (d DocWithTS) Done() {
-	if d.fromPool && len(d.Doc) <= poolSizeThreshold {
-		pool.Put(d.Doc)
-	}
+// PutInPool puts the underlying buffer into the buffer pool.
+// Call this on all pool-created structs once you finish with them.
+//
+// If the struct was not created with NewDocWithTSFromPool, this panics.
+func (d DocWithTS) PutInPool() {
+	lo.Assertf(
+		d.fromPool,
+		"BackToPool() called on non-pool %T",
+		d,
+	)
+
+	pool.Put(d.Doc)
 }
