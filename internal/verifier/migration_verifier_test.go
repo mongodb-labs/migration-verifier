@@ -1096,13 +1096,13 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 	)
 	suite.Require().NoError(err)
 
-	notifier := &MockSuccessNotifier{}
+	notifier := &testutil.MockSuccessNotifier{}
 
 	verifier.generation++
 
 	suite.Require().NoError(verifier.GenerateRecheckTasks(ctx, notifier))
 
-	suite.Assert().Len(notifier.messages, 1)
+	suite.Assert().Len(notifier.Messages(), 1)
 
 	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
 	suite.Require().NoError(err)
@@ -1398,14 +1398,14 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 		"PersistChangeEvents should panic if it gets an unknown optype",
 	)
 
-	notifier := &MockSuccessNotifier{}
+	notifier := &testutil.MockSuccessNotifier{}
 
 	verifier.generation++
 
 	err = verifier.GenerateRecheckTasks(ctx, notifier)
 	suite.Require().NoError(err)
 
-	suite.Assert().Len(notifier.messages, 1)
+	suite.Assert().Len(notifier.Messages(), 1)
 
 	var doc bson.M
 	cur, err := verifier.verificationTaskCollection().Find(ctx, bson.M{"generation": 1})
