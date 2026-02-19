@@ -2,9 +2,9 @@ package compare
 
 import (
 	"math"
+	"slices"
 
 	pool "github.com/libp2p/go-buffer-pool"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -52,13 +52,7 @@ func NewDocIDFromPool(rv bson.RawValue) DocID {
 // Done allows reuse of the underlying buffer.
 // It’s a no-op on structs not created with NewDocWithTSFromPool.
 func (d DocID) Done() {
-	lo.Assertf(
-		d.fromPool,
-		"BackToPool() called on non-pool %T",
-		d,
-	)
-
-	if len(d.ID.Value) > 0 {
+	if d.fromPool && len(d.ID.Value) > 0 {
 		pool.Put(d.ID.Value)
 	}
 }
@@ -76,8 +70,14 @@ type DocWithTS struct {
 //
 // Once done with this struct, callers should call PutInPool() on it.
 func NewDocWithTSFromPool(doc bson.Raw, ts bson.Timestamp) DocWithTS {
-	copiedDoc := pool.Get(len(doc))
-	copy(copiedDoc, doc)
+	var copiedDoc []byte
+
+	if len(doc) <= poolSizeThreshold {
+		copiedDoc = pool.Get(len(doc))
+		copy(copiedDoc, doc)
+	} else {
+		copiedDoc = slices.Clone(doc)
+	}
 
 	return DocWithTS{
 		Doc:      copiedDoc,
