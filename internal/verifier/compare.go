@@ -222,8 +222,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 		// After the below we’ll be done with these documents, so we can
 		// schedule putting their buffers into the memory pool.
-		defer curDocWithTS.PutInPool()
-		defer theirDocWithTS.PutInPool()
+		defer curDocWithTS.Done()
+		defer theirDocWithTS.Done()
 
 		// Now we determine which document came from whom.
 		var srcDoc, dstDoc compare.DocWithTS
@@ -436,7 +436,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 			},
 		)
 
-		docWithTS.PutInPool()
+		docWithTS.Done()
 	}
 
 	for _, docWithTS := range dstCache {
@@ -458,7 +458,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 			},
 		)
 
-		docWithTS.PutInPool()
+		docWithTS.Done()
 	}
 
 	verifier.docsComparedHistory.Add(curHistoryDocCount)
@@ -624,7 +624,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			)
 
 			for _, id := range docIDs {
-				id.PutInPool()
+				id.Done()
 			}
 
 			if err != nil {

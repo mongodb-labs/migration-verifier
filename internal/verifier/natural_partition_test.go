@@ -593,11 +593,11 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 
 							defer func() {
 								for _, c := range compared {
-									c.PutInPool()
+									c.Done()
 								}
 
 								for _, d := range dstFetches {
-									d.PutInPool()
+									d.Done()
 								}
 							}()
 
@@ -689,11 +689,11 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 
 							defer func() {
 								for _, c := range compared {
-									c.PutInPool()
+									c.Done()
 								}
 
 								for _, d := range dstFetches {
-									d.PutInPool()
+									d.Done()
 								}
 							}()
 
@@ -787,11 +787,11 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 
 							defer func() {
 								for _, c := range compared {
-									c.PutInPool()
+									c.Done()
 								}
 
 								for _, d := range dstFetches {
-									d.PutInPool()
+									d.Done()
 								}
 							}()
 
@@ -888,11 +888,11 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 
 							defer func() {
 								for _, c := range compared {
-									c.PutInPool()
+									c.Done()
 								}
 
 								for _, d := range dstFetches {
-									d.PutInPool()
+									d.Done()
 								}
 							}()
 
