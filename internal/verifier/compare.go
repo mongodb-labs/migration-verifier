@@ -823,7 +823,7 @@ func iterateCursorToChannel(
 		panic("need a session")
 	}
 
-	var docsFlushed int
+	var docsCount int
 	var bytesEnqueued types.ByteCount
 
 	var docsWithTSCache []compare.DocWithTS
@@ -850,8 +850,6 @@ func iterateCursorToChannel(
 			reportutils.FmtBytes(bytesEnqueued),
 		)
 
-		docsFlushed += len(docsWithTSCache)
-
 		docsWithTSCache = docsWithTSCache[:0]
 		bytesEnqueued = 0
 
@@ -860,6 +858,8 @@ func iterateCursorToChannel(
 
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
+
+		docsCount++
 
 		clusterTime, err := util.GetClusterTimeFromSession(sess)
 		if err != nil {
@@ -897,7 +897,7 @@ func iterateCursorToChannel(
 		}
 	}
 
-	return docsFlushed, nil
+	return docsCount, nil
 }
 
 func getMapKey(buf []byte, docKeyValues []bson.RawValue) string {
