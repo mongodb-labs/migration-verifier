@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -835,10 +836,19 @@ func iterateCursorToChannel(
 		)
 
 		if err != nil {
-			return errors.Wrapf(err, "sending %d documents to compare thread", len(docsWithTSCache))
+			return errors.Wrapf(
+				err,
+				"sending %d documents (%s) to compare thread",
+				len(docsWithTSCache),
+				reportutils.FmtBytes(bytesEnqueued),
+			)
 		}
 
-		state.NoteSuccess("sent %d documents to compare thread", len(docsWithTSCache))
+		state.NoteSuccess(
+			"sent %d documents (%s) to compare thread",
+			len(docsWithTSCache),
+			reportutils.FmtBytes(bytesEnqueued),
+		)
 
 		docsFlushed += len(docsWithTSCache)
 
