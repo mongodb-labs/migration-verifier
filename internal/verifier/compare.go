@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"math"
@@ -10,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -639,7 +641,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				Int("idsInQuery", len(docIDs)).
 				Msg("Iterating dst cursor.")
 
-			dstDocsFound, err := compare.IterateCursorToChannel(
+			dstDocsFound, err := iterateCursorToChannel(
 				sctx,
 				state,
 				cursor.NewAbstract(theCursor),
@@ -755,7 +757,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 		if err == nil {
 			state.NoteSuccess("opened src find cursor")
 
-			_, err = compare.IterateCursorToChannel(
+			_, err = iterateCursorToChannel(
 				sctx,
 				state,
 				cursor.NewAbstract(theCursor),
@@ -766,6 +768,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				err,
 				"failed to read source documents",
 			)
+
+			close(srcChannel)
 		} else {
 			err = errors.Wrap(
 				err,
@@ -797,7 +801,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 		if err == nil {
 			state.NoteSuccess("opened dst find cursor")
 
-			_, err = compare.IterateCursorToChannel(
+			_, err = iterateCursorToChannel(
 				sctx,
 				state,
 				cursor.NewAbstract(theCursor),
@@ -820,6 +824,97 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 	}
 
 	return srcChannel, dstChannel, readSrcCallback, readDstCallback
+}
+
+// iterateCursorToChannel returns the # of documents sent to the channel.
+//
+// NB: This DOES NOT close the given channel.
+func iterateCursorToChannel(
+	sctx context.Context,
+	state retry.SuccessNotifier,
+	cursor cursor.Abstract,
+	writer chan<- []compare.DocWithTS,
+) (int, error) {
+	sess := mongo.SessionFromContext(sctx)
+	if sess == nil {
+		panic("need a session")
+	}
+
+	var docsCount int
+	var bytesEnqueued types.ByteCount
+
+	var docsWithTSCache []compare.DocWithTS
+
+	flush := func() error {
+		err := chanutil.WriteWithDoneCheck(
+			sctx,
+			writer,
+			slices.Clone(docsWithTSCache),
+		)
+
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"sending %d documents (%s) to compare thread",
+				len(docsWithTSCache),
+				reportutils.FmtBytes(bytesEnqueued),
+			)
+		}
+
+		state.NoteSuccess(
+			"sent %d documents (%s) to compare thread",
+			len(docsWithTSCache),
+			reportutils.FmtBytes(bytesEnqueued),
+		)
+
+		docsWithTSCache = docsWithTSCache[:0]
+		bytesEnqueued = 0
+
+		return nil
+	}
+
+	for cursor.Next(sctx) {
+		state.NoteSuccess("received a document")
+
+		docsCount++
+
+		clusterTime, err := util.GetClusterTimeFromSession(sess)
+		if err != nil {
+			return 0, errors.Wrap(err, "reading cluster time from session")
+		}
+
+		needFlush := cmp.Or(
+			len(docsWithTSCache) == compare.ToComparatorBatchSize,
+			int(bytesEnqueued)+len(cursor.Current()) > compare.ToComparatorByteLimit,
+		)
+
+		if needFlush {
+			if err := flush(); err != nil {
+				return 0, err
+			}
+		}
+
+		docsWithTSCache = append(
+			docsWithTSCache,
+			compare.NewDocWithTSFromPool(cursor.Current(), clusterTime),
+		)
+
+		bytesEnqueued += types.ByteCount(len(cursor.Current()))
+	}
+
+	if cursor.Err() != nil {
+		return 0, errors.Wrap(cursor.Err(), "failed to iterate cursor")
+	}
+
+	state.NoteSuccess("exhausted cursor")
+
+	if len(docsWithTSCache) > 0 {
+		if err := flush(); err != nil {
+			return 0, err
+		}
+	}
+
+	return docsCount, nil
 }
 
 func getMapKey(buf []byte, docKeyValues []bson.RawValue) string {

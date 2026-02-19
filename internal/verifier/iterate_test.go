@@ -47,7 +47,7 @@ func (s *IntegrationTestSuite) TestIterateCursorToChannel() {
 	theCursor, err := coll.Find(sctx, bson.D{})
 	s.Require().NoError(err)
 
-	docsSent, err := compare.IterateCursorToChannel(
+	docsSent, err := iterateCursorToChannel(
 		sctx,
 		&testutil.MockSuccessNotifier{},
 		cursor.NewAbstract(theCursor),
