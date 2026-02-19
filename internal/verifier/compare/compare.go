@@ -13,6 +13,10 @@ const (
 	// to the comparator thread at once.
 	ToComparatorBatchSize = 100
 
+	// ToComparatorByteLimit is the max # of bytes that readers send to
+	// the comparator thread at once.
+	ToComparatorByteLimit = 32 << 20
+
 	// Only retain buffers under this byte limit.
 	poolSizeThreshold = 100_000
 )

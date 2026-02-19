@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"math"
@@ -821,7 +822,8 @@ func iterateCursorToChannel(
 		panic("need a session")
 	}
 
-	docsCount := 0
+	var docsFlushed int
+	var bytesEnqueued types.ByteCount
 
 	var docsWithTSCache []compare.DocWithTS
 
@@ -838,7 +840,10 @@ func iterateCursorToChannel(
 
 		state.NoteSuccess("sent %d documents to compare thread", len(docsWithTSCache))
 
+		docsFlushed += len(docsWithTSCache)
+
 		docsWithTSCache = docsWithTSCache[:0]
+		bytesEnqueued = 0
 
 		return nil
 	}
@@ -846,11 +851,20 @@ func iterateCursorToChannel(
 	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
 
-		docsCount++
-
 		clusterTime, err := util.GetClusterTimeFromSession(sess)
 		if err != nil {
 			return 0, errors.Wrap(err, "reading cluster time from session")
+		}
+
+		needFlush := cmp.Or(
+			len(docsWithTSCache) == compare.ToComparatorBatchSize,
+			int(bytesEnqueued)+len(cursor.Current) > compare.ToComparatorByteLimit,
+		)
+
+		if needFlush {
+			if err := flush(); err != nil {
+				return 0, err
+			}
 		}
 
 		docsWithTSCache = append(
@@ -858,11 +872,7 @@ func iterateCursorToChannel(
 			compare.NewDocWithTSFromPool(cursor.Current, clusterTime),
 		)
 
-		if len(docsWithTSCache) == compare.ToComparatorBatchSize {
-			if err := flush(); err != nil {
-				return 0, err
-			}
-		}
+		bytesEnqueued += types.ByteCount(len(cursor.Current))
 	}
 
 	if cursor.Err() != nil {
@@ -877,7 +887,7 @@ func iterateCursorToChannel(
 		}
 	}
 
-	return docsCount, nil
+	return docsFlushed, nil
 }
 
 func getMapKey(buf []byte, docKeyValues []bson.RawValue) string {
