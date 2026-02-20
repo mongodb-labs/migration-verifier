@@ -280,13 +280,13 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 			)
 			suite.Require().NoError(err)
 
-			notifier := &MockSuccessNotifier{}
+			notifier := &testutil.MockSuccessNotifier{}
 
 			verifier.generation++
 			err = verifier.GenerateRecheckTasks(ctx, notifier)
 			suite.Require().NoError(err)
 
-			suite.Assert().Len(notifier.messages, 1)
+			suite.Assert().Len(notifier.Messages(), 1)
 
 			tasks := fetchVerifierCurrentTasks(ctx, suite.T(), verifier)
 			suite.Require().Len(tasks, 1)
@@ -348,13 +348,13 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 				cb()
 			}
 
-			notifier := &MockSuccessNotifier{}
+			notifier := &testutil.MockSuccessNotifier{}
 
 			verifier.generation++
 			err := verifier.GenerateRecheckTasks(ctx, notifier)
 			suite.Require().NoError(err)
 
-			suite.Assert().Len(notifier.messages, 1)
+			suite.Assert().Len(notifier.Messages(), 1)
 
 			tasks := fetchVerifierCurrentTasks(ctx, suite.T(), verifier)
 			suite.Require().Len(tasks, 1)
@@ -396,13 +396,13 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 
 	verifier.generation++
 
-	notifier := &MockSuccessNotifier{}
+	notifier := &testutil.MockSuccessNotifier{}
 
 	suite.T().Logf("Generating recheck tasks …")
 	err = verifier.GenerateRecheckTasks(ctx, notifier)
 	suite.Require().NoError(err)
 
-	suite.Assert().NotEmpty(notifier.messages)
+	suite.Assert().NotEmpty(notifier.Messages())
 }
 
 func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
@@ -436,14 +436,14 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.Assert().ElementsMatch([]any{d1, d2, d3}, results)
 
-	notifier := &MockSuccessNotifier{}
+	notifier := &testutil.MockSuccessNotifier{}
 
 	verifier.generation++
 	err = verifier.GenerateRecheckTasks(ctx, notifier)
 	suite.Require().NoError(err)
 
 	// Here we expect each task to be inserted separately due to size.
-	suite.Assert().Len(notifier.messages, 3)
+	suite.Assert().Len(notifier.Messages(), 3)
 
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -525,13 +525,13 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	results := suite.fetchRecheckDocs(ctx, verifier)
 	suite.ElementsMatch([]any{d1, d2, d3}, results)
 
-	notifier := &MockSuccessNotifier{}
+	notifier := &testutil.MockSuccessNotifier{}
 
 	verifier.generation++
 	err = verifier.GenerateRecheckTasks(ctx, notifier)
 	suite.Require().NoError(err)
 
-	suite.Assert().Len(notifier.messages, 1)
+	suite.Assert().Len(notifier.Messages(), 1)
 
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))
@@ -587,13 +587,13 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 	err = insertRecheckDocs(ctx, verifier, "testDB2", "testColl2", ids, dataSizes)
 	suite.Require().NoError(err)
 
-	notifier := &MockSuccessNotifier{}
+	notifier := &testutil.MockSuccessNotifier{}
 
 	verifier.generation++
 	err = verifier.GenerateRecheckTasks(ctx, notifier)
 	suite.Require().NoError(err)
 
-	suite.Assert().Len(notifier.messages, 1)
+	suite.Assert().Len(notifier.Messages(), 1)
 
 	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
 	cursor, err := taskColl.Find(ctx, bson.D{}, options.Find().SetProjection(bson.D{{"_id", 0}}))

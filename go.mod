@@ -1,10 +1,10 @@
 module github.com/10gen/migration-verifier
 
-go 1.24.0
+go 1.25.4
 
 require (
 	github.com/cespare/permute/v2 v2.0.0-beta2
-	github.com/deckarep/golang-set/v2 v2.3.0
+	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gin-contrib/pprof v1.5.3
 	github.com/gin-gonic/gin v1.10.0
@@ -23,17 +23,18 @@ require (
 
 	// NB: This is the last driver version that supported 4.0.
 	go.mongodb.org/mongo-driver/v2 v2.5.0
-	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
-	golang.org/x/sync v0.18.0
+	golang.org/x/exp v0.0.0-20260211191109-2735e65f0518
+	golang.org/x/sync v0.19.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
-require github.com/mongodb-labs/migration-tools v0.0.0-20260206045746-a88899c9f1a9
+require github.com/mongodb-labs/migration-tools v0.0.0-20260220020807-132028526517
 
 require (
 	github.com/BurntSushi/toml v0.3.1 // indirect
 	github.com/bytedance/sonic v1.13.2 // indirect
 	github.com/bytedance/sonic/loader v0.2.4 // indirect
+	github.com/ccoveille/go-safecast/v2 v2.0.0 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect

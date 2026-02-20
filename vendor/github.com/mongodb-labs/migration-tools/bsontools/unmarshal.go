@@ -6,8 +6,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// UnmarshalRaw mimics bson.Unmarshal to a bson.D.
-func UnmarshalRaw[D ~[]byte](raw D) (bson.D, error) {
+// UnmarshalToD mimics bson.Unmarshal to a bson.D.
+func UnmarshalToD[D ~[]byte](raw D) (bson.D, error) {
 	elsCount := 0
 
 	for _, err := range RawElements(raw) {
@@ -91,7 +91,7 @@ func unmarshalValue(val bson.RawValue) (any, error) {
 	case bson.TypeString:
 		return RawValueTo[string](val)
 	case bson.TypeEmbeddedDocument:
-		tVal, err := UnmarshalRaw(val.Value)
+		tVal, err := UnmarshalToD(val.Value)
 		if err != nil {
 			return nil, fmt.Errorf("unmarshaling subdoc: %w", err)
 		}

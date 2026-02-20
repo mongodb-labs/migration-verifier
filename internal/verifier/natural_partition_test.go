@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/10gen/migration-verifier/internal/partitions"
+	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
@@ -261,7 +262,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 					err = compare.ReadNaturalPartitionFromSource(
 						ctx,
 						verifier.logger,
-						&MockSuccessNotifier{},
+						&testutil.MockSuccessNotifier{},
 						directClient,
 						verifier.verificationTaskCollection(),
 						&task,
@@ -477,7 +478,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 
 	logger, _ := getLoggerAndWriter("stdout")
 
-	notifier := &MockSuccessNotifier{}
+	notifier := &testutil.MockSuccessNotifier{}
 
 	client := suite.srcMongoClient
 
@@ -577,7 +578,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							err = compare.ReadNaturalPartitionFromSource(
 								ctx,
 								logger,
-								&MockSuccessNotifier{},
+								&testutil.MockSuccessNotifier{},
 								directClient,
 								coll,
 								task,

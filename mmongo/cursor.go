@@ -5,20 +5,15 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/10gen/migration-verifier/mmongo/cursor"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-type cursorLike interface {
-	TryNext(context.Context) bool
-	RemainingBatchLength() int
-	Err() error
-}
-
 // GetBatch returns a batch of documents from a cursor. It does so by appending
 // to passed-in slices, which lets you optimize memory handling.
-func GetBatch[T cursorLike](
+func GetBatch[T cursor.CursorLike](
 	ctx context.Context,
 	cursor T,
 	docs []bson.Raw,

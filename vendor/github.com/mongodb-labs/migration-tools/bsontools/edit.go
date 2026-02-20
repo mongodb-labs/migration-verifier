@@ -36,12 +36,16 @@ func (pe PointerTooDeepError) Error() string {
 //
 // Example usage (replaces /role/title):
 //
-//	ReplaceInRaw(&rawDoc, newRoleTitle, "role", "title")
+//	rawDoc, found, err = ReplaceInRaw(rawDoc, newRoleTitle, "role", "title")
 func ReplaceInRaw[T ~[]byte](raw T, newValue bson.RawValue, pointer ...string) (T, bool, error) {
 	return replaceOrRemoveInRaw(raw, &newValue, pointer)
 }
 
 // RemoveFromRaw is like ReplaceInRaw, but it removes the element.
+//
+// Example usage (replaces /role/title):
+//
+//	rawDoc, found, err = RemoveFromRaw(rawDoc, "role", "title")
 func RemoveFromRaw[T ~[]byte](raw T, pointer ...string) (T, bool, error) {
 	return replaceOrRemoveInRaw(raw, nil, pointer)
 }

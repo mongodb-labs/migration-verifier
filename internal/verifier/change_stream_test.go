@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/testutil"
@@ -848,7 +849,7 @@ func (suite *IntegrationTestSuite) TestWritesOffCursorKilledResilience() {
 				suite.T(),
 				suite.srcMongoClient,
 				verifier.srcClusterInfo.VersionArray,
-				clientAppName,
+				buildvar.GetClientAppName(),
 			),
 		)
 	}
@@ -877,7 +878,7 @@ func (suite *IntegrationTestSuite) TestCursorKilledResilience() {
 			suite.T(),
 			suite.srcMongoClient,
 			verifier.srcClusterInfo.VersionArray,
-			clientAppName,
+			buildvar.GetClientAppName(),
 		),
 	)
 
