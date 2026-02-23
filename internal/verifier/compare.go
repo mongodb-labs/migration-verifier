@@ -18,7 +18,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
-	"github.com/10gen/migration-verifier/mmongo/cursor"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
@@ -644,7 +643,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			dstDocsFound, err := iterateCursorToChannel(
 				sctx,
 				state,
-				cursor.NewAbstract(theCursor),
+				theCursor,
 				dstToCompareChannel,
 			)
 			if err != nil {
@@ -760,7 +759,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			_, err = iterateCursorToChannel(
 				sctx,
 				state,
-				cursor.NewAbstract(theCursor),
+				theCursor,
 				srcChannel,
 			)
 
@@ -804,7 +803,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			_, err = iterateCursorToChannel(
 				sctx,
 				state,
-				cursor.NewAbstract(theCursor),
+				theCursor,
 				dstChannel,
 			)
 			err = errors.Wrap(
@@ -832,7 +831,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 func iterateCursorToChannel(
 	sctx context.Context,
 	state retry.SuccessNotifier,
-	cursor cursor.Abstract,
+	cursor *mongo.Cursor,
 	writer chan<- []compare.DocWithTS,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
@@ -885,7 +884,7 @@ func iterateCursorToChannel(
 
 		needFlush := cmp.Or(
 			len(docsWithTSCache) == compare.ToComparatorBatchSize,
-			int(bytesEnqueued)+len(cursor.Current()) > compare.ToComparatorByteLimit,
+			int(bytesEnqueued)+len(cursor.Current) > compare.ToComparatorByteLimit,
 		)
 
 		if needFlush {
@@ -896,10 +895,10 @@ func iterateCursorToChannel(
 
 		docsWithTSCache = append(
 			docsWithTSCache,
-			compare.NewDocWithTSFromPool(cursor.Current(), clusterTime),
+			compare.NewDocWithTSFromPool(cursor.Current, clusterTime),
 		)
 
-		bytesEnqueued += types.ByteCount(len(cursor.Current()))
+		bytesEnqueued += types.ByteCount(len(cursor.Current))
 	}
 
 	if cursor.Err() != nil {

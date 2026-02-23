@@ -14,8 +14,8 @@ const (
 	ToComparatorBatchSize = 100
 
 	// ToComparatorByteLimit is the max # of bytes that readers send to the
-	// comparator thread at once.
-	ToComparatorByteLimit = 32 << 20 //  2 cursors’ worth of data
+	// comparator thread at once. This value is somewhat arbitrarily chosen.
+	ToComparatorByteLimit = 32 << 20
 )
 
 func ToComparatorBatchCount(totalDocs int) int {

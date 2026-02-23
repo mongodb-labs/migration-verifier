@@ -5,7 +5,6 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
-	"github.com/10gen/migration-verifier/mmongo/cursor"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -50,7 +49,7 @@ func (s *IntegrationTestSuite) TestIterateCursorToChannel() {
 	docsSent, err := iterateCursorToChannel(
 		sctx,
 		&testutil.MockSuccessNotifier{},
-		cursor.NewAbstract(theCursor),
+		theCursor,
 		receiver,
 	)
 	s.Require().NoError(err)
