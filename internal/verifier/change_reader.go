@@ -347,9 +347,6 @@ func (rc *ChangeReaderCommon) updateTimes(sess *mongo.Session, token bson.Raw) {
 
 		if opTime == nil {
 			// This is unlikely in 4.4+ but can happen in early 4.2 releases.
-			rc.logger.Debug().
-				Msg("Cannot calculate lag because session operation time is unavailable.")
-
 			return
 		}
 
