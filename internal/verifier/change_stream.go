@@ -229,7 +229,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	}
 
 	sess := mongo.SessionFromContext(sctx)
-	csr.updateTimes(sess, cs.ResumeToken())
+	csr.updateTimestamps(sess, cs.ResumeToken())
 
 	if event, has := latestEvent.Get(); has {
 		csr.logger.Trace().
@@ -288,8 +288,8 @@ changeStreamLoop:
 		// source writes are ended and the migration tool is finished / committed.
 		// This means we should exit rather than continue reading the change stream
 		// since there should be no more events.
-		case <-csr.writesOffTs.Ready():
-			writesOffTs := csr.writesOffTs.Get()
+		case <-csr.writesOffTS.Ready():
+			writesOffTs := csr.writesOffTS.Get()
 
 			csr.logger.Debug().
 				Any("writesOffTimestamp", writesOffTs).
@@ -313,7 +313,7 @@ changeStreamLoop:
 						Msgf("%s has reached the writesOff timestamp. Shutting down.", csr)
 
 					csr.running = false
-					csr.startAtTs = &curTs
+					csr.startAtTS = &curTs
 
 					break changeStreamLoop
 				}

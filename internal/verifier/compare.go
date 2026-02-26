@@ -150,9 +150,9 @@ func (verifier *Verifier) NoteCompareOfOptime(
 
 	switch cluster {
 	case src:
-		dg = verifier.lastProcessedSrcOptime
+		dg = verifier.srcLastRecheckedTS
 	case dst:
-		dg = verifier.lastProcessedDstOptime
+		dg = verifier.dstLastRecheckedTS
 	default:
 		panic("bad cluster: " + cluster)
 	}

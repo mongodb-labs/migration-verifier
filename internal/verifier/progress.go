@@ -1,6 +1,8 @@
 package verifier
 
-import "context"
+import (
+	"context"
+)
 
 func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 	verifier.mux.RLock()
