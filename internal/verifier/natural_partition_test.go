@@ -271,7 +271,6 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 						compare.Binary,
 						toCompare,
 						toDst,
-						readpref.Primary(),
 					)
 					require.NoError(t, err, "should read")
 
@@ -353,6 +352,7 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 			coll,
 			100_000,
 			logger,
+			suite.srcConnStr,
 			readpref.Primary(),
 		)
 		require.NoError(t, err)
@@ -446,19 +446,10 @@ func getDirectClientAndHostname(
 	helloRaw, err := util.GetHelloRaw(ctx, client, readpref.Primary())
 	require.NoError(t, err)
 
-	hostnameRV, err := helloRaw.LookupErr("me")
+	hostname, err := bsontools.RawLookup[string](helloRaw, "me")
 	require.NoError(t, err)
 
-	hostname, err := bsontools.RawValueTo[string](hostnameRV)
-	require.NoError(t, err)
-
-	connstr, err = compare.SetDirectHostInConnectionString(
-		connstr,
-		hostname,
-	)
-	require.NoError(t, err)
-
-	directClient, err := mongo.Connect(options.Client().ApplyURI(connstr))
+	directClient, err := mmongo.GetDirectSourceClient(connstr, hostname)
 	require.NoError(t, err)
 
 	return directClient, hostname
@@ -590,7 +581,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								compareMethod,
 								toCompare,
 								toDst,
-								readpref.Primary(),
 							)
 							suite.Require().NoError(err, "should read")
 
@@ -687,7 +677,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								compareMethod,
 								toCompare,
 								toDst,
-								readpref.Primary(),
 							)
 							suite.Require().NoError(err, "should read")
 
@@ -786,7 +775,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								compareMethod,
 								toCompare,
 								toDst,
-								readpref.Primary(),
 							)
 							suite.Require().NoError(err, "should read")
 
@@ -888,7 +876,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								compareMethod,
 								toCompare,
 								toDst,
-								readpref.Primary(),
 							)
 							suite.Require().NoError(err, "should read")
 

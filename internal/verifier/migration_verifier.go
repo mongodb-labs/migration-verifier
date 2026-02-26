@@ -1499,6 +1499,7 @@ func (verifier *Verifier) partitionCollection(
 			srcColl,
 			verifier.partitionSizeInBytes,
 			verifier.logger,
+			verifier.srcURI,
 			verifier.readPreference,
 		)
 		if err != nil {

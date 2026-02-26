@@ -7,7 +7,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/retry"
@@ -16,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
@@ -515,24 +515,13 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
 ) {
-	hostname := task.QueryFilter.Partition.HostnameAndPort.MustGetf(
+	hostnameAndPort := task.QueryFilter.Partition.HostnameAndPort.MustGetf(
 		"hostname/port missing; this is required for natural partitions",
 	)
 
-	connstr, err := compare.SetDirectHostInConnectionString(
-		verifier.srcURI,
-		hostname,
-	)
+	client, err := mmongo.GetDirectSourceClient(verifier.srcURI, hostnameAndPort)
 	if err != nil {
-		return nil, nil, nil, nil, errors.Wrapf(err, "setting source connstr to connect directly to %#q", hostname)
-	}
-
-	client, err := mongo.Connect(options.Client().
-		ApplyURI(connstr).
-		SetAppName(buildvar.GetClientAppName()),
-	)
-	if err != nil {
-		return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
+		return nil, nil, nil, nil, errors.Wrapf(err, "connecting for natural read")
 	}
 
 	srcToCompareChannel := make(chan []compare.DocWithTS)
@@ -558,7 +547,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			verifier.docCompareMethod,
 			srcToCompareChannel,
 			srcToDstChannel,
-			verifier.readPreference,
 		)
 	}
 

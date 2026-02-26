@@ -3,7 +3,6 @@ package compare
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"slices"
 	"time"
 
@@ -22,25 +21,7 @@ import (
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
-
-func SetDirectHostInConnectionString(connstr, hostname string) (string, error) {
-	parsedURI, err := url.ParseRequestURI(connstr)
-	if err != nil {
-		return "", errors.Wrapf(err, "parsing connection string")
-	}
-
-	parsedURI.Host = hostname
-
-	_, connstr, err = mongotools.MaybeAddDirectConnection(parsedURI.String())
-	if err != nil {
-		return "", errors.Wrapf(err, "tweaking connection string to %#q to ensure direct connection", parsedURI.Host)
-	}
-
-	return connstr, nil
-}
 
 func rvIsNonEmpty(rv bson.RawValue) bool {
 	return !rv.IsZero() && rv.Type != bson.TypeNull
@@ -50,6 +31,9 @@ func rvIsNonEmpty(rv bson.RawValue) bool {
 // to the given task and sends the relevant data to the destination
 // reader and compare channels. This function only returns when there are
 // no more documents to read (or a failure happens).
+//
+// IMPORTANT: The given client MUST be a direct connection to the same node
+// that was read to create the partitions.
 //
 // This closes the passed-in channels when it exits.
 //
@@ -66,7 +50,6 @@ func ReadNaturalPartitionFromSource(
 	compareMethod Method,
 	toCompare chan<- []DocWithTS,
 	toDst chan<- []DocID,
-	readPref *readpref.ReadPref,
 ) error {
 	defer close(toCompare)
 	defer close(toDst)
@@ -203,7 +186,6 @@ func ReadNaturalPartitionFromSource(
 			tasksColl,
 			startRecordID,
 			createCmd,
-			readPref,
 		)
 		if err != nil {
 			return errors.Wrapf(err, "opening backup natural cursor")
@@ -368,7 +350,6 @@ func openBackupNaturalCursor(
 	tasksColl *mongo.Collection,
 	startRecordID option.Option[bson.RawValue],
 	createCmd func(resumeTokenOpt option.Option[bson.RawValue]) bson.D,
-	readPref *readpref.ReadPref,
 ) (*mongo.Cursor, error) {
 
 	// NB: These are in descending order.
@@ -387,11 +368,8 @@ func openBackupNaturalCursor(
 	for _, priorResumeToken := range priorResumeTokens {
 		cmd := createCmd(option.Some(bsontools.ToRawValue(priorResumeToken)))
 
-		cursor, err := coll.Database().RunCommandCursor(
-			ctx,
-			cmd,
-			options.RunCmd().SetReadPreference(readPref),
-		)
+		// No readpref is necessary because this should be a direct connection.
+		cursor, err := coll.Database().RunCommandCursor(ctx, cmd)
 		if err == nil {
 			logger.Info().
 				Any("task", task.PrimaryKey).
@@ -424,11 +402,8 @@ func openBackupNaturalCursor(
 
 	cmd := createCmd(option.None[bson.RawValue]())
 
-	cursor, err := coll.Database().RunCommandCursor(
-		ctx,
-		cmd,
-		options.RunCmd().SetReadPreference(readPref),
-	)
+	// No readpref is necessary because this should be a direct connection.
+	cursor, err := coll.Database().RunCommandCursor(ctx, cmd)
 	if err != nil {
 		return nil, errors.Wrapf(err, "opening source cursor from beginning")
 	}

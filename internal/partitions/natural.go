@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mmongo/cursor"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/10gen/migration-verifier/timeseries"
@@ -38,21 +39,47 @@ const (
 // scan anyway later on to compare the documents.
 func PartitionCollectionNaturalOrder(
 	ctx context.Context,
-	coll *mongo.Collection,
+	baseColl *mongo.Collection,
 	idealPartitionBytes types.ByteCount,
 	subLogger *logger.Logger,
+	srcURI string,
 	readPref *readpref.ReadPref,
 ) (chan mo.Result[Partition], error) {
 
 	// Time-series bucket collections’ `_id`s are always auto-assigned, which
 	// means we might as well always partition them by ID.
 	lo.Assertf(
-		!strings.HasPrefix(coll.Name(), timeseries.BucketPrefix),
+		!strings.HasPrefix(baseColl.Name(), timeseries.BucketPrefix),
 		"timeseries buckets (%s) must be ID-partitioned",
-		coll.Name(),
+		baseColl.Name(),
 	)
 
+	// Partitions by record ID are only meaningful on a single mongod.
+	// (i.e., 2 nodes within the same replica set will have different
+	// record IDs for the same document)
+	//
+	// Thus, along with the resume tokens we also persist the hostname
+	// and port.
+	helloRaw, err := util.GetHelloRaw(ctx, baseColl.Database().Client(), readPref)
+	if err != nil {
+		return nil, errors.Wrapf(err, "sending hello/isMaster")
+	}
+
+	hostnameAndPort, err := bsontools.RawLookup[string](helloRaw, "me")
+	if err != nil {
+		return nil, errors.Wrapf(err, "parsing hostname in isMaster")
+	}
+
 	pChan := make(chan mo.Result[Partition])
+
+	directClient, err := mmongo.GetDirectSourceClient(srcURI, hostnameAndPort)
+	if err != nil {
+		return nil, errors.Wrapf(err, "connecting for natural partition")
+	}
+
+	coll := directClient.
+		Database(baseColl.Database().Name()).
+		Collection(baseColl.Name())
 
 	// Avoid storing a null upper limit. See architecture
 	// documentation for rationale.
@@ -115,7 +142,6 @@ func PartitionCollectionNaturalOrder(
 	resp := coll.Database().RunCommand(
 		sessCtx,
 		cmd,
-		options.RunCmd().SetReadPreference(readPref),
 	)
 
 	c, err := cursor.New(coll.Database(), resp, sess, readPref)
@@ -139,27 +165,6 @@ func PartitionCollectionNaturalOrder(
 			// This likely indicates a new, unexpected collection type.
 			return nil, fmt.Errorf("uncomparable BSON type (%s) for record ID (%s)", recIDRV.Type, recIDRV)
 		}
-	}
-
-	// Partitions by record ID are only meaningful on a single mongod.
-	// (i.e., 2 nodes within the same replica set will have different
-	// record IDs for the same document)
-	//
-	// Thus, along with the resume tokens we also persist the hostname
-	// and port.
-	helloRaw, err := util.GetHelloRaw(ctx, coll.Database().Client(), readPref)
-	if err != nil {
-		return nil, errors.Wrapf(err, "sending hello/isMaster")
-	}
-
-	hostnameAndPortRV, err := helloRaw.LookupErr("me")
-	if err != nil {
-		return nil, errors.Wrapf(err, "parsing isMaster")
-	}
-
-	hostnameAndPort, err := bsontools.RawValueToString(hostnameAndPortRV)
-	if err != nil {
-		return nil, errors.Wrapf(err, "parsing hostname in isMaster")
 	}
 
 	go func() {
