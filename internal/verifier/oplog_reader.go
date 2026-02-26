@@ -294,10 +294,10 @@ CursorLoop:
 		select {
 		case <-sctx.Done():
 			return sctx.Err()
-		case <-o.writesOffTs.Ready():
+		case <-o.writesOffTS.Ready():
 			o.logger.Debug().
 				Stringer("reader", o).
-				Any("timestamp", o.writesOffTs.Get()).
+				Any("timestamp", o.writesOffTS.Get()).
 				Msg("Received writes-off timestamp.")
 
 			break CursorLoop
@@ -311,7 +311,7 @@ CursorLoop:
 		}
 	}
 
-	writesOffTS := o.writesOffTs.Get()
+	writesOffTS := o.writesOffTS.Get()
 
 	for {
 		if !o.lastChangeEventTime.Load().OrZero().Before(writesOffTS) {
@@ -335,7 +335,7 @@ CursorLoop:
 	infoLog := o.logger.Info()
 	if ts, has := o.lastChangeEventTime.Load().Get(); has {
 		infoLog = infoLog.Any("lastEventTime", ts)
-		o.startAtTs = lo.ToPtr(ts)
+		o.startAtTS = lo.ToPtr(ts)
 	} else {
 		infoLog = infoLog.Str("lastEventTime", "none")
 	}
@@ -403,7 +403,7 @@ func (o *OplogReader) readAndHandleOneBatch(
 	sess := mongo.SessionFromContext(sctx)
 	resumeToken := oplog.ResumeToken{latestTS}.MarshalToBSON()
 
-	o.updateTimes(sess, resumeToken)
+	o.updateTimestamps(sess, resumeToken)
 
 	select {
 	case <-sctx.Done():
