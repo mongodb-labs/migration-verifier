@@ -139,6 +139,7 @@ func PartitionCollectionNaturalOrder(
 
 	sessCtx := mongo.NewSessionContext(ctx, sess)
 
+	// No readpref is necessary because this should be a direct connection.
 	resp := coll.Database().RunCommand(sessCtx, cmd)
 
 	// This is a direct connection, so read preference is irrelevant.
