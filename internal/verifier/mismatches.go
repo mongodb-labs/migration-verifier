@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -353,4 +354,74 @@ func recordMismatches(
 	)
 
 	return errors.Wrapf(err, "recording %d mismatches", len(models))
+}
+
+func getLongestLivedDocumentMismatch(
+	ctx context.Context,
+	db *mongo.Database,
+	generation int,
+) (option.Option[MismatchInfo], error) {
+	cursor, err := db.Collection(verificationTasksCollection).Aggregate(
+		ctx,
+		mongo.Pipeline{
+			// Match document-checking tasks in the generation.
+			{{"$match", bson.D{
+				{"generation", generation},
+				{"type", tasks.VerifyDocuments},
+			}}},
+
+			// Add each task’s longest-lived mismatch to the task.
+			{{"$lookup", bson.D{
+				{"from", mismatchesCollectionName},
+				{"localField", "_id"},
+				{"foreignField", "task"},
+				{"as", "mismatch"},
+				{"pipeline", mongo.Pipeline{
+					{{"$sort", bson.D{
+						{"detail.mismatchHistory.durationMS", -1},
+						{"detail.id", 1},
+					}}},
+					{{"$limit", 1}},
+				}},
+			}}},
+
+			// Discard the task in favor of the mismatch.
+			{{"$unwind", "$mismatch"}},
+			{{"$replaceWith", "$mismatch"}},
+
+			// Sort the mismatches (again). We need this because previously
+			// the mismatches were ordered by their tasks’ natural order.
+			{{"$sort", bson.D{
+				{"detail.mismatchHistory.durationMS", -1},
+				{"detail.id", 1},
+			}}},
+
+			// Just the top mismatch.
+			{{"$limit", 1}},
+		},
+	)
+	if err != nil {
+		return option.None[MismatchInfo](), errors.Wrapf(err, "querying mismatches")
+	}
+
+	var infos []MismatchInfo
+	if err := cursor.All(ctx, &infos); err != nil {
+		return option.None[MismatchInfo](), errors.Wrapf(err, "reading mismatches")
+	}
+
+	switch len(infos) {
+	case 0:
+		return option.None[MismatchInfo](), nil
+	case 1:
+		return option.Some(infos[0]), nil
+	default:
+		lo.Assertf(
+			false,
+			"need only 1 info; got: %+v",
+			infos,
+		)
+
+		// unreachable
+		return option.None[MismatchInfo](), nil
+	}
 }

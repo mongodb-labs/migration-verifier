@@ -91,3 +91,15 @@ func SumLogs[T realNumber](l []Log[T]) T {
 
 	return sum
 }
+
+func RatePer[T realNumber](h *History[T], dur time.Duration) float64 {
+	docsLogs := h.Get()
+
+	if len(docsLogs) == 0 {
+		return 0
+	}
+
+	denom := float64(time.Since(docsLogs[0].At)) / float64(dur)
+
+	return float64(SumLogs(docsLogs)) / denom
+}
