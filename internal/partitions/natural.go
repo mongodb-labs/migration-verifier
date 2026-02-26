@@ -67,7 +67,7 @@ func PartitionCollectionNaturalOrder(
 
 	hostnameAndPort, err := bsontools.RawLookup[string](helloRaw, "me")
 	if err != nil {
-		return nil, errors.Wrapf(err, "parsing hostname in isMaster")
+		return nil, errors.Wrapf(err, "parsing server’s hostname/port from response")
 	}
 
 	pChan := make(chan mo.Result[Partition])
