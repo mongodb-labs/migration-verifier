@@ -1499,6 +1499,7 @@ func (verifier *Verifier) partitionCollection(
 			srcColl,
 			verifier.partitionSizeInBytes,
 			verifier.logger,
+			verifier.readPreference,
 		)
 		if err != nil {
 			return fmt.Errorf("starting natural partitioning: %w", err)

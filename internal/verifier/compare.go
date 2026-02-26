@@ -2,7 +2,6 @@ package verifier
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"fmt"
 	"math"
@@ -11,7 +10,6 @@ import (
 	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
-	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -560,6 +558,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			verifier.docCompareMethod,
 			srcToCompareChannel,
 			srcToDstChannel,
+			verifier.readPreference,
 		)
 	}
 
@@ -617,7 +616,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 
 			cursorStartTime := time.Now()
 
-			theCursor, err := verifier.getDocumentsCursor(
+			cursor, err := verifier.getDocumentsCursor(
 				sctx,
 				coll,
 				verifier.dstClusterInfo,
@@ -640,12 +639,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				Int("idsInQuery", len(docIDs)).
 				Msg("Iterating dst cursor.")
 
-			dstDocsFound, err := iterateCursorToChannel(
-				sctx,
-				state,
-				theCursor,
-				dstToCompareChannel,
-			)
+			dstDocsFound, err := iterateCursorToChannel(sctx, state, cursor, dstToCompareChannel)
 			if err != nil {
 				return errors.Wrap(
 					err,
@@ -743,7 +737,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 
 		sctx := mongo.NewSessionContext(ctx, sess)
 
-		theCursor, err := verifier.getDocumentsCursor(
+		cursor, err := verifier.getDocumentsCursor(
 			sctx,
 			verifier.srcClientCollection(task),
 			verifier.srcClusterInfo,
@@ -756,12 +750,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 		if err == nil {
 			state.NoteSuccess("opened src find cursor")
 
-			_, err = iterateCursorToChannel(
-				sctx,
-				state,
-				theCursor,
-				srcChannel,
-			)
+			_, err = iterateCursorToChannel(sctx, state, cursor, srcChannel)
 
 			err = errors.Wrap(
 				err,
@@ -787,7 +776,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 
 		sctx := mongo.NewSessionContext(ctx, sess)
 
-		theCursor, err := verifier.getDocumentsCursor(
+		cursor, err := verifier.getDocumentsCursor(
 			sctx,
 			verifier.dstClientCollection(task),
 			verifier.dstClusterInfo,
@@ -800,12 +789,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 		if err == nil {
 			state.NoteSuccess("opened dst find cursor")
 
-			_, err = iterateCursorToChannel(
-				sctx,
-				state,
-				theCursor,
-				dstChannel,
-			)
+			_, err = iterateCursorToChannel(sctx, state, cursor, dstChannel)
 			err = errors.Wrap(
 				err,
 				"failed to read destination documents",
@@ -825,9 +809,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 	return srcChannel, dstChannel, readSrcCallback, readDstCallback
 }
 
-// iterateCursorToChannel returns the # of documents sent to the channel.
-//
-// NB: This DOES NOT close the given channel.
+// This returns the # of documents sent to the comparator and # of batches
+// used to send those documents.
 func iterateCursorToChannel(
 	sctx context.Context,
 	state retry.SuccessNotifier,
@@ -839,8 +822,7 @@ func iterateCursorToChannel(
 		panic("need a session")
 	}
 
-	var docsCount int
-	var bytesEnqueued types.ByteCount
+	docsCount := 0
 
 	var docsWithTSCache []compare.DocWithTS
 
@@ -852,22 +834,12 @@ func iterateCursorToChannel(
 		)
 
 		if err != nil {
-			return errors.Wrapf(
-				err,
-				"sending %d documents (%s) to compare thread",
-				len(docsWithTSCache),
-				reportutils.FmtBytes(bytesEnqueued),
-			)
+			return errors.Wrapf(err, "sending %d documents to compare thread", len(docsWithTSCache))
 		}
 
-		state.NoteSuccess(
-			"sent %d documents (%s) to compare thread",
-			len(docsWithTSCache),
-			reportutils.FmtBytes(bytesEnqueued),
-		)
+		state.NoteSuccess("sent %d documents to compare thread", len(docsWithTSCache))
 
 		docsWithTSCache = docsWithTSCache[:0]
-		bytesEnqueued = 0
 
 		return nil
 	}
@@ -882,23 +854,16 @@ func iterateCursorToChannel(
 			return 0, errors.Wrap(err, "reading cluster time from session")
 		}
 
-		needFlush := cmp.Or(
-			len(docsWithTSCache) == compare.ToComparatorBatchSize,
-			int(bytesEnqueued)+len(cursor.Current) > compare.ToComparatorByteLimit,
-		)
-
-		if needFlush {
-			if err := flush(); err != nil {
-				return 0, err
-			}
-		}
-
 		docsWithTSCache = append(
 			docsWithTSCache,
 			compare.NewDocWithTSFromPool(cursor.Current, clusterTime),
 		)
 
-		bytesEnqueued += types.ByteCount(len(cursor.Current))
+		if len(docsWithTSCache) == compare.ToComparatorBatchSize {
+			if err := flush(); err != nil {
+				return 0, err
+			}
+		}
 	}
 
 	if cursor.Err() != nil {

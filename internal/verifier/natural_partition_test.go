@@ -26,6 +26,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
 
 func (suite *IntegrationTestSuite) skipUnlessCanPartitionNatural() [3]int {
@@ -270,6 +271,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 						compare.Binary,
 						toCompare,
 						toDst,
+						readpref.Primary(),
 					)
 					require.NoError(t, err, "should read")
 
@@ -351,10 +353,11 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 			coll,
 			100_000,
 			logger,
+			readpref.Primary(),
 		)
 		require.NoError(t, err)
 
-		hello, err := util.GetHelloRaw(ctx, suite.srcMongoClient)
+		hello, err := util.GetHelloRaw(ctx, suite.srcMongoClient, readpref.Primary())
 		require.NoError(t, err)
 
 		hostnameRV, err := hello.LookupErr("me")
@@ -440,7 +443,7 @@ func getDirectClientAndHostname(
 	client *mongo.Client,
 	connstr string,
 ) (*mongo.Client, string) {
-	helloRaw, err := util.GetHelloRaw(ctx, client)
+	helloRaw, err := util.GetHelloRaw(ctx, client, readpref.Primary())
 	require.NoError(t, err)
 
 	hostnameRV, err := helloRaw.LookupErr("me")
@@ -540,9 +543,10 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							{"$_requestResumeToken", true},
 							{"hint", bson.D{{"$natural", 1}}},
 						},
+						options.RunCmd().SetReadPreference(readpref.Primary()),
 					)
 
-					cur, err := cursor.New(coll.Database(), resp, nil)
+					cur, err := cursor.New(coll.Database(), resp, nil, readpref.Primary())
 					suite.Require().NoError(err, "should open cursor")
 					for !cur.IsFinished() {
 						rtOpt, err := cursor.GetResumeToken(cur)
@@ -586,6 +590,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								compareMethod,
 								toCompare,
 								toDst,
+								readpref.Primary(),
 							)
 							suite.Require().NoError(err, "should read")
 
@@ -682,6 +687,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								compareMethod,
 								toCompare,
 								toDst,
+								readpref.Primary(),
 							)
 							suite.Require().NoError(err, "should read")
 
@@ -780,6 +786,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								compareMethod,
 								toCompare,
 								toDst,
+								readpref.Primary(),
 							)
 							suite.Require().NoError(err, "should read")
 
@@ -881,6 +888,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								compareMethod,
 								toCompare,
 								toDst,
+								readpref.Primary(),
 							)
 							suite.Require().NoError(err, "should read")
 

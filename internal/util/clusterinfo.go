@@ -11,6 +11,8 @@ import (
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
 
 type ClusterTopology string
@@ -73,7 +75,8 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 }
 
 func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, error) {
-	raw, err := GetHelloRaw(ctx, client)
+	// The topology won’t vary amongst the nodes.
+	raw, err := GetHelloRaw(ctx, client, readpref.Nearest())
 	if err != nil {
 		return "", errors.Wrapf(err, "failed learn topology")
 	}
@@ -88,16 +91,22 @@ func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, er
 
 // GetHelloRaw returns the result of a `hello` (or, if needed,
 // `isMaster`) command.
-func GetHelloRaw(ctx context.Context, client *mongo.Client) (bson.Raw, error) {
+func GetHelloRaw(
+	ctx context.Context,
+	client *mongo.Client,
+	readPref *readpref.ReadPref,
+) (bson.Raw, error) {
 	resp := client.Database("admin").RunCommand(
 		ctx,
 		bson.D{{"hello", 1}},
+		options.RunCmd().SetReadPreference(readPref),
 	)
 
 	if resp.Err() != nil {
 		resp = client.Database("admin").RunCommand(
 			ctx,
 			bson.D{{"isMaster", 1}},
+			options.RunCmd().SetReadPreference(readPref),
 		)
 	}
 

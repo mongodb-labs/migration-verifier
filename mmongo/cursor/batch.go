@@ -17,6 +17,8 @@ import (
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
@@ -36,6 +38,7 @@ type BatchCursor struct {
 	db           *mongo.Database
 	rawResp      bson.Raw
 	curBatch     bson.RawArray
+	readPref     *readpref.ReadPref
 }
 
 // GetCurrentBatchIterator returns an iterator over the BatchCursor’s current batch.
@@ -141,7 +144,11 @@ func (c *BatchCursor) GetNext(ctx context.Context, extraPieces ...bson.E) error 
 	if c.sess != nil {
 		ctx = mongo.NewSessionContext(ctx, c.sess)
 	}
-	resp := c.db.RunCommand(ctx, cmd)
+	resp := c.db.RunCommand(
+		ctx,
+		cmd,
+		options.RunCmd().SetReadPreference(c.readPref),
+	)
 
 	raw, err := resp.Raw()
 	if err != nil {
@@ -199,6 +206,7 @@ func New(
 	db *mongo.Database,
 	resp *mongo.SingleResult,
 	sess *mongo.Session,
+	readPref *readpref.ReadPref,
 ) (*BatchCursor, error) {
 	raw, err := resp.Raw()
 	if err != nil {
@@ -219,6 +227,7 @@ func New(
 		rawResp:  raw,
 		curBatch: bson.RawArray(baseResp.Cursor.FirstBatch),
 		sess:     sess,
+		readPref: readPref,
 	}, nil
 }
 

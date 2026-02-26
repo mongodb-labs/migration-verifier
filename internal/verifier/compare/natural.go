@@ -22,6 +22,8 @@ import (
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
 
 func SetDirectHostInConnectionString(connstr, hostname string) (string, error) {
@@ -64,6 +66,7 @@ func ReadNaturalPartitionFromSource(
 	compareMethod Method,
 	toCompare chan<- []DocWithTS,
 	toDst chan<- []DocID,
+	readPref *readpref.ReadPref,
 ) error {
 	defer close(toCompare)
 	defer close(toDst)
@@ -200,6 +203,7 @@ func ReadNaturalPartitionFromSource(
 			tasksColl,
 			startRecordID,
 			createCmd,
+			readPref,
 		)
 		if err != nil {
 			return errors.Wrapf(err, "opening backup natural cursor")
@@ -364,6 +368,7 @@ func openBackupNaturalCursor(
 	tasksColl *mongo.Collection,
 	startRecordID option.Option[bson.RawValue],
 	createCmd func(resumeTokenOpt option.Option[bson.RawValue]) bson.D,
+	readPref *readpref.ReadPref,
 ) (*mongo.Cursor, error) {
 
 	// NB: These are in descending order.
@@ -382,7 +387,11 @@ func openBackupNaturalCursor(
 	for _, priorResumeToken := range priorResumeTokens {
 		cmd := createCmd(option.Some(bsontools.ToRawValue(priorResumeToken)))
 
-		cursor, err := coll.Database().RunCommandCursor(ctx, cmd)
+		cursor, err := coll.Database().RunCommandCursor(
+			ctx,
+			cmd,
+			options.RunCmd().SetReadPreference(readPref),
+		)
 		if err == nil {
 			logger.Info().
 				Any("task", task.PrimaryKey).
@@ -415,7 +424,11 @@ func openBackupNaturalCursor(
 
 	cmd := createCmd(option.None[bson.RawValue]())
 
-	cursor, err := coll.Database().RunCommandCursor(ctx, cmd)
+	cursor, err := coll.Database().RunCommandCursor(
+		ctx,
+		cmd,
+		options.RunCmd().SetReadPreference(readPref),
+	)
 	if err != nil {
 		return nil, errors.Wrapf(err, "opening source cursor from beginning")
 	}

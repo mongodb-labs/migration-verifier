@@ -11,8 +11,6 @@ import (
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"go.mongodb.org/mongo-driver/v2/mongo/writeconcern"
 )
 
 const opTimeKeyInServerResponse = "operationTime"
@@ -82,18 +80,14 @@ func runAppendOplogNote(
 		{"data", bson.D{
 			{"migration-verifier", note},
 		}},
+		{"writeConcern", bson.D{{"w", "majority"}}},
 	}
 
 	if maxClusterTime, has := maxClusterTimeOpt.Get(); has {
 		cmd = append(cmd, bson.E{"maxClusterTime", maxClusterTime})
 	}
 
-	resp := client.
-		Database(
-			"admin",
-			options.Database().SetWriteConcern(writeconcern.Majority()),
-		).
-		RunCommand(ctx, cmd)
+	resp := client.Database("admin").RunCommand(ctx, cmd)
 
 	rawResponse, err := resp.Raw()
 

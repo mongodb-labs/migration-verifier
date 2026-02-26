@@ -20,6 +20,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
 
 const (
@@ -40,6 +41,7 @@ func PartitionCollectionNaturalOrder(
 	coll *mongo.Collection,
 	idealPartitionBytes types.ByteCount,
 	subLogger *logger.Logger,
+	readPref *readpref.ReadPref,
 ) (chan mo.Result[Partition], error) {
 
 	// Time-series bucket collections’ `_id`s are always auto-assigned, which
@@ -110,9 +112,13 @@ func PartitionCollectionNaturalOrder(
 
 	sessCtx := mongo.NewSessionContext(ctx, sess)
 
-	resp := coll.Database().RunCommand(sessCtx, cmd)
+	resp := coll.Database().RunCommand(
+		sessCtx,
+		cmd,
+		options.RunCmd().SetReadPreference(readPref),
+	)
 
-	c, err := cursor.New(coll.Database(), resp, sess)
+	c, err := cursor.New(coll.Database(), resp, sess, readPref)
 	if err != nil {
 		return nil, errors.Wrapf(err, "opening partition query (%+v)", cmd)
 	}
@@ -141,7 +147,7 @@ func PartitionCollectionNaturalOrder(
 	//
 	// Thus, along with the resume tokens we also persist the hostname
 	// and port.
-	helloRaw, err := util.GetHelloRaw(ctx, coll.Database().Client())
+	helloRaw, err := util.GetHelloRaw(ctx, coll.Database().Client(), readPref)
 	if err != nil {
 		return nil, errors.Wrapf(err, "sending hello/isMaster")
 	}
