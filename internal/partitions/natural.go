@@ -139,12 +139,10 @@ func PartitionCollectionNaturalOrder(
 
 	sessCtx := mongo.NewSessionContext(ctx, sess)
 
-	resp := coll.Database().RunCommand(
-		sessCtx,
-		cmd,
-	)
+	resp := coll.Database().RunCommand(sessCtx, cmd)
 
-	c, err := cursor.New(coll.Database(), resp, sess, readPref)
+	// This is a direct connection, so read preference is irrelevant.
+	c, err := cursor.New(coll.Database(), resp, sess, readpref.Nearest())
 	if err != nil {
 		return nil, errors.Wrapf(err, "opening partition query (%+v)", cmd)
 	}
