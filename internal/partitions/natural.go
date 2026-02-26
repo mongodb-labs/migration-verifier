@@ -142,8 +142,7 @@ func PartitionCollectionNaturalOrder(
 	// No readpref is necessary because this should be a direct connection.
 	resp := coll.Database().RunCommand(sessCtx, cmd)
 
-	// This is a direct connection, so read preference is irrelevant.
-	c, err := cursor.New(coll.Database(), resp, sess, readpref.Nearest())
+	c, err := cursor.New(coll.Database(), resp, sess)
 	if err != nil {
 		return nil, errors.Wrapf(err, "opening partition query (%+v)", cmd)
 	}
