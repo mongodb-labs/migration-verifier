@@ -10,7 +10,13 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-func GetDirectSourceClient(
+// GetDirectClient creates a direct connection by parsing a connection
+// string as a URI and replacing its authority section. This preserves any
+// options in the connection string, including authentication.
+//
+// This is useful if, e.g., you need to pin requests to a particular node
+// in a replica set.
+func GetDirectClient(
 	baseConnstr string,
 	hostnameAndPort string,
 ) (*mongo.Client, error) {

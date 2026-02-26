@@ -357,7 +357,7 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 		)
 		require.NoError(t, err)
 
-		hello, err := util.GetHelloRaw(ctx, suite.srcMongoClient, readpref.Primary())
+		hello, err := util.GetHelloRaw(ctx, suite.srcMongoClient, option.None[*readpref.ReadPref]())
 		require.NoError(t, err)
 
 		hostnameRV, err := hello.LookupErr("me")
@@ -443,13 +443,13 @@ func getDirectClientAndHostname(
 	client *mongo.Client,
 	connstr string,
 ) (*mongo.Client, string) {
-	helloRaw, err := util.GetHelloRaw(ctx, client, readpref.Primary())
+	helloRaw, err := util.GetHelloRaw(ctx, client, option.None[*readpref.ReadPref]())
 	require.NoError(t, err)
 
 	hostname, err := bsontools.RawLookup[string](helloRaw, "me")
 	require.NoError(t, err)
 
-	directClient, err := mmongo.GetDirectSourceClient(connstr, hostname)
+	directClient, err := mmongo.GetDirectClient(connstr, hostname)
 	require.NoError(t, err)
 
 	return directClient, hostname
@@ -537,7 +537,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 						options.RunCmd().SetReadPreference(readpref.Primary()),
 					)
 
-					cur, err := cursor.New(coll.Database(), resp, nil, readpref.Primary())
+					cur, err := cursor.New(coll.Database(), resp, nil)
 					suite.Require().NoError(err, "should open cursor")
 					for !cur.IsFinished() {
 						rtOpt, err := cursor.GetResumeToken(cur)

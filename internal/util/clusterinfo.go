@@ -7,6 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -76,7 +77,7 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 
 func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, error) {
 	// The topology won’t vary amongst the nodes.
-	raw, err := GetHelloRaw(ctx, client, readpref.Nearest())
+	raw, err := GetHelloRaw(ctx, client, option.None[*readpref.ReadPref]())
 	if err != nil {
 		return "", errors.Wrapf(err, "failed learn topology")
 	}
@@ -94,19 +95,24 @@ func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, er
 func GetHelloRaw(
 	ctx context.Context,
 	client *mongo.Client,
-	readPref *readpref.ReadPref,
+	readPref option.Option[*readpref.ReadPref],
 ) (bson.Raw, error) {
+	opts := options.RunCmd()
+	if rp, has := readPref.Get(); has {
+		opts = opts.SetReadPreference(rp)
+	}
+
 	resp := client.Database("admin").RunCommand(
 		ctx,
 		bson.D{{"hello", 1}},
-		options.RunCmd().SetReadPreference(readPref),
+		opts,
 	)
 
 	if resp.Err() != nil {
 		resp = client.Database("admin").RunCommand(
 			ctx,
 			bson.D{{"isMaster", 1}},
-			options.RunCmd().SetReadPreference(readPref),
+			opts,
 		)
 	}
 

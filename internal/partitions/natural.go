@@ -60,7 +60,11 @@ func PartitionCollectionNaturalOrder(
 	//
 	// Thus, along with the resume tokens we also persist the hostname
 	// and port.
-	helloRaw, err := util.GetHelloRaw(ctx, baseColl.Database().Client(), readPref)
+	helloRaw, err := util.GetHelloRaw(
+		ctx,
+		baseColl.Database().Client(),
+		option.Some(readPref),
+	)
 	if err != nil {
 		return nil, errors.Wrapf(err, "sending hello/isMaster")
 	}
@@ -72,7 +76,7 @@ func PartitionCollectionNaturalOrder(
 
 	pChan := make(chan mo.Result[Partition])
 
-	directClient, err := mmongo.GetDirectSourceClient(srcURI, hostnameAndPort)
+	directClient, err := mmongo.GetDirectClient(srcURI, hostnameAndPort)
 	if err != nil {
 		return nil, errors.Wrapf(err, "connecting for natural partition")
 	}
