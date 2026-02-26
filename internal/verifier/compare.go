@@ -26,6 +26,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"golang.org/x/exp/slices"
 )
 
@@ -612,6 +613,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				verifier.dstClusterInfo,
 				verifier.dstChangeReader.getStartTimestamp(),
 				&dupeTask,
+				option.None[*readpref.ReadPref](),
 			)
 
 			for _, id := range docIDs {
@@ -740,6 +742,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				verifier.srcChangeReader.getStartTimestamp(),
 			),
 			task,
+			option.IfNotZero(verifier.readPreference),
 		)
 
 		if err == nil {
@@ -784,6 +787,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				verifier.dstChangeReader.getStartTimestamp(),
 			),
 			task,
+			option.None[*readpref.ReadPref](),
 		)
 
 		if err == nil {
@@ -919,6 +923,7 @@ func (verifier *Verifier) getDocumentsCursor(
 	clusterInfo *util.ClusterInfo,
 	readConcernTS bson.Timestamp,
 	task *tasks.Task,
+	readPref option.Option[*readpref.ReadPref],
 ) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	var andPredicates bson.A
@@ -973,7 +978,11 @@ func (verifier *Verifier) getDocumentsCursor(
 		panic("No session?!?")
 	}
 
-	runCommandOptions := options.RunCmd().SetReadPreference(verifier.readPreference)
+	runCommandOptions := options.RunCmd()
+
+	if rp, has := readPref.Get(); has {
+		runCommandOptions = runCommandOptions.SetReadPreference(rp)
+	}
 
 	// We never want to read before the change stream start time,
 	// or for the last generation, the change stream end time.
