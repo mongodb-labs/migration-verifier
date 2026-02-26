@@ -346,8 +346,7 @@ func (rc *ChangeReaderCommon) updateTimes(sess *mongo.Session, token bson.Raw) {
 		opTime := sess.OperationTime()
 
 		if opTime == nil {
-			// This is unlikely in 4.4+ but can happen in early 4.2 releases.
-			return
+			panic("session operationTime is nil … did this get called prematurely?")
 		}
 
 		rc.currentTimes.Store(option.Some(readerCurrentTimes{
