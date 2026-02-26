@@ -8,7 +8,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
@@ -18,6 +17,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
@@ -26,6 +26,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"golang.org/x/exp/slices"
 )
 
@@ -517,22 +518,11 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
 ) {
-	hostname := task.QueryFilter.Partition.HostnameAndPort.MustGetf(
+	hostnameAndPort := task.QueryFilter.Partition.HostnameAndPort.MustGetf(
 		"hostname/port missing; this is required for natural partitions",
 	)
 
-	connstr, err := compare.SetDirectHostInConnectionString(
-		verifier.srcURI,
-		hostname,
-	)
-	if err != nil {
-		return nil, nil, nil, nil, errors.Wrapf(err, "setting source connstr to connect directly to %#q", hostname)
-	}
-
-	client, err := mongo.Connect(options.Client().
-		ApplyURI(connstr).
-		SetAppName(buildvar.GetClientAppName()),
-	)
+	client, err := mmongo.GetDirectClient(verifier.srcURI, hostnameAndPort)
 	if err != nil {
 		return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
 	}
@@ -623,6 +613,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				verifier.dstClusterInfo,
 				verifier.dstChangeReader.getStartTimestamp(),
 				&dupeTask,
+				option.None[*readpref.ReadPref](),
 			)
 
 			for _, id := range docIDs {
@@ -751,6 +742,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				verifier.srcChangeReader.getStartTimestamp(),
 			),
 			task,
+			option.IfNotZero(verifier.readPreference),
 		)
 
 		if err == nil {
@@ -795,6 +787,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				verifier.dstChangeReader.getStartTimestamp(),
 			),
 			task,
+			option.None[*readpref.ReadPref](),
 		)
 
 		if err == nil {
@@ -930,6 +923,7 @@ func (verifier *Verifier) getDocumentsCursor(
 	clusterInfo *util.ClusterInfo,
 	readConcernTS bson.Timestamp,
 	task *tasks.Task,
+	readPref option.Option[*readpref.ReadPref],
 ) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	var andPredicates bson.A
@@ -984,7 +978,11 @@ func (verifier *Verifier) getDocumentsCursor(
 		panic("No session?!?")
 	}
 
-	runCommandOptions := options.RunCmd().SetReadPreference(verifier.readPreference)
+	runCommandOptions := options.RunCmd()
+
+	if rp, has := readPref.Get(); has {
+		runCommandOptions = runCommandOptions.SetReadPreference(rp)
+	}
 
 	// We never want to read before the change stream start time,
 	// or for the last generation, the change stream end time.

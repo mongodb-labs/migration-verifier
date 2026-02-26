@@ -325,30 +325,26 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 	err := retry.New().WithCallback(
 		func(ctx context.Context, ri *retry.FuncInfo) error {
 			ri.Log(logger.Logger, "collStats", "source", srcDB.Name(), collName, "Retrieving collection size and document count.")
-			request := bson.D{
-				{"aggregate", collName},
-				{"pipeline", mongo.Pipeline{
-					{{"$collStats", bson.D{
-						{"storageStats", bson.D{{"scale", 1}}},
+			pipeline := mongo.Pipeline{
+				{{"$collStats", bson.D{
+					{"storageStats", bson.D{{"scale", 1}}},
+				}}},
+				// The "$group" here behaves as a project and rename when there's only one
+				// document (non-sharded case).  When there are multiple documents (one for
+				// each shard) it correctly sums the counts and sizes from each shard.
+				{{"$group", bson.D{
+					{"_id", "$ns"},
+					{"count", accum.Sum{agg.Cond{
+						If:   "$storageStats.timeseries",
+						Then: "$storageStats.timeseries.bucketCount",
+						Else: "$storageStats.count",
 					}}},
-					// The "$group" here behaves as a project and rename when there's only one
-					// document (non-sharded case).  When there are multiple documents (one for
-					// each shard) it correctly sums the counts and sizes from each shard.
-					{{"$group", bson.D{
-						{"_id", "$ns"},
-						{"count", accum.Sum{agg.Cond{
-							If:   "$storageStats.timeseries",
-							Then: "$storageStats.timeseries.bucketCount",
-							Else: "$storageStats.count",
-						}}},
-						{"size", accum.Sum{"$storageStats.size"}},
-						{"capped", accum.First{"$capped"}},
-					}}},
-				}},
-				{"cursor", bson.D{}},
+					{"size", accum.Sum{"$storageStats.size"}},
+					{"capped", accum.First{"$capped"}},
+				}}},
 			}
 
-			cursor, driverErr := srcDB.RunCommandCursor(ctx, request)
+			cursor, driverErr := srcDB.Collection(collName).Aggregate(ctx, pipeline)
 			if driverErr != nil {
 				return driverErr
 			}
@@ -410,38 +406,16 @@ func GetDocumentCountAfterFiltering(ctx context.Context, logger *logger.Logger, 
 	srcDB := srcColl.Database()
 	collName := srcColl.Name()
 
-	value := struct {
-		Count int64 `bson:"numFilteredDocs"`
-	}{}
-
-	var pipeline mongo.Pipeline
-
-	if len(filter) > 0 {
-		pipeline = append(pipeline, bson.D{{"$match", filter}})
-	}
-	pipeline = append(pipeline, bson.D{{"$count", "numFilteredDocs"}})
+	var count int64
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, ri *retry.FuncInfo) error {
 			ri.Log(logger.Logger, "count", "source", srcDB.Name(), collName, "Counting filtered documents.")
-			request := bson.D{
-				{"aggregate", collName},
-				{"pipeline", pipeline},
-				{"cursor", bson.D{}},
-			}
+			var err error
 
-			cursor, driverErr := srcDB.RunCommandCursor(ctx, request)
-			if driverErr != nil {
-				return driverErr
-			}
+			count, err = srcDB.Collection(collName).CountDocuments(ctx, filter)
 
-			defer cursor.Close(ctx)
-			if cursor.Next(ctx) {
-				if err := cursor.Decode(&value); err != nil {
-					return errors.Wrapf(err, "failed to decode $count response (%+v) for source namespace %s.%s after filter (%+v)", cursor.Current, srcDB.Name(), collName, filter)
-				}
-			}
-			return nil
+			return err
 		},
 		"counting %#q's filtered documents",
 		srcDB.Name()+"."+collName,
@@ -455,17 +429,19 @@ func GetDocumentCountAfterFiltering(ctx context.Context, logger *logger.Logger, 
 		return 0, nil
 	}
 
+	ns := srcDB.Name() + "." + collName
+
 	if err != nil {
-		return 0, errors.Wrapf(err, "failed to run aggregation $count for source namespace %s.%s after filter (%+v)", srcDB.Name(), collName, filter)
+		return 0, errors.Wrapf(err, "counting %#q’s filter-matching docs (%+v)", ns, filter)
 	}
 
 	logger.Debug().
-		Str("namespace", srcDB.Name()+"."+collName).
-		Int64("docsCount", value.Count).
+		Str("namespace", ns).
+		Int64("docsCount", count).
 		Str("filter", fmt.Sprintf("%+v", filter)).
 		Msg("Collection stats.")
 
-	return value.Count, nil
+	return count, nil
 }
 
 // getNumPartitions returns the total number of partitions needed for the collection,

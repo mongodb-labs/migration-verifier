@@ -12,7 +12,9 @@ import (
 )
 
 func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri)
+	opts := verifier.getClientOpts(uri).SetReadPreference(
+		verifier.readPreference,
+	)
 	var err error
 	verifier.srcClient, err = mongo.Connect(opts)
 	if err != nil {

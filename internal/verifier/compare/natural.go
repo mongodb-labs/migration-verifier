@@ -3,7 +3,6 @@ package compare
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"slices"
 	"time"
 
@@ -24,22 +23,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-func SetDirectHostInConnectionString(connstr, hostname string) (string, error) {
-	parsedURI, err := url.ParseRequestURI(connstr)
-	if err != nil {
-		return "", errors.Wrapf(err, "parsing connection string")
-	}
-
-	parsedURI.Host = hostname
-
-	_, connstr, err = mongotools.MaybeAddDirectConnection(parsedURI.String())
-	if err != nil {
-		return "", errors.Wrapf(err, "tweaking connection string to %#q to ensure direct connection", parsedURI.Host)
-	}
-
-	return connstr, nil
-}
-
 func rvIsNonEmpty(rv bson.RawValue) bool {
 	return !rv.IsZero() && rv.Type != bson.TypeNull
 }
@@ -48,6 +31,9 @@ func rvIsNonEmpty(rv bson.RawValue) bool {
 // to the given task and sends the relevant data to the destination
 // reader and compare channels. This function only returns when there are
 // no more documents to read (or a failure happens).
+//
+// IMPORTANT: The given client MUST be a direct connection to the same node
+// that was read to create the partitions.
 //
 // This closes the passed-in channels when it exits.
 //
@@ -382,6 +368,7 @@ func openBackupNaturalCursor(
 	for _, priorResumeToken := range priorResumeTokens {
 		cmd := createCmd(option.Some(bsontools.ToRawValue(priorResumeToken)))
 
+		// No readpref is necessary because this should be a direct connection.
 		cursor, err := coll.Database().RunCommandCursor(ctx, cmd)
 		if err == nil {
 			logger.Info().
@@ -415,6 +402,7 @@ func openBackupNaturalCursor(
 
 	cmd := createCmd(option.None[bson.RawValue]())
 
+	// No readpref is necessary because this should be a direct connection.
 	cursor, err := coll.Database().RunCommandCursor(ctx, cmd)
 	if err != nil {
 		return nil, errors.Wrapf(err, "opening source cursor from beginning")

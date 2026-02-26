@@ -41,6 +41,13 @@ const (
 	maxRecheckIDs = 10_000
 )
 
+var (
+	recheckInsertBaseLen    = len(bsoncore.AppendStringElement(nil, "insert", ""))
+	recheckDocumentsBaseLen = len(bsoncore.AppendArrayElement(nil, "documents", nil))
+	recheckOrderedEl        = bsoncore.AppendBooleanElement(nil, "ordered", false)
+	recheckWriteConcernEl   = bsoncore.AppendDocumentElement(nil, "writeConcern", mmongo.WriteConcernMajorityRaw)
+)
+
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	ctx context.Context,
@@ -255,7 +262,13 @@ func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
 	}
 
 	// This BSON doc takes 39 bytes besides the collection name and requests.
-	expectedBSONSize := 39 + len(collName) + rechecksBSONSize
+	expectedBSONSize := 4 +
+		recheckInsertBaseLen + len(collName) +
+		recheckDocumentsBaseLen + rechecksBSONSize +
+		len(recheckOrderedEl) +
+		len(recheckWriteConcernEl) +
+		1
+
 	requestBSON := make(bson.Raw, 4, expectedBSONSize)
 
 	requestBSON = bsoncore.AppendStringElement(
@@ -263,16 +276,13 @@ func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
 		"insert",
 		collName,
 	)
-	requestBSON = bsoncore.AppendBooleanElement(
-		requestBSON,
-		"ordered",
-		false,
-	)
 	requestBSON = bsoncore.AppendArrayElement(
 		requestBSON,
 		"documents",
 		rechecksBSON,
 	)
+	requestBSON = append(requestBSON, recheckOrderedEl...)
+	requestBSON = append(requestBSON, recheckWriteConcernEl...)
 	requestBSON = append(requestBSON, 0)
 
 	if len(requestBSON) != expectedBSONSize {

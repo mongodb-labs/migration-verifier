@@ -26,6 +26,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
 
 func (suite *IntegrationTestSuite) skipUnlessCanPartitionNatural() [3]int {
@@ -351,10 +352,12 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 			coll,
 			100_000,
 			logger,
+			suite.srcConnStr,
+			readpref.Primary(),
 		)
 		require.NoError(t, err)
 
-		hello, err := util.GetHelloRaw(ctx, suite.srcMongoClient)
+		hello, err := util.GetHelloRaw(ctx, suite.srcMongoClient, option.None[*readpref.ReadPref]())
 		require.NoError(t, err)
 
 		hostnameRV, err := hello.LookupErr("me")
@@ -440,22 +443,13 @@ func getDirectClientAndHostname(
 	client *mongo.Client,
 	connstr string,
 ) (*mongo.Client, string) {
-	helloRaw, err := util.GetHelloRaw(ctx, client)
+	helloRaw, err := util.GetHelloRaw(ctx, client, option.None[*readpref.ReadPref]())
 	require.NoError(t, err)
 
-	hostnameRV, err := helloRaw.LookupErr("me")
+	hostname, err := bsontools.RawLookup[string](helloRaw, "me")
 	require.NoError(t, err)
 
-	hostname, err := bsontools.RawValueTo[string](hostnameRV)
-	require.NoError(t, err)
-
-	connstr, err = compare.SetDirectHostInConnectionString(
-		connstr,
-		hostname,
-	)
-	require.NoError(t, err)
-
-	directClient, err := mongo.Connect(options.Client().ApplyURI(connstr))
+	directClient, err := mmongo.GetDirectClient(connstr, hostname)
 	require.NoError(t, err)
 
 	return directClient, hostname
@@ -540,6 +534,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							{"$_requestResumeToken", true},
 							{"hint", bson.D{{"$natural", 1}}},
 						},
+						options.RunCmd().SetReadPreference(readpref.Primary()),
 					)
 
 					cur, err := cursor.New(coll.Database(), resp, nil)

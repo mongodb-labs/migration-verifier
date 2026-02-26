@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/10gen/migration-verifier/option"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,7 +18,7 @@ import (
 func TestGetBatch(t *testing.T) {
 	ctx := t.Context()
 
-	client := getClientFromEnv(t)
+	client := getClientFromEnvOrSkip(t)
 
 	coll := client.Database(t.Name()).Collection(
 		"coll",
@@ -25,6 +26,8 @@ func TestGetBatch(t *testing.T) {
 			SetWriteConcern(writeconcern.Majority()).
 			SetReadConcern(readconcern.Majority()),
 	)
+
+	require.NoError(t, coll.Drop(ctx), "pre-drop")
 
 	sess, err := client.StartSession(options.Session().SetCausalConsistency(true))
 	require.NoError(t, err)
@@ -39,7 +42,7 @@ func TestGetBatch(t *testing.T) {
 		lo.RepeatBy(
 			docsCount,
 			func(index int) any {
-				return bson.D{}
+				return bson.D{{"_id", index}}
 			},
 		),
 	)
@@ -66,14 +69,14 @@ func TestGetBatch(t *testing.T) {
 		assert.Len(t, docs, 100, "should get expected batch")
 	}
 
-	assert.False(t, cursor.TryNext(ctx), "cursor should be done")
+	assert.False(t, cursor.TryNext(ctx), "cursor should be done (current: %+v)", cursor.Current)
 	require.NoError(t, cursor.Err(), "should be no error")
 }
 
 func TestUnmarshalCursor(t *testing.T) {
 	ctx := t.Context()
 
-	client := getClientFromEnv(t)
+	client := getClientFromEnvOrSkip(t)
 
 	cursor, err := client.Database("admin").Aggregate(
 		ctx,
@@ -105,9 +108,14 @@ func TestUnmarshalCursor(t *testing.T) {
 	)
 }
 
-func getClientFromEnv(t *testing.T) *mongo.Client {
-	connStr := os.Getenv("MVTEST_META")
-	if connStr == "" {
+func getConnStrFromEnv() option.Option[string] {
+	return option.IfNotZero(os.Getenv("MVTEST_META"))
+}
+
+func getClientFromEnvOrSkip(t *testing.T) *mongo.Client {
+	connStr, has := getConnStrFromEnv().Get()
+
+	if !has {
 		t.Skipf("No MVTEST_META found; skipping.")
 	}
 
