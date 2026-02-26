@@ -408,13 +408,6 @@ func GetDocumentCountAfterFiltering(ctx context.Context, logger *logger.Logger, 
 
 	var count int64
 
-	var pipeline mongo.Pipeline
-
-	if len(filter) > 0 {
-		pipeline = append(pipeline, bson.D{{"$match", filter}})
-	}
-	pipeline = append(pipeline, bson.D{{"$count", "numFilteredDocs"}})
-
 	err := retry.New().WithCallback(
 		func(ctx context.Context, ri *retry.FuncInfo) error {
 			ri.Log(logger.Logger, "count", "source", srcDB.Name(), collName, "Counting filtered documents.")
