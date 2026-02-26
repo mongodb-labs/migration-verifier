@@ -326,8 +326,13 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 
 	logConfig(cCtx, logger)
 
+	err := v.SetReadPreference(cCtx.String(readPreference))
+	if err != nil {
+		return nil, err
+	}
+
 	srcConnStr := cCtx.String(srcURI)
-	_, srcConnStr, err := mongotools.MaybeAddDirectConnection(srcConnStr)
+	_, srcConnStr, err = mongotools.MaybeAddDirectConnection(srcConnStr)
 	if err != nil {
 		return nil, errors.Wrap(err, "parsing source connection string")
 	}
@@ -426,10 +431,6 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 	v.SetPartitioningScheme(partitions.Scheme(partitioningScheme))
 
-	err = v.SetReadPreference(cCtx.String(readPreference))
-	if err != nil {
-		return nil, err
-	}
 	v.SetFailureDisplaySize(cCtx.Int64(failureDisplaySize))
 	return v, nil
 }
