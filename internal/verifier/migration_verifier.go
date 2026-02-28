@@ -1493,6 +1493,12 @@ func (verifier *Verifier) partitionCollection(
 			return errors.Wrapf(err, "getting %#q’s shard key", srcNs)
 		}
 
+		verifier.workerTracker.SetPartitionCounts(
+			task.PrimaryKey,
+			0,
+			int(idealNumPartitions),
+		)
+
 		var pChan chan mo.Result[partitions.Partition]
 		pChan, err = partitions.PartitionCollectionNaturalOrder(
 			ctx,
@@ -1533,6 +1539,12 @@ func (verifier *Verifier) partitionCollection(
 					srcNs,
 				)
 			}
+
+			verifier.workerTracker.SetPartitionCounts(
+				task.PrimaryKey,
+				partitionsCount,
+				int(idealNumPartitions),
+			)
 		}
 	default:
 		panic(fmt.Sprintf("bad partition method (%#q); how did that happen?!?", verifier.partitioningScheme))
