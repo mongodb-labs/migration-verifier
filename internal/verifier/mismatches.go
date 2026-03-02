@@ -4,21 +4,26 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"iter"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/option"
+	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
+	"golang.org/x/exp/slices"
 )
 
 const (
 	mismatchesCollectionName = "mismatches"
+
+	maxMismatchBatchBytes = 5 << 20 // somewhat arbitrary
+	maxMismatchCount      = 10_000
 )
 
 type MismatchInfo struct {
@@ -43,7 +48,7 @@ func (mi MismatchInfo) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON().")
 }
 
-func (mi MismatchInfo) MarshalToBSON() []byte {
+func (mi MismatchInfo) MarshalToBSONFromPool() []byte {
 	detail := mi.Detail.MarshalToBSON()
 
 	bsonLen := 4 + // header
@@ -51,7 +56,7 @@ func (mi MismatchInfo) MarshalToBSON() []byte {
 		1 + 6 + 1 + len(detail) + // Detail
 		1 // NUL
 
-	buf := make(bson.Raw, 4, bsonLen)
+	buf := pool.Get(bsonLen)[:4]
 
 	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
 
@@ -307,28 +312,53 @@ func recordMismatches(
 	ctx context.Context,
 	db *mongo.Database,
 	taskID bson.ObjectID,
-	problems []VerificationResult,
+	problems iter.Seq[VerificationResult],
 ) error {
 	if option.IfNotZero(taskID).IsNone() {
 		panic("empty task ID given")
 	}
 
-	models := lo.Map(
-		problems,
-		func(r VerificationResult, _ int) mongo.WriteModel {
-			return &mongo.InsertOneModel{
-				Document: MismatchInfo{
-					Task:   taskID,
-					Detail: r,
-				}.MarshalToBSON(),
-			}
-		},
-	)
+	totalBytes := 0
+	var curProblems []bson.Raw
 
-	_, err := db.Collection(mismatchesCollectionName).BulkWrite(
-		ctx,
-		models,
-	)
+	eg, egCtx := contextplus.ErrGroup(ctx)
 
-	return errors.Wrapf(err, "recording %d mismatches", len(models))
+	var flush = func() {
+		batch := slices.Clone(curProblems)
+		curProblems = curProblems[:0]
+
+		eg.Go(func() error {
+			_, err := db.Collection(mismatchesCollectionName).InsertMany(
+				egCtx,
+				batch,
+				options.InsertMany().SetOrdered(false),
+			)
+
+			return errors.Wrapf(err, "persisting batch of %d mismatches for task %v", len(batch), taskID)
+		})
+	}
+
+	for prob := range problems {
+		raw := MismatchInfo{
+			Task:   taskID,
+			Detail: prob,
+		}.MarshalToBSONFromPool()
+		defer pool.Put(raw)
+
+		if totalBytes+len(raw) > maxMismatchBatchBytes {
+			flush()
+		}
+
+		curProblems = append(curProblems, raw)
+
+		if len(curProblems) == maxMismatchCount {
+			flush()
+		}
+	}
+
+	if len(curProblems) > 0 {
+		flush()
+	}
+
+	return eg.Wait()
 }
