@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/10gen/migration-verifier/arenabuf"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
@@ -196,8 +197,11 @@ func ReadNaturalPartitionFromSource(
 
 	retryState.NoteSuccess("opened cursor")
 
+	
 	var batch []DocWithTS
 	var batchDocIDs []DocID
+
+	docsBuf := &arenabuf.Buffer[bson.Raw]{}
 
 	flush := func(ctx context.Context) error {
 		logger.Trace().
@@ -301,19 +305,16 @@ cursorLoop:
 			break cursorLoop
 		}
 
-		var userDoc bson.Raw
-
-		userDocRV, err := cursor.Current.LookupErr("doc")
+		userDoc, err := bsontools.RawLookup[bson.Raw](cursor.Current, "doc")
 		if err != nil {
 			return errors.Wrapf(err, "getting user document")
 		}
 
-		userDoc, err = bsontools.RawValueTo[bson.Raw](userDocRV)
-		if err != nil {
-			return errors.Wrapf(err, "parsing user document")
-		}
-
-		batch = append(batch, NewDocWithTSFromPool(userDoc, *opTime))
+		batch = append(
+			batch,
+			DocWithTS{
+				Doc: 
+			} NewDocWithTSFromPool(userDoc, *opTime))
 
 		docID, err := compareMethod.RawDocIDForComparison(
 			userDoc,
