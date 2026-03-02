@@ -841,7 +841,7 @@ func iterateCursorToChannel(
 		err := chanutil.WriteWithDoneCheck(
 			sctx,
 			writer,
-			slices.Clone(docsWithTSCache),
+			docsWithTSCache,
 		)
 
 		if err != nil {
@@ -859,7 +859,7 @@ func iterateCursorToChannel(
 			reportutils.FmtBytes(bytesEnqueued),
 		)
 
-		docsWithTSCache = docsWithTSCache[:0]
+		docsWithTSCache = nil
 		bytesEnqueued = 0
 
 		return nil
