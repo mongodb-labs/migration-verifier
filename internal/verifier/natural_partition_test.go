@@ -587,16 +587,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							compared := lo.Flatten(lo.ChannelToSlice(toCompare))
 							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
-							defer func() {
-								for _, c := range compared {
-									c.PutInPool()
-								}
-
-								for _, d := range dstFetches {
-									d.PutInPool()
-								}
-							}()
-
 							switch compareMethod {
 							case compare.Binary:
 								suite.Assert().Equal(
@@ -682,16 +672,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 
 							compared := lo.Flatten(lo.ChannelToSlice(toCompare))
 							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
-
-							defer func() {
-								for _, c := range compared {
-									c.PutInPool()
-								}
-
-								for _, d := range dstFetches {
-									d.PutInPool()
-								}
-							}()
 
 							switch compareMethod {
 							case compare.Binary:
@@ -780,16 +760,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 
 							compared := lo.Flatten(lo.ChannelToSlice(toCompare))
 							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
-
-							defer func() {
-								for _, c := range compared {
-									c.PutInPool()
-								}
-
-								for _, d := range dstFetches {
-									d.PutInPool()
-								}
-							}()
 
 							switch compareMethod {
 							case compare.Binary:
@@ -881,16 +851,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 
 							compared := lo.Flatten(lo.ChannelToSlice(toCompare))
 							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
-
-							defer func() {
-								for _, c := range compared {
-									c.PutInPool()
-								}
-
-								for _, d := range dstFetches {
-									d.PutInPool()
-								}
-							}()
 
 							switch compareMethod {
 							case compare.Binary:

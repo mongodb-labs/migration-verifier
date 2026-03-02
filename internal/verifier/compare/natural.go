@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/10gen/migration-verifier/arenabuf"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
@@ -199,6 +200,9 @@ func ReadNaturalPartitionFromSource(
 	var batch []DocWithTS
 	var batchDocIDs []DocID
 
+	docsBuf := &arenabuf.Buffer[bson.Raw]{}
+	docIDsBuf := &arenabuf.Buffer[[]byte]{}
+
 	flush := func(ctx context.Context) error {
 		logger.Trace().
 			Any("task", task.PrimaryKey).
@@ -220,6 +224,7 @@ func ReadNaturalPartitionFromSource(
 		retryState.NoteSuccess("sent %d-doc batch to dst", len(batch))
 
 		batchDocIDs = batchDocIDs[:0]
+		docIDsBuf.Reset()
 
 		logger.Trace().
 			Any("task", task.PrimaryKey).
@@ -229,7 +234,7 @@ func ReadNaturalPartitionFromSource(
 
 		toCompareStart := time.Now()
 
-		// Now send documents  to the comparison thread.
+		// Now send documents to the comparison thread.
 		for chunk := range mslices.Chunk(slices.Clone(batch), ToComparatorBatchSize) {
 			err = chanutil.WriteWithDoneCheck(
 				ctx,
@@ -254,6 +259,7 @@ func ReadNaturalPartitionFromSource(
 		retryState.NoteSuccess("sent %d docs to compare", len(batch))
 
 		batch = batch[:0]
+		docsBuf.Reset()
 
 		return nil
 	}
@@ -301,19 +307,18 @@ cursorLoop:
 			break cursorLoop
 		}
 
-		var userDoc bson.Raw
-
-		userDocRV, err := cursor.Current.LookupErr("doc")
+		userDoc, err := bsontools.RawLookup[bson.Raw](cursor.Current, "doc")
 		if err != nil {
 			return errors.Wrapf(err, "getting user document")
 		}
 
-		userDoc, err = bsontools.RawValueTo[bson.Raw](userDocRV)
-		if err != nil {
-			return errors.Wrapf(err, "parsing user document")
-		}
-
-		batch = append(batch, NewDocWithTSFromPool(userDoc, *opTime))
+		batch = append(
+			batch,
+			DocWithTS{
+				Doc: docsBuf.Add(userDoc),
+				TS:  *opTime,
+			},
+		)
 
 		docID, err := compareMethod.RawDocIDForComparison(
 			userDoc,
@@ -322,7 +327,15 @@ cursorLoop:
 			return errors.Wrapf(err, "parsing doc ID for comparison")
 		}
 
-		batchDocIDs = append(batchDocIDs, NewDocIDFromPool(docID))
+		batchDocIDs = append(
+			batchDocIDs,
+			DocID{
+				ID: bson.RawValue{
+					Type:  docID.Type,
+					Value: docIDsBuf.Add(docID.Value),
+				},
+			},
+		)
 
 		if cursor.RemainingBatchLength() == 0 {
 			if err := flush(ctx); err != nil {
