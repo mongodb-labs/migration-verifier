@@ -5,7 +5,6 @@ import (
 
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
-	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -41,7 +40,6 @@ func TestMismatchesInfoMarshal(t *testing.T) {
 		}
 
 		raw := mi.AppendBSON(nil)
-		defer pool.Put(raw)
 
 		var rt MismatchInfo
 		require.NoError(t, bson.Unmarshal(raw, &rt))
