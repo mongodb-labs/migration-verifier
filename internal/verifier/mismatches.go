@@ -318,17 +318,10 @@ func recordMismatches(
 	eg, egCtx := contextplus.ErrGroup(ctx)
 
 	var flush = func() {
-		batchArena := make([]byte, 0, len(arena))
-		batch := make([]bson.Raw, 0, len(curProblems))
+		batch := curProblems
 
-		for _, prob := range curProblems {
-			start := len(batchArena)
-			batchArena = append(batchArena, prob...)
-			batch = append(batch, bson.Raw(batchArena[start:]))
-		}
-
-		curProblems = curProblems[:0]
-		arena = arena[:0]
+		curProblems = nil
+		arena = nil
 
 		eg.Go(func() error {
 			_, err := db.Collection(mismatchesCollectionName).InsertMany(
