@@ -34,7 +34,7 @@ func TestVerificationResultMarshal(t *testing.T) {
 	}
 
 	for _, result := range results {
-		raw := result.MarshalToBSON()
+		raw := result.AppendBSON(nil)
 
 		var rt VerificationResult
 		require.NoError(t, bson.Unmarshal(raw, &rt))

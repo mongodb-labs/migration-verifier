@@ -10,13 +10,11 @@ import (
 	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/option"
-	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
-	"golang.org/x/exp/slices"
 )
 
 const (
@@ -48,26 +46,21 @@ func (mi MismatchInfo) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON().")
 }
 
-func (mi MismatchInfo) MarshalToBSONFromPool() []byte {
-	detail := mi.Detail.MarshalToBSON()
-
-	bsonLen := 4 + // header
-		1 + 4 + 1 + len(bson.ObjectID{}) + // Task
-		1 + 6 + 1 + len(detail) + // Detail
-		1 // NUL
-
-	buf := pool.Get(bsonLen)[:4]
-
-	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
+// AppendBSON appends the struct’s BSON representation to the
+// given slice & returns the new slice.
+func (mi MismatchInfo) AppendBSON(buf []byte) []byte {
+	bsonStart := len(buf)
+	buf = binary.LittleEndian.AppendUint32(buf, 0)
 
 	buf = bsoncore.AppendObjectIDElement(buf, "task", mi.Task)
-	buf = bsoncore.AppendDocumentElement(buf, "detail", detail)
+	buf = bsoncore.AppendDocumentElement(buf, "detail", nil)
+	buf = mi.Detail.AppendBSON(buf)
 
 	buf = append(buf, 0)
 
-	if len(buf) != bsonLen {
-		panic(fmt.Sprintf("%T BSON length is %d but expected %d", mi, len(buf), bsonLen))
-	}
+	bsonLen := len(buf) - bsonStart
+
+	binary.LittleEndian.PutUint32(buf[bsonStart:], uint32(bsonLen))
 
 	return buf
 }
@@ -320,16 +313,22 @@ func recordMismatches(
 
 	totalBytes := 0
 	var curProblems []bson.Raw
+	var arena []byte
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
 
 	var flush = func() {
-		batch := slices.Clone(curProblems)
-		for _, raw := range batch {
-			defer pool.Put(raw)
+		batchArena := make([]byte, 0, len(arena))
+		batch := make([]bson.Raw, 0, len(curProblems))
+
+		for _, prob := range curProblems {
+			start := len(batchArena)
+			batchArena = append(batchArena, prob...)
+			batch = append(batch, bson.Raw(batchArena[start:]))
 		}
 
 		curProblems = curProblems[:0]
+		arena = arena[:0]
 
 		eg.Go(func() error {
 			_, err := db.Collection(mismatchesCollectionName).InsertMany(
@@ -342,17 +341,21 @@ func recordMismatches(
 		})
 	}
 
+	var nextMismatch bson.Raw
+
 	for prob := range problems {
-		raw := MismatchInfo{
+		nextMismatch = MismatchInfo{
 			Task:   taskID,
 			Detail: prob,
-		}.MarshalToBSONFromPool()
+		}.AppendBSON(nextMismatch[:0])
 
-		if totalBytes+len(raw) > maxMismatchBatchBytes {
+		if totalBytes+len(nextMismatch) > maxMismatchBatchBytes {
 			flush()
 		}
 
-		curProblems = append(curProblems, raw)
+		start := len(arena)
+		arena = append(arena, nextMismatch...)
+		curProblems = append(curProblems, arena[start:])
 
 		if len(curProblems) == maxMismatchCount {
 			flush()

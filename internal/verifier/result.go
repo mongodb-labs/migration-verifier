@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -89,7 +90,9 @@ func (vr VerificationResult) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON.")
 }
 
-func (vr VerificationResult) MarshalToBSON() []byte {
+// MarshalToBSON appends the struct’s BSON representation to the
+// given slice & returns the new slice.
+func (vr VerificationResult) AppendBSON(buf []byte) []byte {
 	bsonLen := 4 + // header
 		1 + 5 + 1 + 4 + 1 + // Field
 		1 + 7 + 1 + 4 + 1 + // Details
@@ -116,9 +119,9 @@ func (vr VerificationResult) MarshalToBSON() []byte {
 		bsonLen += 1 + 12 + 1 + 8
 	}
 
-	buf := make(bson.Raw, 4, bsonLen)
+	buf = slices.Grow(buf, bsonLen)
 
-	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
+	buf = binary.LittleEndian.AppendUint32(buf, uint32(bsonLen))
 
 	if !vr.ID.IsZero() {
 		buf = bsoncore.AppendValueElement(buf, "id", bsoncore.Value{

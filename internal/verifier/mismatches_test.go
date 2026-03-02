@@ -40,7 +40,7 @@ func TestMismatchesInfoMarshal(t *testing.T) {
 			Detail: result,
 		}
 
-		raw := mi.MarshalToBSONFromPool()
+		raw := mi.AppendBSON(nil)
 		defer pool.Put(raw)
 
 		var rt MismatchInfo
