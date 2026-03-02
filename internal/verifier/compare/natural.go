@@ -197,11 +197,11 @@ func ReadNaturalPartitionFromSource(
 
 	retryState.NoteSuccess("opened cursor")
 
-	
 	var batch []DocWithTS
 	var batchDocIDs []DocID
 
 	docsBuf := &arenabuf.Buffer[bson.Raw]{}
+	docIDsBuf := &arenabuf.Buffer[[]byte]{}
 
 	flush := func(ctx context.Context) error {
 		logger.Trace().
@@ -224,6 +224,7 @@ func ReadNaturalPartitionFromSource(
 		retryState.NoteSuccess("sent %d-doc batch to dst", len(batch))
 
 		batchDocIDs = batchDocIDs[:0]
+		docIDsBuf.Reset()
 
 		logger.Trace().
 			Any("task", task.PrimaryKey).
@@ -233,7 +234,7 @@ func ReadNaturalPartitionFromSource(
 
 		toCompareStart := time.Now()
 
-		// Now send documents  to the comparison thread.
+		// Now send documents to the comparison thread.
 		for chunk := range mslices.Chunk(slices.Clone(batch), ToComparatorBatchSize) {
 			err = chanutil.WriteWithDoneCheck(
 				ctx,
@@ -258,6 +259,7 @@ func ReadNaturalPartitionFromSource(
 		retryState.NoteSuccess("sent %d docs to compare", len(batch))
 
 		batch = batch[:0]
+		docsBuf.Reset()
 
 		return nil
 	}
@@ -313,8 +315,10 @@ cursorLoop:
 		batch = append(
 			batch,
 			DocWithTS{
-				Doc: 
-			} NewDocWithTSFromPool(userDoc, *opTime))
+				Doc: docsBuf.Add(userDoc),
+				TS:  *opTime,
+			},
+		)
 
 		docID, err := compareMethod.RawDocIDForComparison(
 			userDoc,
@@ -323,7 +327,15 @@ cursorLoop:
 			return errors.Wrapf(err, "parsing doc ID for comparison")
 		}
 
-		batchDocIDs = append(batchDocIDs, NewDocIDFromPool(docID))
+		batchDocIDs = append(
+			batchDocIDs,
+			DocID{
+				ID: bson.RawValue{
+					Type:  docID.Type,
+					Value: docIDsBuf.Add(docID.Value),
+				},
+			},
+		)
 
 		if cursor.RemainingBatchLength() == 0 {
 			if err := flush(ctx); err != nil {

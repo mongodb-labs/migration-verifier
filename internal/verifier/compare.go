@@ -8,6 +8,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/10gen/migration-verifier/arenabuf"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/reportutils"
@@ -223,11 +224,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 		// channels, which documents were missing on one side or the other.
 		delete(theirMap, mapKey)
 
-		// After the below we’ll be done with these documents, so we can
-		// schedule putting their buffers into the memory pool.
-		defer curDocWithTS.PutInPool()
-		defer theirDocWithTS.PutInPool()
-
 		// Now we determine which document came from whom.
 		var srcDoc, dstDoc compare.DocWithTS
 		if isSrc {
@@ -438,8 +434,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 				MismatchHistory: createMismatchTimes(firstMismatchTime),
 			},
 		)
-
-		docWithTS.PutInPool()
 	}
 
 	for _, docWithTS := range dstCache {
@@ -460,8 +454,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 				MismatchHistory: createMismatchTimes(firstMismatchTime),
 			},
 		)
-
-		docWithTS.PutInPool()
 	}
 
 	verifier.docsComparedHistory.Add(curHistoryDocCount)
@@ -615,10 +607,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				&dupeTask,
 				option.None[*readpref.ReadPref](),
 			)
-
-			for _, id := range docIDs {
-				id.PutInPool()
-			}
 
 			if err != nil {
 				return errors.Wrapf(err, "finding %d documents", len(docIDs))
@@ -835,13 +823,15 @@ func iterateCursorToChannel(
 	var docsCount int
 	var bytesEnqueued types.ByteCount
 
+	docsBuf := &arenabuf.Buffer[bson.Raw]{}
+
 	var docsWithTSCache []compare.DocWithTS
 
 	flush := func() error {
 		err := chanutil.WriteWithDoneCheck(
 			sctx,
 			writer,
-			docsWithTSCache,
+			slices.Clone(docsWithTSCache),
 		)
 
 		if err != nil {
@@ -859,7 +849,8 @@ func iterateCursorToChannel(
 			reportutils.FmtBytes(bytesEnqueued),
 		)
 
-		docsWithTSCache = nil
+		docsBuf.Reset()
+		docsWithTSCache = docsWithTSCache[:0]
 		bytesEnqueued = 0
 
 		return nil
@@ -888,7 +879,10 @@ func iterateCursorToChannel(
 
 		docsWithTSCache = append(
 			docsWithTSCache,
-			compare.NewDocWithTSFromPool(cursor.Current, clusterTime),
+			compare.DocWithTS{
+				Doc: docsBuf.Add(cursor.Current),
+				TS:  clusterTime,
+			},
 		)
 
 		bytesEnqueued += types.ByteCount(len(cursor.Current))

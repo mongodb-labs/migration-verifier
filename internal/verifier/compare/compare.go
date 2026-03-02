@@ -24,8 +24,7 @@ func ToComparatorBatchCount(totalDocs int) int {
 // source-reader thread to the destination. This wraps a document ID
 // with a struct that simplifies memory management.
 type DocID struct {
-	ID       bson.RawValue
-	fromPool bool
+	ID bson.RawValue
 }
 
 // DocWithTS holds a document that’s to be compared with its peer’s or, if not,

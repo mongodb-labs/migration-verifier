@@ -8,27 +8,21 @@ type bufferType interface {
 
 // Buffer tracks multiple buffers in a single “arena” buffer.
 type Buffer[T bufferType] struct {
-	buf      []byte
-	pointers []T
+	buf []byte
 }
 
-// Add copies a new slice to the Buffer’s internals.
+// Add copies a new slice to the Buffer’s internals and returns the copied
+// slice.
 func (b *Buffer[T]) Add(in T) T {
 	start := len(b.buf)
 	b.buf = append(b.buf, in...)
 	newBuf := b.buf[start:]
 
-	b.pointers = append(b.pointers, newBuf)
-
 	return newBuf
 }
 
-// Slices returns the Buffer’s internal slices. It *does not* copy the buffer.
-func (b *Buffer[T]) Slices() []T {
-	return b.pointers
-}
-
+// Reset creates a new backing buffer. To minimize allocations on subsequent
+// usage it makes the new buffer the same size as the existing one.
 func (b *Buffer[T]) Reset() {
-	b.buf = b.buf[:0]
-	b.pointers = b.pointers[:0]
+	b.buf = make([]byte, 0, len(b.buf))
 }
