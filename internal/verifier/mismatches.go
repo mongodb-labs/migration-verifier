@@ -320,8 +320,8 @@ func recordMismatches(
 	var flush = func() {
 		batch := curProblems
 
-		curProblems = nil
-		arena = nil
+		curProblems = make([]bson.Raw, 0, len(curProblems))
+		arena = make([]byte, 0, len(arena))
 
 		eg.Go(func() error {
 			_, err := db.Collection(mismatchesCollectionName).InsertMany(
