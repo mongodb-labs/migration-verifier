@@ -7,10 +7,10 @@ import (
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
+	"github.com/10gen/migration-verifier/arenabuf"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -19,6 +19,11 @@ import (
 
 const (
 	mismatchesCollectionName = "mismatches"
+
+	// These are chosen somewhat arbitrarily:
+	defaultMaxMismatchCount = 50_000
+	maxMismatchRequests     = 10
+	maxMismatchBatchBytes   = 5 << 20
 )
 
 type MismatchInfo struct {
@@ -309,26 +314,63 @@ func recordMismatches(
 	taskID bson.ObjectID,
 	problems []VerificationResult,
 ) error {
+
+	// If the # of problems is so great that honoring the default max mismatches
+	// per request would create “too many” requests, then pack more mismatches
+	// per request.
+	maxMismatchCount := max(
+		defaultMaxMismatchCount,
+		len(problems)/maxMismatchRequests,
+	)
+
 	if option.IfNotZero(taskID).IsNone() {
 		panic("empty task ID given")
 	}
 
-	models := lo.Map(
-		problems,
-		func(r VerificationResult, _ int) mongo.WriteModel {
-			return &mongo.InsertOneModel{
-				Document: MismatchInfo{
-					Task:   taskID,
-					Detail: r,
-				}.MarshalToBSON(),
-			}
-		},
-	)
+	totalBytes := 0
 
-	_, err := db.Collection(mismatchesCollectionName).BulkWrite(
-		ctx,
-		models,
-	)
+	buf := &arenabuf.Buffer[bson.Raw]{}
 
-	return errors.Wrapf(err, "recording %d mismatches", len(models))
+	eg, egCtx := contextplus.ErrGroup(ctx)
+
+	var flush = func() {
+		batch := buf.Slices()
+
+		buf.Reset()
+
+		eg.Go(func() error {
+			_, err := db.Collection(mismatchesCollectionName).InsertMany(
+				egCtx,
+				batch,
+				options.InsertMany().SetOrdered(false),
+			)
+
+			return errors.Wrapf(err, "persisting batch of %d mismatches for task %v", len(batch), taskID)
+		})
+	}
+
+	var nextMismatch bson.Raw
+
+	for _, prob := range problems {
+		nextMismatch = MismatchInfo{
+			Task:   taskID,
+			Detail: prob,
+		}.MarshalToBSON()
+
+		if totalBytes+len(nextMismatch) > maxMismatchBatchBytes {
+			flush()
+		}
+
+		buf.Add(nextMismatch)
+
+		if len(buf.Slices()) == maxMismatchCount {
+			flush()
+		}
+	}
+
+	if len(buf.Slices()) > 0 {
+		flush()
+	}
+
+	return eg.Wait()
 }
