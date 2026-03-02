@@ -581,8 +581,8 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 	debugLog.Msg("Processing document comparison task.")
 
-	compareCtx, canceler := contextplus.WithCancelCause(ctx)
-	defer canceler(fmt.Errorf("function end"))
+	compareCtx, compareCanceler := contextplus.WithCancelCause(ctx)
+	defer compareCanceler(fmt.Errorf("function end"))
 
 	reportsResultChan := verifier.FetchAndCompareDocuments(
 		compareCtx,
@@ -636,6 +636,8 @@ REPORTS:
 					Int("mismatchesSoFar", len(report.Problems)).
 					Msg("Discrepancies found.")
 			}
+
+			problemsCount += len(report.Problems)
 
 			problems := report.Problems
 
