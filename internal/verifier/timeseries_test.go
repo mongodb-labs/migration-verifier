@@ -122,9 +122,9 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 	// Needed to compare docs:
 	suite.Require().NoError(verifier.startChangeHandling(ctx))
 
-	problems, srcDocs, srcBytes, err := verifier.FetchAndCompareDocuments(
+	problems, srcDocs, srcBytes, err := runFetchAndCompareDocuments(
 		ctx,
-		0,
+		verifier,
 		&tasks[0],
 	)
 	suite.Require().NoError(err, "must compare OK")

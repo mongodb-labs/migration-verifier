@@ -582,47 +582,63 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 	debugLog.Msg("Processing document comparison task.")
 
-	problems, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(
-		ctx,
+	compareCtx, canceler := contextplus.WithCancelCause(ctx)
+	defer canceler(fmt.Errorf("function end"))
+
+	reportsResultChan := verifier.FetchAndCompareDocuments(
+		compareCtx,
 		workerNum,
 		task,
 	)
 
-	if err != nil {
-		return errors.Wrapf(
-			err,
-			"worker %d failed to process document comparison task %s (namespace: %#q)",
-			workerNum,
-			task.PrimaryKey,
-			task.QueryFilter.Namespace,
-		)
-	}
+	problemsCount := 0
 
-	task.SourceDocumentCount = docsCount
-	task.SourceByteCount = bytesCount
+REPORTS:
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case repResult, open := <-reportsResultChan:
+			if !open {
+				lo.Assertf(
+					problemsCount > 0,
+					"should only see channel closed if there were problems",
+				)
 
-	if len(problems) == 0 {
-		task.Status = tasks.Completed
-	} else {
-		// We enqueue rechecks and persist mismatches concurrently.
-		eg, egCtx := contextplus.ErrGroup(ctx)
+				break REPORTS
+			}
 
-		task.Status = tasks.Failed
-		// We know we won't change lastGeneration while verification tasks are running, so no mutex needed here.
-		if verifier.lastGeneration {
-			verifier.logger.Error().
-				Int("workerNum", workerNum).
-				Any("task", task.PrimaryKey).
-				Str("namespace", task.QueryFilter.Namespace).
-				Int("mismatchesCount", len(problems)).
-				Msg("Document(s) mismatched, and this is the final generation.")
-		} else {
-			verifier.logger.Debug().
-				Int("workerNum", workerNum).
-				Any("task", task.PrimaryKey).
-				Str("namespace", task.QueryFilter.Namespace).
-				Int("mismatchesCount", len(problems)).
-				Msg("Discrepancies found. Will recheck in the next generation.")
+			report, err := repResult.Get()
+
+			if err != nil {
+				return errors.Wrapf(
+					err,
+					"worker %d failed to process document comparison task %s (namespace: %#q)",
+					workerNum,
+					task.PrimaryKey,
+					task.QueryFilter.Namespace,
+				)
+			}
+
+			task.SourceDocumentCount += report.DocCount
+			task.SourceByteCount += report.ByteCount
+
+			if len(report.Problems) == 0 {
+				// The only problem-free report is the last one.
+				// (NB: The last report is not necessarily problem-free!)
+				break REPORTS
+			}
+
+			if problemsCount == 0 {
+				verifier.logger.Debug().
+					Int("workerNum", workerNum).
+					Any("task", task.PrimaryKey).
+					Str("namespace", task.QueryFilter.Namespace).
+					Int("mismatchesSoFar", len(report.Problems)).
+					Msg("Discrepancies found.")
+			}
+
+			problems := report.Problems
 
 			dataSizes := make([]int32, 0, len(problems))
 			firstMismatchTimes := make([]bson.DateTime, 0, len(problems))
@@ -636,6 +652,9 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 				dataSizes = append(dataSizes, problem.dataSize)
 				firstMismatchTimes = append(firstMismatchTimes, problem.MismatchHistory.First)
 			}
+
+			// We enqueue rechecks and persist mismatches concurrently.
+			eg, egCtx := contextplus.ErrGroup(ctx)
 
 			// Create a task for the next generation to recheck the
 			// mismatched & missing docs.
@@ -651,32 +670,55 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 				},
 			)
-		}
 
-		eg.Go(
-			func() error {
-				err := recordMismatches(
-					egCtx,
-					verifier.metaClient.Database(verifier.metaDBName),
-					task.PrimaryKey,
-					slices.Values(problems),
-				)
+			eg.Go(
+				func() error {
+					err := recordMismatches(
+						egCtx,
+						verifier.metaClient.Database(verifier.metaDBName),
+						task.PrimaryKey,
+						slices.Values(problems),
+					)
 
-				return errors.Wrapf(
-					err,
-					"recording task %s's %d discrepancies",
-					task.PrimaryKey,
-					len(problems),
-				)
-			},
-		)
+					return errors.Wrapf(
+						err,
+						"recording task %s's %d discrepancies",
+						task.PrimaryKey,
+						len(problems),
+					)
+				},
+			)
 
-		if err := eg.Wait(); err != nil {
-			return err
+			if err := eg.Wait(); err != nil {
+				return errors.Wrapf(err, "persisting mismatches/rechecks")
+			}
 		}
 	}
 
-	err = verifier.UpdateVerificationTask(ctx, task)
+	if problemsCount == 0 {
+		task.Status = tasks.Completed
+	} else {
+		task.Status = tasks.Failed
+		// We know we won't change lastGeneration while verification tasks are running, so no mutex needed here.
+		if verifier.lastGeneration {
+			verifier.logger.Error().
+				Int("workerNum", workerNum).
+				Any("task", task.PrimaryKey).
+				Str("namespace", task.QueryFilter.Namespace).
+				Int("mismatchesCount", problemsCount).
+				Msg("Document(s) mismatched, and this is the final generation.")
+		} else {
+			verifier.logger.Debug().
+				Int("workerNum", workerNum).
+				Any("task", task.PrimaryKey).
+				Str("namespace", task.QueryFilter.Namespace).
+				Int("mismatchesCount", problemsCount).
+				Msg("Discrepancies found. Will recheck in the next generation.")
+
+		}
+	}
+
+	err := verifier.UpdateVerificationTask(ctx, task)
 
 	if err != nil {
 		return errors.Wrapf(
@@ -691,8 +733,8 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace).
-		Int64("documentCount", int64(docsCount)).
-		Str("dataSize", reportutils.FmtBytes(bytesCount)).
+		Int64("documentCount", int64(task.SourceDocumentCount)).
+		Str("dataSize", reportutils.FmtBytes(task.SourceByteCount)).
 		Stringer("timeElapsed", time.Since(start)).
 		Msg("Finished document comparison task.")
 

@@ -58,11 +58,16 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 
 		var done atomic.Bool
 		go func() {
-			_, _, _, err := verifier.FetchAndCompareDocuments(
+			reports := lo.ChannelToSlice(verifier.FetchAndCompareDocuments(
 				cancelableCtx,
 				0,
 				&task,
-			)
+			))
+
+			s.Require().Len(reports, 1)
+
+			_, err := reports[0].Get()
+
 			if err != nil {
 				s.Assert().ErrorIs(
 					err,

@@ -85,7 +85,7 @@ func BenchmarkGeneric(t *testing.B) {
 		qfilter := tasks.QueryFilter{Namespace: namespace}
 		task := tasks.Task{QueryFilter: qfilter}
 		// TODO: is this safe?
-		mismatchedIds, docsCount, bytesCount, err := verifier.FetchAndCompareDocuments(context.Background(), 0, &task)
+		mismatchedIds, docsCount, bytesCount, err := runFetchAndCompareDocuments(context.Background(), verifier, &task)
 		if err != nil {
 			t.Fatal(err)
 		}

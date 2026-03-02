@@ -98,11 +98,7 @@ func (suite *IntegrationTestSuite) TestFetchAndCompareAllDstDocsGone() {
 		},
 	}
 
-	results, _, _, err := verifier.FetchAndCompareDocuments(
-		ctx,
-		0,
-		task,
-	)
+	results, _, _, err := runFetchAndCompareDocuments(ctx, verifier, task)
 	require.NoError(t, err)
 
 	assert.Len(t, results, len(docs), "every doc should trigger a result")
