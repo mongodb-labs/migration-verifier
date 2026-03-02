@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"iter"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -19,9 +19,6 @@ import (
 
 const (
 	mismatchesCollectionName = "mismatches"
-
-	maxMismatchBatchBytes = 5 << 20 // somewhat arbitrary
-	maxMismatchCount      = 10_000
 )
 
 type MismatchInfo struct {
@@ -46,21 +43,26 @@ func (mi MismatchInfo) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON().")
 }
 
-// AppendBSON appends the struct’s BSON representation to the
-// given slice & returns the new slice.
-func (mi MismatchInfo) AppendBSON(buf []byte) []byte {
-	bsonStart := len(buf)
-	buf = binary.LittleEndian.AppendUint32(buf, 0)
+func (mi MismatchInfo) MarshalToBSON() []byte {
+	detail := mi.Detail.MarshalToBSON()
+
+	bsonLen := 4 + // header
+		1 + 4 + 1 + len(bson.ObjectID{}) + // Task
+		1 + 6 + 1 + len(detail) + // Detail
+		1 // NUL
+
+	buf := make(bson.Raw, 4, bsonLen)
+
+	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
 
 	buf = bsoncore.AppendObjectIDElement(buf, "task", mi.Task)
-	buf = bsoncore.AppendDocumentElement(buf, "detail", nil)
-	buf = mi.Detail.AppendBSON(buf)
+	buf = bsoncore.AppendDocumentElement(buf, "detail", detail)
 
 	buf = append(buf, 0)
 
-	bsonLen := len(buf) - bsonStart
-
-	binary.LittleEndian.PutUint32(buf[bsonStart:], uint32(bsonLen))
+	if len(buf) != bsonLen {
+		panic(fmt.Sprintf("%T BSON length is %d but expected %d", mi, len(buf), bsonLen))
+	}
 
 	return buf
 }
@@ -305,59 +307,28 @@ func recordMismatches(
 	ctx context.Context,
 	db *mongo.Database,
 	taskID bson.ObjectID,
-	problems iter.Seq[VerificationResult],
+	problems []VerificationResult,
 ) error {
 	if option.IfNotZero(taskID).IsNone() {
 		panic("empty task ID given")
 	}
 
-	totalBytes := 0
-	var curProblems []bson.Raw
-	var arena []byte
+	models := lo.Map(
+		problems,
+		func(r VerificationResult, _ int) mongo.WriteModel {
+			return &mongo.InsertOneModel{
+				Document: MismatchInfo{
+					Task:   taskID,
+					Detail: r,
+				}.MarshalToBSON(),
+			}
+		},
+	)
 
-	eg, egCtx := contextplus.ErrGroup(ctx)
+	_, err := db.Collection(mismatchesCollectionName).BulkWrite(
+		ctx,
+		models,
+	)
 
-	var flush = func() {
-		batch := curProblems
-
-		curProblems = make([]bson.Raw, 0, len(curProblems))
-		arena = make([]byte, 0, len(arena))
-
-		eg.Go(func() error {
-			_, err := db.Collection(mismatchesCollectionName).InsertMany(
-				egCtx,
-				batch,
-				options.InsertMany().SetOrdered(false),
-			)
-
-			return errors.Wrapf(err, "persisting batch of %d mismatches for task %v", len(batch), taskID)
-		})
-	}
-
-	var nextMismatch bson.Raw
-
-	for prob := range problems {
-		nextMismatch = MismatchInfo{
-			Task:   taskID,
-			Detail: prob,
-		}.AppendBSON(nextMismatch[:0])
-
-		if totalBytes+len(nextMismatch) > maxMismatchBatchBytes {
-			flush()
-		}
-
-		start := len(arena)
-		arena = append(arena, nextMismatch...)
-		curProblems = append(curProblems, arena[start:])
-
-		if len(curProblems) == maxMismatchCount {
-			flush()
-		}
-	}
-
-	if len(curProblems) > 0 {
-		flush()
-	}
-
-	return eg.Wait()
+	return errors.Wrapf(err, "recording %d mismatches", len(models))
 }

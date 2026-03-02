@@ -2,15 +2,14 @@ package verifier
 
 import (
 	"encoding/binary"
+	"fmt"
 	"time"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/option"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
-	"golang.org/x/exp/slices"
 )
 
 const (
@@ -90,9 +89,7 @@ func (vr VerificationResult) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON.")
 }
 
-// AppendBSON appends the struct’s BSON representation to the
-// given slice & returns the new slice.
-func (vr VerificationResult) AppendBSON(buf []byte) []byte {
+func (vr VerificationResult) MarshalToBSON() []byte {
 	bsonLen := 4 + // header
 		1 + 5 + 1 + 4 + 1 + // Field
 		1 + 7 + 1 + 4 + 1 + // Details
@@ -119,10 +116,9 @@ func (vr VerificationResult) AppendBSON(buf []byte) []byte {
 		bsonLen += 1 + 12 + 1 + 8
 	}
 
-	buf = slices.Grow(buf, bsonLen)
+	buf := make(bson.Raw, 4, bsonLen)
 
-	startSize := len(buf)
-	buf = binary.LittleEndian.AppendUint32(buf, uint32(bsonLen))
+	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
 
 	if !vr.ID.IsZero() {
 		buf = bsoncore.AppendValueElement(buf, "id", bsoncore.Value{
@@ -147,13 +143,9 @@ func (vr VerificationResult) AppendBSON(buf []byte) []byte {
 
 	buf = append(buf, 0)
 
-	lo.Assertf(
-		len(buf)-startSize == bsonLen,
-		"%T BSON length is %d but expected %d",
-		vr,
-		len(buf),
-		bsonLen,
-	)
+	if len(buf) != bsonLen {
+		panic(fmt.Sprintf("%T BSON length is %d but expected %d", vr, len(buf), bsonLen))
+	}
 
 	return buf
 }

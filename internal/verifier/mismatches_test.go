@@ -39,7 +39,7 @@ func TestMismatchesInfoMarshal(t *testing.T) {
 			Detail: result,
 		}
 
-		raw := mi.AppendBSON(nil)
+		raw := mi.MarshalToBSON()
 
 		var rt MismatchInfo
 		require.NoError(t, bson.Unmarshal(raw, &rt))

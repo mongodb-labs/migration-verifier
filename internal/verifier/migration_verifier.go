@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	_ "net/http/pprof"
 	"os"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -677,7 +676,7 @@ REPORTS:
 						egCtx,
 						verifier.metaClient.Database(verifier.metaDBName),
 						task.PrimaryKey,
-						slices.Values(problems),
+						problems,
 					)
 
 					return errors.Wrapf(
@@ -1233,7 +1232,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			ctx,
 			verifier.verificationDatabase(),
 			task.PrimaryKey,
-			slices.Values(specificationProblems),
+			specificationProblems,
 		)
 		if err != nil {
 			return errors.Wrapf(err, "recording %#q spec discrepancies", srcNs)
@@ -1281,7 +1280,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			ctx,
 			verifier.verificationDatabase(),
 			task.PrimaryKey,
-			slices.Values(indexProblems),
+			indexProblems,
 		)
 		if err != nil {
 			return errors.Wrapf(err, "recording %#q index discrepancies", srcNs)
@@ -1311,7 +1310,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			ctx,
 			verifier.verificationDatabase(),
 			task.PrimaryKey,
-			slices.Values(shardingProblems),
+			shardingProblems,
 		)
 		if err != nil {
 			return errors.Wrapf(err, "recording %#q sharding discrepancies", srcNs)
