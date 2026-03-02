@@ -20,8 +20,10 @@ import (
 const (
 	mismatchesCollectionName = "mismatches"
 
-	maxMismatchBatchBytes = 5 << 20
-	maxMismatchCount      = 10_000
+	// These are chosen somewhat arbitrarily:
+	defaultMaxMismatchCount = 50_000
+	maxMismatchRequests     = 10
+	maxMismatchBatchBytes   = 5 << 20
 )
 
 type MismatchInfo struct {
@@ -312,6 +314,15 @@ func recordMismatches(
 	taskID bson.ObjectID,
 	problems []VerificationResult,
 ) error {
+
+	// If the # of problems is so great that honoring the default max mismatches
+	// per request would create “too many” requests, then pack more mismatches
+	// per request.
+	maxMismatchCount := max(
+		defaultMaxMismatchCount,
+		len(problems)/maxMismatchRequests,
+	)
+
 	if option.IfNotZero(taskID).IsNone() {
 		panic("empty task ID given")
 	}
