@@ -2,12 +2,12 @@ package verifier
 
 import (
 	"encoding/binary"
-	"fmt"
 	"time"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 	"golang.org/x/exp/slices"
@@ -121,6 +121,7 @@ func (vr VerificationResult) AppendBSON(buf []byte) []byte {
 
 	buf = slices.Grow(buf, bsonLen)
 
+	startSize := len(buf)
 	buf = binary.LittleEndian.AppendUint32(buf, uint32(bsonLen))
 
 	if !vr.ID.IsZero() {
@@ -146,9 +147,13 @@ func (vr VerificationResult) AppendBSON(buf []byte) []byte {
 
 	buf = append(buf, 0)
 
-	if len(buf) != bsonLen {
-		panic(fmt.Sprintf("%T BSON length is %d but expected %d", vr, len(buf), bsonLen))
-	}
+	lo.Assertf(
+		len(buf)-startSize == bsonLen,
+		"%T BSON length is %d but expected %d",
+		vr,
+		len(buf),
+		bsonLen,
+	)
 
 	return buf
 }
