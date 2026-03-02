@@ -90,7 +90,7 @@ func (vr VerificationResult) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON.")
 }
 
-// MarshalToBSON appends the struct’s BSON representation to the
+// AppendBSON appends the struct’s BSON representation to the
 // given slice & returns the new slice.
 func (vr VerificationResult) AppendBSON(buf []byte) []byte {
 	bsonLen := 4 + // header
