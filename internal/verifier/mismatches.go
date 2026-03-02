@@ -325,6 +325,10 @@ func recordMismatches(
 
 	var flush = func() {
 		batch := slices.Clone(curProblems)
+		for _, raw := range batch {
+			defer pool.Put(raw)
+		}
+
 		curProblems = curProblems[:0]
 
 		eg.Go(func() error {
@@ -343,7 +347,6 @@ func recordMismatches(
 			Task:   taskID,
 			Detail: prob,
 		}.MarshalToBSONFromPool()
-		defer pool.Put(raw)
 
 		if totalBytes+len(raw) > maxMismatchBatchBytes {
 			flush()
