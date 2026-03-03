@@ -37,9 +37,15 @@ const (
 	comparisonHistoryThreshold = 500
 )
 
-type CompareReport struct {
-	Problems  []compare.Result
-	DocCount  types.DocumentCount
+// DocCompareReport represents a batch of document discrepancies.
+type DocCompareReport struct {
+	// Problems details the discrepancies.
+	Problems []compare.Result
+
+	// DocCount is the number of documents checked.
+	DocCount types.DocumentCount
+
+	// ByteCount is the total size of the source’s documents.
 	ByteCount types.ByteCount
 }
 
@@ -47,7 +53,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
 	workerNum int,
 	task *tasks.Task,
-) <-chan mo.Result[CompareReport] {
+) <-chan mo.Result[DocCompareReport] {
 	var srcChannel, dstChannel <-chan []compare.DocWithTS
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
@@ -57,7 +63,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 		task.QueryFilter.Namespace,
 	)
 
-	reportsChan := make(chan mo.Result[CompareReport], 5)
+	reportsChan := make(chan mo.Result[DocCompareReport], 5)
 
 	go func() {
 		defer close(reportsChan)
@@ -93,10 +99,10 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 						task,
 						srcChannel,
 						dstChannel,
-						chanutil.IngestMap[CompareReport, mo.Result[CompareReport]](
+						chanutil.IngestMap[DocCompareReport, mo.Result[DocCompareReport]](
 							ctx,
 							reportsChan,
-							mo.Ok[CompareReport],
+							mo.Ok[DocCompareReport],
 						),
 					)
 
@@ -109,7 +115,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 			chanutil.WriteWithDoneCheck(
 				givenCtx,
 				reportsChan,
-				mo.Err[CompareReport](err),
+				mo.Err[DocCompareReport](err),
 			)
 
 			return
@@ -148,7 +154,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	fi retry.SuccessNotifier,
 	task *tasks.Task,
 	srcChannel, dstChannel <-chan []compare.DocWithTS,
-	reportsChan chan<- CompareReport,
+	reportsChan chan<- DocCompareReport,
 ) error {
 
 	// 1. Initialize State

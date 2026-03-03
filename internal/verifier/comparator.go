@@ -261,7 +261,7 @@ func (c *comparator) processSingleDoc(curDocWithTS compare.DocWithTS, isSrc bool
 // Returns the # of problems flushed. Will only flush when appropriate.
 func (c *comparator) flushIfNeeded(
 	ctx context.Context,
-	reportChan chan<- CompareReport,
+	reportChan chan<- DocCompareReport,
 ) (int, error) {
 	totalProblems := c.countUnpairedDocs() + len(c.problems)
 
@@ -280,7 +280,7 @@ func (c *comparator) flushIfNeeded(
 // Returns the # of problems flushed. Always flushes.
 func (c *comparator) flush(
 	ctx context.Context,
-	reportChan chan<- CompareReport,
+	reportChan chan<- DocCompareReport,
 ) (int, error) {
 
 	c.sweepMissingDocs()
@@ -290,7 +290,7 @@ func (c *comparator) flush(
 	err := chanutil.WriteWithDoneCheck(
 		ctx,
 		reportChan,
-		CompareReport{
+		DocCompareReport{
 			Problems:  probsToFlush,
 			DocCount:  c.srcDocCount,
 			ByteCount: c.srcByteCount,
@@ -317,7 +317,7 @@ func (c *comparator) countUnpairedDocs() int {
 
 // sweepMissingDocs processes the remaining unpaired documents in the caches.
 func (c *comparator) sweepMissingDocs() {
-	c.results = slices.Grow(c.results, c.countUnpairedDocs())
+	c.problems = slices.Grow(c.problems, c.countUnpairedDocs())
 
 	for _, docWithTS := range c.srcCache {
 		firstMismatchTime := c.firstMismatchTimeLookup.get(docWithTS.Doc)
@@ -342,8 +342,8 @@ func (c *comparator) sweepMissingDocs() {
 			Details:         compare.Missing,
 			Cluster:         ClusterSource,
 			NameSpace:       c.namespace,
-			DstTimestamp:    option.Some(docWithTS.TS),
 			DataSize:        int32(len(docWithTS.Doc)),
+			DstTimestamp:    option.Some(docWithTS.TS),
 			MismatchHistory: createMismatchTimes(firstMismatchTime),
 		})
 		docWithTS.PutInPool()
