@@ -37,9 +37,15 @@ const (
 	comparisonHistoryThreshold = 500
 )
 
-type CompareReport struct {
-	Problems  []compare.Result
-	DocCount  types.DocumentCount
+// DocCompareReport represents a batch of document discrepancies.
+type DocCompareReport struct {
+	// Problems details the discrepancies.
+	Problems []compare.Result
+
+	// DocCount is the number of documents checked.
+	DocCount types.DocumentCount
+
+	// ByteCount is the total size of the source’s documents.
 	ByteCount types.ByteCount
 }
 
@@ -47,7 +53,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
 	workerNum int,
 	task *tasks.Task,
-) <-chan mo.Result[CompareReport] {
+) <-chan mo.Result[DocCompareReport] {
 	var srcChannel, dstChannel <-chan []compare.DocWithTS
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
@@ -100,7 +106,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 		).Run(givenCtx, verifier.logger)
 
 	if err != nil {
-		return lo.SliceToChannel(1, mslices.Of(mo.Err[CompareReport](err)))
+		return lo.SliceToChannel(1, mslices.Of(mo.Err[DocCompareReport](err)))
 	}
 
 	if ts, has := task.SrcTimestamp.Get(); has {
@@ -111,7 +117,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 		verifier.NoteCompareOfOptime(dst, ts)
 	}
 
-	report := CompareReport{
+	report := DocCompareReport{
 		Problems:  results,
 		DocCount:  docCount,
 		ByteCount: byteCount,
