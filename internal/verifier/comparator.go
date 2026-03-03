@@ -44,8 +44,8 @@ type comparator struct {
 
 	// Metrics & Results
 	problems            []compare.Result
-	taskSrcDocCount     types.DocumentCount
-	taskSrcByteCount    types.ByteCount
+	srcDocCount         types.DocumentCount
+	srcByteCount        types.ByteCount
 	curHistoryDocCount  types.DocumentCount
 	curHistoryByteCount types.ByteCount
 
@@ -168,23 +168,27 @@ func simpleTimerReset(t *time.Timer, dur time.Duration) {
 
 // recordSrcMetrics isolates the noise of tracking business metrics.
 func (c *comparator) recordSrcMetrics(docs []compare.DocWithTS) {
-	c.taskSrcDocCount += types.DocumentCount(len(docs))
+	c.srcDocCount += types.DocumentCount(len(docs))
 	c.curHistoryDocCount += types.DocumentCount(len(docs))
 
 	for _, docWithTS := range docs {
-		c.taskSrcByteCount += types.ByteCount(len(docWithTS.Doc))
+		c.srcByteCount += types.ByteCount(len(docWithTS.Doc))
 		c.curHistoryByteCount += types.ByteCount(len(docWithTS.Doc))
 
 		if c.curHistoryDocCount >= comparisonHistoryThreshold {
-			c.verifier.docsComparedHistory.Add(c.curHistoryDocCount)
-			c.verifier.bytesComparedHistory.Add(c.curHistoryByteCount)
-
-			c.curHistoryDocCount = 0
-			c.curHistoryByteCount = 0
+			c.publishHistoryCounts()
 		}
 	}
 
-	c.verifier.workerTracker.SetSrcCounts(c.workerNum, c.taskSrcDocCount, c.taskSrcByteCount)
+	c.verifier.workerTracker.SetSrcCounts(c.workerNum, c.srcDocCount, c.srcByteCount)
+}
+
+func (c *comparator) publishHistoryCounts() {
+	c.verifier.docsComparedHistory.Add(c.curHistoryDocCount)
+	c.verifier.bytesComparedHistory.Add(c.curHistoryByteCount)
+
+	c.curHistoryDocCount = 0
+	c.curHistoryByteCount = 0
 }
 
 // processSingleDoc is the refactored `handleNewDoc` closure.
@@ -210,11 +214,18 @@ func (c *comparator) processSingleDoc(curDocWithTS compare.DocWithTS, isSrc bool
 
 	theirDocWithTS, exists := theirMap[mapKey]
 	if !exists {
+		// The other map lacks this document. Cache it, and we’re done for now.
 		ourMap[mapKey] = curDocWithTS
+		c.cachedVariableBytes += types.ByteCount(len(mapKey) + len(curDocWithTS.Doc))
+
 		return nil
 	}
 
+	// The other map also has the document. Remove it from the cache, then
+	// we’ll compare their doc with ours.
 	delete(theirMap, mapKey)
+	c.cachedVariableBytes -= types.ByteCount(len(mapKey) + len(theirDocWithTS.Doc))
+
 	defer curDocWithTS.PutInPool()
 	defer theirDocWithTS.PutInPool()
 
@@ -239,16 +250,18 @@ func (c *comparator) processSingleDoc(curDocWithTS compare.DocWithTS, isSrc bool
 		mismatches[i].MismatchHistory = createMismatchTimes(firstMismatchTime)
 		mismatches[i].SrcTimestamp = option.Some(srcDoc.TS)
 		mismatches[i].DstTimestamp = option.Some(dstDoc.TS)
+
+		c.cachedVariableBytes += types.ByteCount(len(mismatches[i].ID.Value))
 	}
 
 	c.problems = append(c.problems, mismatches...)
 	return nil
 }
 
-// Returns the #
+// Returns the # of problems flushed. Will only flush when appropriate.
 func (c *comparator) flushIfNeeded(
 	ctx context.Context,
-	flushChan chan<- CompareReport,
+	reportChan chan<- CompareReport,
 ) (int, error) {
 	totalProblems := c.countUnpairedDocs() + len(c.problems)
 
@@ -261,17 +274,26 @@ func (c *comparator) flushIfNeeded(
 		return 0, nil
 	}
 
+	return c.flush(ctx, reportChan)
+}
+
+// Returns the # of problems flushed. Always flushes.
+func (c *comparator) flush(
+	ctx context.Context,
+	reportChan chan<- CompareReport,
+) (int, error) {
+
 	c.sweepMissingDocs()
 
 	probsToFlush := c.problems
 
 	err := chanutil.WriteWithDoneCheck(
 		ctx,
-		flushChan,
+		reportChan,
 		CompareReport{
 			Problems:  probsToFlush,
-			DocCount:  c.taskSrcDocCount,
-			ByteCount: c.taskSrcByteCount,
+			DocCount:  c.srcDocCount,
+			ByteCount: c.srcByteCount,
 		},
 	)
 
@@ -280,9 +302,11 @@ func (c *comparator) flushIfNeeded(
 	}
 
 	c.problems = nil
-	c.taskSrcDocCount = 0
-	c.taskSrcByteCount = 0
+	c.srcDocCount = 0
+	c.srcByteCount = 0
 	c.cachedVariableBytes = 0
+
+	c.publishHistoryCounts()
 
 	return len(probsToFlush), nil
 }

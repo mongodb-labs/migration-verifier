@@ -195,15 +195,26 @@ func (verifier *Verifier) compareDocsFromChannels(
 				}
 			}
 		}
+
+		probs, err := c.flushIfNeeded(ctx, reportsChan)
+
+		if err != nil {
+			return errors.Wrapf(err, "flushing problems")
+		}
+
+		if probs > 0 {
+			verifier.logger.Debug().
+				Any("task", task.PrimaryKey).
+				Int("workerNum", workerNum).
+				Str("namespace", task.QueryFilter.Namespace).
+				Int("count", probs).
+				Msg("Recorded document-disparity problems.")
+		}
 	}
 
-	// 3. Cleanup & Final Reporting
-	c.sweepMissingDocs()
+	_, err := c.flush(ctx, reportsChan)
 
-	verifier.docsComparedHistory.Add(c.curHistoryDocCount)
-	verifier.bytesComparedHistory.Add(c.curHistoryByteCount)
-
-	return c.problems, c.taskSrcDocCount, c.taskSrcByteCount, nil
+	return err
 }
 
 func createMismatchTimes(firstDateTime option.Option[bson.DateTime]) recheck.MismatchHistory {
