@@ -118,9 +118,9 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_BigProblems() {
 				lo.Range(perBatchCount),
 				func(i int) bson.D {
 					return bson.D{
-						{"_id", strings.Repeat(
+						{"bigStr", strings.Repeat(
 							strconv.Itoa(docsCount+i),
-							1_000,
+							10_000,
 						)},
 					}
 				},
