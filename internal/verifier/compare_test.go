@@ -227,16 +227,24 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 
 			done.Store(true)
 
-			s.Require().Len(reports, 1)
+			// When a context is canceled but a channel is ready it’s
+			// indeterminate whether the channel or the context “wins”. Thus
+			// it’s possible to have no report, or 1 report.
+			switch len(reports) {
+			case 0:
+				// Nothing to do
+			case 1:
+				_, err := reports[0].Get()
 
-			_, err := reports[0].Get()
-
-			if err != nil {
-				s.Assert().ErrorIs(
-					err,
-					context.Canceled,
-					"only failure should be context cancellation",
-				)
+				if err != nil {
+					s.Assert().ErrorIs(
+						err,
+						context.Canceled,
+						"only failure should be context cancellation",
+					)
+				}
+			default:
+				s.Assert().Fail("expected <=1 report but found %+v", reports)
 			}
 		}()
 
