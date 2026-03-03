@@ -63,7 +63,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 		task.QueryFilter.Namespace,
 	)
 
-	resultsChan := make(chan mo.Result[DocCompareReport])
+	resultsChan := make(chan mo.Result[DocCompareReport], 100)
 
 	go func() {
 		defer close(resultsChan)

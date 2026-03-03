@@ -50,7 +50,8 @@ type comparator struct {
 	curHistoryByteCount types.ByteCount
 
 	// We periodically flush the comparator’s caches. We do that whenever
-	// len(results) or this value hit predefined limits.
+	// len(problems) or this value hit predefined limits. Note that this is
+	// a lower bound to memory usage, not an attempt to track exact usage.
 	cachedVariableBytes types.ByteCount
 
 	// Lookups & Reusable Buffers
