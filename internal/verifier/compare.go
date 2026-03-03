@@ -22,6 +22,7 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -36,16 +37,23 @@ const (
 	comparisonHistoryThreshold = 500
 )
 
+// DocCompareReport represents a batch of document discrepancies.
+type DocCompareReport struct {
+	// Problems details the discrepancies.
+	Problems []compare.Result
+
+	// DocCount is the number of documents checked.
+	DocCount types.DocumentCount
+
+	// ByteCount is the total size of the source’s documents.
+	ByteCount types.ByteCount
+}
+
 func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
 	workerNum int,
 	task *tasks.Task,
-) (
-	[]compare.Result,
-	types.DocumentCount,
-	types.ByteCount,
-	error,
-) {
+) <-chan mo.Result[DocCompareReport] {
 	var srcChannel, dstChannel <-chan []compare.DocWithTS
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
@@ -97,17 +105,25 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 			"comparing documents",
 		).Run(givenCtx, verifier.logger)
 
-	if err == nil {
-		if ts, has := task.SrcTimestamp.Get(); has {
-			verifier.NoteCompareOfOptime(src, ts)
-		}
-
-		if ts, has := task.DstTimestamp.Get(); has {
-			verifier.NoteCompareOfOptime(dst, ts)
-		}
+	if err != nil {
+		return lo.SliceToChannel(1, mslices.Of(mo.Err[DocCompareReport](err)))
 	}
 
-	return results, docCount, byteCount, err
+	if ts, has := task.SrcTimestamp.Get(); has {
+		verifier.NoteCompareOfOptime(src, ts)
+	}
+
+	if ts, has := task.DstTimestamp.Get(); has {
+		verifier.NoteCompareOfOptime(dst, ts)
+	}
+
+	report := DocCompareReport{
+		Problems:  results,
+		DocCount:  docCount,
+		ByteCount: byteCount,
+	}
+
+	return lo.SliceToChannel(1, mslices.Of(mo.Ok(report)))
 }
 
 func (verifier *Verifier) NoteCompareOfOptime(

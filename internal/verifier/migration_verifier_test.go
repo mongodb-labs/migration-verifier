@@ -354,7 +354,7 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 
 	verifier := suite.BuildVerifier()
 	suite.Require().NoError(verifier.startChangeHandling(ctx))
-	results, docCount, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
+	results, docCount, _, err := runFetchAndCompareDocuments(ctx, verifier, task)
 	require.NoError(err, "should fetch & compare")
 	assert.EqualValues(suite.T(), len(docs), docCount, "expected # of docs")
 	assert.Empty(suite.T(), results, "should find no problem")
@@ -422,13 +422,13 @@ func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
 
 	verifier.globalFilter = bson.D{{"_id", id1}}
 
-	results, docCount, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
+	results, docCount, _, err := runFetchAndCompareDocuments(ctx, verifier, task)
 	require.NoError(t, err, "should fetch & compare")
 	assert.EqualValues(t, 1, docCount, "should compare 1 doc")
 	assert.Empty(t, results, "should find no problem")
 
 	verifier.globalFilter = bson.D{{"_id", id2}}
-	results, docCount, _, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
+	results, docCount, _, err = runFetchAndCompareDocuments(ctx, verifier, task)
 	require.NoError(t, err, "should fetch & compare")
 	assert.EqualValues(t, 1, docCount, "should compare 1 doc")
 	assert.NotEmpty(t, results, "should find a problem")
@@ -528,7 +528,7 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 		suite.Run(
 			curCase.label,
 			func() {
-				results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
+				results, docCount, byteCount, err := runFetchAndCompareDocuments(ctx, verifier, task)
 				suite.Require().NoError(err)
 
 				suite.Assert().EqualValues(curCase.docsCount, docCount, "docs count")
@@ -827,7 +827,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 		DstTimestamp: option.Some(bson.Timestamp{234, 345}),
 	}
 
-	_, _, _, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
+	_, _, _, err := runFetchAndCompareDocuments(ctx, verifier, task)
 	suite.Require().NoError(err)
 
 	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
@@ -848,7 +848,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 
 	task.SrcTimestamp = option.Some(bson.Timestamp{1, 2})
 
-	_, _, _, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
+	_, _, _, err = runFetchAndCompareDocuments(ctx, verifier, task)
 	suite.Require().NoError(err)
 
 	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
@@ -858,6 +858,33 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 			"earlier src timestamp in task should not clobber newer in verifier",
 		)
 	})
+}
+
+// This wraps FetchAndCompareDocuments to return all results at once.
+func runFetchAndCompareDocuments(
+	ctx context.Context,
+	verifier *Verifier,
+	task *tasks.Task,
+) ([]compare.Result, types.DocumentCount, types.ByteCount, error) {
+	payload := lo.ChannelToSlice(verifier.FetchAndCompareDocuments(ctx, 0, task))
+
+	var problems []compare.Result
+	var docCount types.DocumentCount
+	var byteCount types.ByteCount
+
+	for _, result := range payload {
+		report, err := result.Get()
+
+		if err != nil {
+			return nil, 0, 0, err
+		}
+
+		problems = append(problems, report.Problems...)
+		docCount += report.DocCount
+		byteCount += report.ByteCount
+	}
+
+	return problems, docCount, byteCount, nil
 }
 
 func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
@@ -907,7 +934,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 
 	// Test fetchDocuments without global filter.
 	verifier.globalFilter = nil
-	results, docCount, byteCount, err := verifier.FetchAndCompareDocuments(ctx, 0, task)
+	results, docCount, byteCount, err := runFetchAndCompareDocuments(ctx, verifier, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(2, docCount, "should find source docs")
 	suite.Assert().NotZero(byteCount, "should tally docs' size")
@@ -921,7 +948,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	verifier.globalFilter = bson.D{
 		{"num", map[string]any{"$lt": 100}},
 	}
-	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
+	results, docCount, byteCount, err = runFetchAndCompareDocuments(ctx, verifier, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(1, docCount, "should find source docs")
 	suite.Assert().NotZero(byteCount, "should tally docs' size")
@@ -940,7 +967,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	verifier.globalFilter = bson.D{
 		{"num", map[string]any{"$lt": 100}},
 	}
-	results, docCount, byteCount, err = verifier.FetchAndCompareDocuments(ctx, 0, task)
+	results, docCount, byteCount, err = runFetchAndCompareDocuments(ctx, verifier, task)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(1, docCount, "should find source docs")
 	suite.Assert().NotZero(byteCount, "should tally docs' size")
