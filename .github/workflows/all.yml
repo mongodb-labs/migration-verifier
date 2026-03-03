@@ -24,23 +24,23 @@ jobs:
       matrix:
         include:
           # NB: This is the only setup we’re supporting with 4.0.
-#          - mongodb_versions: [ '4.0', '8.0' ]
-#            topology: replset
-#            partitioningScheme: _id
-#            srcChangeReader: changeStream
-#            dstChangeReader: changeStream
-#
-#          # Testing fallback when `hello` isn’t implemented
-#          # (but appendOplogNote is).
-#          - mongodb_versions: [ '4.2.5', '6.0' ]
-#            topology: replset
-#            srcChangeReader: changeStream
-#            dstChangeReader: changeStream
-#
-#          - mongodb_versions: [ '4.0', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
+          - mongodb_versions: [ '4.0', '8.0' ]
+            topology: replset
+            partitioningScheme: _id
+            srcChangeReader: changeStream
+            dstChangeReader: changeStream
+
+          # Testing fallback when `hello` isn’t implemented
+          # (but appendOplogNote is).
+          - mongodb_versions: [ '4.2.5', '6.0' ]
+            topology: replset
+            srcChangeReader: changeStream
+            dstChangeReader: changeStream
+
+          - mongodb_versions: [ '4.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
 
           - mongodb_versions: [ '4.2', '8.0' ]
             topology: replset
@@ -52,30 +52,30 @@ jobs:
             srcFCV: 4.2
             partitioningScheme: natural
 
-#          - mongodb_versions: [ '4.4', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
-#
-#          - mongodb_versions: [ '5.0', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
-#
-#          - mongodb_versions: [ '6.0', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
-#
-#          - mongodb_versions: [ '7.0', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
-#
-#          - mongodb_versions: [ '8.0', '8.0' ]
-#            topology: replset
-#            srcChangeReader: tailOplog
-#            dstChangeReader: tailOplog
+          - mongodb_versions: [ '4.4', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '5.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '6.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '7.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '8.0', '8.0' ]
+            topology: replset
+            srcChangeReader: tailOplog
+            dstChangeReader: tailOplog
 
         exclude:
           # 1. No natural scan for sharded sources.
@@ -109,29 +109,29 @@ jobs:
         # versions are: source, destination
         mongodb_versions:
           - [ '4.2', '4.2' ]
-#          - [ '4.2', '4.4' ]
-#          - [ '4.2', '5.0' ]
-#          - [ '4.2', '6.0' ]
-#          - [ '4.2', '8.0' ]
-#
-#          - [ '4.4', '4.4' ]
-#          - [ '4.4', '5.0' ]
-#          - [ '4.4', '6.0' ]
-#          - [ '4.4', '8.0' ]
-#
-#          - [ '5.0', '5.0' ]
-#          - [ '5.0', '6.0' ]
-#          - [ '5.0', '7.0' ]
-#          - [ '5.0', '8.0' ]
-#
-#          - [ '6.0', '6.0' ]
-#          - [ '6.0', '7.0' ]
-#          - [ '6.0', '8.0' ]
-#
-#          - [ '7.0', '7.0' ]
-#          - [ '7.0', '8.0' ]
-#
-#          - [ '8.0', '8.0' ]
+          - [ '4.2', '4.4' ]
+          - [ '4.2', '5.0' ]
+          - [ '4.2', '6.0' ]
+          - [ '4.2', '8.0' ]
+
+          - [ '4.4', '4.4' ]
+          - [ '4.4', '5.0' ]
+          - [ '4.4', '6.0' ]
+          - [ '4.4', '8.0' ]
+
+          - [ '5.0', '5.0' ]
+          - [ '5.0', '6.0' ]
+          - [ '5.0', '7.0' ]
+          - [ '5.0', '8.0' ]
+
+          - [ '6.0', '6.0' ]
+          - [ '6.0', '7.0' ]
+          - [ '6.0', '8.0' ]
+
+          - [ '7.0', '7.0' ]
+          - [ '7.0', '8.0' ]
+
+          - [ '8.0', '8.0' ]
 
         toHashedIndexKey: [true, false]
 
