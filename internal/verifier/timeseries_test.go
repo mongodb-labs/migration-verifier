@@ -7,6 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/timeseries"
@@ -135,7 +136,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 
 	for _, prob := range problems {
 		suite.Assert().Equal(
-			Missing,
+			compare.Missing,
 			prob.Details,
 			"Details in problem: %+v",
 			prob,

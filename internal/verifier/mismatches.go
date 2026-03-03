@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -23,7 +24,7 @@ const (
 
 type MismatchInfo struct {
 	Task   bson.ObjectID
-	Detail VerificationResult
+	Detail compare.Result
 }
 
 // Returns an aggregation that indicates whether the MismatchInfo refers to
@@ -35,6 +36,27 @@ func getMismatchDocMissingAggExpr(docExpr any) any {
 			Field: "detail",
 		},
 	)
+}
+
+// Returns an agg expression that indicates whether the VerificationResult
+// refers to a missing document.
+func getResultDocMissingAggExpr(docExpr any) any {
+	return agg.And{
+		agg.Eq{
+			agg.GetField{
+				Input: docExpr,
+				Field: "details",
+			},
+			compare.Missing,
+		},
+		agg.Eq{
+			agg.GetField{
+				Input: docExpr,
+				Field: "field",
+			},
+			"",
+		},
+	}
 }
 
 var _ bson.Marshaler = MismatchInfo{}
@@ -126,7 +148,7 @@ func getMismatchesForTasks(
 	ctx context.Context,
 	db *mongo.Database,
 	taskIDs []bson.ObjectID,
-) (map[bson.ObjectID][]VerificationResult, error) {
+) (map[bson.ObjectID][]compare.Result, error) {
 	cursor, err := db.Collection(mismatchesCollectionName).Find(
 		ctx,
 		bson.D{
@@ -137,7 +159,7 @@ func getMismatchesForTasks(
 		return nil, errors.Wrapf(err, "querying mismatches for %d task(s)", len(taskIDs))
 	}
 
-	result := map[bson.ObjectID][]VerificationResult{}
+	result := map[bson.ObjectID][]compare.Result{}
 
 	for cursor.Next(ctx) {
 		var d MismatchInfo
@@ -157,7 +179,7 @@ func getMismatchesForTasks(
 
 	for _, taskID := range taskIDs {
 		if _, ok := result[taskID]; !ok {
-			result[taskID] = []VerificationResult{}
+			result[taskID] = []compare.Result{}
 		}
 	}
 
@@ -307,7 +329,7 @@ func recordMismatches(
 	ctx context.Context,
 	db *mongo.Database,
 	taskID bson.ObjectID,
-	problems []VerificationResult,
+	problems []compare.Result,
 ) error {
 	if option.IfNotZero(taskID).IsNone() {
 		panic("empty task ID given")
@@ -315,7 +337,7 @@ func recordMismatches(
 
 	models := lo.Map(
 		problems,
-		func(r VerificationResult, _ int) mongo.WriteModel {
+		func(r compare.Result, _ int) mongo.WriteModel {
 			return &mongo.InsertOneModel{
 				Document: MismatchInfo{
 					Task:   taskID,
