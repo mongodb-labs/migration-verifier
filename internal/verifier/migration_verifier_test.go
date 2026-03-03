@@ -1653,14 +1653,26 @@ func TestVerifierCompareDocs(t *testing.T) {
 							func(ctx context.Context, fi *retry.FuncInfo) error {
 								var err error
 
-								results, docCount, byteCount, err = verifier.compareDocsFromChannels(
+								// This has to fit all of the reports.
+								reportsChan := make(chan DocCompareReport, 1_000)
+
+								err = verifier.compareDocsFromChannels(
 									ctx,
 									0,
 									fi,
 									&fauxTask,
 									srcChannel,
 									dstChannel,
+									reportsChan,
 								)
+
+								if err == nil {
+									for report := range reportsChan {
+										results = append(results, report.Problems...)
+										docCount += report.DocCount
+										byteCount += report.ByteCount
+									}
+								}
 
 								return err
 							},
