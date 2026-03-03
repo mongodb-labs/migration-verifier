@@ -1666,8 +1666,6 @@ func TestVerifierCompareDocs(t *testing.T) {
 									reportsChan,
 								)
 
-								close(reportsChan)
-
 								if err == nil {
 									for report := range reportsChan {
 										results = append(results, report.Problems...)

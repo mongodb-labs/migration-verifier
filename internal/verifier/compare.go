@@ -148,6 +148,7 @@ func (verifier *Verifier) NoteCompareOfOptime(
 	})
 }
 
+// NB: This closes the given reportsChan.
 func (verifier *Verifier) compareDocsFromChannels(
 	ctx context.Context,
 	workerNum int,
@@ -160,6 +161,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// 1. Initialize State
 	c := newComparator(verifier, workerNum, fi, task)
 	defer func() {
+		close(reportsChan)
+
 		if !c.readTimer.Stop() {
 			<-c.readTimer.C
 		}
