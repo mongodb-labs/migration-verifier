@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/mongodb-labs/migration-tools/bsontools"
@@ -156,6 +157,11 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_BigProblems() {
 	}
 
 	verifier := s.BuildVerifier()
+
+	// For this test to work we need binary comparison … or else memory usage
+	// will be too modest to trip the failure.
+	verifier.SetDocCompareMethod(compare.Binary)
+
 	s.Require().NoError(verifier.startChangeHandling(ctx))
 
 	results := lo.ChannelToSlice(verifier.FetchAndCompareDocuments(
