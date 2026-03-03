@@ -827,21 +827,27 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 		DstTimestamp: option.Some(bson.Timestamp{234, 345}),
 	}
 
-	_, _, _, err := runFetchAndCompareDocuments(ctx, verifier, task)
+	err := verifier.insertDocumentRecheckTasks(
+		ctx,
+		mslices.Of(bson.Raw(lo.Must(bson.Marshal(task)))),
+	)
+	suite.Require().NoError(err, "must insert recheck task")
+
+	err = verifier.ProcessVerifyTask(ctx, 0, task)
 	suite.Require().NoError(err)
 
-	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+	verifier.lastProcessedSrcOptime.Load(func(ts bson.Timestamp) {
 		suite.Assert().Equal(
 			task.SrcTimestamp.MustGet(),
-			t,
+			ts,
 			"src timestamp should be published",
 		)
 	})
 
-	verifier.lastProcessedDstOptime.Load(func(t bson.Timestamp) {
+	verifier.lastProcessedDstOptime.Load(func(ts bson.Timestamp) {
 		suite.Assert().Equal(
 			task.DstTimestamp.MustGet(),
-			t,
+			ts,
 			"dst timestamp should be published",
 		)
 	})
@@ -851,10 +857,10 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 	_, _, _, err = runFetchAndCompareDocuments(ctx, verifier, task)
 	suite.Require().NoError(err)
 
-	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+	verifier.lastProcessedSrcOptime.Load(func(ts bson.Timestamp) {
 		suite.Assert().Equal(
 			bson.Timestamp{123, 234},
-			t,
+			ts,
 			"earlier src timestamp in task should not clobber newer in verifier",
 		)
 	})
