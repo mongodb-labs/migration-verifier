@@ -282,7 +282,6 @@ func (c *comparator) flush(
 	ctx context.Context,
 	reportChan chan<- DocCompareReport,
 ) (int, error) {
-
 	c.sweepMissingDocs()
 
 	probsToFlush := c.problems

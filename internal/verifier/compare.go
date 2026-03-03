@@ -63,10 +63,10 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 		task.QueryFilter.Namespace,
 	)
 
-	reportsChan := make(chan mo.Result[DocCompareReport], 5)
+	resultsChan := make(chan mo.Result[DocCompareReport])
 
 	go func() {
-		defer close(reportsChan)
+		defer close(resultsChan)
 
 		err := retryer.
 			WithBefore(func() error {
@@ -91,38 +91,46 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 			).
 			WithCallback(
 				func(ctx context.Context, fi *retry.FuncInfo) error {
-					var err error
-					err = verifier.compareDocsFromChannels(
+					reportChan, doneChan := chanutil.IngestMap(
+						ctx,
+						resultsChan,
+						mo.Ok[DocCompareReport],
+					)
+
+					defer func() {
+						close(reportChan)
+						<-doneChan
+					}()
+
+					return verifier.compareDocsFromChannels(
 						ctx,
 						workerNum,
 						fi,
 						task,
 						srcChannel,
 						dstChannel,
-						chanutil.IngestMap[DocCompareReport, mo.Result[DocCompareReport]](
-							ctx,
-							reportsChan,
-							mo.Ok[DocCompareReport],
-						),
+						reportChan,
 					)
-
-					return err
 				},
 				"comparing documents",
 			).Run(givenCtx, verifier.logger)
 
 		if err != nil {
-			chanutil.WriteWithDoneCheck(
+			writeErr := chanutil.WriteWithDoneCheck(
 				givenCtx,
-				reportsChan,
+				resultsChan,
 				mo.Err[DocCompareReport](err),
 			)
 
-			return
+			if writeErr != nil && !errors.Is(writeErr, context.Canceled) {
+				verifier.logger.Warn().
+					Err(err).
+					Msg("Failed to compare documents.")
+			}
 		}
 	}()
 
-	return reportsChan
+	return resultsChan
 }
 
 func (verifier *Verifier) NoteCompareOfOptime(
@@ -161,8 +169,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// 1. Initialize State
 	c := newComparator(verifier, workerNum, fi, task)
 	defer func() {
-		close(reportsChan)
-
 		if !c.readTimer.Stop() {
 			<-c.readTimer.C
 		}

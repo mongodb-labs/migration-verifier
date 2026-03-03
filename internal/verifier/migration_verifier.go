@@ -612,6 +612,8 @@ REPORTS:
 
 			report, err := repResult.Get()
 
+			fmt.Printf("----- result: %+v\n\n", repResult)
+
 			if err != nil {
 				return errors.Wrapf(
 					err,
