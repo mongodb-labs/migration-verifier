@@ -1,7 +1,6 @@
 package verifier
 
 import (
-	"cmp"
 	"context"
 	"time"
 
@@ -259,30 +258,36 @@ func (c *comparator) processSingleDoc(curDocWithTS compare.DocWithTS, isSrc bool
 	return nil
 }
 
-// Returns the # of problems flushed. Will only flush when appropriate.
+// Will only flush when appropriate.
+// Returns a string description of why it flushed.
 func (c *comparator) flushIfNeeded(
 	ctx context.Context,
 	reportChan chan<- DocCompareReport,
-) (int, error) {
+) (option.Option[string], error) {
 	totalProblems := c.countUnpairedDocs() + len(c.problems)
 
-	needFlush := cmp.Or(
+	whyFlush := lo.Ternary(
 		totalProblems >= comparatorMaxProblemsLen,
-		c.cachedVariableBytes >= comparatorMaxVariableBytes,
+		"problems count",
+		lo.Ternary(
+			c.cachedVariableBytes >= comparatorMaxVariableBytes,
+			"memory usage",
+			"",
+		),
 	)
 
-	if !needFlush {
-		return 0, nil
+	if whyFlush == "" {
+		return option.None[string](), nil
 	}
 
-	return c.flush(ctx, reportChan)
+	return option.Some(whyFlush), c.flush(ctx, reportChan)
 }
 
 // Returns the # of problems flushed. Always flushes.
 func (c *comparator) flush(
 	ctx context.Context,
 	reportChan chan<- DocCompareReport,
-) (int, error) {
+) error {
 	c.sweepMissingDocs()
 
 	probsToFlush := c.problems
@@ -298,7 +303,7 @@ func (c *comparator) flush(
 	)
 
 	if err != nil {
-		return 0, errors.Wrapf(err, "flushing %d problems", len(probsToFlush))
+		return errors.Wrapf(err, "flushing %d problems", len(probsToFlush))
 	}
 
 	c.problems = nil
@@ -308,7 +313,7 @@ func (c *comparator) flush(
 
 	c.publishHistoryCounts()
 
-	return len(probsToFlush), nil
+	return nil
 }
 
 func (c *comparator) countUnpairedDocs() int {

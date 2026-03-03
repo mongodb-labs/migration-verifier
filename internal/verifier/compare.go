@@ -220,25 +220,23 @@ func (verifier *Verifier) compareDocsFromChannels(
 			}
 		}
 
-		probs, err := c.flushIfNeeded(ctx, reportsChan)
+		whyFlush, err := c.flushIfNeeded(ctx, reportsChan)
 
 		if err != nil {
 			return errors.Wrapf(err, "flushing problems")
 		}
 
-		if probs > 0 {
+		if reason, has := whyFlush.Get(); has {
 			verifier.logger.Debug().
 				Any("task", task.PrimaryKey).
 				Int("workerNum", workerNum).
 				Str("namespace", task.QueryFilter.Namespace).
-				Int("count", probs).
+				Str("reason", reason).
 				Msg("Recorded document-disparity problems.")
 		}
 	}
 
-	_, err := c.flush(ctx, reportsChan)
-
-	return err
+	return c.flush(ctx, reportsChan)
 }
 
 func createMismatchTimes(firstDateTime option.Option[bson.DateTime]) recheck.MismatchHistory {

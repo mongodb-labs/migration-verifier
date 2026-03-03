@@ -109,7 +109,7 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_BigProblems() {
 	docsCount := 0
 
 	batchesCount := 100
-	perBatchCount := 10
+	perBatchCount := 100
 
 	for range batchesCount {
 		res, err := srcColl.InsertMany(
@@ -120,7 +120,7 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_BigProblems() {
 					return bson.D{
 						{"_id", strings.Repeat(
 							strconv.Itoa(docsCount+i),
-							10_000,
+							1_000,
 						)},
 					}
 				},

@@ -17,7 +17,7 @@ type IngestMapCanceler func(context.Context) error
 // called function to populate it, but that function expects to send ints,
 // you can do:
 //
-//	intChan, cancel := IngestMap(ctx, stringChan, strconv.Itoa)
+//	intChan, cancel := StartIngestMap(ctx, stringChan, strconv.Itoa)
 //
 //	if err := functionThatSendsInts(ctx, intChan); err != nil {
 //		// .. however you handle errors
