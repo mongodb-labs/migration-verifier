@@ -256,8 +256,8 @@ func (c *comparator) sweepMissingDocs() {
 			Details:         compare.Missing,
 			Cluster:         ClusterSource,
 			NameSpace:       c.namespace,
-			DstTimestamp:    option.Some(docWithTS.TS),
 			DataSize:        int32(len(docWithTS.Doc)),
+			DstTimestamp:    option.Some(docWithTS.TS),
 			MismatchHistory: createMismatchTimes(firstMismatchTime),
 		})
 		docWithTS.PutInPool()

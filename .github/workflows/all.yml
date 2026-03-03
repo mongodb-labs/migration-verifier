@@ -49,6 +49,11 @@ jobs:
 
           - mongodb_versions: [ '4.4', '8.0' ]
             topology: replset
+            srcFCV: 4.2
+            partitioningScheme: natural
+
+          - mongodb_versions: [ '4.4', '8.0' ]
+            topology: replset
             srcChangeReader: tailOplog
             dstChangeReader: tailOplog
 
@@ -144,7 +149,14 @@ jobs:
     # versions need.
     runs-on: ubuntu-22.04
 
-    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology }}${{ matrix.toHashedIndexKey && ', hashed doc compare' || '' }}, srcChangeReader=${{ matrix.srcChangeReader }}, dstChangeReader=${{ matrix.dstChangeReader }}, partitioningScheme=${{ matrix.partitioningScheme }}
+    name: >-
+        ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }},
+        ${{ matrix.srcFCV && format('srcFCV={0},', matrix.srcFCV) || '' }}
+        ${{ matrix.topology }},
+        ${{ matrix.toHashedIndexKey && 'hashed doc compare,' || '' }}
+        srcChangeReader=${{ matrix.srcChangeReader }},
+        dstChangeReader=${{ matrix.dstChangeReader }},
+        partitioningScheme=${{ matrix.partitioningScheme }}
 
     steps:
       - run: uname -a
@@ -184,6 +196,11 @@ jobs:
                 echo mlaunch init --binarypath $(cat .dstpath) --port 27030 --dir dst --replicaset ${{ (matrix.topology == 'sharded' || matrix.topology == 'replset-to-sharded') && '--sharded 2' || '' }}
                 echo mlaunch init --binarypath $(cat .metapath) --port 27040 --dir meta --single
             } | parallel
+
+      - name: Set Source FCV
+        if: matrix.srcFCV != ''
+        run: |
+          $(cat .srcpath)/mongo localhost:27020 --eval 'db.adminCommand({setFeatureCompatibilityVersion: "${{ matrix.srcFCV }}"})'
 
       - name: Test
         run: go test -v ./... -race
