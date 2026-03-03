@@ -1440,7 +1440,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 		dstDocs     []bson.D
 		indexFields []string
 		checkOrder  bool
-		compareFn   func(*testing.T, []VerificationResult)
+		compareFn   func(*testing.T, []compare.Result)
 	}
 
 	compareTests := []compareTest{
@@ -1452,7 +1452,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 			dstDocs: []bson.D{
 				{{"_id", id}, {"num", 123}, {"name", "foobar"}},
 			},
-			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
+			compareFn: func(t *testing.T, mismatchedIds []compare.Result) {
 				assert.Empty(t, mismatchedIds)
 			},
 		},
@@ -1465,7 +1465,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 			dstDocs: []bson.D{
 				{{"_id", id}, {"num", 123}, {"name", "foobar"}},
 			},
-			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
+			compareFn: func(t *testing.T, mismatchedIds []compare.Result) {
 				assert.Empty(t, mismatchedIds)
 			},
 		},
@@ -1479,7 +1479,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 			dstDocs: []bson.D{
 				{{"_id", id}, {"num", 123}, {"name", "foobar"}},
 			},
-			compareFn: func(t *testing.T, mismatchResults []VerificationResult) {
+			compareFn: func(t *testing.T, mismatchResults []compare.Result) {
 				if assert.Equal(t, 1, len(mismatchResults)) {
 					var res int
 					require.Nil(t, mismatchResults[0].ID.Unmarshal(&res))
@@ -1497,7 +1497,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 			dstDocs: []bson.D{
 				{{"_id", id}, {"num", 123}, {"name", "foobar"}},
 			},
-			compareFn: func(t *testing.T, mismatchResults []VerificationResult) {
+			compareFn: func(t *testing.T, mismatchResults []compare.Result) {
 				if assert.Equal(t, 1, len(mismatchResults)) {
 					var res int
 					require.Nil(t, mismatchResults[0].ID.Unmarshal(&res))
@@ -1513,9 +1513,9 @@ func TestVerifierCompareDocs(t *testing.T) {
 				{{"_id", id}, {"num", 1234}, {"name", "foobar"}},
 			},
 			dstDocs: []bson.D{},
-			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
+			compareFn: func(t *testing.T, mismatchedIds []compare.Result) {
 				if assert.Equal(t, 1, len(mismatchedIds)) {
-					assert.Equal(t, mismatchedIds[0].Details, Missing)
+					assert.Equal(t, mismatchedIds[0].Details, compare.Missing)
 					assert.Equal(t, mismatchedIds[0].Cluster, ClusterTarget)
 				}
 			},
@@ -1527,9 +1527,9 @@ func TestVerifierCompareDocs(t *testing.T) {
 			dstDocs: []bson.D{
 				{{"_id", id}, {"num", 1234}, {"name", "foobar"}},
 			},
-			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
+			compareFn: func(t *testing.T, mismatchedIds []compare.Result) {
 				if assert.Equal(t, 1, len(mismatchedIds)) {
-					assert.Equal(t, mismatchedIds[0].Details, Missing)
+					assert.Equal(t, mismatchedIds[0].Details, compare.Missing)
 					assert.Equal(t, mismatchedIds[0].Cluster, ClusterSource)
 				}
 			},
@@ -1548,7 +1548,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 				{{"_id", id}, {"sharded", 345}},
 				{{"_id", id}, {"sharded", 123}},
 			},
-			compareFn: func(t *testing.T, mismatchedIds []VerificationResult) {
+			compareFn: func(t *testing.T, mismatchedIds []compare.Result) {
 				assert.Empty(t, mismatchedIds, "should be no problems")
 			},
 		},
@@ -1618,7 +1618,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 								ShardKeys: indexFields,
 							},
 						}
-						var results []VerificationResult
+						var results []compare.Result
 						var docCount types.DocumentCount
 						var byteCount types.ByteCount
 
@@ -1664,7 +1664,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 func (suite *IntegrationTestSuite) getFailuresForTask(
 	verifier *Verifier,
 	taskID bson.ObjectID,
-) []VerificationResult {
+) []compare.Result {
 	discrepancies, err := getMismatchesForTasks(
 		suite.Context(),
 		verifier.verificationDatabase(),
@@ -1837,7 +1837,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 
 	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
 	suite.Equal(1, len(failures))
-	suite.Equal(failures[0].Details, Missing)
+	suite.Equal(failures[0].Details, compare.Missing)
 	suite.Equal(failures[0].Cluster, ClusterTarget)
 	suite.Equal(failures[0].NameSpace, "testDb.testColl")
 
@@ -1857,7 +1857,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	suite.Equal(1, len(failures))
-	suite.Equal(failures[0].Details, Missing)
+	suite.Equal(failures[0].Details, compare.Missing)
 	suite.Equal(failures[0].Cluster, ClusterTarget)
 	suite.Equal(failures[0].NameSpace, "testDb.testCollTo")
 
@@ -1877,7 +1877,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	suite.Equal(1, len(failures))
-	suite.Equal(failures[0].Details, Missing)
+	suite.Equal(failures[0].Details, compare.Missing)
 	suite.Equal(failures[0].Cluster, ClusterSource)
 	suite.Equal(failures[0].NameSpace, "testDb.destOnlyColl")
 
@@ -1986,7 +1986,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(mbson.ToRawValue(srcIndexNames[1]), failures[0].ID)
-		suite.Equal(Missing, failures[0].Details)
+		suite.Equal(compare.Missing, failures[0].Details)
 		suite.Equal(ClusterTarget, failures[0].Cluster)
 		suite.Equal("testDb.testColl1", failures[0].NameSpace)
 	}
@@ -2019,7 +2019,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(mbson.ToRawValue(dstIndexNames[1]), failures[0].ID)
-		suite.Equal(Missing, failures[0].Details)
+		suite.Equal(compare.Missing, failures[0].Details)
 		suite.Equal(ClusterSource, failures[0].Cluster)
 		suite.Equal("testDb.testColl2", failures[0].NameSpace)
 	}
@@ -2053,11 +2053,11 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 			return failures[i].ID.StringValue() < failures[j].ID.StringValue()
 		})
 		suite.Equal(mbson.ToRawValue(dstIndexNames[1]), failures[0].ID)
-		suite.Equal(Missing, failures[0].Details)
+		suite.Equal(compare.Missing, failures[0].Details)
 		suite.Equal(ClusterSource, failures[0].Cluster)
 		suite.Equal("testDb.testColl3", failures[0].NameSpace)
 		suite.Equal(mbson.ToRawValue(srcIndexNames[0]), failures[1].ID)
-		suite.Equal(Missing, failures[1].Details)
+		suite.Equal(compare.Missing, failures[1].Details)
 		suite.Equal(ClusterTarget, failures[1].Cluster)
 		suite.Equal("testDb.testColl3", failures[1].NameSpace)
 	}
