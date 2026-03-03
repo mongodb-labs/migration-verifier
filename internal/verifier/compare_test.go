@@ -2,7 +2,7 @@ package verifier
 
 import (
 	"context"
-	"math/rand/v2"
+	"math/rand"
 	"strconv"
 	"strings"
 	"sync/atomic"

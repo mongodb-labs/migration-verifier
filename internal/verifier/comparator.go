@@ -317,6 +317,9 @@ func (c *comparator) flush(
 	}
 
 	c.problems = nil
+	clear(c.srcCache)
+	clear(c.dstCache)
+
 	c.srcDocCount = 0
 	c.srcByteCount = 0
 	c.cachedVariableBytes = 0
@@ -348,8 +351,6 @@ func (c *comparator) sweepMissingDocs() {
 		docWithTS.PutInPool()
 	}
 
-	clear(c.srcCache)
-
 	for _, docWithTS := range c.dstCache {
 		firstMismatchTime := c.firstMismatchTimeLookup.get(docWithTS.Doc)
 		c.problems = append(c.problems, compare.Result{
@@ -363,6 +364,4 @@ func (c *comparator) sweepMissingDocs() {
 		})
 		docWithTS.PutInPool()
 	}
-
-	clear(c.dstCache)
 }
