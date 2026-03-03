@@ -722,6 +722,14 @@ REPORTS:
 		}
 	}
 
+	if ts, has := task.SrcTimestamp.Get(); has {
+		verifier.NoteCompareOfOptime(src, ts)
+	}
+
+	if ts, has := task.DstTimestamp.Get(); has {
+		verifier.NoteCompareOfOptime(dst, ts)
+	}
+
 	task.SourceDocumentCount = docsCount
 	task.SourceByteCount = bytesCount
 

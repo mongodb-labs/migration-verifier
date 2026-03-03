@@ -52,73 +52,72 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	var srcChannel, dstChannel <-chan []compare.DocWithTS
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
-	results := []VerificationResult{}
-	var docCount types.DocumentCount
-	var byteCount types.ByteCount
-
 	retryer := retry.New().WithDescription(
 		"comparing task %v's documents (namespace: %s)",
 		task.PrimaryKey,
 		task.QueryFilter.Namespace,
 	)
 
-	err := retryer.
-		WithBefore(func() error {
-			var err error
+	reportsChan := make(chan mo.Result[CompareReport], 5)
 
-			srcChannel, dstChannel, readSrcCallback, readDstCallback, err = verifier.getFetcherChannelsAndCallbacks(task)
+	go func() {
+		defer close(reportsChan)
 
-			return err
-		}).
-		WithErrorCodes(util.CursorKilledErrCode).
-		WithCallback(
-			func(ctx context.Context, fi *retry.FuncInfo) error {
-				return readSrcCallback(ctx, fi)
-			},
-			"reading from source",
-		).
-		WithCallback(
-			func(ctx context.Context, fi *retry.FuncInfo) error {
-				return readDstCallback(ctx, fi)
-			},
-			"reading from destination",
-		).
-		WithCallback(
-			func(ctx context.Context, fi *retry.FuncInfo) error {
+		err := retryer.
+			WithBefore(func() error {
 				var err error
-				results, docCount, byteCount, err = verifier.compareDocsFromChannels(
-					ctx,
-					workerNum,
-					fi,
-					task,
-					srcChannel,
-					dstChannel,
-				)
+
+				srcChannel, dstChannel, readSrcCallback, readDstCallback, err = verifier.getFetcherChannelsAndCallbacks(task)
 
 				return err
-			},
-			"comparing documents",
-		).Run(givenCtx, verifier.logger)
+			}).
+			WithErrorCodes(util.CursorKilledErrCode).
+			WithCallback(
+				func(ctx context.Context, fi *retry.FuncInfo) error {
+					return readSrcCallback(ctx, fi)
+				},
+				"reading from source",
+			).
+			WithCallback(
+				func(ctx context.Context, fi *retry.FuncInfo) error {
+					return readDstCallback(ctx, fi)
+				},
+				"reading from destination",
+			).
+			WithCallback(
+				func(ctx context.Context, fi *retry.FuncInfo) error {
+					var err error
+					err = verifier.compareDocsFromChannels(
+						ctx,
+						workerNum,
+						fi,
+						task,
+						srcChannel,
+						dstChannel,
+						chanutil.IngestMap[CompareReport, mo.Result[CompareReport]](
+							ctx,
+							reportsChan,
+							mo.Ok[CompareReport],
+						),
+					)
 
-	if err != nil {
-		return lo.SliceToChannel(1, mslices.Of(mo.Err[CompareReport](err)))
-	}
+					return err
+				},
+				"comparing documents",
+			).Run(givenCtx, verifier.logger)
 
-	if ts, has := task.SrcTimestamp.Get(); has {
-		verifier.NoteCompareOfOptime(src, ts)
-	}
+		if err != nil {
+			chanutil.WriteWithDoneCheck(
+				givenCtx,
+				reportsChan,
+				mo.Err[CompareReport](err),
+			)
 
-	if ts, has := task.DstTimestamp.Get(); has {
-		verifier.NoteCompareOfOptime(dst, ts)
-	}
+			return
+		}
+	}()
 
-	report := CompareReport{
-		Problems:  results,
-		DocCount:  docCount,
-		ByteCount: byteCount,
-	}
-
-	return lo.SliceToChannel(1, mslices.Of(mo.Ok(report)))
+	return reportsChan
 }
 
 func (verifier *Verifier) NoteCompareOfOptime(
@@ -150,12 +149,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 	fi retry.SuccessNotifier,
 	task *tasks.Task,
 	srcChannel, dstChannel <-chan []compare.DocWithTS,
-) (
-	[]VerificationResult,
-	types.DocumentCount,
-	types.ByteCount,
-	error,
-) {
+	reportsChan chan<- CompareReport,
+) error {
 	results := []VerificationResult{}
 
 	// Document & byte counts for both the task and a batch of docs to tally
