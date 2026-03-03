@@ -266,21 +266,23 @@ func (c *comparator) flushIfNeeded(
 ) (option.Option[string], error) {
 	totalProblems := c.countUnpairedDocs() + len(c.problems)
 
-	whyFlush := lo.Ternary(
+	var whyFlush option.Option[string]
+
+	whyFlush = lo.Ternary(
 		totalProblems >= comparatorMaxProblemsLen,
-		"problems count",
+		option.Some("problems count"),
 		lo.Ternary(
 			c.cachedVariableBytes >= comparatorMaxVariableBytes,
-			"memory usage",
-			"",
+			option.Some("memory usage"),
+			whyFlush,
 		),
 	)
 
-	if whyFlush == "" {
-		return option.None[string](), nil
+	if whyFlush.IsNone() {
+		return whyFlush, nil
 	}
 
-	return option.Some(whyFlush), c.flush(ctx, reportChan)
+	return whyFlush, c.flush(ctx, reportChan)
 }
 
 // Returns the # of problems flushed. Always flushes.

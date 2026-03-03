@@ -165,7 +165,6 @@ func (verifier *Verifier) NoteCompareOfOptime(
 	})
 }
 
-// NB: This closes the given reportsChan.
 func (verifier *Verifier) compareDocsFromChannels(
 	ctx context.Context,
 	workerNum int,
