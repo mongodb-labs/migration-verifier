@@ -239,7 +239,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 		}
 
 		// Finally we compare the documents and save any mismatch report(s).
-		mismatches, err := verifier.compareOneDocument(srcDoc.Doc, dstDoc.Doc, namespace)
+		mismatches, err := compareOneDocument(verifier.docCompareMethod, srcDoc.Doc, dstDoc.Doc, namespace)
 
 		if err != nil {
 			return errors.Wrap(err, "failed to compare documents")
@@ -1022,19 +1022,23 @@ func (verifier *Verifier) getDocumentsCursor(
 	)
 }
 
-func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
+func compareOneDocument(
+	docCompareMethod compare.Method,
+	srcClientDoc, dstClientDoc bson.Raw,
+	namespace string,
+) ([]VerificationResult, error) {
 	match := bytes.Equal(srcClientDoc, dstClientDoc)
 	if match {
 		// Happy path! The documents binary-match.
 		return nil, nil
 	}
 
-	docID, err := verifier.docCompareMethod.ClonedDocIDForComparison(srcClientDoc)
+	docID, err := docCompareMethod.ClonedDocIDForComparison(srcClientDoc)
 	if err != nil {
 		return nil, errors.Wrapf(err, "extracting doc ID for comparison")
 	}
 
-	if verifier.docCompareMethod == compare.ToHashedIndexKey {
+	if docCompareMethod == compare.ToHashedIndexKey {
 		// With hash comparison, mismatches are opaque.
 		return []VerificationResult{{
 			ID:        docID,
@@ -1049,7 +1053,7 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 		return nil, err
 	}
 	if mismatch == nil {
-		if verifier.docCompareMethod.ShouldIgnoreFieldOrder() {
+		if docCompareMethod.ShouldIgnoreFieldOrder() {
 			return nil, nil
 		}
 		dataSize := max(len(srcClientDoc), len(dstClientDoc))
