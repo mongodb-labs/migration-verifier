@@ -48,9 +48,17 @@ type comparator struct {
 	curHistoryDocCount  types.DocumentCount
 	curHistoryByteCount types.ByteCount
 
-	// We periodically flush the comparator’s caches. We do that whenever
-	// len(problems) or this value hit predefined limits. Note that this is
-	// a lower bound to memory usage, not an attempt to track exact usage.
+	// We flush the comparator’s caches whenever len(problems) or this value
+	// exceed predefined limits.
+	//
+	// Note that this is a lower bound to memory
+	// usage, not an attempt to track exact usage. In other words, when this
+	// value hits (for example) 10 MiB, the actual memory usage is probably
+	// more--even substantially so--but it should not be orders of magnitude
+	// more.
+	//
+	// As long as we prevent an arbitrarily-long task from being able to
+	// exhaust available memory, this mechanism is doing its job.
 	cachedVariableBytes types.ByteCount
 
 	// Lookups & Reusable Buffers
