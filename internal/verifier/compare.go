@@ -91,15 +91,14 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 			).
 			WithCallback(
 				func(ctx context.Context, fi *retry.FuncInfo) error {
-					reportChan, doneChan := chanutil.IngestMap(
+					reportChan, canceler := chanutil.StartIngestMap(
 						ctx,
 						resultsChan,
 						mo.Ok[DocCompareReport],
 					)
 
 					defer func() {
-						close(reportChan)
-						<-doneChan
+						_ = canceler(ctx)
 					}()
 
 					return verifier.compareDocsFromChannels(

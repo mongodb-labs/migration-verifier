@@ -4,27 +4,34 @@ import (
 	"context"
 )
 
-// IngestMap lets you abstract receiver channels by mutating each item to
-// something else.
+// IngestMapCanceler defines a callback that cancels an ingest map.
+// It closes the map’s input channel then blocks until the map finishes writing
+// to its target channel.
+type IngestMapCanceler func(context.Context) error
+
+// StartIngestMap lets you abstract receiver channels by converting items
+// from one channel into items on another channel. It starts a goroutine that
+// continually reads an item, mutates it, then inserts it into another channel.
 //
 // For example, if you have a string channel and want a
 // called function to populate it, but that function expects to send ints,
 // you can do:
 //
-//	byteChan, done := IngestMap(ctx, stringChan, strconv.Itoa)
+//	intChan, cancel := IngestMap(ctx, stringChan, strconv.Itoa)
 //
-//	functionThatSendsBytes(ctx, byteChan)
+//	if err := functionThatSendsInts(ctx, intChan); err != nil {
+//		// .. however you handle errors
+//	}
 //
-//	close(byteChan)
-//	<-done
-//
-// The last bits are needed because this starts a goroutine internally, which
-// has to shut down cleanly to avoid race conditions.
-func IngestMap[In any, Out any](
+//	// We’re done sending ints, so cancel the ingest map:
+//	if err := cancel(ctx); err != nil {
+//		// .. however you handle context-expiry
+//	}
+func StartIngestMap[In any, Out any](
 	ctx context.Context,
 	out chan<- Out,
 	fn func(In) Out,
-) (chan<- In, <-chan struct{}) {
+) (chan<- In, IngestMapCanceler) {
 	// Create the channel we will hand back to the caller
 	in := make(chan In)
 	done := make(chan struct{})
@@ -53,5 +60,10 @@ func IngestMap[In any, Out any](
 		}
 	}()
 
-	return in, done
+	return in, func(ctx context.Context) error {
+		close(in)
+
+		_, err := ReadWithDoneCheck(ctx, done)
+		return err
+	}
 }
