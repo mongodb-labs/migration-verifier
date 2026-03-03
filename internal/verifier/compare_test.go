@@ -20,6 +20,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
+// This tests behavior when there are enough small documents to necessitate
+// multiple problem reports. (This hits the comparator’s docs-cached max.)
 func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_ManySmallProblems() {
 	ctx := s.Context()
 
@@ -97,6 +99,8 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_ManySmallProblems() 
 	s.Assert().EqualValues(batchesCount*perBatchCount, totalDocs, "total docs checked")
 }
 
+// This tests behavior when there are enough large documents to necessitate
+// multiple problem reports. (This hits the comparator’s bytes-cached max.)
 func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_BigProblems() {
 	ctx := s.Context()
 
