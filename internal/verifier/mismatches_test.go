@@ -3,6 +3,7 @@ package verifier
 import (
 	"testing"
 
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/stretchr/testify/assert"
@@ -11,7 +12,7 @@ import (
 )
 
 func TestMismatchesInfoMarshal(t *testing.T) {
-	results := []VerificationResult{
+	results := []compare.Result{
 		{},
 		{
 			ID: mbson.ToRawValue("hello"),

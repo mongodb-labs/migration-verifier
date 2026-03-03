@@ -1,11 +1,10 @@
-package verifier
+package compare
 
 import (
 	"encoding/binary"
 	"fmt"
 	"time"
 
-	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -16,8 +15,8 @@ const (
 	Missing = "Missing"
 )
 
-// VerificationResult holds the Verification Results.
-type VerificationResult struct {
+// Result holds the result of a single comparison.
+type Result struct {
 	// This field gets used differently depending on whether this result
 	// came from a document comparison or something else. If it’s from a
 	// document comparison, it *MUST* be a document ID, not a
@@ -39,9 +38,9 @@ type VerificationResult struct {
 	MismatchHistory recheck.MismatchHistory `bson:"mismatchHistory,omitempty"`
 
 	// The data size of the largest of the mismatched objects.
-	// Note this is not persisted; it is used only to ensure recheck tasks
-	// don't get too large.
-	dataSize int32
+	// Note this is used only to ensure recheck tasks’ queries don’t return
+	// too many results.
+	DataSize int32
 
 	SrcTimestamp option.Option[bson.Timestamp]
 	DstTimestamp option.Option[bson.Timestamp]
@@ -50,46 +49,24 @@ type VerificationResult struct {
 // DocumentIsMissing returns a boolean that indicates whether the
 // VerificationResult indicates a document that is missing on either
 // source or destination.
-func (vr VerificationResult) DocumentIsMissing() bool {
+func (vr Result) DocumentIsMissing() bool {
 	// NB: Missing gets set as the Details value when a field is missing
 	// but the document exists. To ascertain that the document is entirely
 	// absent we have to check Field as well.
 	return vr.Details == Missing && vr.Field == ""
 }
 
-func (vr VerificationResult) MismatchDuration() time.Duration {
+func (vr Result) MismatchDuration() time.Duration {
 	return time.Duration(vr.MismatchHistory.DurationMS) * time.Millisecond
 }
 
-// Returns an agg expression that indicates whether the VerificationResult
-// refers to a missing document.
-func getResultDocMissingAggExpr(docExpr any) any {
-	return agg.And{
-		agg.Eq{
-			agg.GetField{
-				Input: docExpr,
-				Field: "details",
-			},
-			Missing,
-		},
-		agg.Eq{
-			agg.GetField{
-				Input: docExpr,
-				Field: "field",
-			},
-			"",
-		},
-	}
+var _ bson.Marshaler = Result{}
 
-}
-
-var _ bson.Marshaler = VerificationResult{}
-
-func (vr VerificationResult) MarshalBSON() ([]byte, error) {
+func (vr Result) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON.")
 }
 
-func (vr VerificationResult) MarshalToBSON() []byte {
+func (vr Result) MarshalToBSON() []byte {
 	bsonLen := 4 + // header
 		1 + 5 + 1 + 4 + 1 + // Field
 		1 + 7 + 1 + 4 + 1 + // Details

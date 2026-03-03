@@ -509,17 +509,17 @@ func (verifier *Verifier) maybeAppendGlobalFilterToPredicates(predicates bson.A)
 	return append(predicates, verifier.globalFilter)
 }
 
-func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, id bson.RawValue, fieldPrefix string) (results []VerificationResult) {
+func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDoc, dstClientDoc bson.Raw, namespace string, id bson.RawValue, fieldPrefix string) (results []compare.Result) {
 	results = make(
-		[]VerificationResult,
+		[]compare.Result,
 		0,
 		len(mismatch.missingFieldOnSrc)+len(mismatch.missingFieldOnDst)+len(mismatch.fieldContentsDiffer),
 	)
 
 	for _, field := range mismatch.missingFieldOnSrc {
-		result := VerificationResult{
+		result := compare.Result{
 			Field:     fieldPrefix + field,
-			Details:   Missing,
+			Details:   compare.Missing,
 			Cluster:   ClusterSource,
 			NameSpace: namespace,
 			ID:        id,
@@ -529,9 +529,9 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 	}
 
 	for _, field := range mismatch.missingFieldOnDst {
-		result := VerificationResult{
+		result := compare.Result{
 			Field:     fieldPrefix + field,
-			Details:   Missing,
+			Details:   compare.Missing,
 			Cluster:   ClusterTarget,
 			NameSpace: namespace,
 			ID:        id,
@@ -555,7 +555,7 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 			)
 		}
 
-		result := VerificationResult{
+		result := compare.Result{
 			Field:     fieldPrefix + field,
 			Details:   details,
 			Cluster:   ClusterTarget,
@@ -632,7 +632,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 			for _, problem := range problems {
 				idsToRecheck = append(idsToRecheck, problem.ID)
-				dataSizes = append(dataSizes, problem.dataSize)
+				dataSizes = append(dataSizes, problem.DataSize)
 				firstMismatchTimes = append(firstMismatchTimes, problem.MismatchHistory.First)
 			}
 
@@ -835,26 +835,26 @@ func (verifier *Verifier) partitionAndInspectNamespace(
 func (verifier *Verifier) compareCollectionSpecifications(
 	srcNs, dstNs string,
 	srcSpecOpt, dstSpecOpt option.Option[util.CollectionSpec],
-) ([]VerificationResult, bool, error) {
+) ([]compare.Result, bool, error) {
 	srcSpec, hasSrcSpec := srcSpecOpt.Get()
 	dstSpec, hasDstSpec := dstSpecOpt.Get()
 
 	if !hasSrcSpec {
-		return []VerificationResult{{
+		return []compare.Result{{
 			NameSpace: srcNs,
 			Cluster:   ClusterSource,
-			Details:   Missing,
+			Details:   compare.Missing,
 		}}, false, nil
 	}
 	if !hasDstSpec {
-		return []VerificationResult{{
+		return []compare.Result{{
 			NameSpace: dstNs,
 			Cluster:   ClusterTarget,
-			Details:   Missing,
+			Details:   compare.Missing,
 		}}, false, nil
 	}
 	if srcSpec.Type != dstSpec.Type {
-		return []VerificationResult{{
+		return []compare.Result{{
 			NameSpace: srcNs,
 			Cluster:   ClusterTarget,
 			Field:     "Type",
@@ -862,9 +862,9 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		}}, false, nil
 		// If the types differ, the rest is not important.
 	}
-	var results []VerificationResult
+	var results []compare.Result
 	if srcSpec.Info.ReadOnly != dstSpec.Info.ReadOnly {
-		results = append(results, VerificationResult{
+		results = append(results, compare.Result{
 			NameSpace: dstNs,
 			Cluster:   ClusterTarget,
 			Field:     "ReadOnly",
@@ -881,7 +881,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 			)
 		}
 		if mismatchDetails == nil {
-			results = append(results, VerificationResult{
+			results = append(results, compare.Result{
 				NameSpace: dstNs,
 				Cluster:   ClusterTarget,
 				Field:     "Options (Field Order Only)",
@@ -1028,7 +1028,7 @@ func (verifier *Verifier) verifyIndexes(
 	ctx context.Context,
 	srcColl, dstColl *mongo.Collection,
 	srcIdIndexSpec, dstIdIndexSpec bson.Raw,
-) ([]VerificationResult, error) {
+) ([]compare.Result, error) {
 
 	srcMap, err := getIndexesMap(ctx, srcColl)
 	if err != nil {
@@ -1056,7 +1056,7 @@ func (verifier *Verifier) verifyIndexes(
 		dstMap["_id"] = dstIdIndexSpec
 	}
 
-	var results []VerificationResult
+	var results []compare.Result
 	srcMapUsed := map[string]bool{}
 
 	for indexName, dstSpec := range dstMap {
@@ -1074,7 +1074,7 @@ func (verifier *Verifier) verifyIndexes(
 			}
 
 			if !theyMatch {
-				results = append(results, VerificationResult{
+				results = append(results, compare.Result{
 					ID:        mbson.ToRawValue(indexName),
 					Field:     "index",
 					NameSpace: FullName(dstColl),
@@ -1083,10 +1083,10 @@ func (verifier *Verifier) verifyIndexes(
 				})
 			}
 		} else {
-			results = append(results, VerificationResult{
+			results = append(results, compare.Result{
 				ID:        mbson.ToRawValue(indexName),
 				Field:     "index",
-				Details:   Missing,
+				Details:   compare.Missing,
 				Cluster:   ClusterSource,
 				NameSpace: FullName(srcColl),
 			})
@@ -1096,10 +1096,10 @@ func (verifier *Verifier) verifyIndexes(
 	// Find any index specs which existed in the source cluster but not the target cluster.
 	for indexName := range srcMap {
 		if !srcMapUsed[indexName] {
-			results = append(results, VerificationResult{
+			results = append(results, compare.Result{
 				ID:        mbson.ToRawValue(indexName),
 				Field:     "index",
-				Details:   Missing,
+				Details:   compare.Missing,
 				Cluster:   ClusterTarget,
 				NameSpace: FullName(dstColl)})
 		}
