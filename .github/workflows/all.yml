@@ -149,7 +149,13 @@ jobs:
     # versions need.
     runs-on: ubuntu-22.04
 
-    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology }}${{ matrix.toHashedIndexKey && ', hashed doc compare' || '' }}, srcChangeReader=${{ matrix.srcChangeReader }}, dstChangeReader=${{ matrix.dstChangeReader }}, partitioningScheme=${{ matrix.partitioningScheme }}
+    name: >-
+        ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }},
+        ${{ matrix.srcFCV && format(' srcFCV={0},', matrix.srcFCV) || '' }}
+        ${{ matrix.topology }}${{ matrix.toHashedIndexKey && ', hashed doc compare' || '' }},
+        srcChangeReader=${{ matrix.srcChangeReader }},
+        dstChangeReader=${{ matrix.dstChangeReader }},
+        partitioningScheme=${{ matrix.partitioningScheme }}
 
     steps:
       - run: uname -a
