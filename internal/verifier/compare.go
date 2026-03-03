@@ -42,7 +42,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	workerNum int,
 	task *tasks.Task,
 ) (
-	[]VerificationResult,
+	[]compare.Result,
 	types.DocumentCount,
 	types.ByteCount,
 	error,
@@ -50,7 +50,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	var srcChannel, dstChannel <-chan []compare.DocWithTS
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
-	results := []VerificationResult{}
+	results := []compare.Result{}
 	var docCount types.DocumentCount
 	var byteCount types.ByteCount
 
@@ -141,12 +141,12 @@ func (verifier *Verifier) compareDocsFromChannels(
 	task *tasks.Task,
 	srcChannel, dstChannel <-chan []compare.DocWithTS,
 ) (
-	[]VerificationResult,
+	[]compare.Result,
 	types.DocumentCount,
 	types.ByteCount,
 	error,
 ) {
-	results := []VerificationResult{}
+	results := []compare.Result{}
 
 	// Document & byte counts for both the task and a batch of docs to tally
 	// for the Verifier’s relevant History structs to track those figures.
@@ -426,14 +426,14 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 		results = append(
 			results,
-			VerificationResult{
+			compare.Result{
 				ID: lo.Must(verifier.docCompareMethod.ClonedDocIDForComparison(
 					docWithTS.Doc,
 				)),
-				Details:         Missing,
+				Details:         compare.Missing,
 				Cluster:         ClusterTarget,
 				NameSpace:       namespace,
-				dataSize:        int32(len(docWithTS.Doc)),
+				DataSize:        int32(len(docWithTS.Doc)),
 				SrcTimestamp:    option.Some(docWithTS.TS),
 				MismatchHistory: createMismatchTimes(firstMismatchTime),
 			},
@@ -447,16 +447,16 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 		results = append(
 			results,
-			VerificationResult{
+			compare.Result{
 				ID: lo.Must(verifier.docCompareMethod.ClonedDocIDForComparison(
 					docWithTS.Doc,
 				)),
-				Details:      Missing,
+				Details:      compare.Missing,
 				Cluster:      ClusterSource,
 				NameSpace:    namespace,
 				DstTimestamp: option.Some(docWithTS.TS),
 
-				dataSize:        int32(len(docWithTS.Doc)),
+				DataSize:        int32(len(docWithTS.Doc)),
 				MismatchHistory: createMismatchTimes(firstMismatchTime),
 			},
 		)
@@ -1026,7 +1026,7 @@ func compareOneDocument(
 	docCompareMethod compare.Method,
 	srcClientDoc, dstClientDoc bson.Raw,
 	namespace string,
-) ([]VerificationResult, error) {
+) ([]compare.Result, error) {
 	match := bytes.Equal(srcClientDoc, dstClientDoc)
 	if match {
 		// Happy path! The documents binary-match.
@@ -1040,7 +1040,7 @@ func compareOneDocument(
 
 	if docCompareMethod == compare.ToHashedIndexKey {
 		// With hash comparison, mismatches are opaque.
-		return []VerificationResult{{
+		return []compare.Result{{
 			ID:        docID,
 			Details:   Mismatch,
 			Cluster:   ClusterTarget,
@@ -1059,12 +1059,12 @@ func compareOneDocument(
 		dataSize := max(len(srcClientDoc), len(dstClientDoc))
 
 		// If we're respecting field order we have just done a binary compare so we have fields in different order.
-		return []VerificationResult{{
+		return []compare.Result{{
 			ID:        docID,
 			Details:   Mismatch + " : only field order differs",
 			Cluster:   ClusterTarget,
 			NameSpace: namespace,
-			dataSize:  int32(dataSize),
+			DataSize:  int32(dataSize),
 		}}, nil
 	}
 

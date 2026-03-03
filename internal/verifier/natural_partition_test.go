@@ -109,7 +109,7 @@ func (suite *IntegrationTestSuite) TestFetchAndCompareAllDstDocsGone() {
 
 	slices.SortFunc(
 		results,
-		func(a, b VerificationResult) int {
+		func(a, b compare.Result) int {
 			return cmp.Compare(
 				lo.Must(bsontools.RawValueTo[int](a.ID)),
 				lo.Must(bsontools.RawValueTo[int](b.ID)),
