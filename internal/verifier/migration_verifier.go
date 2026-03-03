@@ -592,6 +592,9 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 
 	problemsCount := 0
 
+	var docsCount types.DocumentCount
+	var bytesCount types.ByteCount
+
 REPORTS:
 	for {
 		select {
@@ -619,8 +622,8 @@ REPORTS:
 				)
 			}
 
-			task.SourceDocumentCount += report.DocCount
-			task.SourceByteCount += report.ByteCount
+			docsCount += report.DocCount
+			bytesCount += report.ByteCount
 
 			if len(report.Problems) == 0 {
 				// The only problem-free report is the last one.
@@ -718,6 +721,9 @@ REPORTS:
 
 		}
 	}
+
+	task.SourceDocumentCount = docsCount
+	task.SourceByteCount = bytesCount
 
 	err := verifier.UpdateVerificationTask(ctx, task)
 
