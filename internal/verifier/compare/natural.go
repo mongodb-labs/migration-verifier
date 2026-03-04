@@ -54,17 +54,8 @@ func ReadNaturalPartitionFromSource(
 	defer close(toCompare)
 	defer close(toDst)
 
-	lo.Assertf(
-		task.QueryFilter.Partition.Natural,
-		"natural partition required; task: %+v",
-		task,
-	)
-
-	lowerBoundRV := task.QueryFilter.Partition.Key.Lower
-
-	upperRecordID := task.QueryFilter.Partition.Upper
-	if !rvIsNonEmpty(upperRecordID) {
-		return fmt.Errorf("empty/null upper bound is invalid")
+	if err := validateNaturalTask(task); err != nil {
+		return err
 	}
 
 	sess, err := srcClient.StartSession()
@@ -78,185 +69,168 @@ func ReadNaturalPartitionFromSource(
 	db, collName := mmongo.SplitNamespace(task.QueryFilter.Namespace)
 	coll := srcClient.Database(db).Collection(collName)
 
-	var cursor *mongo.Cursor
-
 	var resumeTokenOpt option.Option[bson.RawValue]
+	var startRecordID option.Option[bson.RawValue]
+	var resumeTokenParameter string
 
+	srcVersion, err := mmongo.GetVersionArray(ctx, srcClient)
+	if err != nil {
+		return errors.Wrapf(err, "fetching source version")
+	}
+
+	// Handle Resume Token
+	lowerBoundRV := task.QueryFilter.Partition.Key.Lower
 	if rvIsNonEmpty(lowerBoundRV) {
 		resumeTokenOpt = option.Some(lowerBoundRV)
+
+		startRecordID, resumeTokenParameter, err = setupResumeToken(srcVersion, lowerBoundRV)
+		if err != nil {
+			return err
+		}
 	}
 
-	var canUseStartAt bool
-
-	resumeToken, hasToken := resumeTokenOpt.Get()
-
-	var startRecordID option.Option[bson.RawValue]
-
-	if hasToken {
-		version, err := mmongo.GetVersionArray(ctx, srcClient)
-		if err != nil {
-			return errors.Wrapf(err, "fetching server version")
-		}
-
-		canUseStartAt = mmongo.FindCanUseStartAt(version)
-
-		rawToken, err := bsontools.RawValueTo[bson.Raw](resumeToken)
-		if err != nil {
-			return errors.Wrapf(err, "resume token to %T", rawToken)
-		}
-
-		recIDRV, err := rawToken.LookupErr(partitions.RecordID)
-		if err != nil {
-			return errors.Wrapf(err, "extracting record ID (resume token: %+v)", rawToken)
-		}
-
-		startRecordID = option.Some(recIDRV)
-	}
-
-	resumeTokenParameter := lo.Ternary(
-		canUseStartAt,
-		"$_startAt",
-		"$_resumeAfter",
-	)
-
-	// Because we send `showRecordId` we need to disambiguate the
-	// server-added $recordId field from a user field of the same name
-	// (however unlikely!). We do that by projecting the original
-	// document down a level.
-	var docProjection any
-
-	switch compareMethod {
-	case ToHashedIndexKey:
-		docProjection = GetHashedIndexKeyProjection(task.QueryFilter)
-	case Binary, IgnoreOrder:
-		docProjection = "$$ROOT"
-	}
+	docProjection := getDocProjection(task, compareMethod)
 
 	createCmd := func(resumeTokenOpt option.Option[bson.RawValue]) bson.D {
-		// This will yield documents of this form:
-		// {
-		//      $recordId: <...>,
-		//      doc:       { ... },
-		// }
-		//
-		// NB: If the user document is 16 MiB, then the above will exceed that.
-		// Thankfully, the server allows an extra 16 KiB of headroom for such.
-		cmd := bson.D{
-			{"find", coll.Name()},
-			{"hint", bson.D{{"$natural", 1}}},
-			{"showRecordId", true},
-			{"$_requestResumeToken", true},
-			{"filter", docFilter.OrElse(bson.D{})},
-			{"readConcern", bson.D{
-				{"level", "majority"},
-			}},
-			{"projection", bson.D{
-				{"_id", 0},
-				{"doc", docProjection},
-			}},
-			{"comment", fmt.Sprintf("task %v", task.PrimaryKey)},
-		}
-
-		if token, has := resumeTokenOpt.Get(); has {
-			cmd = append(cmd, bson.E{resumeTokenParameter, token})
-		}
-
-		return cmd
-	}
-
-	cursor, err = coll.Database().RunCommandCursor(sctx, createCmd(resumeTokenOpt))
-
-	if err != nil {
-		if !mmongo.ErrorHasCode(err, util.KeyNotFoundErrCode) {
-			return errors.Wrapf(err, "opening source cursor")
-		}
-
-		logger.Debug().
-			Any("task", task.PrimaryKey).
-			Str("namespace", task.QueryFilter.Namespace).
-			Stringer("resumeToken", resumeToken).
-			Err(err).
-			Msg("Resume token is no longer valid. Will attempt use of earlier tokens.")
-
-		cursor, err = openBackupNaturalCursor(
-			ctx,
-			logger,
-			coll,
-			task,
-			tasksColl,
-			startRecordID,
-			createCmd,
+		return buildNaturalFindCmd(
+			task, coll.Name(), docFilter, docProjection, resumeTokenOpt, resumeTokenParameter,
 		)
-		if err != nil {
-			return errors.Wrapf(err, "opening backup natural cursor")
-		}
 	}
 
+	cursor, err := openSourceCursor(ctx, sctx, logger, coll, tasksColl, task, createCmd, resumeTokenOpt, startRecordID)
+	if err != nil {
+		return err
+	}
 	defer cursor.Close(ctx)
 
 	retryState.NoteSuccess("opened cursor")
 
+	return processCursor(
+		ctx, sess, logger, retryState, cursor, task, compareMethod,
+		startRecordID, task.QueryFilter.Partition.Upper, toCompare, toDst,
+	)
+}
+
+func validateNaturalTask(task *tasks.Task) error {
+	lo.Assertf(
+		task.QueryFilter.Partition.Natural,
+		"natural partition required; task: %+v",
+		task,
+	)
+
+	if !rvIsNonEmpty(task.QueryFilter.Partition.Upper) {
+		return fmt.Errorf("empty/null upper bound is invalid")
+	}
+	return nil
+}
+
+func getDocProjection(task *tasks.Task, compareMethod Method) any {
+	switch compareMethod {
+	case ToHashedIndexKey:
+		return GetHashedIndexKeyProjection(task.QueryFilter)
+	case Binary, IgnoreOrder:
+		return "$$ROOT"
+	default:
+		return "$$ROOT"
+	}
+}
+
+func setupResumeToken(
+	srcVersion [3]int,
+	lowerBoundRV bson.RawValue,
+) (option.Option[bson.RawValue], string, error) {
+	canUseStartAt := mmongo.FindCanUseStartAt(srcVersion)
+
+	rawToken, err := bsontools.RawValueTo[bson.Raw](lowerBoundRV)
+	if err != nil {
+		return option.None[bson.RawValue](), "", errors.Wrapf(err, "resume token to %T", rawToken)
+	}
+
+	recIDRV, err := rawToken.LookupErr(partitions.RecordID)
+	if err != nil {
+		return option.None[bson.RawValue](), "", errors.Wrapf(err, "extracting record ID (resume token: %+v)", rawToken)
+	}
+
+	resumeTokenParameter := lo.Ternary(canUseStartAt, "$_startAt", "$_resumeAfter")
+
+	return option.Some(recIDRV), resumeTokenParameter, nil
+}
+
+func buildNaturalFindCmd(
+	task *tasks.Task,
+	collName string,
+	docFilter option.Option[bson.D],
+	docProjection any,
+	resumeTokenOpt option.Option[bson.RawValue],
+	resumeTokenParameter string,
+) bson.D {
+	cmd := bson.D{
+		{"find", collName},
+		{"hint", bson.D{{"$natural", 1}}},
+		{"showRecordId", true},
+		{"$_requestResumeToken", true}, // Alternatively, only add if !GLOBAL.CANNOT_RESUME
+		{"filter", docFilter.OrElse(bson.D{})},
+		{"readConcern", bson.D{{"level", "majority"}}},
+		{"projection", bson.D{{"_id", 0}, {"doc", docProjection}}},
+		{"comment", fmt.Sprintf("task %v", task.PrimaryKey)},
+	}
+
+	if token, has := resumeTokenOpt.Get(); has {
+		cmd = append(cmd, bson.E{Key: resumeTokenParameter, Value: token})
+	}
+
+	return cmd
+}
+
+func openSourceCursor(
+	ctx context.Context, // for metadata
+	sctx context.Context, // for the source read
+	logger *logger.Logger,
+	coll *mongo.Collection,
+	tasksColl *mongo.Collection,
+	task *tasks.Task,
+	createCmd func(option.Option[bson.RawValue]) bson.D,
+	resumeTokenOpt option.Option[bson.RawValue],
+	startRecordID option.Option[bson.RawValue],
+) (*mongo.Cursor, error) {
+	cursor, err := coll.Database().RunCommandCursor(sctx, createCmd(resumeTokenOpt))
+	if err == nil {
+		return cursor, nil
+	}
+
+	if !mmongo.ErrorHasCode(err, util.KeyNotFoundErrCode) {
+		return nil, errors.Wrapf(err, "opening source cursor")
+	}
+
+	logger.Debug().
+		Any("task", task.PrimaryKey).
+		Str("namespace", task.QueryFilter.Namespace).
+		Err(err).
+		Msg("Resume token is no longer valid. Will attempt use of earlier tokens.")
+
+	cursor, err = openBackupNaturalCursor(ctx, logger, coll, task, tasksColl, startRecordID, createCmd)
+	if err != nil {
+		return nil, errors.Wrapf(err, "opening backup natural cursor")
+	}
+
+	return cursor, nil
+}
+
+func processCursor(
+	ctx context.Context,
+	sess *mongo.Session,
+	logger *logger.Logger,
+	retryState retry.SuccessNotifier,
+	cursor *mongo.Cursor,
+	task *tasks.Task,
+	compareMethod Method,
+	startRecordID option.Option[bson.RawValue],
+	upperRecordID bson.RawValue,
+	toCompare chan<- []DocWithTS,
+	toDst chan<- []DocID,
+) error {
 	var batch []DocWithTS
 	var batchDocIDs []DocID
-
-	flush := func(ctx context.Context) error {
-		logger.Trace().
-			Any("task", task.PrimaryKey).
-			Str("namespace", task.QueryFilter.Namespace).
-			Int("count", len(batchDocIDs)).
-			Msg("Flushing source document IDs to dst.")
-
-		err := chanutil.WriteWithDoneCheck(
-			ctx,
-			toDst,
-			slices.Clone(batchDocIDs),
-		)
-		if err != nil {
-			// NB: This leaks memory, but that shouldn’t matter because
-			// this error should crash the verifier.
-			return errors.Wrapf(err, "sending %d doc IDs to dst", len(batchDocIDs))
-		}
-
-		retryState.NoteSuccess("sent %d-doc batch to dst", len(batch))
-
-		batchDocIDs = batchDocIDs[:0]
-
-		logger.Trace().
-			Any("task", task.PrimaryKey).
-			Str("namespace", task.QueryFilter.Namespace).
-			Int("count", len(batch)).
-			Msg("Flushing source documents to compare.")
-
-		toCompareStart := time.Now()
-
-		// Now send documents  to the comparison thread.
-		for chunk := range mslices.Chunk(slices.Clone(batch), ToComparatorBatchSize) {
-			err = chanutil.WriteWithDoneCheck(
-				ctx,
-				toCompare,
-				chunk,
-			)
-			if err != nil {
-				// NB: This leaks memory, but that shouldn’t matter because
-				// this error should crash the verifier.
-				return errors.Wrapf(err, "sending %d of %d src docs to compare", len(chunk), len(batch))
-			}
-		}
-
-		retryState.NoteSuccess("sent %d src docs to compare thread", len(batch))
-
-		logger.Trace().
-			Any("task", task.PrimaryKey).
-			Int("count", len(batch)).
-			Stringer("elapsed", time.Since(toCompareStart)).
-			Msg("Done flushing source documents to compare.")
-
-		retryState.NoteSuccess("sent %d docs to compare", len(batch))
-
-		batch = batch[:0]
-
-		return nil
-	}
 
 cursorLoop:
 	for {
@@ -264,7 +238,6 @@ cursorLoop:
 			if cursor.Err() != nil {
 				return errors.Wrapf(cursor.Err(), "reading documents")
 			}
-
 			break
 		}
 
@@ -285,39 +258,32 @@ cursorLoop:
 			if err != nil {
 				return errors.Wrap(err, "comparing current record ID with start")
 			}
-
 			if val < 0 {
 				continue cursorLoop
 			}
 		}
 
-		// NB: There is always an upper bound.
 		val, err := mongotools.CompareRecordIDs(recIDRV, upperRecordID)
 		if err != nil {
 			return errors.Wrap(err, "comparing record ID with partition’s upper bound")
 		}
-
 		if val > 0 {
 			break cursorLoop
 		}
-
-		var userDoc bson.Raw
 
 		userDocRV, err := cursor.Current.LookupErr("doc")
 		if err != nil {
 			return errors.Wrapf(err, "getting user document")
 		}
 
-		userDoc, err = bsontools.RawValueTo[bson.Raw](userDocRV)
+		userDoc, err := bsontools.RawValueTo[bson.Raw](userDocRV)
 		if err != nil {
 			return errors.Wrapf(err, "parsing user document")
 		}
 
 		batch = append(batch, NewDocWithTSFromPool(userDoc, *opTime))
 
-		docID, err := compareMethod.RawDocIDForComparison(
-			userDoc,
-		)
+		docID, err := compareMethod.RawDocIDForComparison(userDoc)
 		if err != nil {
 			return errors.Wrapf(err, "parsing doc ID for comparison")
 		}
@@ -325,7 +291,7 @@ cursorLoop:
 		batchDocIDs = append(batchDocIDs, NewDocIDFromPool(docID))
 
 		if cursor.RemainingBatchLength() == 0 {
-			if err := flush(ctx); err != nil {
+			if err := flushSourceBatch(ctx, logger, retryState, task, &batch, &batchDocIDs, toCompare, toDst); err != nil {
 				return errors.Wrapf(err, "flushing docs")
 			}
 		}
@@ -334,10 +300,63 @@ cursorLoop:
 	retryState.NoteSuccess("reached end of cursor")
 
 	if len(batch) > 0 {
-		if err := flush(ctx); err != nil {
+		if err := flushSourceBatch(ctx, logger, retryState, task, &batch, &batchDocIDs, toCompare, toDst); err != nil {
 			return errors.Wrapf(err, "flushing final docs")
 		}
 	}
+
+	return nil
+}
+
+func flushSourceBatch(
+	ctx context.Context,
+	logger *logger.Logger,
+	retryState retry.SuccessNotifier,
+	task *tasks.Task,
+	batch *[]DocWithTS,
+	batchDocIDs *[]DocID,
+	toCompare chan<- []DocWithTS,
+	toDst chan<- []DocID,
+) error {
+	logger.Trace().
+		Any("task", task.PrimaryKey).
+		Str("namespace", task.QueryFilter.Namespace).
+		Int("count", len(*batchDocIDs)).
+		Msg("Flushing source document IDs to dst.")
+
+	err := chanutil.WriteWithDoneCheck(ctx, toDst, slices.Clone(*batchDocIDs))
+	if err != nil {
+		return errors.Wrapf(err, "sending %d doc IDs to dst", len(*batchDocIDs))
+	}
+
+	retryState.NoteSuccess("sent %d-doc batch to dst", len(*batch))
+	*batchDocIDs = (*batchDocIDs)[:0]
+
+	logger.Trace().
+		Any("task", task.PrimaryKey).
+		Str("namespace", task.QueryFilter.Namespace).
+		Int("count", len(*batch)).
+		Msg("Flushing source documents to compare.")
+
+	toCompareStart := time.Now()
+
+	for chunk := range mslices.Chunk(slices.Clone(*batch), ToComparatorBatchSize) {
+		err = chanutil.WriteWithDoneCheck(ctx, toCompare, chunk)
+		if err != nil {
+			return errors.Wrapf(err, "sending %d of %d src docs to compare", len(chunk), len(*batch))
+		}
+	}
+
+	retryState.NoteSuccess("sent %d src docs to compare thread", len(*batch))
+
+	logger.Trace().
+		Any("task", task.PrimaryKey).
+		Int("count", len(*batch)).
+		Stringer("elapsed", time.Since(toCompareStart)).
+		Msg("Done flushing source documents to compare.")
+
+	retryState.NoteSuccess("sent %d docs to compare", len(*batch))
+	*batch = (*batch)[:0]
 
 	return nil
 }
