@@ -57,73 +57,89 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	var srcChannel, dstChannel <-chan []compare.DocWithTS
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
-	results := []compare.Result{}
-	var docCount types.DocumentCount
-	var byteCount types.ByteCount
-
 	retryer := retry.New().WithDescription(
 		"comparing task %v's documents (namespace: %s)",
 		task.PrimaryKey,
 		task.QueryFilter.Namespace,
 	)
 
-	err := retryer.
-		WithBefore(func() error {
-			var err error
+	resultsChan := make(chan mo.Result[DocCompareReport], 100)
 
-			srcChannel, dstChannel, readSrcCallback, readDstCallback, err = verifier.getFetcherChannelsAndCallbacks(task)
+	go func() {
+		defer close(resultsChan)
 
-			return err
-		}).
-		WithErrorCodes(util.CursorKilledErrCode).
-		WithCallback(
-			func(ctx context.Context, fi *retry.FuncInfo) error {
-				return readSrcCallback(ctx, fi)
-			},
-			"reading from source",
-		).
-		WithCallback(
-			func(ctx context.Context, fi *retry.FuncInfo) error {
-				return readDstCallback(ctx, fi)
-			},
-			"reading from destination",
-		).
-		WithCallback(
-			func(ctx context.Context, fi *retry.FuncInfo) error {
+		err := retryer.
+			WithBefore(func() error {
 				var err error
-				results, docCount, byteCount, err = verifier.compareDocsFromChannels(
-					ctx,
-					workerNum,
-					fi,
-					task,
-					srcChannel,
-					dstChannel,
-				)
+
+				srcChannel, dstChannel, readSrcCallback, readDstCallback, err = verifier.getFetcherChannelsAndCallbacks(task)
 
 				return err
-			},
-			"comparing documents",
-		).Run(givenCtx, verifier.logger)
+			}).
+			WithErrorCodes(util.CursorKilledErrCode).
+			WithCallback(
+				func(ctx context.Context, fi *retry.FuncInfo) error {
+					return readSrcCallback(ctx, fi)
+				},
+				"reading from source",
+			).
+			WithCallback(
+				func(ctx context.Context, fi *retry.FuncInfo) error {
+					return readDstCallback(ctx, fi)
+				},
+				"reading from destination",
+			).
+			WithCallback(
+				func(ctx context.Context, fi *retry.FuncInfo) error {
+					reportChan, canceler := chanutil.StartIngestMap(
+						ctx,
+						resultsChan,
+						mo.Ok[DocCompareReport],
+					)
 
-	if err != nil {
-		return lo.SliceToChannel(1, mslices.Of(mo.Err[DocCompareReport](err)))
-	}
+					defer func() {
+						_ = canceler(ctx)
+					}()
 
-	if ts, has := task.SrcTimestamp.Get(); has {
-		verifier.NoteCompareOfOptime(src, ts)
-	}
+					return verifier.compareDocsFromChannels(
+						ctx,
+						workerNum,
+						fi,
+						task,
+						srcChannel,
+						dstChannel,
+						reportChan,
+					)
+				},
+				"comparing documents",
+			).Run(givenCtx, verifier.logger)
 
-	if ts, has := task.DstTimestamp.Get(); has {
-		verifier.NoteCompareOfOptime(dst, ts)
-	}
+		if err != nil {
+			writeErr := chanutil.WriteWithDoneCheck(
+				givenCtx,
+				resultsChan,
+				mo.Err[DocCompareReport](err),
+			)
 
-	report := DocCompareReport{
-		Problems:  results,
-		DocCount:  docCount,
-		ByteCount: byteCount,
-	}
+			if writeErr != nil && !errors.Is(writeErr, context.Canceled) {
+				verifier.logger.Warn().
+					Err(err).
+					Msg("Failed to compare documents.")
+			}
 
-	return lo.SliceToChannel(1, mslices.Of(mo.Ok(report)))
+			return
+		}
+
+		if ts, has := task.SrcTimestamp.Get(); has {
+			verifier.NoteCompareOfOptime(src, ts)
+		}
+
+		if ts, has := task.DstTimestamp.Get(); has {
+			verifier.NoteCompareOfOptime(dst, ts)
+		}
+	}()
+
+	return resultsChan
 }
 
 func (verifier *Verifier) NoteCompareOfOptime(
@@ -155,7 +171,8 @@ func (verifier *Verifier) compareDocsFromChannels(
 	fi retry.SuccessNotifier,
 	task *tasks.Task,
 	srcChannel, dstChannel <-chan []compare.DocWithTS,
-) ([]compare.Result, types.DocumentCount, types.ByteCount, error) {
+	reportsChan chan<- DocCompareReport,
+) error {
 
 	// 1. Initialize State
 	c := newComparator(verifier, workerNum, fi, task)
@@ -172,7 +189,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	for c.stillReading() {
 		srcBatch, dstBatch, err := c.readBatches(ctx, srcChannel, dstChannel)
 		if err != nil {
-			return nil, 0, 0, err
+			return err
 		}
 
 		// Interleave processing the batches
@@ -182,7 +199,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 				srcBatch = srcBatch[1:]
 
 				if err := c.processSingleDoc(doc, true); err != nil {
-					return nil, 0, 0, errors.Wrapf(
+					return errors.Wrapf(
 						err, "comparer thread failed to handle %#q's source doc (task: %s) with ID %v",
 						c.namespace, task.PrimaryKey, doc.Doc.Lookup("_id"),
 					)
@@ -194,22 +211,31 @@ func (verifier *Verifier) compareDocsFromChannels(
 				dstBatch = dstBatch[1:]
 
 				if err := c.processSingleDoc(doc, false); err != nil {
-					return nil, 0, 0, errors.Wrapf(
+					return errors.Wrapf(
 						err, "comparer thread failed to handle %#q's destination doc (task: %s) with ID %v",
 						c.namespace, task.PrimaryKey, doc.Doc.Lookup("_id"),
 					)
 				}
 			}
 		}
+
+		whyFlush, err := c.flushIfNeeded(ctx, reportsChan)
+
+		if err != nil {
+			return errors.Wrapf(err, "flushing problems")
+		}
+
+		if reason, has := whyFlush.Get(); has {
+			verifier.logger.Debug().
+				Any("task", task.PrimaryKey).
+				Int("workerNum", workerNum).
+				Str("namespace", task.QueryFilter.Namespace).
+				Str("reason", reason).
+				Msg("Recorded document-disparity problems.")
+		}
 	}
 
-	// 3. Cleanup & Final Reporting
-	c.sweepMissingDocs()
-
-	verifier.docsComparedHistory.Add(c.curHistoryDocCount)
-	verifier.bytesComparedHistory.Add(c.curHistoryByteCount)
-
-	return c.results, c.taskSrcDocCount, c.taskSrcByteCount, nil
+	return c.flush(ctx, reportsChan)
 }
 
 func createMismatchTimes(firstDateTime option.Option[bson.DateTime]) recheck.MismatchHistory {

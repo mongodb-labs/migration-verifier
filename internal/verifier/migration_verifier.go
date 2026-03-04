@@ -660,20 +660,21 @@ REPORTS:
 			// We enqueue rechecks and persist mismatches concurrently.
 			eg, egCtx := contextplus.ErrGroup(ctx)
 
-			// Create a task for the next generation to recheck the
-			// mismatched & missing docs.
-			eg.Go(
-				func() error {
-					err := verifier.InsertFailedCompareRecheckDocs(egCtx, task.QueryFilter.Namespace, idsToRecheck, dataSizes, firstMismatchTimes)
+			if !verifier.lastGeneration {
+				// Make the next generation recheck the mismatched/missing docs.
+				eg.Go(
+					func() error {
+						err := verifier.InsertFailedCompareRecheckDocs(egCtx, task.QueryFilter.Namespace, idsToRecheck, dataSizes, firstMismatchTimes)
 
-					return errors.Wrapf(
-						err,
-						"failed to enqueue %d recheck(s) of mismatched documents",
-						len(idsToRecheck),
-					)
+						return errors.Wrapf(
+							err,
+							"failed to enqueue %d recheck(s) of mismatched documents",
+							len(idsToRecheck),
+						)
 
-				},
-			)
+					},
+				)
+			}
 
 			eg.Go(
 				func() error {

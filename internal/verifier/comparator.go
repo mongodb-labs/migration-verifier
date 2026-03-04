@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
@@ -14,6 +15,14 @@ import (
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/exp/slices"
+)
+
+const (
+	// These somewhat-arbitrary limits constrain the verifier so that,
+	// in a large, naturally-scanned collection, memory usage won’t balloon
+	// when many mismatches are found.
+	comparatorMaxProblemsLen   = 100_000
+	comparatorMaxVariableBytes = 30 << 20 // MiB
 )
 
 type comparator struct {
@@ -33,11 +42,24 @@ type comparator struct {
 	dstCache map[string]compare.DocWithTS
 
 	// Metrics & Results
-	results             []compare.Result
-	taskSrcDocCount     types.DocumentCount
-	taskSrcByteCount    types.ByteCount
+	problems            []compare.Result
+	srcDocCount         types.DocumentCount
+	srcByteCount        types.ByteCount
 	curHistoryDocCount  types.DocumentCount
 	curHistoryByteCount types.ByteCount
+
+	// We flush the comparator’s caches whenever len(problems) or this value
+	// exceed predefined limits.
+	//
+	// Note that this is a lower bound to memory
+	// usage, not an attempt to track exact usage. In other words, when this
+	// value hits (for example) 10 MiB, the actual memory usage is probably
+	// more--even substantially so--but it should not be orders of magnitude
+	// more.
+	//
+	// As long as we prevent an arbitrarily-long task from being able to
+	// exhaust available memory, this mechanism is doing its job.
+	cachedVariableBytes types.ByteCount
 
 	// Lookups & Reusable Buffers
 	firstMismatchTimeLookup firstMismatchTimeLookup
@@ -56,7 +78,7 @@ func newComparator(v *Verifier, workerNum int, fi retry.SuccessNotifier, task *t
 
 		srcCache: map[string]compare.DocWithTS{},
 		dstCache: map[string]compare.DocWithTS{},
-		results:  []compare.Result{},
+		problems: []compare.Result{},
 
 		firstMismatchTimeLookup: firstMismatchTimeLookup{
 			task:             task,
@@ -154,23 +176,27 @@ func simpleTimerReset(t *time.Timer, dur time.Duration) {
 
 // recordSrcMetrics isolates the noise of tracking business metrics.
 func (c *comparator) recordSrcMetrics(docs []compare.DocWithTS) {
-	c.taskSrcDocCount += types.DocumentCount(len(docs))
+	c.srcDocCount += types.DocumentCount(len(docs))
 	c.curHistoryDocCount += types.DocumentCount(len(docs))
 
 	for _, docWithTS := range docs {
-		c.taskSrcByteCount += types.ByteCount(len(docWithTS.Doc))
+		c.srcByteCount += types.ByteCount(len(docWithTS.Doc))
 		c.curHistoryByteCount += types.ByteCount(len(docWithTS.Doc))
 
 		if c.curHistoryDocCount >= comparisonHistoryThreshold {
-			c.verifier.docsComparedHistory.Add(c.curHistoryDocCount)
-			c.verifier.bytesComparedHistory.Add(c.curHistoryByteCount)
-
-			c.curHistoryDocCount = 0
-			c.curHistoryByteCount = 0
+			c.publishHistoryCounts()
 		}
 	}
 
-	c.verifier.workerTracker.SetSrcCounts(c.workerNum, c.taskSrcDocCount, c.taskSrcByteCount)
+	c.verifier.workerTracker.SetSrcCounts(c.workerNum, c.srcDocCount, c.srcByteCount)
+}
+
+func (c *comparator) publishHistoryCounts() {
+	c.verifier.docsComparedHistory.Add(c.curHistoryDocCount)
+	c.verifier.bytesComparedHistory.Add(c.curHistoryByteCount)
+
+	c.curHistoryDocCount = 0
+	c.curHistoryByteCount = 0
 }
 
 // processSingleDoc is the refactored `handleNewDoc` closure.
@@ -196,11 +222,18 @@ func (c *comparator) processSingleDoc(curDocWithTS compare.DocWithTS, isSrc bool
 
 	theirDocWithTS, exists := theirMap[mapKey]
 	if !exists {
+		// The other map lacks this document. Cache it, and we’re done for now.
 		ourMap[mapKey] = curDocWithTS
+		c.cachedVariableBytes += types.ByteCount(len(mapKey) + len(curDocWithTS.Doc))
+
 		return nil
 	}
 
+	// The other map also has the document. Remove it from the cache, then
+	// we’ll compare their doc with ours.
 	delete(theirMap, mapKey)
+	c.cachedVariableBytes -= types.ByteCount(len(mapKey) + len(theirDocWithTS.Doc))
+
 	defer curDocWithTS.PutInPool()
 	defer theirDocWithTS.PutInPool()
 
@@ -225,19 +258,88 @@ func (c *comparator) processSingleDoc(curDocWithTS compare.DocWithTS, isSrc bool
 		mismatches[i].MismatchHistory = createMismatchTimes(firstMismatchTime)
 		mismatches[i].SrcTimestamp = option.Some(srcDoc.TS)
 		mismatches[i].DstTimestamp = option.Some(dstDoc.TS)
+
+		c.cachedVariableBytes += types.ByteCount(len(mismatches[i].ID.Value))
 	}
 
-	c.results = append(c.results, mismatches...)
+	c.problems = append(c.problems, mismatches...)
 	return nil
+}
+
+// Will only flush when appropriate.
+// Returns a string description of why it flushed.
+func (c *comparator) flushIfNeeded(
+	ctx context.Context,
+	reportChan chan<- DocCompareReport,
+) (option.Option[string], error) {
+	totalProblems := c.countUnpairedDocs() + len(c.problems)
+
+	var whyFlush option.Option[string]
+
+	whyFlush = lo.Ternary(
+		totalProblems >= comparatorMaxProblemsLen,
+		option.Some("problems count"),
+		lo.Ternary(
+			c.cachedVariableBytes >= comparatorMaxVariableBytes,
+			option.Some("memory usage"),
+			whyFlush,
+		),
+	)
+
+	if whyFlush.IsNone() {
+		return option.None[string](), nil
+	}
+
+	return whyFlush, c.flush(ctx, reportChan)
+}
+
+// Returns the # of problems flushed. Always flushes.
+func (c *comparator) flush(
+	ctx context.Context,
+	reportChan chan<- DocCompareReport,
+) error {
+	c.sweepMissingDocs()
+
+	probsToFlush := c.problems
+
+	err := chanutil.WriteWithDoneCheck(
+		ctx,
+		reportChan,
+		DocCompareReport{
+			Problems:  probsToFlush,
+			DocCount:  c.srcDocCount,
+			ByteCount: c.srcByteCount,
+		},
+	)
+
+	if err != nil {
+		return errors.Wrapf(err, "flushing %d problems", len(probsToFlush))
+	}
+
+	c.problems = nil
+	clear(c.srcCache)
+	clear(c.dstCache)
+
+	c.srcDocCount = 0
+	c.srcByteCount = 0
+	c.cachedVariableBytes = 0
+
+	c.publishHistoryCounts()
+
+	return nil
+}
+
+func (c *comparator) countUnpairedDocs() int {
+	return len(c.srcCache) + len(c.dstCache)
 }
 
 // sweepMissingDocs processes the remaining unpaired documents in the caches.
 func (c *comparator) sweepMissingDocs() {
-	c.results = slices.Grow(c.results, len(c.srcCache)+len(c.dstCache))
+	c.problems = slices.Grow(c.problems, c.countUnpairedDocs())
 
 	for _, docWithTS := range c.srcCache {
 		firstMismatchTime := c.firstMismatchTimeLookup.get(docWithTS.Doc)
-		c.results = append(c.results, compare.Result{
+		c.problems = append(c.problems, compare.Result{
 			ID:              lo.Must(c.verifier.docCompareMethod.ClonedDocIDForComparison(docWithTS.Doc)),
 			Details:         compare.Missing,
 			Cluster:         ClusterTarget,
@@ -251,7 +353,7 @@ func (c *comparator) sweepMissingDocs() {
 
 	for _, docWithTS := range c.dstCache {
 		firstMismatchTime := c.firstMismatchTimeLookup.get(docWithTS.Doc)
-		c.results = append(c.results, compare.Result{
+		c.problems = append(c.problems, compare.Result{
 			ID:              lo.Must(c.verifier.docCompareMethod.ClonedDocIDForComparison(docWithTS.Doc)),
 			Details:         compare.Missing,
 			Cluster:         ClusterSource,
