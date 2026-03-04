@@ -29,6 +29,85 @@ const (
 	RecordID = "$recordId"
 )
 
+// CreateSingleNaturalOrderPartition returns a natural-order “partition” that
+// includes the entire collection (stopping at the top record ID). This is
+// needed when the source cluster cannot partition a natural scan.
+//
+// This returns empty if the collection is empty, which means generation 0
+// should skip this collection.
+func CreateSingleNaturalOrderPartition(
+	ctx context.Context,
+	srcColl *mongo.Collection,
+	srcURI string,
+	readPref *readpref.ReadPref,
+) (option.Option[Partition], error) {
+	_, hostnameAndPort, topIDOpt, err := getDirectCollAndTopID(ctx, srcColl, srcURI, readPref)
+	if err != nil {
+		return option.None[Partition](), err
+	}
+
+	if !topIDOpt.IsSome() {
+		return option.None[Partition](), nil
+	}
+
+	return option.Some(Partition{
+		Natural:         true,
+		HostnameAndPort: option.Some(hostnameAndPort),
+		Ns: &Namespace{
+			srcColl.Database().Name(),
+			srcColl.Name(),
+		},
+		Key: PartitionKey{
+			Lower: bsontools.ToRawValue(bson.Null{}),
+		},
+		Upper: topIDOpt.MustGet(),
+	}), nil
+}
+
+func getDirectCollAndTopID(
+	ctx context.Context,
+	srcColl *mongo.Collection,
+	srcURI string,
+	readPref *readpref.ReadPref,
+) (*mongo.Collection, string, option.Option[bson.RawValue], error) {
+	helloRaw, err := util.GetHelloRaw(
+		ctx,
+		srcColl.Database().Client(),
+		option.Some(readPref),
+	)
+	if err != nil {
+		return nil, "", option.None[bson.RawValue](), errors.Wrapf(err, "sending hello/isMaster")
+	}
+
+	hostnameAndPort, err := bsontools.RawLookup[string](helloRaw, "me")
+	if err != nil {
+		return nil, "", option.None[bson.RawValue](), errors.Wrapf(err, "parsing server’s hostname/port from response")
+	}
+
+	directClient, err := mmongo.GetDirectClient(srcURI, hostnameAndPort)
+	if err != nil {
+		return nil, "", option.None[bson.RawValue](), errors.Wrapf(err, "connecting for natural partition")
+	}
+
+	coll := directClient.
+		Database(srcColl.Database().Name()).
+		Collection(srcColl.Name())
+
+		// Avoid storing a null upper limit. See architecture
+	// documentation for rationale.
+	topRecordIDOpt, err := GetTopRecordID(ctx, coll)
+	if err != nil {
+		return nil, "", option.None[bson.RawValue](), errors.Wrapf(err, "fetching top record ID")
+	}
+
+	var recIDOpt option.Option[bson.RawValue]
+	if recID, hasRecID := topRecordIDOpt.Get(); hasRecID {
+		recIDOpt = option.Some(recID)
+	}
+
+	return coll, hostnameAndPort, recIDOpt, nil
+}
+
 // PartitionCollectionNaturalOrder spawns a goroutine that partitions the
 // collection in natural order.
 //
@@ -54,52 +133,24 @@ func PartitionCollectionNaturalOrder(
 		baseColl.Name(),
 	)
 
-	// Partitions by record ID are only meaningful on a single mongod.
-	// (i.e., 2 nodes within the same replica set will have different
-	// record IDs for the same document)
-	//
-	// Thus, along with the resume tokens we also persist the hostname
-	// and port.
-	helloRaw, err := util.GetHelloRaw(
+	coll, hostnameAndPort, topRecordIDOpt, err := getDirectCollAndTopID(
 		ctx,
-		baseColl.Database().Client(),
-		option.Some(readPref),
+		baseColl,
+		srcURI,
+		readPref,
 	)
 	if err != nil {
-		return nil, errors.Wrapf(err, "sending hello/isMaster")
-	}
-
-	hostnameAndPort, err := bsontools.RawLookup[string](helloRaw, "me")
-	if err != nil {
-		return nil, errors.Wrapf(err, "parsing server’s hostname/port from response")
-	}
-
-	pChan := make(chan mo.Result[Partition])
-
-	directClient, err := mmongo.GetDirectClient(srcURI, hostnameAndPort)
-	if err != nil {
-		return nil, errors.Wrapf(err, "connecting for natural partition")
-	}
-
-	coll := directClient.
-		Database(baseColl.Database().Name()).
-		Collection(baseColl.Name())
-
-	// Avoid storing a null upper limit. See architecture
-	// documentation for rationale.
-	topRecordIDOpt, err := GetTopRecordID(ctx, coll)
-	if err != nil {
-		return nil, errors.Wrapf(err, "fetching top record ID")
+		return nil, err
 	}
 
 	if !topRecordIDOpt.IsSome() {
 		// If the collection is empty then there’s no point in partitioning it.
 		// Any documents created during generation 0 will be rechecked in
 		// generation 1.
-		close(pChan)
-
-		return pChan, nil
+		return nil, nil
 	}
+
+	pChan := make(chan mo.Result[Partition])
 
 	collSizeInBytes, docCount, _, err := GetSizeAndDocumentCount(ctx, subLogger, coll)
 	if err != nil {

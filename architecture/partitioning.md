@@ -159,6 +159,12 @@ setting that as the last partition’s upper bound. Since generation 1 will
 recheck all documents inserted during generation 0, generation 0 doesn’t need
 to compare those documents.
 
+### MongoDB 4.2 & earlier
+
+The ability to resume a natural collection scan was new in MongoDB 4.4. Thus,
+when “partitioning” a collection in natural mode on 4.2 & earlier, the entire
+collection is scanned in a single task.
+
 ## No partitioning?
 
 If a given collection is not large enough for even a single partition

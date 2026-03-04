@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -27,9 +28,10 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
+	"golang.org/x/exp/constraints"
 )
 
-func (suite *IntegrationTestSuite) skipUnlessCanPartitionNatural() [3]int {
+func (suite *IntegrationTestSuite) getSourceReplsetVersion() [3]int {
 	ctx := suite.T().Context()
 
 	topology := suite.GetTopology(suite.srcMongoClient)
@@ -43,15 +45,11 @@ func (suite *IntegrationTestSuite) skipUnlessCanPartitionNatural() [3]int {
 	)
 	suite.Require().NoError(err)
 
-	if err := mmongo.WhyFindCannotResume([2]int(version[:])); err != nil {
-		suite.T().Skipf("no natural scan (%v)", err)
-	}
-
 	return version
 }
 
 func (suite *IntegrationTestSuite) TestFetchAndCompareAllDstDocsGone() {
-	suite.skipUnlessCanPartitionNatural()
+	suite.getSourceReplsetVersion() // skip if src is sharded
 
 	ctx := suite.T().Context()
 	t := suite.T()
@@ -90,11 +88,23 @@ func (suite *IntegrationTestSuite) TestFetchAndCompareAllDstDocsGone() {
 	// needed for comparison:
 	require.NoError(t, verifier.startChangeHandling(ctx))
 
+	_, hostname := getDirectClientAndHostname(
+		ctx,
+		suite.T(),
+		suite.srcMongoClient,
+		suite.srcConnStr,
+	)
+
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
 		Type:       tasks.VerifyCollection,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: FullName(srcColl),
+			Partition: &partitions.Partition{
+				Natural:         true,
+				HostnameAndPort: option.Some(hostname),
+				Upper:           bsontools.ToRawValue(math.MaxInt64),
+			},
 		},
 	}
 
@@ -127,7 +137,7 @@ func (suite *IntegrationTestSuite) TestFetchAndCompareAllDstDocsGone() {
 // TestNaturalPartitionSourceE2E confirms that we can partition and
 // read document correctly.
 func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
-	version := suite.skipUnlessCanPartitionNatural()
+	srcVersion := suite.getSourceReplsetVersion()
 
 	ctx := suite.T().Context()
 	t := suite.T()
@@ -167,8 +177,8 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 		suite.Run(
 			fmt.Sprintf("clustered %t", clustered),
 			func() {
-				if version[0] < 6 && clustered {
-					suite.T().Skip("clustered requires v6+")
+				if srcVersion[0] < 6 && clustered {
+					suite.T().Skip("clustered requires v6+ source")
 				}
 
 				verifier := suite.BuildVerifier()
@@ -223,10 +233,13 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 				)
 				suite.Require().NoError(err)
 
+				docIDs, err := getDocIDs(ctx, coll, docsCount/2)
+				suite.Require().NoError(err)
+
 				// Now delete half of the collection’s documents randomly:
 				_, err = coll.DeleteMany(
 					ctx,
-					bson.D{{"$sampleRate", 0.5}},
+					bson.D{{"_id", bson.D{{"$in", docIDs}}}},
 				)
 				suite.Require().NoError(err)
 
@@ -295,7 +308,10 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 }
 
 func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
-	version := suite.skipUnlessCanPartitionNatural()
+	srcVersion := suite.getSourceReplsetVersion()
+	if why := mmongo.WhyFindCannotResume([2]int(srcVersion[:])); why != nil {
+		suite.T().Skip(why.Error())
+	}
 
 	ctx := suite.T().Context()
 	t := suite.T()
@@ -317,7 +333,7 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 	)
 
 	for _, clustered := range mslices.Of(true, false) {
-		if version[0] < 6 && clustered {
+		if srcVersion[0] < 6 && clustered {
 			suite.T().Skip("clustered requires v6+")
 		}
 
@@ -356,10 +372,7 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 		hello, err := util.GetHelloRaw(ctx, suite.srcMongoClient, option.None[*readpref.ReadPref]())
 		require.NoError(t, err)
 
-		hostnameRV, err := hello.LookupErr("me")
-		require.NoError(t, err)
-
-		hostname, err := bsontools.RawValueTo[string](hostnameRV)
+		hostname, err := bsontools.RawLookup[string](hello, "me")
 		require.NoError(t, err)
 
 		results := lo.ChannelToSlice(pChan)
@@ -433,26 +446,11 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 	}
 }
 
-func getDirectClientAndHostname(
-	ctx context.Context,
-	t *testing.T,
-	client *mongo.Client,
-	connstr string,
-) (*mongo.Client, string) {
-	helloRaw, err := util.GetHelloRaw(ctx, client, option.None[*readpref.ReadPref]())
-	require.NoError(t, err)
-
-	hostname, err := bsontools.RawLookup[string](helloRaw, "me")
-	require.NoError(t, err)
-
-	directClient, err := mmongo.GetDirectClient(connstr, hostname)
-	require.NoError(t, err)
-
-	return directClient, hostname
-}
-
 func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
-	suite.skipUnlessCanPartitionNatural()
+	srcVersion := suite.getSourceReplsetVersion()
+	if why := mmongo.WhyFindCannotResume([2]int(srcVersion[:])); why != nil {
+		suite.T().Skip(why.Error())
+	}
 
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
@@ -939,4 +937,48 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 			)
 		}
 	}
+}
+
+func getDirectClientAndHostname(
+	ctx context.Context,
+	t *testing.T,
+	client *mongo.Client,
+	connstr string,
+) (*mongo.Client, string) {
+	helloRaw, err := util.GetHelloRaw(ctx, client, option.None[*readpref.ReadPref]())
+	require.NoError(t, err)
+
+	hostname, err := bsontools.RawLookup[string](helloRaw, "me")
+	require.NoError(t, err)
+
+	directClient, err := mmongo.GetDirectClient(connstr, hostname)
+	require.NoError(t, err)
+
+	return directClient, hostname
+}
+
+func getDocIDs[T constraints.Integer](ctx context.Context, coll *mongo.Collection, count T) ([]bson.RawValue, error) {
+	cursor, err := coll.Aggregate(
+		ctx,
+		mongo.Pipeline{
+			{{"$sample", bson.D{{"size", count}}}},
+			{{"$project", bson.D{{"_id", 1}}}},
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get %d doc IDs: %w", count, err)
+	}
+
+	var docs []bson.Raw
+	err = cursor.All(ctx, &docs)
+	if err != nil {
+		return nil, fmt.Errorf("read %d doc IDs: %w", count, err)
+	}
+
+	return lo.Map(
+		docs,
+		func(doc bson.Raw, _ int) bson.RawValue {
+			return doc.Lookup("_id")
+		},
+	), nil
 }

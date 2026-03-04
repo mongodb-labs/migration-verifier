@@ -89,7 +89,10 @@ func ReadNaturalPartitionFromSource(
 		}
 	}
 
-	docProjection := getDocProjection(task, compareMethod)
+	var docProjection any
+	if mmongo.WhyFindCannotResume([2]int(srcVersion[:])) == nil {
+		docProjection = getDocProjection(task, compareMethod)
+	}
 
 	createCmd := func(resumeTokenOpt option.Option[bson.RawValue]) bson.D {
 		return buildNaturalFindCmd(
@@ -107,6 +110,7 @@ func ReadNaturalPartitionFromSource(
 
 	return processCursor(
 		ctx, sess, logger, retryState, cursor, task, compareMethod,
+		docProjection != nil,
 		startRecordID, task.QueryFilter.Partition.Upper, toCompare, toDst,
 	)
 }
@@ -166,13 +170,18 @@ func buildNaturalFindCmd(
 ) bson.D {
 	cmd := bson.D{
 		{"find", collName},
+		{"comment", fmt.Sprintf("task %v", task.PrimaryKey)},
 		{"hint", bson.D{{"$natural", 1}}},
 		{"showRecordId", true},
-		{"$_requestResumeToken", true}, // Alternatively, only add if !GLOBAL.CANNOT_RESUME
 		{"filter", docFilter.OrElse(bson.D{})},
 		{"readConcern", bson.D{{"level", "majority"}}},
-		{"projection", bson.D{{"_id", 0}, {"doc", docProjection}}},
-		{"comment", fmt.Sprintf("task %v", task.PrimaryKey)},
+	}
+
+	if docProjection != nil {
+		cmd = append(cmd, bson.D{
+			{"projection", bson.D{{"_id", 0}, {"doc", docProjection}}},
+			{"$_requestResumeToken", true},
+		}...)
 	}
 
 	if token, has := resumeTokenOpt.Get(); has {
@@ -224,6 +233,7 @@ func processCursor(
 	cursor *mongo.Cursor,
 	task *tasks.Task,
 	compareMethod Method,
+	hasResumeToken bool,
 	startRecordID option.Option[bson.RawValue],
 	upperRecordID bson.RawValue,
 	toCompare chan<- []DocWithTS,
@@ -271,14 +281,25 @@ cursorLoop:
 			break cursorLoop
 		}
 
-		userDocRV, err := cursor.Current.LookupErr("doc")
-		if err != nil {
-			return errors.Wrapf(err, "getting user document")
-		}
+		var userDoc bson.Raw
 
-		userDoc, err := bsontools.RawValueTo[bson.Raw](userDocRV)
-		if err != nil {
-			return errors.Wrapf(err, "parsing user document")
+		if hasResumeToken {
+			userDoc, err = bsontools.RawLookup[bson.Raw](cursor.Current, "doc")
+			if err != nil {
+				return errors.Wrapf(err, "getting user document")
+			}
+		} else {
+			var found bool
+			userDoc, found, err = bsontools.RemoveFromRaw(cursor.Current, partitions.RecordID)
+			if err != nil {
+				return errors.Wrapf(err, "removing %#q from user document", partitions.RecordID)
+			}
+
+			lo.Assertf(
+				found,
+				"should always find resume token (doc: %+v)",
+				userDoc,
+			)
 		}
 
 		batch = append(batch, NewDocWithTSFromPool(userDoc, *opTime))

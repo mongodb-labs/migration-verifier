@@ -165,6 +165,8 @@ type Verifier struct {
 	bytesComparedHistory *history.History[types.ByteCount]
 
 	verificationStatusCheckInterval time.Duration
+
+	warnedNoResumableCollectionScan bool
 }
 
 var _ MigrationVerifierAPI = &Verifier{}
@@ -1525,23 +1527,49 @@ func (verifier *Verifier) partitionCollection(
 
 		if clusterInfo.Topology != util.TopologyReplset {
 			return fmt.Errorf("resumable natural scan requires a replica set")
-		} else {
-			err = mmongo.WhyFindCannotResume([2]int(verifier.srcClusterInfo.VersionArray))
-
-			if err != nil {
-				return err
-			}
 		}
 
-		shardKeys, err := verifier.getShardKeyFields(
-			ctx,
-			&uuidutil.NamespaceAndUUID{
-				DBName:   srcColl.Database().Name(),
-				CollName: srcColl.Name(),
-			},
-		)
+		err = mmongo.WhyFindCannotResume([2]int(verifier.srcClusterInfo.VersionArray))
+
 		if err != nil {
-			return errors.Wrapf(err, "getting %#q’s shard key", srcNs)
+			if !verifier.warnedNoResumableCollectionScan {
+				verifier.logger.Warn().
+					AnErr("reason", err).
+					Msg("The source cluster cannot resume natural-order collection scans. This means entire collections must be verified in a single thread. Thus, any verifier outages will require restarting incomplete verifications.")
+				verifier.warnedNoResumableCollectionScan = true
+			}
+
+			partOpt, err := partitions.CreateSingleNaturalOrderPartition(
+				ctx,
+				srcColl,
+				verifier.srcURI,
+				verifier.readPreference,
+			)
+			if err != nil {
+				return errors.Wrapf(err, "creating partition for %#q", FullName(srcColl))
+			}
+
+			part, has := partOpt.Get()
+			if !has {
+				verifier.logger.Debug().
+					Int("workerNum", workerNum).
+					Str("namespace", srcNs).
+					Msg("Collection is empty. Skipping in generation 0.")
+
+				return nil
+			}
+
+			_, err = verifier.InsertPartitionVerificationTask(ctx, &part, shardKeyFields, dstNs)
+			if err != nil {
+				return errors.Wrapf(
+					err,
+					"inserting %#q’s document-comparison task (%+v)",
+					srcNs,
+					part,
+				)
+			}
+
+			return nil
 		}
 
 		var pChan chan mo.Result[partitions.Partition]
@@ -1575,7 +1603,7 @@ func (verifier *Verifier) partitionCollection(
 
 			partitionsCount++
 
-			_, err = verifier.InsertPartitionVerificationTask(ctx, &partition, shardKeys, dstNs)
+			_, err = verifier.InsertPartitionVerificationTask(ctx, &partition, shardKeyFields, dstNs)
 			if err != nil {
 				return errors.Wrapf(
 					err,
