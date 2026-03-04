@@ -22,7 +22,7 @@ const (
 	// in a large, naturally-scanned collection, memory usage won’t balloon
 	// when many mismatches are found.
 	comparatorMaxProblemsLen   = 100_000
-	comparatorMaxVariableBytes = 30 << 20
+	comparatorMaxVariableBytes = 30 << 20 // MiB
 )
 
 type comparator struct {
@@ -287,7 +287,7 @@ func (c *comparator) flushIfNeeded(
 	)
 
 	if whyFlush.IsNone() {
-		return whyFlush, nil
+		return option.None[string](), nil
 	}
 
 	return whyFlush, c.flush(ctx, reportChan)
