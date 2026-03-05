@@ -23,10 +23,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # NB: This is the only setup we’re supporting with 4.0.
           - mongodb_versions: [ '4.0', '8.0' ]
             topology: replset
             partitioningScheme: _id
+            srcChangeReader: changeStream
+            dstChangeReader: changeStream
+
+          - mongodb_versions: [ '4.0', '8.0' ]
+            topology: replset
+            partitioningScheme: natural
             srcChangeReader: changeStream
             dstChangeReader: changeStream
 
@@ -80,18 +85,6 @@ jobs:
         exclude:
           # 1. No natural scan for sharded sources.
           - topology: sharded
-            partitioningScheme: natural
-
-          # 2. No natural scan before 4.4.
-          - mongodb_versions: [ '4.2', '4.2' ]
-            partitioningScheme: natural
-          - mongodb_versions: [ '4.2', '4.4' ]
-            partitioningScheme: natural
-          - mongodb_versions: [ '4.2', '5.0' ]
-            partitioningScheme: natural
-          - mongodb_versions: [ '4.2', '6.0' ]
-            partitioningScheme: natural
-          - mongodb_versions: [ '4.2', '8.0' ]
             partitioningScheme: natural
 
           # No hashed comparison before 4.4.

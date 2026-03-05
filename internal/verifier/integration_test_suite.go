@@ -219,6 +219,13 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	)
 	verifier.SetPartitioningScheme(envPartitionBy)
 
+	verifier.logger.Info().
+		Str("docCompareMethod", envDocCompareMethod).
+		Str("srcChangeReader", envSrcChangeReader).
+		Str("dstChangeReader", envDstChangeReader).
+		Stringer("partitioningScheme", envPartitionBy).
+		Msg("Created verifier.")
+
 	suite.Require().NoError(verifier.initializeChangeReaders())
 
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))

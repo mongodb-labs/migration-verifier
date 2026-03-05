@@ -406,10 +406,16 @@ reduce server load, for collections with custom `_id` values.
 
 The following caveats apply:
 
+### MongoDB 4.2 & earlier
+
+Source clusters running MongoDB 4.2 & earlier cannot parallelize collection
+scans in natural mode. Each non-empty collection is scanned in exactly one
+task. If Verifier is interrupted and has to restart, the entire collection
+scan restarts from the beginning.
+
 ### Unsupported configurations
 
-This scheme requires MongoDB 4.4+ and only works when connecting to a replica set
-(i.e., not a mongos).
+This scheme only works when connecting to a replica set (i.e., not a mongos).
 
 ### Lost checks
 
@@ -442,6 +448,9 @@ because these server versions expose a control that obviates this workaround.
 
 (See [SERVER-110161](https://jira.mongodb.org/browse/SERVER-110161) for more
 details.)
+
+This also does not affect source clusters running MongoDB 4.2 or earlier
+because such clusters can’t parallelize collection scans anwyay.
 
 # Change reading methods
 
