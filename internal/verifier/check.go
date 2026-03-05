@@ -398,6 +398,13 @@ func (verifier *Verifier) startChangeHandling(ctx context.Context) error {
 	}
 
 	changeHandlingErr := verifier.changeHandlingErr
+
+	select {
+	case <-changeHandlingErr.Ready():
+		panic("change handling already started")
+	default:
+	}
+
 	go func() {
 		changeHandlingErr.Set(changeReaderGroup.Wait())
 	}()

@@ -357,6 +357,8 @@ func recordMismatches(
 	return errors.Wrapf(err, "recording %d mismatches", len(models))
 }
 
+// SendDocumentMismatches outputs all document mismatches found in the prior
+// generation (or, in generation 0, the current generation).
 func (verifier *Verifier) SendDocumentMismatches(
 	ctx context.Context,
 	minDurationSecs uint32,
@@ -364,15 +366,16 @@ func (verifier *Verifier) SendDocumentMismatches(
 ) error {
 	defer close(out)
 
-	verifier.mux.RLock()
-	defer verifier.mux.RUnlock()
-
-	generation := verifier.generation
+	generation, _ := verifier.getGeneration()
 
 	// A quick shortcut since a significant use case here is discovering
 	// mismatches of nonzero duration.
 	if generation == 0 && minDurationSecs > 0 {
 		return nil
+	}
+
+	if generation > 0 {
+		generation--
 	}
 
 	mismatchPipeline := mongo.Pipeline{
