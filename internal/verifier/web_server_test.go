@@ -36,6 +36,14 @@ func (verifier *MockVerifier) GetProgress(ctx context.Context) (Progress, error)
 	return Progress{}, nil
 }
 
+func (verifier *MockVerifier) SendDocumentMismatches(
+	ctx context.Context,
+	minDurationSecs uint32,
+	out chan<- APIMismatchInfo,
+) error {
+	panic("not implemented")
+}
+
 func NewWebServerSuite() *WebServerTestSuite {
 	mv := NewMockVerifier()
 	return &WebServerTestSuite{

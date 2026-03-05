@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"slices"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -62,7 +64,7 @@ func getResultDocMissingAggExpr(docExpr any) any {
 var _ bson.Marshaler = MismatchInfo{}
 
 func (mi MismatchInfo) MarshalBSON() ([]byte, error) {
-	panic("Use MarshalToBSON().")
+	return mi.MarshalToBSON(), nil
 }
 
 func (mi MismatchInfo) MarshalToBSON() []byte {
@@ -353,4 +355,113 @@ func recordMismatches(
 	)
 
 	return errors.Wrapf(err, "recording %d mismatches", len(models))
+}
+
+func (verifier *Verifier) SendDocumentMismatches(
+	ctx context.Context,
+	minDurationSecs uint32,
+	out chan<- APIMismatchInfo,
+) error {
+	defer close(out)
+
+	verifier.mux.RLock()
+	defer verifier.mux.RUnlock()
+
+	generation := verifier.generation
+
+	// A quick shortcut since a significant use case here is discovering
+	// mismatches of nonzero duration.
+	if generation == 0 && minDurationSecs > 0 {
+		return nil
+	}
+
+	mismatchPipeline := mongo.Pipeline{
+		{{"$sort", bson.D{
+			{"detail.mismatchHistory.durationMS", -1},
+			{"detail.id", 1},
+		}}},
+	}
+
+	if minDurationSecs > 0 {
+		mismatchPipeline = slices.Insert(
+			mismatchPipeline,
+			0,
+			bson.D{
+				{"$match", bson.D{
+					{"detail.mismatchHistory.durationMS", bson.D{
+						{"$gte", minDurationSecs},
+					}},
+				}},
+			},
+		)
+	}
+
+	db := verifier.metaClient.Database(verifier.metaDBName)
+
+	cursor, err := db.Collection(verificationTasksCollection).Aggregate(
+		ctx,
+		mongo.Pipeline{
+			// Match document-checking tasks in the generation.
+			{{"$match", bson.D{
+				{"generation", generation},
+				{"type", tasks.VerifyDocuments},
+			}}},
+
+			// Add each task’s longest-lived mismatch to the task.
+			{{"$lookup", bson.D{
+				{"from", mismatchesCollectionName},
+				{"localField", "_id"},
+				{"foreignField", "task"},
+				{"as", "mismatch"},
+				{"pipeline", mismatchPipeline},
+			}}},
+
+			// Discard the task in favor of the mismatch.
+			{{"$unwind", "$mismatch"}},
+			{{"$replaceWith", "$mismatch"}},
+		},
+	)
+
+	if err != nil {
+		return fmt.Errorf("fetching generation %d’s mismatches: %w", generation, err)
+	}
+
+	for cursor.Next(ctx) {
+		var mm MismatchInfo
+
+		if err := cursor.Decode(&mm); err != nil {
+			return fmt.Errorf("parsing generation %d’s mismatches: %w", generation, err)
+		}
+
+		apiMM := APIMismatchInfo{
+			ID:           mm.Detail.ID,
+			Namespace:    mm.Detail.NameSpace,
+			DurationSecs: mm.Detail.MismatchDuration().Seconds(),
+		}
+
+		if mm.Detail.DocumentIsMissing() {
+			apiMM.Type = lo.Ternary(
+				mm.Detail.Cluster == ClusterSource,
+				APIMismatchExtra,
+				APIMismatchMissing,
+			)
+		} else {
+			apiMM.Type = APIMismatchContent
+
+			apiMM.Field = option.Some(mm.Detail.Field)
+			apiMM.Detail = option.Some(mm.Detail.Details)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case out <- apiMM:
+		}
+	}
+
+	if err := cursor.Err(); err != nil {
+		return fmt.Errorf("reading generation %d’s mismatches: %w", generation, err)
+	}
+
+	return nil
 }

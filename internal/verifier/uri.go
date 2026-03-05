@@ -23,6 +23,9 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 
 	verifier.srcURI = uri
 
+	verifier.logger.Info().
+		Msg("Reading destination’s cluster info.")
+
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.srcClient)
 	if err != nil {
 		return errors.Wrap(err, "failed to read source cluster info")
@@ -94,6 +97,9 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to connect to destination %#q", uri)
 	}
+
+	verifier.logger.Info().
+		Msg("Reading destination’s cluster info.")
 
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.dstClient)
 	if err != nil {

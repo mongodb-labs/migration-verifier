@@ -28,6 +28,21 @@ func RawLookup[T unmarshalTargets, D ~[]byte](in D, pointer ...string) (T, error
 	return val, err
 }
 
+// CountRawElements returns a count of the fields in the given BSON document.
+func CountRawElements[D ~[]byte](doc D) (int, error) {
+	elsCount := 0
+
+	for _, err := range RawElements(doc) {
+		if err != nil {
+			return 0, err
+		}
+
+		elsCount++
+	}
+
+	return elsCount, nil
+}
+
 // RawElements returns an iterator over a Raw’s elements.
 //
 // If the iterator returns an error but the caller continues iterating,

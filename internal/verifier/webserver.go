@@ -3,18 +3,24 @@ package verifier
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/verifier/webserver"
+	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/mongodb-labs/migration-tools/future"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/sync/semaphore"
@@ -29,6 +35,7 @@ type MigrationVerifierAPI interface {
 	WritesOff(ctx context.Context) error
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
+	SendDocumentMismatches(context.Context, uint32, chan<- APIMismatchInfo) error
 }
 
 // WebServer represents the HTTP server
@@ -40,6 +47,25 @@ type WebServer struct {
 	operationalAPILock *semaphore.Weighted
 	signalShutdown     context.CancelCauseFunc
 	mongosyncError     error
+}
+
+type APIMismatchType string
+
+const (
+	APIMismatchExtra   APIMismatchType = "extraOnDst"
+	APIMismatchMissing APIMismatchType = "missingOnDst"
+	APIMismatchContent APIMismatchType = "content"
+)
+
+// APIMismatchInfo is a stable, public-facing struct that contains a subset
+// of the data in MismatchInfo
+type APIMismatchInfo struct {
+	Type         APIMismatchType
+	Namespace    string
+	ID           bson.RawValue
+	Field        option.Option[string]
+	Detail       option.Option[string]
+	DurationSecs float64 `bson:"durationSecs"`
 }
 
 // APIResponse is the schema for Operational API response
@@ -142,6 +168,7 @@ func (server *WebServer) setupRouter() *gin.Engine {
 			v1.POST("/check", server.operationalAPILockMiddleware(), server.checkEndPoint)
 			v1.POST("/writesOff", server.operationalAPILockMiddleware(), server.writesOffEndpoint)
 			v1.GET("/progress", server.progressEndpoint)
+			v1.GET("/docMismatches", server.docMismatchesEndpoint)
 		}
 	}
 
@@ -259,6 +286,104 @@ func (server *WebServer) progressEndpoint(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"progress": progress,
 	})
+}
+
+func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
+	c.Header("Content-Type", "application/x-ndjson")
+
+	// Optional: Prevent proxies/load balancers from buffering the response
+	c.Header("X-Accel-Buffering", "no")
+	c.Header("Cache-Control", "no-cache")
+
+	const minDurationSecsKey = "minDurationSecs"
+
+	var minDurationSecs uint64
+	if val := c.Query(minDurationSecsKey); val != "" {
+		var err error
+		minDurationSecs, err = strconv.ParseUint(val, 10, 32)
+
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("invalid %#q", minDurationSecsKey),
+			})
+			return
+		}
+	}
+
+	mmChan := make(chan APIMismatchInfo)
+
+	senderCtx, senderCancel := contextplus.WithCancelCause(c)
+	defer senderCancel(fmt.Errorf("OK"))
+
+	mmErr, errSetter := future.New[error]()
+	go func() {
+		err := server.Mapi.SendDocumentMismatches(
+			senderCtx,
+			safecast.MustConvert[uint32](minDurationSecs),
+			mmChan,
+		)
+
+		errSetter(err)
+	}()
+
+	encoder := json.NewEncoder(c.Writer)
+
+	sendError := func(err error) {
+		randNum := rand.Int64()
+
+		server.logger.Error().
+			Int64("ref", randNum).
+			Err(err).
+			Msgf("marshaling ext JSON: %v", err)
+
+		payload := gin.H{
+			"error": fmt.Sprintf("internal error (ref #: %d)", randNum),
+		}
+		if err := encoder.Encode(payload); err != nil {
+			server.logger.Error().
+				Int64("ref", randNum).
+				Err(err).
+				Msg("sending error response")
+		}
+	}
+
+	for {
+		select {
+		case <-mmErr.Ready():
+			if err := mmErr.Get(); err != nil {
+				switch {
+				case errors.Is(err, context.Canceled):
+					fallthrough
+				case errors.Is(err, context.DeadlineExceeded):
+				default:
+					sendError(err)
+				}
+			}
+
+			return
+		case mismatch, open := <-mmChan:
+			if !open {
+				return
+			}
+
+			ejson, err := bson.MarshalExtJSON(mismatch, false, false)
+			if err != nil {
+				senderCancel(fmt.Errorf("marshal ext json: %w", err))
+				sendError(err)
+				return
+			}
+
+			ejson = append(ejson, '\n')
+
+			if _, err := c.Writer.Write(ejson); err != nil {
+				server.logger.Error().
+					Err(err).
+					Msg("sending mismatch")
+
+				return
+			}
+		}
+	}
 }
 
 func successResponse(c *gin.Context) {
