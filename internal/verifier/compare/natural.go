@@ -100,7 +100,7 @@ func ReadNaturalPartitionFromSource(
 		)
 	}
 
-	cursor, err := openSourceCursor(ctx, sctx, logger, coll, tasksColl, task, createCmd, resumeTokenOpt, startRecordID)
+	cursor, err := openSourceCursor(sctx, logger, coll, tasksColl, task, createCmd, resumeTokenOpt, startRecordID)
 	if err != nil {
 		return err
 	}
@@ -192,7 +192,6 @@ func buildNaturalFindCmd(
 }
 
 func openSourceCursor(
-	ctx context.Context, // for metadata
 	sctx context.Context, // for the source read
 	logger *logger.Logger,
 	coll *mongo.Collection,
@@ -217,7 +216,7 @@ func openSourceCursor(
 		Err(err).
 		Msg("Resume token is no longer valid. Will attempt use of earlier tokens.")
 
-	cursor, err = openBackupNaturalCursor(ctx, logger, coll, task, tasksColl, startRecordID, createCmd)
+	cursor, err = openBackupNaturalCursor(sctx, logger, coll, task, tasksColl, startRecordID, createCmd)
 	if err != nil {
 		return nil, errors.Wrapf(err, "opening backup natural cursor")
 	}
@@ -383,18 +382,22 @@ func flushSourceBatch(
 }
 
 func openBackupNaturalCursor(
-	ctx context.Context,
+	sctx context.Context, // for source reads
 	logger *logger.Logger,
-	coll *mongo.Collection,
+	srcColl *mongo.Collection,
 	task *tasks.Task,
 	tasksColl *mongo.Collection,
 	startRecordID option.Option[bson.RawValue],
 	createCmd func(resumeTokenOpt option.Option[bson.RawValue]) bson.D,
 ) (*mongo.Cursor, error) {
+	lo.Assert(
+		mongo.SessionFromContext(sctx) != nil,
+		"context must have a session!",
+	)
 
 	// NB: These are in descending order.
 	priorResumeTokens, err := tasks.FetchPriorResumeTokens(
-		ctx,
+		mongo.NewSessionContext(sctx, nil), // need a session-less context
 		task.QueryFilter.Namespace,
 		startRecordID.MustGet(),
 		tasksColl,
@@ -409,7 +412,7 @@ func openBackupNaturalCursor(
 		cmd := createCmd(option.Some(bsontools.ToRawValue(priorResumeToken)))
 
 		// No readpref is necessary because this should be a direct connection.
-		cursor, err := coll.Database().RunCommandCursor(ctx, cmd)
+		cursor, err := srcColl.Database().RunCommandCursor(sctx, cmd)
 		if err == nil {
 			logger.Info().
 				Any("task", task.PrimaryKey).
@@ -443,7 +446,7 @@ func openBackupNaturalCursor(
 	cmd := createCmd(option.None[bson.RawValue]())
 
 	// No readpref is necessary because this should be a direct connection.
-	cursor, err := coll.Database().RunCommandCursor(ctx, cmd)
+	cursor, err := srcColl.Database().RunCommandCursor(sctx, cmd)
 	if err != nil {
 		return nil, errors.Wrapf(err, "opening source cursor from beginning")
 	}
