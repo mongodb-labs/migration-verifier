@@ -3,6 +3,7 @@ package util
 import (
 	"cmp"
 	"context"
+	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/mbson"
@@ -64,9 +65,7 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 
 	topology, err := getTopology(ctx, client)
 	if err != nil {
-		if err != nil {
-			return ClusterInfo{}, errors.Wrapf(err, "failed to learn topology")
-		}
+		return ClusterInfo{}, errors.Wrapf(err, "failed to learn topology")
 	}
 
 	return ClusterInfo{
@@ -114,6 +113,18 @@ func GetHelloRaw(
 			bson.D{{"isMaster", 1}},
 			opts,
 		)
+	}
+
+	raw, err := resp.Raw()
+
+	// Proactively check for the problem that
+	// https://jira.mongodb.org/browse/SERVER-52654 fixed:
+	if err == nil {
+		const opTimeName = "operationTime"
+		_, err := raw.LookupErr(opTimeName)
+		if err != nil {
+			return nil, fmt.Errorf("server response lacks %#q; force an election, then retry", opTimeName)
+		}
 	}
 
 	return resp.Raw()
