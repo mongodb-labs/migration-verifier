@@ -24,7 +24,7 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 	verifier.srcURI = uri
 
 	verifier.logger.Info().
-		Msg("Reading destination’s cluster info.")
+		Msg("Reading source’s cluster info.")
 
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.srcClient)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -32,14 +33,14 @@ func (verifier *MockVerifier) Check(ctx context.Context, filter bson.D) {
 }
 func (verifier *MockVerifier) WritesOff(ctx context.Context) error { return nil }
 func (verifier *MockVerifier) WritesOn(ctx context.Context)        {}
-func (verifier *MockVerifier) GetProgress(ctx context.Context) (Progress, error) {
-	return Progress{}, nil
+func (verifier *MockVerifier) GetProgress(ctx context.Context) (api.Progress, error) {
+	return api.Progress{}, nil
 }
 
 func (verifier *MockVerifier) SendDocumentMismatches(
 	ctx context.Context,
 	minDurationSecs uint32,
-	out chan<- APIMismatchInfo,
+	out chan<- api.MismatchInfo,
 ) error {
 	panic("not implemented")
 }
@@ -50,6 +51,9 @@ func NewWebServerSuite() *WebServerTestSuite {
 		mockVerifier: mv,
 		webServer:    NewWebServer(27020, mv, logger.NewDebugLogger()),
 	}
+}
+
+func (suite *WebServerTestSuite) TestDocMismatchesEndPoint() {
 }
 
 func (suite *WebServerTestSuite) TestCheckEndPoint() {

@@ -3,6 +3,7 @@ package verifier
 import (
 	"testing"
 
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
@@ -86,27 +87,27 @@ func (suite *IntegrationTestSuite) TestSendDocumentMismatches() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	mmChan := make(chan APIMismatchInfo, 10)
+	mmChan := make(chan api.MismatchInfo, 10)
 	suite.Require().NoError(verifier.SendDocumentMismatches(ctx, 0, mmChan))
 
 	mismatches := lo.ChannelToSlice(mmChan)
 
 	suite.Assert().ElementsMatch(
-		[]APIMismatchInfo{
+		[]api.MismatchInfo{
 			{
 				Namespace: FullName(srcColl),
 				ID:        bsontools.ToRawValue("onSource"),
-				Type:      APIMismatchMissing,
+				Type:      api.MismatchMissing,
 			},
 			{
 				Namespace: FullName(srcColl),
 				ID:        bsontools.ToRawValue("onDestination"),
-				Type:      APIMismatchExtra,
+				Type:      api.MismatchExtra,
 			},
 			{
 				Namespace: FullName(srcColl),
 				ID:        bsontools.ToRawValue("onBoth"),
-				Type:      APIMismatchContent,
+				Type:      api.MismatchContent,
 				Field:     option.Some("foo"),
 				Detail:    option.Some(Mismatch),
 			},

@@ -14,8 +14,8 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/webserver"
-	"github.com/10gen/migration-verifier/option"
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
@@ -29,19 +29,10 @@ import (
 // RequestInProgressErrorDescription is the error description for RequestInProgressError
 const RequestInProgressErrorDescription = "Another request is currently in progress"
 
-// MigrationVerifierAPI represents the interaction webserver with mongosync
-type MigrationVerifierAPI interface {
-	Check(ctx context.Context, filter bson.D)
-	WritesOff(ctx context.Context) error
-	WritesOn(ctx context.Context)
-	GetProgress(ctx context.Context) (Progress, error)
-	SendDocumentMismatches(context.Context, uint32, chan<- APIMismatchInfo) error
-}
-
 // WebServer represents the HTTP server
 type WebServer struct {
 	port               int
-	Mapi               MigrationVerifierAPI
+	Mapi               api.MigrationVerifierAPI
 	logger             *logger.Logger
 	srv                *http.Server
 	operationalAPILock *semaphore.Weighted
@@ -49,34 +40,8 @@ type WebServer struct {
 	mongosyncError     error
 }
 
-type APIMismatchType string
-
-const (
-	APIMismatchExtra   APIMismatchType = "extraOnDst"
-	APIMismatchMissing APIMismatchType = "missingOnDst"
-	APIMismatchContent APIMismatchType = "content"
-)
-
-// APIMismatchInfo is a stable, public-facing struct that contains a subset
-// of the data in MismatchInfo
-type APIMismatchInfo struct {
-	Type         APIMismatchType
-	Namespace    string
-	ID           bson.RawValue
-	Field        option.Option[string]
-	Detail       option.Option[string]
-	DurationSecs float64 `bson:"durationSecs"`
-}
-
-// APIResponse is the schema for Operational API response
-type APIResponse struct {
-	Success          bool    `json:"success"`
-	Error            *string `json:"error,omitempty"`
-	ErrorDescription *string `json:"errorDescription,omitempty"`
-}
-
 // NewWebServer creates a WebServer object
-func NewWebServer(port int, mapi MigrationVerifierAPI, logger *logger.Logger) *WebServer {
+func NewWebServer(port int, mapi api.MigrationVerifierAPI, logger *logger.Logger) *WebServer {
 	return &WebServer{
 		port:               port,
 		Mapi:               mapi,
@@ -267,14 +232,6 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 	successResponse(c)
 }
 
-// Progress represents the structure of the JSON response from the Progress end point.
-type Progress struct {
-	Phase      string              `json:"phase"`
-	Generation int                 `json:"generation"`
-	Error      error               `json:"error"`
-	Status     *VerificationStatus `json:"verificationStatus"`
-}
-
 // progressEndpoint implements the gin handle for the progress endpoint.
 func (server *WebServer) progressEndpoint(c *gin.Context) {
 	progress, err := server.Mapi.GetProgress(c.Request.Context())
@@ -310,7 +267,7 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 		}
 	}
 
-	mmChan := make(chan APIMismatchInfo)
+	mmChan := make(chan api.MismatchInfo)
 
 	senderCtx, senderCancel := contextplus.WithCancelCause(c)
 	defer senderCancel(fmt.Errorf("OK"))
@@ -387,7 +344,7 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 }
 
 func successResponse(c *gin.Context) {
-	c.JSON(http.StatusOK, APIResponse{true, nil, nil})
+	c.JSON(http.StatusOK, api.Response{true, nil, nil})
 }
 
 func (server *WebServer) operationalErrorResponse(c *gin.Context, err error) {
@@ -398,5 +355,5 @@ func (server *WebServer) operationalErrorResponse(c *gin.Context, err error) {
 	server.signalShutdown(err)
 
 	errorDescription := err.Error()
-	c.JSON(http.StatusOK, APIResponse{false, &errorName, &errorDescription})
+	c.JSON(http.StatusOK, api.Response{false, &errorName, &errorDescription})
 }

@@ -9,7 +9,9 @@ import (
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -196,14 +198,14 @@ var (
 		missingFilter,
 		agg.Eq{
 			"$detail.cluster",
-			ClusterTarget,
+			constants.ClusterTarget,
 		},
 	}
 	extraOnDstFilter = agg.And{
 		missingFilter,
 		agg.Eq{
 			"$detail.cluster",
-			ClusterSource,
+			constants.ClusterSource,
 		},
 	}
 
@@ -362,7 +364,7 @@ func recordMismatches(
 func (verifier *Verifier) SendDocumentMismatches(
 	ctx context.Context,
 	minDurationSecs uint32,
-	out chan<- APIMismatchInfo,
+	out chan<- api.MismatchInfo,
 ) error {
 	defer close(out)
 
@@ -436,29 +438,10 @@ func (verifier *Verifier) SendDocumentMismatches(
 			return fmt.Errorf("parsing generation %d’s mismatches: %w", generation, err)
 		}
 
-		apiMM := APIMismatchInfo{
-			ID:           mm.Detail.ID,
-			Namespace:    mm.Detail.NameSpace,
-			DurationSecs: mm.Detail.MismatchDuration().Seconds(),
-		}
-
-		if mm.Detail.DocumentIsMissing() {
-			apiMM.Type = lo.Ternary(
-				mm.Detail.Cluster == ClusterSource,
-				APIMismatchExtra,
-				APIMismatchMissing,
-			)
-		} else {
-			apiMM.Type = APIMismatchContent
-
-			apiMM.Field = option.Some(mm.Detail.Field)
-			apiMM.Detail = option.Some(mm.Detail.Details)
-		}
-
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case out <- apiMM:
+		case out <- mm.Detail.APIMismatchInfo():
 		}
 	}
 

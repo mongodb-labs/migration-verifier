@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -342,7 +343,7 @@ func (c *comparator) sweepMissingDocs() {
 		c.problems = append(c.problems, compare.Result{
 			ID:              lo.Must(c.verifier.docCompareMethod.ClonedDocIDForComparison(docWithTS.Doc)),
 			Details:         compare.Missing,
-			Cluster:         ClusterTarget,
+			Cluster:         constants.ClusterTarget,
 			NameSpace:       c.namespace,
 			DataSize:        int32(len(docWithTS.Doc)),
 			SrcTimestamp:    option.Some(docWithTS.TS),
@@ -356,7 +357,7 @@ func (c *comparator) sweepMissingDocs() {
 		c.problems = append(c.problems, compare.Result{
 			ID:              lo.Must(c.verifier.docCompareMethod.ClonedDocIDForComparison(docWithTS.Doc)),
 			Details:         compare.Missing,
-			Cluster:         ClusterSource,
+			Cluster:         constants.ClusterSource,
 			NameSpace:       c.namespace,
 			DataSize:        int32(len(docWithTS.Doc)),
 			DstTimestamp:    option.Some(docWithTS.TS),
