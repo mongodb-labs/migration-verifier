@@ -286,41 +286,33 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 	encoder := json.NewEncoder(c.Writer)
 
 	sendError := func(err error) {
-		randNum := rand.Int64()
+		errRef := strconv.FormatUint(rand.Uint64(), 16)
 
 		server.logger.Error().
-			Int64("ref", randNum).
+			Str("request", c.Request.URL.Path).
+			Str("ref", errRef).
 			Err(err).
-			Msgf("marshaling ext JSON: %v", err)
+			Msgf("Internal error.")
 
 		payload := gin.H{
-			"error": fmt.Sprintf("internal error (ref #: %d)", randNum),
+			"error": fmt.Sprintf("internal error (ref #: %s)", errRef),
 		}
 		if err := encoder.Encode(payload); err != nil {
 			server.logger.Error().
-				Int64("ref", randNum).
+				Str("ref", errRef).
 				Err(err).
 				Msg("sending error response")
 		}
 	}
 
+READ:
 	for {
 		select {
 		case <-mmErr.Ready():
-			if err := mmErr.Get(); err != nil {
-				switch {
-				case errors.Is(err, context.Canceled):
-					fallthrough
-				case errors.Is(err, context.DeadlineExceeded):
-				default:
-					sendError(err)
-				}
-			}
-
-			return
+			break READ
 		case mismatch, open := <-mmChan:
 			if !open {
-				return
+				break READ
 			}
 
 			ejson, err := bson.MarshalExtJSON(mismatch, false, false)
@@ -339,6 +331,18 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 
 				return
 			}
+		}
+	}
+
+	<-mmErr.Ready()
+
+	if err := mmErr.Get(); err != nil {
+		switch {
+		case errors.Is(err, context.Canceled):
+			fallthrough
+		case errors.Is(err, context.DeadlineExceeded):
+		default:
+			sendError(err)
 		}
 	}
 }

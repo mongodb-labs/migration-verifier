@@ -45,10 +45,10 @@ const (
 type MismatchInfo struct {
 	Type         MismatchType
 	Namespace    string
-	ID           bson.RawValue
-	Field        option.Option[string]
-	Detail       option.Option[string]
-	DurationSecs float64 `bson:"durationSecs"`
+	ID           bson.RawValue         `bson:"_id"`
+	Field        option.Option[string] `bson:",omitempty"`
+	Detail       option.Option[string] `bson:",omitempty"`
+	DurationSecs float64               `bson:"durationSecs"`
 }
 
 // Response is the schema for Operational API response
