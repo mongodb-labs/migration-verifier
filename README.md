@@ -183,10 +183,12 @@ Thereafter it returns mismatches for the _prior_ generation.
 You can optionally send a `minDurationSecs` parameter to fetch mismatches
 by a minimum duration.
 
-There is no defined sort order. If you want to sort mismatches, e.g., by
-duration you can pipe `curl`’s response through `jq`, e.g.:
+There is no sort order defined. If you want to sort mismatches, e.g., by
+duration you can pipe `curl`’s response through [jq](http://jqlang.org).
+The same tool can also limit your result set. For example, if you want the
+top 5 longest-duration mismatches, try:
 ```
-curl http://127.0.0.1:27020/api/v1/docMismatches | jq 'sort_by(-.durationSecs)'
+curl localhost:27020/api/v1/docMismatches | jq --slurp 'sort_by(-.durationSecs) | limit(5; .[])'
 ```
 
 # Tests
