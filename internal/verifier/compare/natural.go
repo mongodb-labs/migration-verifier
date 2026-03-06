@@ -100,7 +100,7 @@ func ReadNaturalPartitionFromSource(
 		)
 	}
 
-	cursor, err := openSourceCursor(ctx, sctx, logger, coll, tasksColl, task, createCmd, resumeTokenOpt, startRecordID)
+	cursor, err := openSourceCursor(sctx, logger, coll, tasksColl, task, createCmd, resumeTokenOpt, startRecordID)
 	if err != nil {
 		return err
 	}
@@ -192,7 +192,6 @@ func buildNaturalFindCmd(
 }
 
 func openSourceCursor(
-	ctx context.Context, // for metadata
 	sctx context.Context, // for the source read
 	logger *logger.Logger,
 	coll *mongo.Collection,
