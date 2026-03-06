@@ -75,7 +75,9 @@ func (vr Result) APIMismatchInfo() api.MismatchInfo {
 	} else {
 		apiMM.Type = api.MismatchContent
 
-		apiMM.Field = option.Some(vr.Field)
+		// In hashed comparison we don’t know the field name.
+		apiMM.Field = option.IfNotZero(vr.Field)
+
 		apiMM.Detail = option.Some(vr.Details)
 	}
 
