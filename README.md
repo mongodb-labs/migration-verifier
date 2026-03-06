@@ -159,29 +159,37 @@ The verifier will now check to completion to make sure that there are no inconsi
 
 # Investigation of Mismatches
 
-The verifier records mismatches in its metadata’s `mismatches`
-collection. Mismatches are indexed by verification task ID. To find a given
-generation’s mismatches, aggregate like this on the metadata cluster:
+The following API command:
+```
+curl http://127.0.0.1:27020/api/v1/docMismatches
+```
+… will return a stream of newline-delimited JSON documents that describe
+currently-known mismatches.
 
-    // Change this as needed if you specify a custom metadata database:
-    use migration_verification_metadata
+Each mismatch document looks like:
+- `durationSecs`: the # of seconds between when the mismatch was first
+  seen and the most recent time it was seen
+- `type`: one of `missingOnDst`, `extraOnDst`, or `content`
+- `namespace`
+- `_id` (relaxed ext JSON)
+- `field`: the field in the document that mismatched (only set with
+  `content`-type mismatches when not using hashed comparison)
+- `detail`: human-readable description of the mismatch (only set with
+  `content`-type mismatches)
 
-    db.verification_tasks.aggregate(
-        { $match: {
-            generation: <whichever generation>,
-            status: {$in: ["failed", "mismatch"]},
-        } },
-        { $lookup: {
-            from: "mismatches",
-            localField: "_id",
-            foreignField: "task",
-            as: "mismatch",
-        }},
-        { $unwind: "$mismatch" },
-    )
+During generation 0, this API command returns mismatches for generation 0.
+Thereafter it returns mismatches for the _prior_ generation.
 
-Note that each mismatch includes timestamps. You can cross-reference
-these with the clusters’ oplogs to diagnose problems.
+You can optionally send a `minDurationSecs` parameter to fetch mismatches
+by a minimum duration.
+
+There is no sort order defined. If you want to sort mismatches, e.g., by
+duration you can pipe `curl`’s response through [jq](http://jqlang.org).
+The same tool can also limit your result set. For example, if you want the
+top 5 longest-duration mismatches, try:
+```
+curl localhost:27020/api/v1/docMismatches | jq --slurp 'sort_by(-.durationSecs) | limit(5; .[])'
+```
 
 # Tests
 

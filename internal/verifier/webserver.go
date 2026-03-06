@@ -3,18 +3,24 @@ package verifier
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/webserver"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/mongodb-labs/migration-tools/future"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/sync/semaphore"
@@ -23,18 +29,10 @@ import (
 // RequestInProgressErrorDescription is the error description for RequestInProgressError
 const RequestInProgressErrorDescription = "Another request is currently in progress"
 
-// MigrationVerifierAPI represents the interaction webserver with mongosync
-type MigrationVerifierAPI interface {
-	Check(ctx context.Context, filter bson.D)
-	WritesOff(ctx context.Context) error
-	WritesOn(ctx context.Context)
-	GetProgress(ctx context.Context) (Progress, error)
-}
-
 // WebServer represents the HTTP server
 type WebServer struct {
 	port               int
-	Mapi               MigrationVerifierAPI
+	Mapi               api.MigrationVerifierAPI
 	logger             *logger.Logger
 	srv                *http.Server
 	operationalAPILock *semaphore.Weighted
@@ -42,15 +40,8 @@ type WebServer struct {
 	mongosyncError     error
 }
 
-// APIResponse is the schema for Operational API response
-type APIResponse struct {
-	Success          bool    `json:"success"`
-	Error            *string `json:"error,omitempty"`
-	ErrorDescription *string `json:"errorDescription,omitempty"`
-}
-
 // NewWebServer creates a WebServer object
-func NewWebServer(port int, mapi MigrationVerifierAPI, logger *logger.Logger) *WebServer {
+func NewWebServer(port int, mapi api.MigrationVerifierAPI, logger *logger.Logger) *WebServer {
 	return &WebServer{
 		port:               port,
 		Mapi:               mapi,
@@ -142,6 +133,7 @@ func (server *WebServer) setupRouter() *gin.Engine {
 			v1.POST("/check", server.operationalAPILockMiddleware(), server.checkEndPoint)
 			v1.POST("/writesOff", server.operationalAPILockMiddleware(), server.writesOffEndpoint)
 			v1.GET("/progress", server.progressEndpoint)
+			v1.GET("/docMismatches", server.docMismatchesEndpoint)
 		}
 	}
 
@@ -240,14 +232,6 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 	successResponse(c)
 }
 
-// Progress represents the structure of the JSON response from the Progress end point.
-type Progress struct {
-	Phase      string              `json:"phase"`
-	Generation int                 `json:"generation"`
-	Error      error               `json:"error"`
-	Status     *VerificationStatus `json:"verificationStatus"`
-}
-
 // progressEndpoint implements the gin handle for the progress endpoint.
 func (server *WebServer) progressEndpoint(c *gin.Context) {
 	progress, err := server.Mapi.GetProgress(c.Request.Context())
@@ -261,8 +245,110 @@ func (server *WebServer) progressEndpoint(c *gin.Context) {
 	})
 }
 
+func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
+	c.Header("Content-Type", "application/x-ndjson")
+
+	// Optional: Prevent proxies/load balancers from buffering the response
+	c.Header("X-Accel-Buffering", "no")
+	c.Header("Cache-Control", "no-cache")
+
+	const minDurationSecsKey = "minDurationSecs"
+
+	var minDurationSecs uint64
+	if val := c.Query(minDurationSecsKey); val != "" {
+		var err error
+		minDurationSecs, err = strconv.ParseUint(val, 10, 32)
+
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("invalid %#q", minDurationSecsKey),
+			})
+			return
+		}
+	}
+
+	mmChan := make(chan api.MismatchInfo)
+
+	senderCtx, senderCancel := contextplus.WithCancelCause(c)
+	defer senderCancel(fmt.Errorf("OK"))
+
+	mmErr, errSetter := future.New[error]()
+	go func() {
+		err := server.Mapi.SendDocumentMismatches(
+			senderCtx,
+			safecast.MustConvert[uint32](minDurationSecs),
+			mmChan,
+		)
+
+		errSetter(err)
+	}()
+
+	encoder := json.NewEncoder(c.Writer)
+
+	sendError := func(err error) {
+		errRef := strconv.FormatUint(rand.Uint64(), 16)
+
+		server.logger.Error().
+			Str("request", c.Request.URL.Path).
+			Str("ref", errRef).
+			Err(err).
+			Msgf("Internal error.")
+
+		payload := gin.H{
+			"error": fmt.Sprintf("internal error (ref #: %s)", errRef),
+		}
+		if err := encoder.Encode(payload); err != nil {
+			server.logger.Error().
+				Str("ref", errRef).
+				Err(err).
+				Msg("sending error response")
+		}
+	}
+
+READ:
+	for {
+		select {
+		case <-mmErr.Ready():
+			break READ
+		case mismatch, open := <-mmChan:
+			if !open {
+				break READ
+			}
+
+			ejson, err := bson.MarshalExtJSON(mismatch, false, false)
+			if err != nil {
+				senderCancel(fmt.Errorf("marshal ext json: %w", err))
+				sendError(err)
+				return
+			}
+
+			ejson = append(ejson, '\n')
+
+			if _, err := c.Writer.Write(ejson); err != nil {
+				server.logger.Error().
+					Err(err).
+					Msg("sending mismatch")
+
+				return
+			}
+		}
+	}
+
+	<-mmErr.Ready()
+
+	if err := mmErr.Get(); err != nil {
+		switch {
+		case errors.Is(err, context.Canceled):
+			fallthrough
+		case errors.Is(err, context.DeadlineExceeded):
+		default:
+			sendError(err)
+		}
+	}
+}
+
 func successResponse(c *gin.Context) {
-	c.JSON(http.StatusOK, APIResponse{true, nil, nil})
+	c.JSON(http.StatusOK, api.Response{true, nil, nil})
 }
 
 func (server *WebServer) operationalErrorResponse(c *gin.Context, err error) {
@@ -273,5 +359,5 @@ func (server *WebServer) operationalErrorResponse(c *gin.Context, err error) {
 	server.signalShutdown(err)
 
 	errorDescription := err.Error()
-	c.JSON(http.StatusOK, APIResponse{false, &errorName, &errorDescription})
+	c.JSON(http.StatusOK, api.Response{false, &errorName, &errorDescription})
 }

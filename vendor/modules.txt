@@ -159,9 +159,10 @@ github.com/modern-go/concurrent
 # github.com/modern-go/reflect2 v1.0.2
 ## explicit; go 1.12
 github.com/modern-go/reflect2
-# github.com/mongodb-labs/migration-tools v0.0.0-20260218194943-94c11ac38161
-## explicit; go 1.25.0
+# github.com/mongodb-labs/migration-tools v0.0.0-20260304162448-60c569fdfde1
+## explicit; go 1.25.7
 github.com/mongodb-labs/migration-tools/bsontools
+github.com/mongodb-labs/migration-tools/future
 github.com/mongodb-labs/migration-tools/mongotools
 # github.com/olekukonko/tablewriter v0.0.5
 ## explicit; go 1.12
