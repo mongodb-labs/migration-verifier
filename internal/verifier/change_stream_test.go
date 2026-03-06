@@ -100,6 +100,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
 		metaDBName,
 		"mongosync_reserved_for_internal_use",
 		"mongosync_internal_foo",
+		"__mdb_internal_mongosync",
 	}
 	for _, dbname := range dbsToIgnore {
 		_, err := suite.srcMongoClient.
@@ -237,6 +238,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 		metaDBName,
 		"mongosync_reserved_for_internal_use",
 		"mongosync_internal_foo",
+		"__mdb_internal_mongosync",
 	}
 	for _, dbname := range dbsToIgnore {
 		_, err := suite.srcMongoClient.
@@ -1252,6 +1254,7 @@ func (suite *IntegrationTestSuite) TestDropMongosyncDB() {
 	dbs := []string{
 		"mongosync_reserved_for_internal_use",
 		"mongosync_internal_foo",
+		"__mdb_internal_mongosync",
 	}
 
 	for _, dbname := range dbs {
