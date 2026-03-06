@@ -217,7 +217,7 @@ func openSourceCursor(
 		Err(err).
 		Msg("Resume token is no longer valid. Will attempt use of earlier tokens.")
 
-	cursor, err = openBackupNaturalCursor(ctx, sctx, logger, coll, task, tasksColl, startRecordID, createCmd)
+	cursor, err = openBackupNaturalCursor(sctx, logger, coll, task, tasksColl, startRecordID, createCmd)
 	if err != nil {
 		return nil, errors.Wrapf(err, "opening backup natural cursor")
 	}
@@ -383,7 +383,6 @@ func flushSourceBatch(
 }
 
 func openBackupNaturalCursor(
-	ctx context.Context, // for metadata reads
 	sctx context.Context, // for source reads
 	logger *logger.Logger,
 	srcColl *mongo.Collection,
@@ -399,7 +398,7 @@ func openBackupNaturalCursor(
 
 	// NB: These are in descending order.
 	priorResumeTokens, err := tasks.FetchPriorResumeTokens(
-		ctx, // need a session-less context
+		mongo.NewSessionContext(sctx, nil), // need a session-less context
 		task.QueryFilter.Namespace,
 		startRecordID.MustGet(),
 		tasksColl,
