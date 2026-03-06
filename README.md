@@ -186,7 +186,8 @@ by a minimum duration.
 There is no defined sort order. If you want to sort mismatches, e.g., by
 duration you can pipe `curl`’s response through `jq`, e.g.:
 ```
-curl http://127.0.0.1:27020/api/v1/docMismatches | jq 'sort(-.durationSecs)'
+curl http://127.0.0.1:27020/api/v1/docMismatches | jq 'sort_by(-.durationSecs)'
+```
 
 # Tests
 
