@@ -58,7 +58,11 @@ func compareBinaryRecordID(a, b bson.RawValue) (int, error) {
 	}
 
 	if aBin.Subtype != 0 || bBin.Subtype != 0 {
-		return 0, fmt.Errorf("cannot compare BSON binary subtypes %d and %d", aBin.Subtype, bBin.Subtype)
+		return 0, fmt.Errorf(
+			"cannot compare BSON binary subtypes %d and %d",
+			aBin.Subtype,
+			bBin.Subtype,
+		)
 	}
 
 	return bytes.Compare(aBin.Data, bBin.Data), nil

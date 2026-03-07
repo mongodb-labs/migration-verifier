@@ -84,6 +84,7 @@ func UnmarshalArray(raw bson.RawArray) (bson.A, error) {
 	return a, nil
 }
 
+//nolint:cyclop
 func unmarshalValue(val bson.RawValue) (any, error) {
 	switch val.Type {
 	case bson.TypeDouble:

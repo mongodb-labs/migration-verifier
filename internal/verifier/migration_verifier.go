@@ -33,6 +33,7 @@ import (
 	"github.com/10gen/migration-verifier/timeseries"
 	"github.com/dustin/go-humanize"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/mongodb-labs/migration-tools/mongotools/index"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -1116,7 +1117,7 @@ func (verifier *Verifier) verifyIndexes(
 		srcSpec, exists := srcMap[indexName]
 		if exists {
 			srcMapUsed[indexName] = true
-			theyMatch, err := verifier.doIndexSpecsMatch(ctx, srcSpec, dstSpec)
+			theyMatch, err := index.AreSpecsEqual(srcSpec, dstSpec)
 			if err != nil {
 				return nil, errors.Wrapf(
 					err,
