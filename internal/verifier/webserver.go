@@ -11,7 +11,9 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/webserver"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -240,25 +242,72 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 	successResponse(c)
 }
 
+type ProgressGenerationStats struct {
+	DocsCompared types.DocumentCount `bson:"docsCompared"`
+	TotalDocs    types.DocumentCount `bson:"totalDocs"`
+
+	SrcBytesCompared types.ByteCount `bson:"srcBytesCompared"`
+	TotalSrcBytes    types.ByteCount `bson:"totalSrcBytes,omitempty"`
+}
+
+type ProgressChangeStats struct {
+	EventsPerSecond  option.Option[float64]       `bson:"eventsPerSecond"`
+	Lag              option.Option[time.Duration] `bson:"lag"`
+	BufferSaturation float64                      `bson:"bufferSaturation"`
+}
+
+type ProgressMismatch struct {
+	DurationSeconds float64 `bson:"durationSeconds"`
+	Type            string  `bson:"type"`
+	Namespace       string  `bson:"namespace"`
+	ID              any     `bson:"_id"`
+	Detail          string  `bson:"detail"`
+}
+
 // Progress represents the structure of the JSON response from the Progress end point.
 type Progress struct {
-	Phase      string              `json:"phase"`
-	Generation int                 `json:"generation"`
-	Error      error               `json:"error"`
-	Status     *VerificationStatus `json:"verificationStatus"`
+	Phase string `bson:"phase"`
+
+	Generation      int                     `bson:"generation"`
+	GenerationStats ProgressGenerationStats `bson:"generationStats"`
+
+	Error  error               `bson:"error"`
+	Status *VerificationStatus `bson:"verificationStatus"`
+
+	SrcLastRecheckedTS option.Option[bson.Timestamp] `bson:"srcLastRecheckedTS"`
+	DstLastRecheckedTS option.Option[bson.Timestamp] `bson:"dstLastRecheckedTS"`
+
+	SrcChangeStats ProgressChangeStats `bson:"srcChangeStats"`
+	DstChangeStats ProgressChangeStats `bson:"dstChangeStats"`
+
+	DocsComparedPerSecond     float64 `bson:"docsComparedPerSecond"`
+	SrcBytesComparedPerSecond float64 `bson:"srcBytesComparedPerSecond"`
+
+	RecentRecheckDurations []time.Duration `bson:"recentRecheckDurations"`
+
+	LongestMismatch option.Option[ProgressMismatch] `bson:"longestMismatch"`
 }
 
 // progressEndpoint implements the gin handle for the progress endpoint.
 func (server *WebServer) progressEndpoint(c *gin.Context) {
+	var payload []byte
+
 	progress, err := server.Mapi.GetProgress(c.Request.Context())
+
+	if err == nil {
+		payload, err = bson.MarshalExtJSON(
+			bson.M{"progress": progress},
+			false, // relaxed
+			false, // no HTML escape
+		)
+	}
+
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"progress": progress,
-	})
+	c.Data(http.StatusOK, "application/json", payload)
 }
 
 func successResponse(c *gin.Context) {
