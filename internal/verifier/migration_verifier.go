@@ -1121,7 +1121,7 @@ func (verifier *Verifier) verifyIndexes(
 			if err != nil {
 				return nil, errors.Wrapf(
 					err,
-					"failed to check whether %#q's source & desstination %#q indexes match",
+					"failed to check whether %#q's source & destination %#q indexes match",
 					FullName(srcColl),
 					indexName,
 				)
