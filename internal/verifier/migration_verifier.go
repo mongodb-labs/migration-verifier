@@ -1117,7 +1117,7 @@ func (verifier *Verifier) verifyIndexes(
 		srcSpec, exists := srcMap[indexName]
 		if exists {
 			srcMapUsed[indexName] = true
-			theyMatch, err := index.AreSpecsEqual(srcSpec, dstSpec)
+			diffOpt, err := index.DescribeSpecDifferences(srcSpec, dstSpec)
 			if err != nil {
 				return nil, errors.Wrapf(
 					err,
@@ -1127,13 +1127,16 @@ func (verifier *Verifier) verifyIndexes(
 				)
 			}
 
-			if !theyMatch {
+			if diff, has := diffOpt.Get(); has {
+				fmt.Printf("------ src: %+v\n\n", srcSpec)
+				fmt.Printf("------ dst: %+v\n\n", dstSpec)
+				fmt.Printf("------- diff: %+v\n\n", diff.String())
 				results = append(results, compare.Result{
 					ID:        mbson.ToRawValue(indexName),
 					Field:     "index",
 					NameSpace: FullName(dstColl),
 					Cluster:   ClusterTarget,
-					Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec, dstSpec),
+					Details:   Mismatch + ": " + diff.String(),
 				})
 			}
 		} else {

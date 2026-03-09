@@ -10,19 +10,21 @@ import (
 	"github.com/ccoveille/go-safecast/v2"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/samber/lo"
+	"github.com/wI2L/jsondiff"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 // These index options must be compared with sensitivity to field order.
-var optsWhereOrderIsSignificant = mapset.NewSet(
+var optsWhereOrderMatters = []string{
 	"key",
 
 	// NB: This is here in case any filters contain embedded documents, which
 	// MongoDB compares order-sensitively.
 	"partialFilterExpression",
-)
+}
 
 var optsToIgnore = mapset.NewSet(
 	// v4.4 stopped adding “ns” to index fields.
@@ -32,35 +34,106 @@ var optsToIgnore = mapset.NewSet(
 	"background",
 )
 
-// AreSpecsEqual compares two index specifications and returns a boolean
-// that indicates whether they match. It:
+// SpecDiff describes the difference between two index specifications.
+type SpecDiff struct {
+	// JSONPatch is a diff between the two indexes in ext JSON. It won’t
+	// reflect significant field order differences.
+	JSONPatch jsondiff.Patch
+
+	// FieldOrderDiffers gives all options whose values differ by
+	// field order alone.
+	FieldOrderDiffers []string
+
+	jsonPatchErr error
+}
+
+func (sd SpecDiff) String() string {
+	if sd.jsonPatchErr != nil {
+		return fmt.Sprintf(
+			"specs differ; failed to create ext JSON patch (%v)",
+			sd.jsonPatchErr,
+		)
+	}
+
+	if sd.JSONPatch != nil {
+		patch := sd.JSONPatch
+
+		patchStr, err := fixJSONPatchFieldOrder([]byte(patch.String()))
+		if err != nil {
+			patchStr = fmt.Appendf(nil, "%s (failed to normalize order: %v)", patch.String(), err)
+		}
+
+		return string(patchStr)
+	}
+
+	return fmt.Sprintf("field order differs: %#q", sd.FieldOrderDiffers)
+}
+
+// DescribeSpecDifferences compares two index specifications and returns a
+// human-readable description of the mismatch. It:
 // 1) normalizes legacy index specifications
 // 2) omits the version field
 // 3) correctly considers or ignores field order as appropriate.
-func AreSpecsEqual(specA, specB bson.Raw) (bool, error) {
+func DescribeSpecDifferences(specA, specB bson.Raw) (option.Option[SpecDiff], error) {
 	specA = slices.Clone(specA)
 	specB = slices.Clone(specB)
 
 	specA, err := prepareIndexSpecForEqualityCheck(specA)
 	if err != nil {
-		return false, err
+		return option.None[SpecDiff](), err
 	}
 
 	specB, err = prepareIndexSpecForEqualityCheck(specB)
 	if err != nil {
-		return false, err
+		return option.None[SpecDiff](), err
 	}
 
 	equalNoOrder, err := bsontools.EqualIgnoringOrder(specA, specB)
 	if err != nil {
-		return false, err
+		return option.None[SpecDiff](), err
 	}
 
 	if !equalNoOrder {
-		return false, nil
+		specAExtJSON, err := bson.MarshalExtJSON(specA, true, false)
+		if err != nil {
+			return option.Some(SpecDiff{
+				jsonPatchErr: fmt.Errorf("marshal spec A to ext JSON: %w", err),
+			}), nil
+		}
+
+		specBExtJSON, err := bson.MarshalExtJSON(specB, true, false)
+		if err != nil {
+			return option.Some(SpecDiff{
+				jsonPatchErr: fmt.Errorf("marshal spec B to ext JSON: %w", err),
+			}), nil
+		}
+
+		fmt.Printf("a ejson: %#q\n\n", string(specAExtJSON))
+		fmt.Printf("b ejson: %#q\n\n", string(specBExtJSON))
+
+		patch, err := jsondiff.CompareJSON(
+			specAExtJSON,
+			specBExtJSON,
+		)
+
+		return option.Some(SpecDiff{
+			jsonPatchErr: err,
+			JSONPatch:    patch,
+		}), nil
 	}
 
-	return orderSensitivePartsMatch(specA, specB)
+	orderDifferFields, err := getOrderDifferOpts(specA, specB)
+	if err != nil {
+		return option.None[SpecDiff](), fmt.Errorf("compare order-sensitive index spec fields: %w", err)
+	}
+
+	if len(orderDifferFields) == 0 {
+		return option.None[SpecDiff](), nil
+	}
+
+	return option.Some(SpecDiff{
+		FieldOrderDiffers: orderDifferFields,
+	}), nil
 }
 
 func prepareIndexSpecForEqualityCheck(spec bson.Raw) (bson.Raw, error) {
@@ -94,8 +167,10 @@ func prepareIndexSpecForEqualityCheck(spec bson.Raw) (bson.Raw, error) {
 }
 
 // This assumes the specs are pre-prepared as above.
-func orderSensitivePartsMatch(specA, specB bson.Raw) (bool, error) {
-	for optName := range optsWhereOrderIsSignificant.Iter() {
+func getOrderDifferOpts(specA, specB bson.Raw) ([]string, error) {
+	var orderDifferOpts []string
+
+	for _, optName := range optsWhereOrderMatters {
 		var optValueA, optValueB bson.RawValue
 
 		// NB: By this point we know the specs match when ignoring order.
@@ -107,8 +182,8 @@ func orderSensitivePartsMatch(specA, specB bson.Raw) (bool, error) {
 				continue
 			}
 
-			return false, fmt.Errorf(
-				"failed to look up %#q in spec A (%v): %w",
+			return nil, fmt.Errorf(
+				"look up %#q in spec A (%v): %w",
 				optName,
 				specA,
 				err,
@@ -121,8 +196,8 @@ func orderSensitivePartsMatch(specA, specB bson.Raw) (bool, error) {
 				continue
 			}
 
-			return false, fmt.Errorf(
-				"failed to look up %#q in spec B (%v): %w",
+			return nil, fmt.Errorf(
+				"look up %#q in spec B (%v): %w",
 				optName,
 				specB,
 				err,
@@ -130,11 +205,11 @@ func orderSensitivePartsMatch(specA, specB bson.Raw) (bool, error) {
 		}
 
 		if !optValueA.Equal(optValueB) {
-			return false, nil
+			orderDifferOpts = append(orderDifferOpts, optName)
 		}
 	}
 
-	return true, nil
+	return orderDifferOpts, nil
 }
 
 // The server stores certain index values differently from how they’re
