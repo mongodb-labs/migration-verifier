@@ -7,6 +7,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -57,7 +58,7 @@ func (verifier *Verifier) verifyShardingIfNeeded(
 	if srcIsSharded != dstIsSharded {
 		return []compare.Result{{
 			Field:     ShardKeyField,
-			Cluster:   lo.Ternary(srcIsSharded, ClusterTarget, ClusterSource),
+			Cluster:   lo.Ternary(srcIsSharded, constants.ClusterTarget, constants.ClusterSource),
 			Details:   compare.Missing,
 			NameSpace: FullName(srcColl),
 		}}, nil

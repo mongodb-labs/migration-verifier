@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/verifier/api"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
@@ -54,6 +57,31 @@ func (vr Result) DocumentIsMissing() bool {
 	// but the document exists. To ascertain that the document is entirely
 	// absent we have to check Field as well.
 	return vr.Details == Missing && vr.Field == ""
+}
+
+func (vr Result) APIMismatchInfo() api.MismatchInfo {
+	apiMM := api.MismatchInfo{
+		ID:           vr.ID,
+		Namespace:    vr.NameSpace,
+		DurationSecs: vr.MismatchDuration().Seconds(),
+	}
+
+	if vr.DocumentIsMissing() {
+		apiMM.Type = lo.Ternary(
+			vr.Cluster == constants.ClusterSource,
+			api.MismatchExtra,
+			api.MismatchMissing,
+		)
+	} else {
+		apiMM.Type = api.MismatchContent
+
+		// In hashed comparison we don’t know the field name.
+		apiMM.Field = option.IfNotZero(vr.Field)
+
+		apiMM.Detail = option.Some(vr.Details)
+	}
+
+	return apiMM
 }
 
 func (vr Result) MismatchDuration() time.Duration {

@@ -1,13 +1,20 @@
 package verifier
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
+	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -20,7 +27,8 @@ type WebServerTestSuite struct {
 }
 
 type MockVerifier struct {
-	filter bson.D
+	filter                 bson.D
+	sendDocumentMismatches func(context.Context, uint32, chan<- api.MismatchInfo) error
 }
 
 func NewMockVerifier() *MockVerifier {
@@ -32,8 +40,20 @@ func (verifier *MockVerifier) Check(ctx context.Context, filter bson.D) {
 }
 func (verifier *MockVerifier) WritesOff(ctx context.Context) error { return nil }
 func (verifier *MockVerifier) WritesOn(ctx context.Context)        {}
-func (verifier *MockVerifier) GetProgress(ctx context.Context) (Progress, error) {
-	return Progress{}, nil
+func (verifier *MockVerifier) GetProgress(ctx context.Context) (api.Progress, error) {
+	return api.Progress{}, nil
+}
+
+func (verifier *MockVerifier) SendDocumentMismatches(
+	ctx context.Context,
+	minDurationSecs uint32,
+	out chan<- api.MismatchInfo,
+) error {
+	if verifier.sendDocumentMismatches == nil {
+		panic("need sendDocumentMismatches set")
+	}
+
+	return verifier.sendDocumentMismatches(ctx, minDurationSecs, out)
 }
 
 func NewWebServerSuite() *WebServerTestSuite {
@@ -42,6 +62,110 @@ func NewWebServerSuite() *WebServerTestSuite {
 		mockVerifier: mv,
 		webServer:    NewWebServer(27020, mv, logger.NewDebugLogger()),
 	}
+}
+
+func (suite *WebServerTestSuite) TestDocMismatchesEndPoint_ImmediateError() {
+	defer func() {
+		suite.mockVerifier.sendDocumentMismatches = nil
+	}()
+
+	suite.mockVerifier.sendDocumentMismatches = func(
+		ctx context.Context,
+		u uint32,
+		c chan<- api.MismatchInfo,
+	) error {
+		close(c)
+
+		return fmt.Errorf("sudden error")
+	}
+
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest("GET", "/api/v1/docMismatches", nil)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(200, w.Code)
+
+	suite.Assert().NotContains(w.Body.String(), "sudden error")
+	suite.Assert().Contains(w.Body.String(), "internal error")
+}
+
+func (suite *WebServerTestSuite) TestDocMismatchesEndPoint_Success() {
+	defer func() {
+		suite.mockVerifier.sendDocumentMismatches = nil
+	}()
+
+	suite.mockVerifier.sendDocumentMismatches = func(
+		ctx context.Context,
+		u uint32,
+		c chan<- api.MismatchInfo,
+	) error {
+		c <- api.MismatchInfo{
+			Type:      api.MismatchContent,
+			Namespace: "name.space1",
+			ID:        bsontools.ToRawValue("onBoth"),
+			Field:     option.Some("someField"),
+			Detail:    option.Some("something something"),
+		}
+
+		c <- api.MismatchInfo{
+			Type:      api.MismatchExtra,
+			Namespace: "name.space2",
+			ID:        bsontools.ToRawValue("onDst"),
+		}
+
+		c <- api.MismatchInfo{
+			Type:      api.MismatchMissing,
+			Namespace: "name.space3",
+			ID:        bsontools.ToRawValue("onSrc"),
+		}
+
+		return nil
+	}
+
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest("GET", "/api/v1/docMismatches", nil)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(200, w.Code)
+
+	decoder := json.NewDecoder(w.Body)
+
+	var resp map[string]any
+
+	suite.Require().NoError(decoder.Decode(&resp))
+	suite.Assert().EqualValues(api.MismatchContent, resp["type"])
+	suite.Assert().Equal("name.space1", resp["namespace"])
+	suite.Assert().Equal("onBoth", resp["_id"])
+	suite.Assert().Equal("someField", resp["field"])
+	suite.Assert().Equal("something something", resp["detail"])
+
+	clear(resp)
+
+	suite.Require().NoError(decoder.Decode(&resp))
+	suite.Assert().EqualValues(api.MismatchExtra, resp["type"])
+	suite.Assert().EqualValues("name.space2", resp["namespace"])
+	suite.Assert().EqualValues("onDst", resp["_id"])
+	suite.Assert().NotContains(resp, "field")
+	suite.Assert().NotContains(resp, "detail")
+
+	clear(resp)
+
+	suite.Require().NoError(decoder.Decode(&resp))
+	suite.Assert().EqualValues(api.MismatchMissing, resp["type"])
+	suite.Assert().EqualValues("name.space3", resp["namespace"])
+	suite.Assert().EqualValues("onSrc", resp["_id"])
+	suite.Assert().NotContains(resp, "field")
+	suite.Assert().NotContains(resp, "detail")
+
+	suite.Assert().ErrorIs(decoder.Decode(&resp), io.EOF, "should be done")
 }
 
 func (suite *WebServerTestSuite) TestCheckEndPoint() {

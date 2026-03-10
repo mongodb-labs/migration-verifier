@@ -24,7 +24,9 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
@@ -53,8 +55,6 @@ const (
 	//TODO: add comments for each of these so the warnings will stop :)
 	Failed            = "Failed"
 	Mismatch          = "Mismatch"
-	ClusterTarget     = "dstClient"
-	ClusterSource     = "srcClient"
 	SrcNamespaceField = "query_filter.namespace"
 	DstNamespaceField = "query_filter.to"
 	NumWorkers        = 10
@@ -169,17 +169,7 @@ type Verifier struct {
 	warnedNoResumableCollectionScan bool
 }
 
-var _ MigrationVerifierAPI = &Verifier{}
-
-// VerificationStatus holds the Verification Status
-type VerificationStatus struct {
-	TotalTasks            int `json:"totalTasks"`
-	AddedTasks            int `json:"addedTasks"`
-	ProcessingTasks       int `json:"processingTasks"`
-	FailedTasks           int `json:"failedTasks"`
-	CompletedTasks        int `json:"completedTasks"`
-	MetadataMismatchTasks int `json:"metadataMismatchTasks"`
-}
+var _ api.MigrationVerifierAPI = &Verifier{}
 
 // VerifierSettings is NewVerifier’s argument.
 type VerifierSettings struct {
@@ -522,7 +512,7 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 		result := compare.Result{
 			Field:     fieldPrefix + field,
 			Details:   compare.Missing,
-			Cluster:   ClusterSource,
+			Cluster:   constants.ClusterSource,
 			NameSpace: namespace,
 			ID:        id,
 		}
@@ -534,7 +524,7 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 		result := compare.Result{
 			Field:     fieldPrefix + field,
 			Details:   compare.Missing,
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			NameSpace: namespace,
 			ID:        id,
 		}
@@ -560,7 +550,7 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 		result := compare.Result{
 			Field:     fieldPrefix + field,
 			Details:   details,
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			NameSpace: namespace,
 			ID:        id,
 		}
@@ -895,21 +885,21 @@ func (verifier *Verifier) compareCollectionSpecifications(
 	if !hasSrcSpec {
 		return []compare.Result{{
 			NameSpace: srcNs,
-			Cluster:   ClusterSource,
+			Cluster:   constants.ClusterSource,
 			Details:   compare.Missing,
 		}}, false, nil
 	}
 	if !hasDstSpec {
 		return []compare.Result{{
 			NameSpace: dstNs,
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			Details:   compare.Missing,
 		}}, false, nil
 	}
 	if srcSpec.Type != dstSpec.Type {
 		return []compare.Result{{
 			NameSpace: srcNs,
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			Field:     "Type",
 			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Type, dstSpec.Type),
 		}}, false, nil
@@ -919,7 +909,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 	if srcSpec.Info.ReadOnly != dstSpec.Info.ReadOnly {
 		results = append(results, compare.Result{
 			NameSpace: dstNs,
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			Field:     "ReadOnly",
 			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Info.ReadOnly, dstSpec.Info.ReadOnly),
 		})
@@ -936,7 +926,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		if mismatchDetails == nil {
 			results = append(results, compare.Result{
 				NameSpace: dstNs,
-				Cluster:   ClusterTarget,
+				Cluster:   constants.ClusterTarget,
 				Field:     "Options (Field Order Only)",
 				Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Options, dstSpec.Options),
 			})
@@ -1131,7 +1121,7 @@ func (verifier *Verifier) verifyIndexes(
 					ID:        mbson.ToRawValue(indexName),
 					Field:     "index",
 					NameSpace: FullName(dstColl),
-					Cluster:   ClusterTarget,
+					Cluster:   constants.ClusterTarget,
 					Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec, dstSpec),
 				})
 			}
@@ -1140,7 +1130,7 @@ func (verifier *Verifier) verifyIndexes(
 				ID:        mbson.ToRawValue(indexName),
 				Field:     "index",
 				Details:   compare.Missing,
-				Cluster:   ClusterSource,
+				Cluster:   constants.ClusterSource,
 				NameSpace: FullName(srcColl),
 			})
 		}
@@ -1153,7 +1143,7 @@ func (verifier *Verifier) verifyIndexes(
 				ID:        mbson.ToRawValue(indexName),
 				Field:     "index",
 				Details:   compare.Missing,
-				Cluster:   ClusterTarget,
+				Cluster:   constants.ClusterTarget,
 				NameSpace: FullName(dstColl)})
 		}
 	}
@@ -1627,7 +1617,7 @@ func (verifier *Verifier) partitionCollection(
 	return nil
 }
 
-func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*VerificationStatus, error) {
+func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*api.VerificationStatus, error) {
 	generation, _ := verifier.getGeneration()
 
 	return verifier.getVerificationStatusForGeneration(ctx, generation)
@@ -1636,7 +1626,7 @@ func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*Verificat
 func (verifier *Verifier) getVerificationStatusForGeneration(
 	ctx context.Context,
 	generation int,
-) (*VerificationStatus, error) {
+) (*api.VerificationStatus, error) {
 	taskCollection := verifier.verificationTaskCollection()
 
 	var results []bson.Raw
@@ -1678,7 +1668,7 @@ func (verifier *Verifier) getVerificationStatusForGeneration(
 		)
 	}
 
-	verificationStatus := VerificationStatus{}
+	verificationStatus := api.VerificationStatus{}
 
 	for _, result := range results {
 		idRaw := result.Lookup("_id")

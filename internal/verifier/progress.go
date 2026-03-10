@@ -1,8 +1,12 @@
 package verifier
 
-import "context"
+import (
+	"context"
 
-func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
+	"github.com/10gen/migration-verifier/internal/verifier/api"
+)
+
+func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error) {
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
 
@@ -10,9 +14,9 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (Progress, error) {
 
 	status, err := verifier.getVerificationStatusForGeneration(ctx, generation)
 	if err != nil {
-		return Progress{Error: err}, err
+		return api.Progress{Error: err}, err
 	}
-	return Progress{
+	return api.Progress{
 		Phase:      verifier.getPhaseWhileLocked(),
 		Generation: verifier.generation,
 		Status:     status,
