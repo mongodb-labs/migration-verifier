@@ -99,11 +99,11 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 		[]mongo.IndexModel{
 			{
 				Keys: bson.D{
+					// We query on generation & task type …
 					{"generation", 1},
-				},
-			},
-			{
-				Keys: bson.D{
+					{"taskType", 1},
+
+					// … then sort descending.
 					{"detail.mismatchHistory.durationMS", -1},
 					{"detail.id", 1},
 				},
