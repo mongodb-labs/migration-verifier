@@ -166,7 +166,7 @@ func getMismatchesForTasks(
 	cursor, err := db.Collection(mismatchesCollectionName).Find(
 		ctx,
 		bson.D{
-			{"task", bson.D{{"$in", taskIDs}}},
+			{"taskID", bson.D{{"$in", taskIDs}}},
 		},
 	)
 	if err != nil {
