@@ -161,7 +161,7 @@ The verifier will now check to completion to make sure that there are no inconsi
 
 The following API command:
 ```
-curl http://127.0.0.1:27020/api/v1/docMismatches
+curl 'http://127.0.0.1:27020/api/v1/docMismatches?minDurationSecs=0'
 ```
 … will return a stream of newline-delimited JSON documents that describe
 currently-known mismatches.
@@ -176,6 +176,30 @@ Each mismatch document looks like:
   `content`-type mismatches when not using hashed comparison)
 - `detail`: human-readable description of the mismatch (only set with
   `content`-type mismatches)
+
+Example output:
+```
+{
+    "type": "missingOnDst",
+    "namespace": "test.coll",
+    "_id": 111,
+    "durationSecs": 8.454
+}
+{
+    "type": "content",
+    "namespace": "test.coll",
+    "_id": 222,
+    "field": "name",
+    "detail": "Mismatch",
+    "durationSecs": 8.454
+}
+{
+    "type": "extraOnDst",
+    "namespace": "test.coll",
+    "_id": 333,
+    "durationSecs": 8.454
+}
+```
 
 During generation 0, this API command returns mismatches for generation 0.
 Thereafter it returns mismatches for the _prior_ generation.
