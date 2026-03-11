@@ -164,7 +164,7 @@ The following API command:
 curl 'http://127.0.0.1:27020/api/v1/docMismatches?minDurationSecs=0'
 ```
 … will return a stream of newline-delimited JSON documents that describe
-currently-known mismatches.
+currently-tracked mismatches.
 
 Each mismatch document looks like:
 - `durationSecs`: the # of seconds between when the mismatch was first
@@ -200,9 +200,6 @@ Example output:
     "durationSecs": 8.454
 }
 ```
-
-During generation 0, this API command returns mismatches for generation 0.
-Thereafter it returns mismatches for the _prior_ generation.
 
 You can optionally send a `minDurationSecs` parameter to fetch mismatches
 by a minimum duration.
