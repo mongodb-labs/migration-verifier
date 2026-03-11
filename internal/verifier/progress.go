@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -95,13 +96,25 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 		DstLastRecheckedTS: dstLastRecheckedTS,
 
 		SrcChangeStats: api.ProgressChangeStats{
-			EventsPerSecond:  verifier.srcChangeReader.getEventsPerSecond(),
-			LagSecs:          option.Map(srcLag, time.Duration.Seconds),
+			EventsPerSecond: verifier.srcChangeReader.getEventsPerSecond(),
+			LagSecs: option.Map(
+				srcLag,
+				chain(
+					time.Duration.Seconds,
+					safecast.MustConvert[int, float64],
+				),
+			),
 			BufferSaturation: verifier.srcChangeReader.getBufferSaturation(),
 		},
 		DstChangeStats: api.ProgressChangeStats{
-			EventsPerSecond:  verifier.dstChangeReader.getEventsPerSecond(),
-			LagSecs:          option.Map(dstLag, time.Duration.Seconds),
+			EventsPerSecond: verifier.dstChangeReader.getEventsPerSecond(),
+			LagSecs: option.Map(
+				dstLag,
+				chain(
+					time.Duration.Seconds,
+					safecast.MustConvert[int, float64],
+				),
+			),
 			BufferSaturation: verifier.dstChangeReader.getBufferSaturation(),
 		},
 
@@ -114,8 +127,6 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 			verifier.bytesComparedHistory.Get(),
 			time.Second,
 		),
-
-		RecentRecheckDurations: verifier.recheckDurations.Get(),
 
 		Status: status,
 	}
@@ -141,6 +152,12 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 	}
 
 	return progress, nil
+}
+
+func chain[T1, T2, T3 any](f1 func(a T1) T2, f2 func(b T2) T3) func(T1) T3 {
+	return func(in T1) T3 {
+		return f2(f1(in))
+	}
 }
 
 func (verifier *Verifier) getPhaseWhileLocked() string {

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"time"
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/option"
@@ -38,7 +37,7 @@ type ProgressGenerationStats struct {
 
 type ProgressChangeStats struct {
 	EventsPerSecond  option.Option[float64] `bson:"eventsPerSecond"`
-	LagSecs          option.Option[float64] `bson:"lagSecs"`
+	LagSecs          option.Option[int]     `bson:"lagSecs"`
 	BufferSaturation float64                `bson:"bufferSaturation"`
 }
 
@@ -69,9 +68,7 @@ type Progress struct {
 	DocsComparedPerSecond     float64 `bson:"docsComparedPerSecond"`
 	SrcBytesComparedPerSecond float64 `bson:"srcBytesComparedPerSecond"`
 
-	RecentRecheckDurations []time.Duration `bson:"recentRecheckDurations"`
-
-	LongestMismatch option.Option[ProgressMismatch] `bson:"longestMismatch"`
+	LongestMismatch option.Option[ProgressMismatch] `bson:"longestMismatch,omitempty"`
 }
 
 type MismatchType string
