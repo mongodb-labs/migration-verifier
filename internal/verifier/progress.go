@@ -96,12 +96,12 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 
 		SrcChangeStats: api.ProgressChangeStats{
 			EventsPerSecond:  verifier.srcChangeReader.getEventsPerSecond(),
-			Lag:              srcLag,
+			LagSecs:          option.Map(srcLag, time.Duration.Seconds),
 			BufferSaturation: verifier.srcChangeReader.getBufferSaturation(),
 		},
 		DstChangeStats: api.ProgressChangeStats{
 			EventsPerSecond:  verifier.dstChangeReader.getEventsPerSecond(),
-			Lag:              dstLag,
+			LagSecs:          option.Map(dstLag, time.Duration.Seconds),
 			BufferSaturation: verifier.dstChangeReader.getBufferSaturation(),
 		},
 

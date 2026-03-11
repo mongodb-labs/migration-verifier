@@ -37,9 +37,9 @@ type ProgressGenerationStats struct {
 }
 
 type ProgressChangeStats struct {
-	EventsPerSecond  option.Option[float64]       `bson:"eventsPerSecond"`
-	Lag              option.Option[time.Duration] `bson:"lag"`
-	BufferSaturation float64                      `bson:"bufferSaturation"`
+	EventsPerSecond  option.Option[float64] `bson:"eventsPerSecond"`
+	LagSecs          option.Option[float64] `bson:"lagSecs"`
+	BufferSaturation float64                `bson:"bufferSaturation"`
 }
 
 type ProgressMismatch struct {

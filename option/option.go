@@ -155,3 +155,13 @@ func (o Option[T]) IsNone() bool {
 func (o Option[T]) IsSome() bool {
 	return o.val != nil
 }
+
+func Map[T, V any](o Option[T], f func(T) V) Option[V] {
+	var ret Option[V]
+
+	if t, has := o.Get(); has {
+		ret = Some(f(t))
+	}
+
+	return ret
+}
