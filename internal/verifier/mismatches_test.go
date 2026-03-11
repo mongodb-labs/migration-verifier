@@ -39,7 +39,7 @@ func TestMismatchesInfoMarshal(t *testing.T) {
 
 	for _, result := range results {
 		mi := MismatchInfo{
-			Task:   bson.NewObjectID(),
+			TaskID: bson.NewObjectID(),
 			Detail: result,
 		}
 

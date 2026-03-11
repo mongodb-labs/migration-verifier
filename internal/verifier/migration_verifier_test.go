@@ -610,7 +610,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(mismatches[0].Task),
+				verifier.generation,
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -676,7 +676,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(theTasks[0].PrimaryKey),
+				verifier.generation,
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -744,7 +744,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(theTasks[0].PrimaryKey),
+				verifier.generation,
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)

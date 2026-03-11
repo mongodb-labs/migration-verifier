@@ -673,7 +673,7 @@ REPORTS:
 					err := recordMismatches(
 						egCtx,
 						verifier.metaClient.Database(verifier.metaDBName),
-						task.PrimaryKey,
+						task,
 						problems,
 					)
 
@@ -1232,7 +1232,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		err := recordMismatches(
 			ctx,
 			verifier.verificationDatabase(),
-			task.PrimaryKey,
+			task,
 			specificationProblems,
 		)
 		if err != nil {
@@ -1280,7 +1280,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		err := recordMismatches(
 			ctx,
 			verifier.verificationDatabase(),
-			task.PrimaryKey,
+			task,
 			indexProblems,
 		)
 		if err != nil {
@@ -1310,7 +1310,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		err := recordMismatches(
 			ctx,
 			verifier.verificationDatabase(),
-			task.PrimaryKey,
+			task,
 			shardingProblems,
 		)
 		if err != nil {
