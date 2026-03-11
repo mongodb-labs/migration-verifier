@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"time"
 
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -26,12 +28,50 @@ type VerificationStatus struct {
 	MetadataMismatchTasks int `json:"metadataMismatchTasks"`
 }
 
+type ProgressGenerationStats struct {
+	DocsCompared types.DocumentCount `bson:"docsCompared"`
+	TotalDocs    types.DocumentCount `bson:"totalDocs"`
+
+	SrcBytesCompared types.ByteCount `bson:"srcBytesCompared"`
+	TotalSrcBytes    types.ByteCount `bson:"totalSrcBytes,omitempty"`
+}
+
+type ProgressChangeStats struct {
+	EventsPerSecond  option.Option[float64]       `bson:"eventsPerSecond"`
+	Lag              option.Option[time.Duration] `bson:"lag"`
+	BufferSaturation float64                      `bson:"bufferSaturation"`
+}
+
+type ProgressMismatch struct {
+	DurationSeconds float64 `bson:"durationSeconds"`
+	Type            string  `bson:"type"`
+	Namespace       string  `bson:"namespace"`
+	ID              any     `bson:"_id"`
+	Detail          string  `bson:"detail"`
+}
+
 // Progress represents the structure of the JSON response from the Progress end point.
 type Progress struct {
-	Phase      string              `json:"phase"`
-	Generation int                 `json:"generation"`
-	Error      error               `json:"error"`
-	Status     *VerificationStatus `json:"verificationStatus"`
+	Phase string `bson:"phase"`
+
+	Generation      int                     `bson:"generation"`
+	GenerationStats ProgressGenerationStats `bson:"generationStats"`
+
+	Error  error               `bson:"error"`
+	Status *VerificationStatus `bson:"verificationStatus"`
+
+	SrcLastRecheckedTS option.Option[bson.Timestamp] `bson:"srcLastRecheckedTS"`
+	DstLastRecheckedTS option.Option[bson.Timestamp] `bson:"dstLastRecheckedTS"`
+
+	SrcChangeStats ProgressChangeStats `bson:"srcChangeStats"`
+	DstChangeStats ProgressChangeStats `bson:"dstChangeStats"`
+
+	DocsComparedPerSecond     float64 `bson:"docsComparedPerSecond"`
+	SrcBytesComparedPerSecond float64 `bson:"srcBytesComparedPerSecond"`
+
+	RecentRecheckDurations []time.Duration `bson:"recentRecheckDurations"`
+
+	LongestMismatch option.Option[ProgressMismatch] `bson:"longestMismatch"`
 }
 
 type MismatchType string

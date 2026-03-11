@@ -234,15 +234,24 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 
 // progressEndpoint implements the gin handle for the progress endpoint.
 func (server *WebServer) progressEndpoint(c *gin.Context) {
+	var payload []byte
+
 	progress, err := server.Mapi.GetProgress(c.Request.Context())
+
+	if err == nil {
+		payload, err = bson.MarshalExtJSON(
+			bson.M{"progress": progress},
+			false, // relaxed
+			false, // no HTML escape
+		)
+	}
+
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"progress": progress,
-	})
+	c.Data(http.StatusOK, "application/json", payload)
 }
 
 func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {

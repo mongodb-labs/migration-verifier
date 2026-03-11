@@ -91,3 +91,14 @@ func SumLogs[T realNumber](l []Log[T]) T {
 
 	return sum
 }
+
+// RatePer gives a rate per unit time.
+func RatePer[T realNumber](logs []Log[T], dur time.Duration) float64 {
+	if len(logs) == 0 {
+		return 0
+	}
+
+	denom := float64(time.Since(logs[0].At)) / float64(dur)
+
+	return float64(SumLogs(logs)) / denom
+}

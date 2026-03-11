@@ -359,6 +359,88 @@ func recordMismatches(
 	return errors.Wrapf(err, "recording %d mismatches", len(models))
 }
 
+func getDocMismatchesPerGenPipeline(
+	generation int,
+	lookupPipeline mongo.Pipeline,
+) mongo.Pipeline {
+	return mongo.Pipeline{
+		// Match document-checking tasks in the generation.
+		{{"$match", bson.D{
+			{"generation", generation},
+			{"type", tasks.VerifyDocuments},
+		}}},
+
+		// Add each task’s longest-lived mismatch to the task.
+		{{"$lookup", bson.D{
+			{"from", mismatchesCollectionName},
+			{"localField", "_id"},
+			{"foreignField", "task"},
+			{"as", "mismatch"},
+			{"pipeline", lookupPipeline},
+		}}},
+
+		// Discard the task in favor of the mismatch.
+		{{"$unwind", "$mismatch"}},
+		{{"$replaceWith", "$mismatch"}},
+	}
+}
+
+func getLongestLivedDocumentMismatch(
+	ctx context.Context,
+	db *mongo.Database,
+	generation int,
+) (option.Option[MismatchInfo], error) {
+	cursor, err := db.Collection(verificationTasksCollection).Aggregate(
+		ctx,
+		append(
+			getDocMismatchesPerGenPipeline(
+				generation,
+				mongo.Pipeline{
+					{{"$sort", bson.D{
+						{"detail.mismatchHistory.durationMS", -1},
+						{"detail.id", 1},
+					}}},
+					{{"$limit", 1}},
+				},
+			),
+
+			// Sort the mismatches (again). We need this because previously
+			// the mismatches were ordered by their tasks’ natural order.
+			bson.D{{"$sort", bson.D{
+				{"detail.mismatchHistory.durationMS", -1},
+				{"detail.id", 1},
+			}}},
+
+			// Just the top mismatch.
+			bson.D{{"$limit", 1}},
+		),
+	)
+	if err != nil {
+		return option.None[MismatchInfo](), errors.Wrapf(err, "querying mismatches")
+	}
+
+	var infos []MismatchInfo
+	if err := cursor.All(ctx, &infos); err != nil {
+		return option.None[MismatchInfo](), errors.Wrapf(err, "reading mismatches")
+	}
+
+	switch len(infos) {
+	case 0:
+		return option.None[MismatchInfo](), nil
+	case 1:
+		return option.Some(infos[0]), nil
+	default:
+		lo.Assertf(
+			false,
+			"need only 1 info; got: %+v",
+			infos,
+		)
+
+		// unreachable
+		return option.None[MismatchInfo](), nil
+	}
+}
+
 // SendDocumentMismatches outputs all document mismatches found in the prior
 // generation (or, in generation 0, the current generation).
 func (verifier *Verifier) SendDocumentMismatches(
@@ -380,12 +462,7 @@ func (verifier *Verifier) SendDocumentMismatches(
 		generation--
 	}
 
-	mismatchPipeline := mongo.Pipeline{
-		{{"$sort", bson.D{
-			{"detail.mismatchHistory.durationMS", -1},
-			{"detail.id", 1},
-		}}},
-	}
+	var mismatchPipeline mongo.Pipeline
 
 	if minDurationSecs > 0 {
 		mismatchPipeline = slices.Insert(
@@ -405,26 +482,10 @@ func (verifier *Verifier) SendDocumentMismatches(
 
 	cursor, err := db.Collection(verificationTasksCollection).Aggregate(
 		ctx,
-		mongo.Pipeline{
-			// Match document-checking tasks in the generation.
-			{{"$match", bson.D{
-				{"generation", generation},
-				{"type", tasks.VerifyDocuments},
-			}}},
-
-			// Add each task’s longest-lived mismatch to the task.
-			{{"$lookup", bson.D{
-				{"from", mismatchesCollectionName},
-				{"localField", "_id"},
-				{"foreignField", "task"},
-				{"as", "mismatch"},
-				{"pipeline", mismatchPipeline},
-			}}},
-
-			// Discard the task in favor of the mismatch.
-			{{"$unwind", "$mismatch"}},
-			{{"$replaceWith", "$mismatch"}},
-		},
+		getDocMismatchesPerGenPipeline(
+			generation,
+			mismatchPipeline,
+		),
 	)
 
 	if err != nil {

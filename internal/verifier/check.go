@@ -278,6 +278,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		if err != nil {
 			return err
 		}
+
 		// we will only coordinate when the number of channels is exactly 2.
 		// * Channel 0 informs the test of a generation bounary.
 		// * Block until the test (via channel 1) tells us to do the
@@ -336,6 +337,10 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 
 			verifier.mux.Lock()
 			verifier.lastGeneration = true
+		}
+
+		if verifier.getPhaseWhileLocked() == Recheck {
+			verifier.recheckDurations.Push(time.Since(verifier.generationStartTime))
 		}
 
 		// Increment the in-memory generation so that the change readers will
