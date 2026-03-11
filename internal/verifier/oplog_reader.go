@@ -159,6 +159,8 @@ func (o *OplogReader) createCursor(
 
 	if util.ClusterHasBSONSize([2]int(o.clusterInfo.VersionArray)) {
 		findOpts.SetProjection(o.getExprProjection())
+	} else {
+		findOpts.SetOplogReplay(true)
 	}
 
 	oplogFilter := bson.D{{"$and", []any{
