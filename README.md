@@ -125,15 +125,16 @@ These represent a logical time in MongoDB’s replication protocol.
   - `phase` (string): either `idle`, `check`, or `recheck`
   - `generation` (unsigned integer)
   - `generationStats`
-    - `docsCompared` (unsigned integer)
-    - `totalDocs` (unsigned integer)
-    - `srcBytesCompared` (unsigned integer)
-    - `totalSrcBytes` (unsigned integer, only present in `check` phase)
+    - `docsCompared` (unsigned)
+    - `totalDocs` (unsigned)
+    - `srcBytesCompared` (unsigned)
+    - `totalSrcBytes` (unsigned, only present in `check` phase)
   - `srcChangeStats`
-    - `eventsPerSecond` (nonnegative float)
-    - `lagSecs` (nonnegative integer)
-    - `bufferSaturation` (nonnegative float)
+    - `eventsPerSecond` (unsigned)
+    - `lagSecs` (unsigned)
+    - `bufferSaturation` (fraction)
   - `dstChangeStats` (same fields as `srcChangeStats`)
+  - `longestMismatch` (See `/docMismatches` below for format.)
   - `error` (string, optional)
   - `verificationStatus` (tasks for the current generation)
     - `totalTasks` (unsigned integer)
@@ -143,10 +144,53 @@ These represent a logical time in MongoDB’s replication protocol.
     - `completedTasks` (unsigned integer, tasks that found no problems)
     - `metadataMismatchTasks` (unsigned integer, tasks that found a collection metadata mismatch)
 
-	This is a sample output when inconsistencies are present:
-
-    	`{"progress":{"phase":"idle","error":null,"verificationStatus":{"totalTasks":1,"addedTasks":0,"processingTasks":0,"failedTasks":1,"completedTasks":0,"metadataMismatchTasks":0,"recheckTasks":0}}}`
-
+This is sample output:
+```
+{
+  "progress": {
+    "phase": "recheck",
+    "generation": 2,
+    "generationStats": {
+      "docsCompared": 0,
+      "totalDocs": 2040204,
+      "srcBytesCompared": 0
+    },
+    "error": null,
+    "verificationStatus": {
+      "totalTasks": 204,
+      "addedTasks": 204,
+      "processingTasks": 0,
+      "failedTasks": 0,
+      "completedTasks": 0,
+      "metadataMismatchTasks": 0
+    },
+    "srcLastRecheckedTS": {
+      "$timestamp": {
+        "t": 1773253202,
+        "i": 2186
+      }
+    },
+    "dstLastRecheckedTS": {
+      "$timestamp": {
+        "t": 1773253202,
+        "i": 10030
+      }
+    },
+    "srcChangeStats": {
+      "eventsPerSecond": 4881.42374871582,
+      "lagSecs": 0,
+      "bufferSaturation": 0.01
+    },
+    "dstChangeStats": {
+      "eventsPerSecond": 32803.89071205276,
+      "lagSecs": 0,
+      "bufferSaturation": 0.95
+    },
+    "docsComparedPerSecond": 75061.86338662436,
+    "srcBytesComparedPerSecond": 43954387.31067323
+  }
+}
+```
 
 # CLI Options
 

@@ -7,10 +7,8 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
-	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/ccoveille/go-safecast/v2"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -132,23 +130,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 	}
 
 	if mm, has := mismatch.Get(); has {
-		mismatchType := lo.Ternary(
-			mm.Detail.DocumentIsMissing(),
-			lo.Ternary(
-				mm.Detail.Cluster == constants.ClusterSource,
-				"extraOnDst",
-				"missingOnDst",
-			),
-			"contentMismatch",
-		)
-
-		progress.LongestMismatch = option.Some(api.ProgressMismatch{
-			ID:              mm.Detail.ID,
-			Namespace:       mm.Detail.NameSpace,
-			DurationSeconds: mm.Detail.MismatchDuration().Seconds(),
-			Detail:          mm.Detail.Details,
-			Type:            mismatchType,
-		})
+		progress.LongestDocMismatch = option.Some(mm.Detail.APIMismatchInfo())
 	}
 
 	return progress, nil

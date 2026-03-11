@@ -19,12 +19,12 @@ type MigrationVerifierAPI interface {
 
 // VerificationStatus holds the Verification Status
 type VerificationStatus struct {
-	TotalTasks            int `json:"totalTasks"`
-	AddedTasks            int `json:"addedTasks"`
-	ProcessingTasks       int `json:"processingTasks"`
-	FailedTasks           int `json:"failedTasks"`
-	CompletedTasks        int `json:"completedTasks"`
-	MetadataMismatchTasks int `json:"metadataMismatchTasks"`
+	TotalTasks            int `bson:"totalTasks"`
+	AddedTasks            int `bson:"addedTasks"`
+	ProcessingTasks       int `bson:"processingTasks"`
+	FailedTasks           int `bson:"failedTasks"`
+	CompletedTasks        int `bson:"completedTasks"`
+	MetadataMismatchTasks int `bson:"metadataMismatchTasks"`
 }
 
 type ProgressGenerationStats struct {
@@ -68,7 +68,7 @@ type Progress struct {
 	DocsComparedPerSecond     float64 `bson:"docsComparedPerSecond"`
 	SrcBytesComparedPerSecond float64 `bson:"srcBytesComparedPerSecond"`
 
-	LongestMismatch option.Option[ProgressMismatch] `bson:"longestMismatch,omitempty"`
+	LongestDocMismatch option.Option[MismatchInfo] `bson:"longestDocMismatch,omitempty"`
 }
 
 type MismatchType string
