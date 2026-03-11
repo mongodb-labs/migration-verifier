@@ -157,6 +157,7 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 		for _, m := range reportData.ContentDiffers {
 			if m.Detail.DocumentIsMissing() {
+				fmt.Printf("------- report data:\n%+v\n\n", reportData)
 				panic(fmt.Sprintf("found missing-type mismatch but expected content-differs: %+v", m))
 			}
 

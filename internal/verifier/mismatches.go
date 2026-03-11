@@ -69,19 +69,30 @@ func (mi MismatchInfo) MarshalBSON() ([]byte, error) {
 	return mi.MarshalToBSON(), nil
 }
 
+var (
+	generationBSONLen   = len(bsoncore.AppendInt32Element(nil, "generation", 0))
+	taskTypeBSONLenBase = len(bsoncore.AppendStringElement(nil, "taskType", ""))
+	taskIDBSONLen       = len(bsoncore.AppendObjectIDElement(nil, "taskID", bson.ObjectID{}))
+	detailBSONLenBase   = len(bsoncore.AppendDocumentElement(nil, "detail", nil))
+)
+
 func (mi MismatchInfo) MarshalToBSON() []byte {
 	detail := mi.Detail.MarshalToBSON()
 
 	bsonLen := 4 + // header
-		1 + 4 + 1 + len(bson.ObjectID{}) + // Task
-		1 + 6 + 1 + len(detail) + // Detail
+		generationBSONLen +
+		taskTypeBSONLenBase + len(mi.TaskType) +
+		taskIDBSONLen +
+		detailBSONLenBase + len(detail) +
 		1 // NUL
 
 	buf := make(bson.Raw, 4, bsonLen)
 
 	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
 
-	buf = bsoncore.AppendObjectIDElement(buf, "task", mi.TaskID)
+	buf = bsoncore.AppendInt32Element(buf, "generation", int32(mi.Generation))
+	buf = bsoncore.AppendStringElement(buf, "taskType", string(mi.TaskType))
+	buf = bsoncore.AppendObjectIDElement(buf, "taskID", mi.TaskID)
 	buf = bsoncore.AppendDocumentElement(buf, "detail", detail)
 
 	buf = append(buf, 0)
@@ -283,7 +294,15 @@ func getDocumentMismatchReportData(
 			func() error {
 				cursor, err := mismatchesColl.Find(
 					egCtx,
-					bson.D{{"generation", generation}},
+					bson.D{
+						{"$and", []bson.D{
+							{
+								{"generation", generation},
+								{"taskType", tasks.VerifyDocuments},
+							},
+							{{"$expr", categoryParts.filter}},
+						}},
+					},
 					options.Find().
 						SetSort(
 							bson.D{
