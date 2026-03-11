@@ -8,6 +8,6 @@ package verifier
 // 4: Use “changeReader” instead of “changeStream” collection name.
 // 5: Metadata now stores source & destination change reader options.
 //    Also track mismatch duration.
-// 6: Mismatches now record task type & generation.
+// 6: Mismatches now record `generation` and `taskType`. `task` is now `taskID`.
 
 const verifierMetadataVersion = 6
