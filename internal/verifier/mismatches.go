@@ -13,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -89,9 +90,9 @@ func (mi MismatchInfo) MarshalToBSON() []byte {
 
 	buf := make(bson.Raw, 4, bsonLen)
 
-	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
+	binary.LittleEndian.PutUint32(buf, safecast.MustConvert[uint32](bsonLen))
 
-	buf = bsoncore.AppendInt32Element(buf, "generation", int32(mi.Generation))
+	buf = bsoncore.AppendInt32Element(buf, "generation", safecast.MustConvert[int32](mi.Generation))
 	buf = bsoncore.AppendStringElement(buf, "taskType", string(mi.TaskType))
 	buf = bsoncore.AppendObjectIDElement(buf, "taskID", mi.TaskID)
 	buf = bsoncore.AppendDocumentElement(buf, "detail", detail)
@@ -122,7 +123,6 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 			},
 		},
 	)
-
 	if err != nil {
 		return errors.Wrapf(err, "creating indexes for collection %#q", mismatchesCollectionName)
 	}
@@ -313,7 +313,6 @@ func getDocumentMismatchReportData(
 						).
 						SetLimit(limit),
 				)
-
 				if err != nil {
 					return errors.Wrapf(err, "fetching %#q", categoryParts.label)
 				}
@@ -461,9 +460,10 @@ func (verifier *Verifier) SendDocumentMismatches(
 	if minDurationSecs > 0 {
 		filter = append(
 			filter,
-			bson.E{"detail.mismatchHistory.durationMS", bson.D{
-				{"$gte", minDurationSecs},
-			},
+			bson.E{
+				"detail.mismatchHistory.durationMS", bson.D{
+					{"$gte", minDurationSecs},
+				},
 			},
 		)
 	}
@@ -480,7 +480,6 @@ func (verifier *Verifier) SendDocumentMismatches(
 			},
 		),
 	)
-
 	if err != nil {
 		return fmt.Errorf("fetching generation %d’s mismatches: %w", generation, err)
 	}
