@@ -14,6 +14,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -79,7 +80,7 @@ func (mi MismatchInfo) MarshalToBSON() []byte {
 
 	buf := make(bson.Raw, 4, bsonLen)
 
-	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
+	binary.LittleEndian.PutUint32(buf, safecast.MustConvert[uint32](bsonLen))
 
 	buf = bsoncore.AppendObjectIDElement(buf, "task", mi.Task)
 	buf = bsoncore.AppendDocumentElement(buf, "detail", detail)

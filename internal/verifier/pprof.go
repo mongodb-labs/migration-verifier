@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime/pprof"
 	"time"
 )
@@ -31,7 +32,7 @@ func (verifier *Verifier) MaybeStartPeriodicHeapProfileCollection(ctx context.Co
 
 func collectHeapUsage() {
 	heapFileName := fmt.Sprintf("heap-%s.out", time.Now().UTC().Format("20060102T150405Z"))
-	heapFile, err := os.Create(heapFileName)
+	heapFile, err := os.Create(filepath.Clean(heapFileName))
 
 	if err != nil {
 		panic(err)

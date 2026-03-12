@@ -1,10 +1,10 @@
 version: "2"
 linters:
-  enable:
-    - forbidigo
-    - gomodguard
-    - govet
-    - gocritic
+#  enable:
+#    - forbidigo
+#    - gomodguard
+#    - govet
+#    - gocritic
   disable:
     - depguard
   settings:

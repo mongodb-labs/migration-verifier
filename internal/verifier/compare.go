@@ -826,7 +826,7 @@ func compareOneDocument(
 			Details:   Mismatch + " : only field order differs",
 			Cluster:   constants.ClusterTarget,
 			NameSpace: namespace,
-			DataSize:  int32(dataSize),
+			DataSize:  safecast.MustConvert[int32](dataSize),
 		}}, nil
 	}
 

@@ -190,7 +190,9 @@ func (verifier *Verifier) insertRecheckDocs(
 				SrcDatabaseName:   dbName,
 				SrcCollectionName: collNames[i],
 				DocumentID:        documentIDs[i],
-				Rand:              rand.Int32(),
+
+				// #nosec G404 - speed is better here
+				Rand: rand.Int32(),
 			},
 			DataSize:          dataSizes[i],
 			ChangeOpTime:      opTime,
@@ -468,7 +470,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		if doc.PrimaryKey.SrcDatabaseName != prevDBName ||
 			doc.PrimaryKey.SrcCollectionName != prevCollName ||
 			len(idAccum) > maxRecheckIDs ||
-			types.ByteCount(idsSizer.Len()) >= maxRecheckIDsBytes ||
+			idsSizer.Len() >= maxRecheckIDsBytes ||
 			dataSizeAccum >= verifier.partitionSizeInBytes {
 
 			err := persistBufferedRechecks()
@@ -488,7 +490,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		}
 
 		// This is the index for storing info about the doc in metadata.
-		metadataIndex := int32(len(idAccum))
+		metadataIndex := safecast.MustConvert[int32](len(idAccum))
 
 		// If we’ve already seen this ID, then we don’t re-add it. We may,
 		// though, still want to incorporate the duplicate into the task’s

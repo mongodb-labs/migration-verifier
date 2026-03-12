@@ -6,6 +6,7 @@ import (
 
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -67,7 +68,7 @@ func (pk PrimaryKey) MarshalToBSON() []byte {
 		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", pk, len(doc), expectedLen))
 	}
 
-	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
+	binary.LittleEndian.PutUint32(doc, safecast.MustConvert[uint32](len(doc)))
 
 	return doc
 }
@@ -141,7 +142,7 @@ func (mt MismatchHistory) MarshalToBSON() []byte {
 		1
 
 	doc := make(bson.Raw, 4, expectedLen)
-	binary.LittleEndian.PutUint32(doc, uint32(cap(doc)))
+	binary.LittleEndian.PutUint32(doc, safecast.MustConvert[uint32](cap(doc)))
 
 	doc = bsoncore.AppendDateTimeElement(doc, "first", int64(mt.First))
 	doc = bsoncore.AppendInt64Element(doc, "durationMS", mt.DurationMS)
@@ -229,7 +230,7 @@ func (rd Doc) MarshalToBSON() []byte {
 
 	doc := make(bson.Raw, 4, expectedLen)
 	doc = bsoncore.AppendDocumentElement(doc, "_id", keyRaw)
-	doc = bsoncore.AppendInt32Element(doc, "dataSize", int32(rd.DataSize))
+	doc = bsoncore.AppendInt32Element(doc, "dataSize", rd.DataSize)
 
 	if cot, has := rd.ChangeOpTime.Get(); has {
 		doc = bsoncore.AppendTimestampElement(doc, "changeOpTime", cot.T, cot.I)
@@ -249,7 +250,7 @@ func (rd Doc) MarshalToBSON() []byte {
 		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", rd, len(doc), expectedLen))
 	}
 
-	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
+	binary.LittleEndian.PutUint32(doc, safecast.MustConvert[uint32](len(doc)))
 
 	return doc
 }

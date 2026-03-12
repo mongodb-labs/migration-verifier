@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand/v2"
 	"net"
 	"net/http"
 	"strconv"
@@ -16,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/webserver"
+	"github.com/10gen/migration-verifier/mmath/random"
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
@@ -160,7 +160,8 @@ func (server *WebServer) Run(ctx context.Context) error {
 		Msg("Web server started.")
 
 	server.srv = &http.Server{
-		Handler: server.setupRouter(),
+		Handler:           server.setupRouter(),
+		ReadHeaderTimeout: time.Minute,
 	}
 
 	webServerCtx, shutDownWebServer := contextplus.WithCancelCause(ctx)
@@ -286,7 +287,7 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 	encoder := json.NewEncoder(c.Writer)
 
 	sendError := func(err error) {
-		errRef := strconv.FormatUint(rand.Uint64(), 16)
+		errRef := strconv.FormatUint(random.MustUint64(), 16)
 
 		server.logger.Error().
 			Str("request", c.Request.URL.Path).

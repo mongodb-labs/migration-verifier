@@ -86,7 +86,7 @@ func (l *Logger) Rotate() {
 
 // NewRotatingWriter creates a new io.Writer with an underlying lumberjack.Logger
 func NewRotatingWriter(dirPath string) (io.Writer, error) {
-	err := os.MkdirAll(dirPath, 0744)
+	err := os.MkdirAll(dirPath, 0750)
 	if err != nil {
 		return nil, err
 	}

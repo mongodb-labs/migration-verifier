@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	// #nosec G108 - pprof by default is OK
 	_ "net/http/pprof"
 	"os"
 	"slices"

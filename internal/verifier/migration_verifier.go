@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	_ "net/http/pprof"
 	"os"
 	"strings"
 	"sync"

@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -345,7 +346,7 @@ func (c *comparator) sweepMissingDocs() {
 			Details:         compare.Missing,
 			Cluster:         constants.ClusterTarget,
 			NameSpace:       c.namespace,
-			DataSize:        int32(len(docWithTS.Doc)),
+			DataSize:        safecast.MustConvert[int32](len(docWithTS.Doc)),
 			SrcTimestamp:    option.Some(docWithTS.TS),
 			MismatchHistory: createMismatchTimes(firstMismatchTime),
 		})
@@ -359,7 +360,7 @@ func (c *comparator) sweepMissingDocs() {
 			Details:         compare.Missing,
 			Cluster:         constants.ClusterSource,
 			NameSpace:       c.namespace,
-			DataSize:        int32(len(docWithTS.Doc)),
+			DataSize:        safecast.MustConvert[int32](len(docWithTS.Doc)),
 			DstTimestamp:    option.Some(docWithTS.TS),
 			MismatchHistory: createMismatchTimes(firstMismatchTime),
 		})

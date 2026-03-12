@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -123,7 +124,7 @@ func (vr Result) MarshalToBSON() []byte {
 
 	buf := make(bson.Raw, 4, bsonLen)
 
-	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
+	binary.LittleEndian.PutUint32(buf, safecast.MustConvert[uint32](bsonLen))
 
 	if !vr.ID.IsZero() {
 		buf = bsoncore.AppendValueElement(buf, "id", bsoncore.Value{
