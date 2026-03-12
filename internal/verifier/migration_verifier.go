@@ -1373,7 +1373,6 @@ func (verifier *Verifier) setCollectionSizeInTask(
 	// Update the collection task now so that the doc count & byte count
 	// can inform logging.
 	if err := verifier.UpdateVerificationTask(ctx, task); err != nil {
-
 		// This failure shouldn’t happen, but it needn’t be fatal.
 		verifier.logger.Warn().
 			Any("task", task.PrimaryKey).
