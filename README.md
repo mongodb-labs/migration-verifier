@@ -134,6 +134,7 @@ These represent a logical time in MongoDB’s replication protocol.
     - `lagSecs` (unsigned)
     - `bufferSaturation` (fraction)
   - `dstChangeStats` (same fields as `srcChangeStats`)
+  - `srcLastRecheckedTS` (see below)
   - `longestMismatch` (See `/docMismatches` below for format.)
   - `error` (string, optional)
   - `verificationStatus` (tasks for the current generation)
@@ -191,6 +192,22 @@ This is sample output:
   }
 }
 ```
+
+#### Last recheck timestamps
+
+The `srcLastRecheckedTS` and `dstLastRecheckedTS` fields indicate the
+oplog timestamp of the last write that the verifier has rechecked.
+
+Consider a write on the source at oplog timestamp {123, 234}. Immediately
+after the write happens, the verifier will not have checked whether the
+write was replicated. By checking whether `srcLastRecheckedTS` has met or
+exceeded that value, you can know when the verifier has done a recheck
+for that write.
+
+In a migration, once you have quiesced writes on your source cluster,
+monitor the replicator & correlate its last-replicated optime with
+`srcLastRecheckedTS`. This will tell you when it’s safe to proceed with
+cutover.
 
 # CLI Options
 
