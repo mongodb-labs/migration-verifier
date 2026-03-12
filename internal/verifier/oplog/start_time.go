@@ -86,7 +86,6 @@ func getLatestVisibleOplogOpTime(
 	ctx context.Context,
 	client *mongo.Client,
 ) (OpTime, error) {
-
 	latestOpTime, err := getLatestOplogOpTime(ctx, client)
 	if err != nil {
 		return OpTime{}, err

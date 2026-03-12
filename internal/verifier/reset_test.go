@@ -199,5 +199,4 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 		ns1,
 		taskDocs[4].QueryFilter.Namespace,
 	)
-
 }

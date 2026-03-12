@@ -16,7 +16,6 @@ import (
 
 // NamespaceStats represents progress statistics for a single namespace.
 type NamespaceStats struct {
-
 	// Namespace is "$dbname.$collname", e.g., "db1.coll1"
 	Namespace string `bson:"_id"`
 
@@ -171,8 +170,10 @@ const perNsStatsPipelineTemplate = `[
 	{ "$sort": { "_id": 1 } }
 ]`
 
-var templateOnce sync.Once
-var jsonTemplate *template.Template
+var (
+	templateOnce sync.Once
+	jsonTemplate *template.Template
+)
 
 // GetPersistedNamespaceStatistics queries the verifier’s metadata for statistics
 // on progress for each namespace. The returned array is sorted by

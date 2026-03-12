@@ -280,7 +280,6 @@ func getExplicitTypeCheckPredicates(lower, upper any) ([]bson.D, error) {
 	}
 
 	if len(betweenTypes) > 0 {
-
 		orPredicates = append(
 			orPredicates,
 			bson.D{{"_id", bson.D{{"$type", typesToStrings(betweenTypes)}}}},

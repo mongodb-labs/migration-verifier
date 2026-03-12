@@ -259,7 +259,6 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 	if val := c.Query(minDurationSecsKey); val != "" {
 		var err error
 		minDurationSecs, err = strconv.ParseUint(val, 10, 32)
-
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("invalid %#q", minDurationSecsKey),

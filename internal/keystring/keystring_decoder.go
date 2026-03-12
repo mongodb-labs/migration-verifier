@@ -69,9 +69,11 @@ const (
 	kBoolTrue  cType = kBool + 1
 )
 
-const kEnd = 4
-const kLess = 1
-const kGreater = 254
+const (
+	kEnd     = 4
+	kLess    = 1
+	kGreater = 254
+)
 
 func numBytesForInt(ctype cType) int {
 	if ctype >= kNumericPositive1ByteInt {

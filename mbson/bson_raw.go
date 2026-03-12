@@ -62,7 +62,6 @@ func RawElements(doc bson.Raw) iter.Seq2[bson.RawElement, error] {
 				return
 			}
 		}
-
 	}
 }
 

@@ -54,7 +54,6 @@ func (cr *CheckRunner) StartNextGeneration() error {
 	case err := <-cr.checkDoneChan:
 		return errors.Wrap(err, "verifier failed while test waited to start next generation")
 	}
-
 }
 
 // Await will await generations and start new ones until the check

@@ -102,7 +102,6 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 				mbson.UnmarshalElementValue(el, &arr),
 				"parsing ops",
 			)
-
 			if err != nil {
 				return err
 			}

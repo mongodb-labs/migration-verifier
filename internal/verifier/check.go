@@ -221,7 +221,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	// Now that we’ve initialized verifier.generation we can
 	// start the change readers.
 	err = verifier.initializeChangeReaders()
-
 	if err != nil {
 		return err
 	}
@@ -242,7 +241,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		},
 		"setting up verifier metadata",
 	).Run(ctx, verifier.logger)
-
 	if err != nil {
 		return err
 	}

@@ -36,8 +36,10 @@ type PrimaryKey struct {
 	Rand int32
 }
 
-var _ bson.Marshaler = PrimaryKey{}
-var _ bson.Unmarshaler = &PrimaryKey{}
+var (
+	_ bson.Marshaler   = PrimaryKey{}
+	_ bson.Unmarshaler = &PrimaryKey{}
+)
 
 // MarshalBSON implements bson.Marshaler .. which is only done to prevent
 // the inefficiency of bson.Marshal().
@@ -122,8 +124,10 @@ type MismatchHistory struct {
 
 var MismatchHistoryBSONLength = len(MismatchHistory{}.MarshalToBSON())
 
-var _ bson.Marshaler = MismatchHistory{}
-var _ bson.Unmarshaler = &MismatchHistory{}
+var (
+	_ bson.Marshaler   = MismatchHistory{}
+	_ bson.Unmarshaler = &MismatchHistory{}
+)
 
 func (mt MismatchHistory) MarshalBSON() ([]byte, error) {
 	panic("Prefer MarshalToBSON.")
@@ -199,8 +203,10 @@ type Doc struct {
 	FirstMismatchTime option.Option[bson.DateTime] `bson:"firstMismatchTime"`
 }
 
-var _ bson.Marshaler = Doc{}
-var _ bson.Unmarshaler = &Doc{}
+var (
+	_ bson.Marshaler   = Doc{}
+	_ bson.Unmarshaler = &Doc{}
+)
 
 // MarshalBSON implements bson.Marshaler .. which is only done to prevent
 // the inefficiency of bson.Marshal().

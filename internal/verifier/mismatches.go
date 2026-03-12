@@ -113,7 +113,6 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 			},
 		},
 	)
-
 	if err != nil {
 		return errors.Wrapf(err, "creating indexes for collection %#q", mismatchesCollectionName)
 	}
@@ -299,7 +298,6 @@ func getDocumentMismatchReportData(
 						).
 						SetLimit(limit),
 				)
-
 				if err != nil {
 					return errors.Wrapf(err, "fetching %#q", categoryParts.label)
 				}
@@ -427,7 +425,6 @@ func (verifier *Verifier) SendDocumentMismatches(
 			{{"$replaceWith", "$mismatch"}},
 		},
 	)
-
 	if err != nil {
 		return fmt.Errorf("fetching generation %d’s mismatches: %w", generation, err)
 	}

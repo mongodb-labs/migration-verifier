@@ -55,7 +55,6 @@ var unitSize = map[DataUnit]uint64{
 // It’s a lot like Duration.String(), but with spaces between,
 // and the lowest unit shown is always the second.
 func DurationToHMS(duration time.Duration) string {
-
 	hours := int(math.Floor(duration.Hours()))
 	minutes := int(math.Floor(duration.Minutes())) % 60
 
@@ -76,7 +75,6 @@ func DurationToHMS(duration time.Duration) string {
 // in the given `unit`. For example, count=1024 and unit=KiB would
 // return "1".
 func BytesToUnit[T num16Plus](count T, unit DataUnit) string {
-
 	// Ideally go-humanize could do this for us,
 	// but as of this writing it can’t.
 	// https://github.com/dustin/go-humanize/issues/111
@@ -160,7 +158,6 @@ func FmtPercent[T, U realNum](numerator T, denominator U) string {
 // You can then give that DataUnit to BytesToUnit() to stringify
 // multiple byte counts to the same unit.
 func FindBestUnit[T num16Plus](count T) DataUnit {
-
 	// humanize.IBytes() does most of what we want but lacks the
 	// flexibility to specify a precision. It’s not complicated to
 	// implement here anyway.

@@ -31,8 +31,8 @@ const (
 func (verifier *Verifier) insertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
-	generation int) (*tasks.Task, error) {
-
+	generation int,
+) (*tasks.Task, error) {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
 		var ok bool
@@ -188,7 +188,6 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
-
 			err := verifier.verificationTaskCollection().FindOneAndUpdate(
 				ctx,
 				bson.M{
@@ -215,7 +214,6 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 					// We want “verifyCollection” tasks before “verify”(-document) ones.
 					SetSort(bson.M{"type": -1}),
 			).Decode(task)
-
 			if err != nil {
 				task = nil
 				if errors.Is(err, mongo.ErrNoDocuments) {

@@ -41,7 +41,6 @@ func ListAllUserNamespaces(
 			util.ExcludePrefixesQuery("name", namespaces.ExcludedDBPrefixes),
 		}},
 	})
-
 	if err != nil {
 		return nil, err
 	}

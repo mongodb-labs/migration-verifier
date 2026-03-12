@@ -245,7 +245,6 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 				// Nothing to do
 			case 1:
 				_, err := reports[0].Get()
-
 				if err != nil {
 					s.Assert().ErrorIs(
 						err,

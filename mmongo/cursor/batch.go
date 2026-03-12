@@ -20,9 +20,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
-var (
-	clusterTimePath = mslices.Of("$clusterTime", "clusterTime")
-)
+var clusterTimePath = mslices.Of("$clusterTime", "clusterTime")
 
 // BatchCursor is like mongo.Cursor, but it exposes documents per batch rather than
 // a per-document reader. This facilitates more efficient memory usage
@@ -83,7 +81,6 @@ func (c *BatchCursor) GetCurrentBatchIterator() iter.Seq2[bson.Raw, error] {
 // GetClusterTime returns the server response’s cluster time.
 func (c *BatchCursor) GetClusterTime() (bson.Timestamp, error) {
 	ctRV, err := c.rawResp.LookupErr(clusterTimePath...)
-
 	if err != nil {
 		return bson.Timestamp{}, errors.Wrapf(
 			err,

@@ -27,9 +27,11 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-var _ bson.ValueMarshaler = &Option[int]{}
-var _ bson.ValueUnmarshaler = &Option[int]{}
-var _ bson.Zeroer = &Option[int]{}
+var (
+	_ bson.ValueMarshaler   = &Option[int]{}
+	_ bson.ValueUnmarshaler = &Option[int]{}
+	_ bson.Zeroer           = &Option[int]{}
+)
 
 // Option represents a possibly-empty value.
 // Its zero value is the empty case.
@@ -76,7 +78,6 @@ func FromPointer[T any](valPtr *T) Option[T] {
 // This is useful, e.g., to interface with code that uses
 // nil to indicate a missing slice or map.
 func IfNotZero[T any](value T) Option[T] {
-
 	// copied from samber/mo.EmptyableToOption:
 	if reflect.ValueOf(&value).Elem().IsZero() {
 		return Option[T]{}

@@ -32,7 +32,6 @@ func (s *mySuite) Test_Option_BSON() {
 	s.Run(
 		"marshal pointer, unmarshal Option",
 		func() {
-
 			bytes, err := bson.Marshal(MyTypePtrs{
 				IsNoneOmitEmpty: pointerTo(234),
 				IsSome:          pointerTo(false),
@@ -55,7 +54,6 @@ func (s *mySuite) Test_Option_BSON() {
 	s.Run(
 		"marshal Option, unmarshal pointer",
 		func() {
-
 			bytes, err := bson.Marshal(MyType{
 				IsNoneOmitEmpty: Some(234),
 				IsSome:          Some(false),
@@ -144,7 +142,6 @@ func (s *mySuite) Test_Option_JSON() {
 	s.Run(
 		"marshal pointer, unmarshal Option",
 		func() {
-
 			bytes, err := json.Marshal(MyTypePtrs{
 				IsNone: pointerTo(234),
 				IsSome: pointerTo(false),
@@ -167,7 +164,6 @@ func (s *mySuite) Test_Option_JSON() {
 	s.Run(
 		"marshal Option, unmarshal pointer",
 		func() {
-
 			bytes, err := json.Marshal(MyType{
 				IsNone: Some(234),
 				IsSome: Some(false),
@@ -256,7 +252,6 @@ func (s *mySuite) Test_Option_Pointer() {
 }
 
 func (s *mySuite) Test_Option() {
-
 	//nolint:testifylint  // None is, in fact, the expected value.
 	s.Assert().Equal(
 		None[int](),

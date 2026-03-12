@@ -1,10 +1,12 @@
 version: "2"
 linters:
-#  enable:
-#    - forbidigo
-#    - gomodguard
-#    - govet
-#    - gocritic
+  enable-default: true
+
+  enable:
+    - forbidigo
+    - gomodguard
+    - govet
+    - gocritic
   disable:
     - depguard
   settings:
@@ -38,5 +40,4 @@ linters:
 formatters:
   enable:
     - gci
-    - gofmt
-    - goimports
+    - gofumpt

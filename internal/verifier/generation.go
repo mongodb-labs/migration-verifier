@@ -82,7 +82,6 @@ func (v *Verifier) readGeneration(ctx context.Context) (option.Option[int], erro
 	parsed := generationDoc{}
 
 	err := result.Decode(&parsed)
-
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			err = nil

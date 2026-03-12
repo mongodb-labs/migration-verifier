@@ -292,7 +292,6 @@ func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson
 		token,
 		options.Replace().SetUpsert(true),
 	)
-
 	if err != nil {
 		return errors.Wrapf(err, "persisting %s resume token (%v)", rc.readerType, token)
 	}
@@ -328,7 +327,6 @@ func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Optio
 		ctx,
 		bson.D{{"_id", resumeTokenDocID(rc.getWhichCluster())}},
 	).Raw()
-
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			err = nil

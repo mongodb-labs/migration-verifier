@@ -90,7 +90,6 @@ func CastRawValue[T bsonCastRecipient](in bson.RawValue) (T, error) {
 // type, then returns the result.
 func Lookup[T bsonCastRecipient](doc bson.Raw, pointer ...string) (T, error) {
 	rv, err := doc.LookupErr(pointer...)
-
 	if err != nil {
 		return *new(T), fmt.Errorf("extracting %#q: %w", pointer, err)
 	}
@@ -111,7 +110,6 @@ func LookupTo[T bsonCastRecipient](doc bson.Raw, recipient *T, pointer ...string
 // Any returned error will include the field name (if it parses validly).
 func UnmarshalElementValue[T bsonCastRecipient](in bson.RawElement, recipient *T) error {
 	rv, err := in.ValueErr()
-
 	if err != nil {
 		key, keyErr := in.KeyErr()
 		if keyErr != nil {

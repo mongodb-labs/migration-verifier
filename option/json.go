@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 )
 
-var _ json.Marshaler = &Option[int]{}
-var _ json.Unmarshaler = &Option[int]{}
+var (
+	_ json.Marshaler   = &Option[int]{}
+	_ json.Unmarshaler = &Option[int]{}
+)
 
 // MarshalJSON encodes Option into json.
 func (o Option[T]) MarshalJSON() ([]byte, error) {

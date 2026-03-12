@@ -62,7 +62,6 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 			)
 
 			if len(indexMap) > 0 {
-
 				suite.Require().NoError(
 					client.Database(dbname).RunCommand(
 						ctx,

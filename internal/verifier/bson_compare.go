@@ -122,7 +122,6 @@ func bsonUnorderedCompareRawValue(srcValue, dstValue bson.RawValue) (bool, error
 // Compares two bson arrays, comparing subdocuments ignoring order.  The array order is still significant.
 // Returns true if the arrays match.
 func bsonUnorderedCompareRawArray(srcRaw, dstRaw bson.Raw) (bool, error) {
-
 	srcElements, dstElements, err := parseDocuments(srcRaw, dstRaw)
 	if err != nil {
 		return false, err

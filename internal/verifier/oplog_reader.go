@@ -199,7 +199,6 @@ func (o *OplogReader) createCursor(
 			oplogFilter,
 			findOpts,
 		)
-
 	if err != nil {
 		return bson.Timestamp{}, errors.Wrapf(err, "opening cursor to tail %s’s oplog", o.readerType)
 	}
@@ -598,7 +597,6 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 }
 
 func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBeforeTS bson.Timestamp) ([]ParsedEvent, bson.Timestamp, error) {
-
 	var latestTS bson.Timestamp
 
 	for _, rawDoc := range o.curDocs {

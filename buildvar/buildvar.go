@@ -7,8 +7,10 @@ const (
 )
 
 // These get set at build time, assuming use of build.sh.
-var Revision = buildVarDefaultStr
-var BuildTime = buildVarDefaultStr
+var (
+	Revision  = buildVarDefaultStr
+	BuildTime = buildVarDefaultStr
+)
 
 func GetClientAppName() string {
 	return fmt.Sprintf("Migration Verifier %s", Revision)

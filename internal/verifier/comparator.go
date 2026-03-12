@@ -100,7 +100,6 @@ func (c *comparator) readBatches(
 	ctx context.Context,
 	srcChannel, dstChannel <-chan []compare.DocWithTS,
 ) ([]compare.DocWithTS, []compare.DocWithTS, error) {
-
 	simpleTimerReset(c.readTimer, readTimeout)
 
 	var srcBatch, dstBatch []compare.DocWithTS
@@ -313,7 +312,6 @@ func (c *comparator) flush(
 			ByteCount: c.srcByteCount,
 		},
 	)
-
 	if err != nil {
 		return errors.Wrapf(err, "flushing %d problems", len(probsToFlush))
 	}

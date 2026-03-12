@@ -384,7 +384,6 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		if partitionSizeMB > math.MaxInt64 {
 			return nil, fmt.Errorf("%q may not exceed %d", partitionSizeMB, math.MaxInt64)
 		}
-
 	}
 
 	v.SetPartitionSizeMB(

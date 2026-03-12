@@ -256,7 +256,6 @@ func partitionCollectionWithParameters(
 			prevSampleErr = err
 			return err
 		}, "sampling documents to get partition mid bounds").Run(ctx, subLogger)
-
 	if err != nil {
 		return nil, err
 	}
@@ -514,11 +513,13 @@ func getMidIDBounds(
 	pipeline = append(pipeline, []bson.D{
 		{{"$sample", bson.D{{"size", numDocsToSample}}}},
 		{{"$project", bson.D{{"_id", 1}}}},
-		{{"$bucketAuto",
+		{{
+			"$bucketAuto",
 			bson.D{
 				{"groupBy", "$_id"},
 				{"buckets", numPartitions},
-			}}},
+			},
+		}},
 	}...)
 
 	// Get a cursor for the $sample and $bucketAuto aggregation.
@@ -569,7 +570,6 @@ func getMidIDBounds(
 			"finding %#q's _id partition boundaries",
 			srcDB.Name()+"."+collName,
 		).Run(ctx, logger)
-
 	if err != nil {
 		return nil, false, errors.Wrapf(err, "encountered a problem in the cursor when trying to $sample and $bucketAuto aggregation for source namespace '%s.%s'", srcDB.Name(), collName)
 	}

@@ -76,7 +76,6 @@ func DisableBalancing(ctx context.Context, coll *mongo.Collection) error {
 				}},
 			},
 		)
-
 	if err != nil {
 		return errors.Wrapf(err, "disabling %#q’s shard balancing", ns)
 	}
