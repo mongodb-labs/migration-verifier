@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/bits"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -220,7 +221,7 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any,
 		if err != nil {
 			return nil, err
 		}
-		return bson.DateTime(dateTimeAsInt ^ (uint64(1) << 63)), nil
+		return safecast.MustConvert[bson.DateTime](dateTimeAsInt ^ (uint64(1) << 63)), nil
 	case kTimestamp:
 		t, err := buf.readUint32BE()
 		if err != nil {
@@ -492,13 +493,13 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any,
 			fractionalBits := 52 - exponent
 			fractionalBytes := (fractionalBits + 7) / 8
 
-			doubleBits := uint64(integerPart) << fractionalBits
+			doubleBits := safecast.MustConvert[uint64](integerPart) << fractionalBits
 			doubleBits &= ^(uint64(1) << 52)
-			doubleBits |= (uint64(exponent) + 1023) << 52
+			doubleBits |= (safecast.MustConvert[uint64](exponent) + 1023) << 52
 			if isNegative {
 				doubleBits |= (uint64(1) << 63)
 			}
-			for i := 0; i < fractionalBytes; i++ {
+			for i := range fractionalBytes {
 				myByte, err := buf.readUint8()
 				if err != nil {
 					return nil, err
