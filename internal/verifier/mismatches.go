@@ -20,6 +20,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -31,38 +32,6 @@ type MismatchInfo struct {
 	TaskType   tasks.Type
 	Generation int
 	Detail     compare.Result
-}
-
-// Returns an aggregation that indicates whether the MismatchInfo refers to
-// a missing document.
-func getMismatchDocMissingAggExpr(docExpr any) any {
-	return getResultDocMissingAggExpr(
-		agg.GetField{
-			Input: docExpr,
-			Field: "detail",
-		},
-	)
-}
-
-// Returns an agg expression that indicates whether the VerificationResult
-// refers to a missing document.
-func getResultDocMissingAggExpr(docExpr any) any {
-	return agg.And{
-		agg.Eq{
-			agg.GetField{
-				Input: docExpr,
-				Field: "details",
-			},
-			compare.Missing,
-		},
-		agg.Eq{
-			agg.GetField{
-				Input: docExpr,
-				Field: "field",
-			},
-			"",
-		},
-	}
 }
 
 var _ bson.Marshaler = MismatchInfo{}
@@ -202,22 +171,26 @@ func getMismatchesForTasks(
 
 var (
 	// A filter to identify docs marked “missing” (on either src or dst)
-	missingFilter = getMismatchDocMissingAggExpr("$$ROOT")
+	missingFilter = agg.And{
+		agg.Eq{"$detail.details", compare.Missing},
+		agg.Eq{"$detail.field", ""},
+	}
 
-	missingOnDstFilter = agg.And{
-		missingFilter,
+	missingOnDstFilter = append(
+		slices.Clone(missingFilter),
 		agg.Eq{
 			"$detail.cluster",
 			constants.ClusterTarget,
 		},
-	}
-	extraOnDstFilter = agg.And{
-		missingFilter,
+	)
+
+	extraOnDstFilter = append(
+		slices.Clone(missingFilter),
 		agg.Eq{
 			"$detail.cluster",
 			constants.ClusterSource,
 		},
-	}
+	)
 
 	contentDiffersFilter = agg.Not{missingFilter}
 )
