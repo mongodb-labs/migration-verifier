@@ -371,32 +371,6 @@ func recordMismatches(
 	return errors.Wrapf(err, "recording %d mismatches", len(models))
 }
 
-func getDocMismatchesPerGenPipeline(
-	generation int,
-	lookupPipeline mongo.Pipeline,
-) mongo.Pipeline {
-	return mongo.Pipeline{
-		// Match document-checking tasks in the generation.
-		{{"$match", bson.D{
-			{"generation", generation},
-			{"type", tasks.VerifyDocuments},
-		}}},
-
-		// Add each task’s longest-lived mismatch to the task.
-		{{"$lookup", bson.D{
-			{"from", mismatchesCollectionName},
-			{"localField", "_id"},
-			{"foreignField", "task"},
-			{"as", "mismatch"},
-			{"pipeline", lookupPipeline},
-		}}},
-
-		// Discard the task in favor of the mismatch.
-		{{"$unwind", "$mismatch"}},
-		{{"$replaceWith", "$mismatch"}},
-	}
-}
-
 func getLongestLivedDocumentMismatch(
 	ctx context.Context,
 	db *mongo.Database,
