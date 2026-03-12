@@ -562,22 +562,17 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 		),
 	)
 
-	_, err := suite.srcMongoClient.
+	srcColl := suite.srcMongoClient.
 		Database(suite.DBNameForTest()).
-		Collection(collName).
-		InsertOne(ctx, bson.D{{"_id", "a"}})
+		Collection(collName)
+
+	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", "a"}})
 	suite.Require().NoError(err)
 
 	// So that the insert above isn’t the last thing in the oplog:
-	_, err = suite.srcMongoClient.
-		Database(suite.DBNameForTest()).
-		Collection(collName).
-		InsertOne(ctx, bson.D{{"_id", "qwe"}})
+	_, err = srcColl.InsertOne(ctx, bson.D{{"_id", "qwe"}})
 	suite.Require().NoError(err)
-	_, err = suite.srcMongoClient.
-		Database(suite.DBNameForTest()).
-		Collection(collName).
-		DeleteOne(ctx, bson.D{{"_id", "qwe"}})
+	_, err = srcColl.DeleteOne(ctx, bson.D{{"_id", "qwe"}})
 	suite.Require().NoError(err)
 
 	testutil.KillTransactions(ctx, suite.T(), suite.srcMongoClient)
@@ -610,7 +605,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(mismatches[0].Task),
+				verifier.generation,
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -623,7 +618,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 				},
 				reportData.Counts,
 			)
-			suite.Assert().Equal(reportData.MissingOnDst, mismatches)
+			suite.Assert().Equal(mismatches, reportData.MissingOnDst)
 		},
 	)
 
@@ -665,7 +660,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 				)
 
 				cur, err = mmColl.Find(ctx, bson.D{
-					{"task", theTasks[0].PrimaryKey},
+					{"taskID", theTasks[0].PrimaryKey},
 				})
 				suite.Require().NoError(err)
 				suite.Require().NoError(cur.All(ctx, &mismatches))
@@ -676,7 +671,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(theTasks[0].PrimaryKey),
+				verifier.generation,
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -735,7 +730,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			lastMismatchDuration := mismatches[0].Detail.MismatchHistory.DurationMS
 
 			cur, err = mmColl.Find(ctx, bson.D{
-				{"task", theTasks[0].PrimaryKey},
+				{"taskID", theTasks[0].PrimaryKey},
 			})
 			suite.Require().NoError(err)
 			suite.Require().NoError(cur.All(ctx, &mismatches))
@@ -744,7 +739,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(theTasks[0].PrimaryKey),
+				verifier.generation,
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)

@@ -177,19 +177,13 @@ Each mismatch document looks like:
 - `detail`: human-readable description of the mismatch (only set with
   `content`-type mismatches)
 
+The results are returned sorted by `durationSecs`, descending.
+
 During generation 0, this API command returns mismatches for generation 0.
 Thereafter it returns mismatches for the _prior_ generation.
 
 You can optionally send a `minDurationSecs` parameter to fetch mismatches
 by a minimum duration.
-
-There is no sort order defined. If you want to sort mismatches, e.g., by
-duration you can pipe `curl`’s response through [jq](http://jqlang.org).
-The same tool can also limit your result set. For example, if you want the
-top 5 longest-duration mismatches, try:
-```
-curl localhost:27020/api/v1/docMismatches | jq --slurp 'sort_by(-.durationSecs) | limit(5; .[])'
-```
 
 # Tests
 

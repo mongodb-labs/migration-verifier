@@ -123,33 +123,17 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 
 	strBuilder.WriteString("\n")
 
-	failedTaskMap := lo.SliceToMap(
-		lo.Range(len(failedTasks)),
-		func(i int) (bson.ObjectID, tasks.Task) {
-			return failedTasks[i].PrimaryKey, failedTasks[i]
-		},
-	)
-	failedTaskIDs := slices.Collect(maps.Keys(failedTaskMap))
-
 	reportData, err := getDocumentMismatchReportData(
 		ctx,
 		verifier.verificationDatabase(),
-		failedTaskIDs,
+		generation,
 		verifier.failureDisplaySize,
 	)
 	if err != nil {
 		return option.None[time.Duration](), false, errors.Wrapf(
 			err,
-			"fetching %d failed tasks’ most persistent discrepancies",
-			len(failedTasks),
+			"fetching most persistent discrepancies",
 		)
-	}
-
-	if reportData.Counts.Total() == 0 {
-		fmt.Printf("failedTaskIDs: %+v\n", failedTaskIDs)
-		fmt.Printf("reportData: %+v\n", reportData)
-
-		panic("No failed tasks, but no mismatches at all?!?")
 	}
 
 	showMismatchDuration := generation > 0
@@ -176,10 +160,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				panic(fmt.Sprintf("found missing-type mismatch but expected content-differs: %+v", m))
 			}
 
-			task := failedTaskMap[m.Task]
-
 			cells := mslices.Of(
-				task.QueryFilter.Namespace,
+				m.Detail.NameSpace,
 				fmt.Sprint(m.Detail.ID),
 				m.Detail.Field,
 				m.Detail.Details,
@@ -235,10 +217,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				panic(fmt.Sprintf("MissingOnDst: found content-mismatch mismatch but expected missing: %+v", reportData))
 			}
 
-			task := failedTaskMap[d.Task]
-
 			cells := mslices.Of(
-				task.QueryFilter.Namespace,
+				d.Detail.NameSpace,
 				fmt.Sprint(d.Detail.ID),
 			)
 
@@ -293,10 +273,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				panic(fmt.Sprintf("ExtraOnDst: found content-mismatch mismatch but expected missing (%+v); reportData = %+v", d, reportData))
 			}
 
-			task := failedTaskMap[d.Task]
-
 			cells := mslices.Of(
-				task.QueryFilter.Namespace,
+				d.Detail.NameSpace,
 				fmt.Sprint(d.Detail.ID),
 			)
 
