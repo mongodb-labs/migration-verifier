@@ -14,6 +14,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -184,7 +185,7 @@ func partitionCollectionWithParameters(
 		Str("namespace", uuidEntry.DBName+"."+uuidEntry.CollName).
 		Float64("sampleRate", sampleRate).
 		Int("sampleMinNumDocs", sampleMinNumDocs).
-		Int64("desiredPartitionSizeInBytes", int64(partitionBytes)).
+		Uint64("desiredPartitionSizeInBytes", uint64(partitionBytes)).
 		Msg("Partitioning collection.")
 
 	// Get the source collection.
@@ -395,7 +396,7 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 		Bool("isCapped", value.Capped).
 		Msg("Collection stats.")
 
-	return types.ByteCount(value.Size), types.DocumentCount(value.Count), value.Capped, nil
+	return safecast.MustConvert[types.ByteCount](value.Size), safecast.MustConvert[types.DocumentCount](value.Count), value.Capped, nil
 }
 
 // GetDocumentCountAfterFiltering counts the number of filtered documents in a collection.

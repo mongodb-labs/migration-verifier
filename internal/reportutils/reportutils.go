@@ -11,6 +11,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/dustin/go-humanize"
 	"golang.org/x/exp/constraints"
 )
@@ -123,7 +124,7 @@ func fmtFloat[T types.RealNumber](num T) string {
 }
 
 func roundFloat(val float64, precision uint) float64 {
-	ratio := math.Pow10(int(precision))
+	ratio := math.Pow10(safecast.MustConvert[int](precision))
 	return math.Round(val*ratio) / ratio
 }
 

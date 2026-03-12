@@ -7,6 +7,7 @@ import (
 
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -150,7 +151,7 @@ func (ResumeToken) MarshalBSON() ([]byte, error) {
 func (rt ResumeToken) MarshalToBSON() []byte {
 	buf := make([]byte, 4, rtBSONLength)
 
-	binary.LittleEndian.PutUint32(buf, uint32(cap(buf)))
+	binary.LittleEndian.PutUint32(buf, safecast.MustConvert[uint32](cap(buf)))
 
 	buf = bsoncore.AppendTimestampElement(buf, "ts", rt.TS.T, rt.TS.I)
 

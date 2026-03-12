@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/bits"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -220,7 +221,7 @@ func readValue(ctype cType, version KeyStringVersion, buf *bufferConsumer) (any,
 		if err != nil {
 			return nil, err
 		}
-		return bson.DateTime(dateTimeAsInt ^ (uint64(1) << 63)), nil
+		return safecast.MustConvert[bson.DateTime](dateTimeAsInt ^ (uint64(1) << 63)), nil
 	case kTimestamp:
 		t, err := buf.readUint32BE()
 		if err != nil {

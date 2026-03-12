@@ -21,6 +21,7 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"github.com/samber/mo"
@@ -638,7 +639,7 @@ func iterateCursorToChannel(
 
 		needFlush := cmp.Or(
 			len(docsWithTSCache) == compare.ToComparatorBatchSize,
-			int(bytesEnqueued)+len(cursor.Current) > compare.ToComparatorByteLimit,
+			safecast.MustConvert[int](bytesEnqueued)+len(cursor.Current) > compare.ToComparatorByteLimit,
 		)
 
 		if needFlush {

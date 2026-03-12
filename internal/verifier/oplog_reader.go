@@ -27,6 +27,7 @@ import (
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -644,7 +645,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 							OpType:      oplogOpToOperationType[subOp.Op],
 							Ns:          NewNamespace(mmongo.SplitNamespace(subOp.Ns)),
 							DocID:       subOp.DocID,
-							FullDocLen:  option.Some(types.ByteCount(subOp.DocLen)),
+							FullDocLen:  option.Some(safecast.MustConvert[types.ByteCount](subOp.DocLen)),
 							ClusterTime: &op.TS,
 						}
 					},
@@ -657,7 +658,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 					OpType:      oplogOpToOperationType[op.Op],
 					Ns:          NewNamespace(mmongo.SplitNamespace(op.Ns)),
 					DocID:       op.DocID,
-					FullDocLen:  option.Some(types.ByteCount(op.DocLen)),
+					FullDocLen:  option.Some(safecast.MustConvert[types.ByteCount](op.DocLen)),
 					ClusterTime: &op.TS,
 				},
 			)

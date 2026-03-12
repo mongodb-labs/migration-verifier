@@ -17,6 +17,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/mongodb-labs/migration-tools/mongotools"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -385,7 +386,9 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 
 	}
 
-	v.SetPartitionSizeMB(uint32(cmp.Or(partitionSizeMB, partitions.DefaultPartitionMiB)))
+	v.SetPartitionSizeMB(
+		safecast.MustConvert[uint32](cmp.Or(partitionSizeMB, partitions.DefaultPartitionMiB)),
+	)
 
 	v.SetStartClean(cCtx.Bool(startClean))
 

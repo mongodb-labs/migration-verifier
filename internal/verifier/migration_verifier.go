@@ -733,7 +733,7 @@ REPORTS:
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace).
-		Int64("documentCount", int64(task.SourceDocumentCount)).
+		Uint64("documentCount", uint64(task.SourceDocumentCount)).
 		Str("dataSize", reportutils.FmtBytes(task.SourceByteCount)).
 		Stringer("timeElapsed", time.Since(start)).
 		Msg("Finished document comparison task.")
@@ -1377,8 +1377,8 @@ func (verifier *Verifier) setCollectionSizeInTask(
 		verifier.logger.Warn().
 			Any("task", task.PrimaryKey).
 			Str("namespace", FullName(srcColl)).
-			Int64("documentsCount", int64(docsCount)).
-			Int64("sizeInBytes", int64(collBytes)).
+			Uint64("documentsCount", uint64(docsCount)).
+			Uint64("sizeInBytes", uint64(collBytes)).
 			Err(err).
 			Msg("Failed to update verification task with collection stats.")
 	}
@@ -1423,9 +1423,9 @@ func (verifier *Verifier) partitionCollection(
 		verifier.logger.Debug().
 			Any("task", task.PrimaryKey).
 			Str("namespace", FullName(srcColl)).
-			Int64("documentsCount", int64(docsCount)).
-			Int64("collectionBytes", int64(collBytes)).
-			Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
+			Uint64("documentsCount", uint64(docsCount)).
+			Uint64("collectionBytes", uint64(collBytes)).
+			Uint64("targetPartitionBytes", uint64(verifier.partitionSizeInBytes)).
 			Msg("Collection is small enough not to need partitioning.")
 
 		partition := partitions.Partition{
@@ -1469,9 +1469,9 @@ func (verifier *Verifier) partitionCollection(
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
 		Str("namespace", FullName(srcColl)).
-		Int64("documentsCount", int64(docsCount)).
-		Int64("collectionBytes", int64(collBytes)).
-		Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
+		Uint64("documentsCount", uint64(docsCount)).
+		Uint64("collectionBytes", uint64(collBytes)).
+		Uint64("targetPartitionBytes", uint64(verifier.partitionSizeInBytes)).
 		Float64("idealPartitionsCount", idealNumPartitions).
 		Stringer("scheme", schemeToUse).
 		Msg("Partitioning collection.")

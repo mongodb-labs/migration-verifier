@@ -6,6 +6,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -93,7 +94,7 @@ func (pe *ParsedEvent) UnmarshalFromBSON(in []byte) error {
 				if !ok {
 					return fmt.Errorf("%#q BSON type %s (value: %v) cannot be %T", key, rv.Type, rv, docLen)
 				} else {
-					pe.FullDocLen = option.Some(types.ByteCount(docLen))
+					pe.FullDocLen = option.Some(safecast.MustConvert[types.ByteCount](docLen))
 				}
 			}
 		case "clusterTime":
