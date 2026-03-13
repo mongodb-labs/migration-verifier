@@ -97,34 +97,117 @@ metaURI: mongodb://localhost:28012
 
 1. After launching the verifier (see above), you can send it requests to get it to start verifying. If you don’t pass the `--start` parameter, verification is started by using the `check` command. An [optional `filter` parameter](#document-filtering) can be passed within the `check` request body to only check documents within that filter. The verification process will keep running until you tell the verifier to stop. It will keep track of the inconsistencies it has found and will keep checking those inconsistencies hoping that eventually they will resolve.
 
-    ```
-    curl -H "Content-Type: application/json" -d '{}' http://127.0.0.1:27020/api/v1/check
-    ```
+```
+curl -H "Content-Type: application/json" -d '{}' http://127.0.0.1:27020/api/v1/check
+```
 
 
 2. Once writes on the source cluster have stopped, you can tell the verifier that writes have stopped. (You can see the state of mongosync’s replication by hitting mongosync’s `progress` endpoint and checking that the state is `COMMITTED`. See the documentation [here](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/reference/api/progress/#response)). \
 The verifier will now check to completion to make sure that there are no inconsistencies. The command you need to send the verifier here is `writesOff`. The command doesn’t block. This means that you will have to poll the verifier, or watch its logs, to see the status of the verification (see `progress`).
 
-    ```
-    curl -H "Content-Type: application/json" -X POST -d '{}' http://127.0.0.1:27020/api/v1/writesOff
-    ```
+```
+curl -H "Content-Type: application/json" -d '{}' http://127.0.0.1:27020/api/v1/writesOff
+```
 
 
-3. You can poll the status of the verification by hitting the `progress`endpoint. In particular, the `phase`should reveal whether the verifier is done verifying; once the `phase`is `idle`the verification has completed. When the `phase`has reached `idle`, the `error`field should be `null`and the `failedTasks`field should be `0`, if the verification was successful. A non-`null``error`field indicates that the verifier itself ran into an error. `failedTasks`being non-`0`indicates that there was an inconsistency. The logs printed by the verifier itself should have more information regarding what the inconsistencies are.
+3. You can poll the verification’s status by hitting the `progress` endpoint. In particular, the `phase` should reveal whether the verifier is done verifying. Once the `phase` is `idle`, the verification has completed. Once the `phase` is `idle`, the `error` field should be null, and the `failedTasks` field should be 0, if the verification was successful. A non-null `error` field indicates that the verifier itself ran into an error. If `failedTasks` is not 0, the verifier found an inconsistency. The verifier’s logs should detail the inconsistencies.
 
-    ```
-    curl -H "Content-Type: application/json" -X GET http://127.0.0.1:27020/api/v1/progress
+```
+curl http://127.0.0.1:27020/api/v1/progress
+```
 
-    ```
+### `/progress` API Response
 
+In the below a “timestamp” is an object with `T` and `I` unsigned integers.
+These represent a logical time in MongoDB’s replication protocol.
 
-	
+- `progress`
+  - `phase` (string): either `idle`, `check`, or `recheck`
+  - `generation` (unsigned integer)
+  - `generationStats`
+    - `docsCompared` (unsigned)
+    - `totalDocs` (unsigned)
+    - `srcBytesCompared` (unsigned)
+    - `totalSrcBytes` (unsigned, only present in `check` phase)
+  - `srcChangeStats`
+    - `eventsPerSecond` (unsigned)
+    - `lagSecs` (unsigned)
+    - `bufferSaturation` (fraction)
+  - `dstChangeStats` (same fields as `srcChangeStats`)
+  - `srcLastRecheckedTS` (see below)
+  - `longestMismatch` (See `/docMismatches` below for format.)
+  - `error` (string, optional)
+  - `verificationStatus` (tasks for the current generation)
+    - `totalTasks` (unsigned integer)
+    - `addedTasks` (unsigned integer, unstarted tasks)
+    - `processingTasks` (unsigned integer, in-progress tasks)
+    - `failedTasks` (unsigned integer, tasks that found a document mismatch)
+    - `completedTasks` (unsigned integer, tasks that found no problems)
+    - `metadataMismatchTasks` (unsigned integer, tasks that found a collection metadata mismatch)
 
-	This is a sample output when inconsistencies are present:
+This is sample output:
+```
+{
+  "progress": {
+    "phase": "recheck",
+    "generation": 2,
+    "generationStats": {
+      "docsCompared": 0,
+      "totalDocs": 2040204,
+      "srcBytesCompared": 0
+    },
+    "error": null,
+    "verificationStatus": {
+      "totalTasks": 204,
+      "addedTasks": 204,
+      "processingTasks": 0,
+      "failedTasks": 0,
+      "completedTasks": 0,
+      "metadataMismatchTasks": 0
+    },
+    "srcLastRecheckedTS": {
+      "$timestamp": {
+        "t": 1773253202,
+        "i": 2186
+      }
+    },
+    "dstLastRecheckedTS": {
+      "$timestamp": {
+        "t": 1773253202,
+        "i": 10030
+      }
+    },
+    "srcChangeStats": {
+      "eventsPerSecond": 4881.42374871582,
+      "lagSecs": 0,
+      "bufferSaturation": 0.01
+    },
+    "dstChangeStats": {
+      "eventsPerSecond": 32803.89071205276,
+      "lagSecs": 0,
+      "bufferSaturation": 0.95
+    },
+    "docsComparedPerSecond": 75061.86338662436,
+    "srcBytesComparedPerSecond": 43954387.31067323
+  }
+}
+```
 
+#### Last recheck timestamps
 
-    	`{"progress":{"phase":"idle","error":null,"verificationStatus":{"totalTasks":1,"addedTasks":0,"processingTasks":0,"failedTasks":1,"completedTasks":0,"metadataMismatchTasks":0,"recheckTasks":0}}}`
+The `srcLastRecheckedTS` and `dstLastRecheckedTS` fields indicate the
+oplog timestamp of the last write that the verifier has rechecked.
 
+Consider a write on the source at oplog timestamp {123, 234}. Immediately
+after the write happens, the verifier will not have checked whether the
+write was replicated. By checking whether `srcLastRecheckedTS` has met or
+exceeded that value, you can know when the verifier has done a recheck
+for that write.
+
+In a migration, once you have quiesced writes on your source cluster,
+monitor the replicator & correlate its last-replicated optime with
+`srcLastRecheckedTS`. This will tell you when it’s safe to proceed with
+cutover.
 
 # CLI Options
 

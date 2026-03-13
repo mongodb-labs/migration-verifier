@@ -30,6 +30,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/mring"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/10gen/migration-verifier/timeseries"
@@ -113,8 +114,8 @@ type Verifier struct {
 	srcChangeReaderMethod string
 	dstChangeReaderMethod string
 
-	lastProcessedSrcOptime *msync.DataGuard[bson.Timestamp]
-	lastProcessedDstOptime *msync.DataGuard[bson.Timestamp]
+	srcLastRecheckedTS *msync.DataGuard[bson.Timestamp]
+	dstLastRecheckedTS *msync.DataGuard[bson.Timestamp]
 
 	changeHandlingErr *util.Eventual[error]
 
@@ -164,6 +165,8 @@ type Verifier struct {
 	docsComparedHistory  *history.History[types.DocumentCount]
 	bytesComparedHistory *history.History[types.ByteCount]
 
+	recheckDurations *mring.Queue[time.Duration]
+
 	verificationStatusCheckInterval time.Duration
 
 	warnedNoResumableCollectionScan bool
@@ -200,13 +203,15 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		docsComparedHistory:  history.New[types.DocumentCount](time.Minute),
 		bytesComparedHistory: history.New[types.ByteCount](time.Minute),
 
+		recheckDurations: mring.New[time.Duration](10),
+
 		verificationStatusCheckInterval: 2 * time.Second,
 		nsMap:                           NewNSMap(),
 
 		changeHandlingErr: util.NewEventual[error](),
 
-		lastProcessedSrcOptime: msync.NewDataGuard(bson.Timestamp{}),
-		lastProcessedDstOptime: msync.NewDataGuard(bson.Timestamp{}),
+		srcLastRecheckedTS: msync.NewDataGuard(bson.Timestamp{}),
+		dstLastRecheckedTS: msync.NewDataGuard(bson.Timestamp{}),
 	}
 }
 
@@ -1877,9 +1882,9 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	case Gen0MetadataAnalysisComplete:
 		fallthrough
 	case GenerationInProgress:
-		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder)
+		hasTasks, err = verifier.printNamespaceStatistics(ctx, generation, strBuilder)
 	case GenerationComplete:
-		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder, reportGenStartTime)
+		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, generation, strBuilder, reportGenStartTime)
 	default:
 		panic("Bad generation status: " + genstatus)
 	}

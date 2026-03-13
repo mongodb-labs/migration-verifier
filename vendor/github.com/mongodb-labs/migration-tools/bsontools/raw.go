@@ -48,6 +48,20 @@ func CountRawElements[D ~[]byte](doc D) (int, error) {
 // If the iterator returns an error but the caller continues iterating,
 // a panic will ensue.
 func RawElements[D ~[]byte](doc D) iter.Seq2[bson.RawElement, error] {
+	if len(doc) == 0 {
+		return func(func(bson.RawElement, error) bool) {}
+	}
+
+	if _, rem, ok := bsoncore.ReadLength(doc); !ok {
+		return func(yield func(bson.RawElement, error) bool) {
+			yield(nil, fmt.Errorf(
+				"%w (buffer is only %d bytes long)",
+				bsoncore.NewInsufficientBytesError(doc, rem),
+				len(doc),
+			))
+		}
+	}
+
 	remaining := doc[4:]
 
 	return func(yield func(bson.RawElement, error) bool) {

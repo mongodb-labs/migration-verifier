@@ -17,7 +17,6 @@ import (
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
@@ -328,17 +327,28 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	return longestDurationOpt, anyAreIncomplete, nil
 }
 
-// Boolean returned indicates whether this generation has any tasks.
-func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuilder *strings.Builder) (bool, error) {
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+type comparisonStatistics struct {
+	totalDocs, comparedDocs   types.DocumentCount
+	totalBytes, comparedBytes types.ByteCount
+	totalNss, completedNss    types.NamespaceCount
+	activeWorkers             int
+	nsStats                   []NamespaceStats
+	nsWorkerStatus            map[string][]WorkerStatus
+}
+
+func (verifier *Verifier) getComparisonStatistics(
+	ctx context.Context,
+	generation int,
+) (comparisonStatistics, error) {
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, generation)
 	if err != nil {
-		return false, err
+		return comparisonStatistics{}, err
 	}
 
 	// The verifier sometimes ends up enqueueing an extra generation
 	// with no tasks. For now we’ll quietly no-op when that happens.
 	if len(stats) == 0 {
-		return false, nil
+		return comparisonStatistics{}, nil
 	}
 
 	var totalDocs, comparedDocs types.DocumentCount
@@ -360,16 +370,6 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		}
 	}
 
-	strBuilder.WriteString("\n")
-
-	fmt.Fprintf(
-		strBuilder,
-		"Namespaces completed: %s of %s (%s%%)\n",
-		reportutils.FmtReal(completedNss),
-		reportutils.FmtReal(totalNss),
-		reportutils.FmtPercent(completedNss, totalNss),
-	)
-
 	var activeWorkers int
 	perNamespaceWorkerStats := verifier.getPerNamespaceWorkerStats()
 	for _, nsWorkerStats := range perNamespaceWorkerStats {
@@ -380,6 +380,48 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		}
 	}
 
+	return comparisonStatistics{
+		totalDocs:      totalDocs,
+		comparedDocs:   comparedDocs,
+		totalBytes:     totalBytes,
+		comparedBytes:  comparedBytes,
+		totalNss:       totalNss,
+		completedNss:   completedNss,
+		activeWorkers:  activeWorkers,
+		nsStats:        stats,
+		nsWorkerStatus: perNamespaceWorkerStats,
+	}, nil
+}
+
+// Boolean returned indicates whether this generation has any tasks.
+func (verifier *Verifier) printNamespaceStatistics(
+	ctx context.Context,
+	generation int,
+	strBuilder *strings.Builder,
+) (bool, error) {
+	compareStats, err := verifier.getComparisonStatistics(ctx, generation)
+	if err != nil {
+		return false, err
+	}
+
+	strBuilder.WriteString("\n")
+
+	totalDocs := compareStats.totalDocs
+	comparedDocs := compareStats.comparedDocs
+	totalBytes := compareStats.totalBytes
+	comparedBytes := compareStats.comparedBytes
+	totalNss := compareStats.totalNss
+	completedNss := compareStats.completedNss
+	activeWorkers := compareStats.activeWorkers
+
+	fmt.Fprintf(
+		strBuilder,
+		"Namespaces completed: %s of %s (%s%%)\n",
+		reportutils.FmtReal(completedNss),
+		reportutils.FmtReal(totalNss),
+		reportutils.FmtPercent(completedNss, totalNss),
+	)
+
 	if activeWorkers > 0 {
 		fmt.Fprintf(
 			strBuilder,
@@ -389,38 +431,19 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		)
 	}
 
-	var docsPerSecond, bytesPerSecond float64
+	docsPerSecond := history.RatePer(
+		verifier.docsComparedHistory.Get(),
+		time.Second,
+	)
 
-	docsLogs := verifier.docsComparedHistory.Get()
-	if len(docsLogs) > 1 {
-
-		// Since each log represents the number of docs compared since the prior
-		// log, the oldest log’s datum is meaningless. Zero it out so that we
-		// sum just the meaningful data.
-		docsLogs[0].Datum = 0
-		elapsed := docsLogs[len(docsLogs)-1].At.Sub(docsLogs[0].At)
-
-		total := history.SumLogs(docsLogs)
-
-		docsPerSecond = util.DivideToF64(total, elapsed.Seconds())
-	}
-
-	bytesLogs := verifier.bytesComparedHistory.Get()
-	if len(bytesLogs) > 1 {
-
-		// See above for why we do this.
-		bytesLogs[0].Datum = 0
-		elapsed := bytesLogs[len(bytesLogs)-1].At.Sub(bytesLogs[0].At)
-
-		total := history.SumLogs(bytesLogs)
-
-		bytesPerSecond = util.DivideToF64(total, elapsed.Seconds())
-	}
+	bytesPerSecond := history.RatePer(
+		verifier.bytesComparedHistory.Get(),
+		time.Second,
+	)
 
 	perSecondDataUnit := reportutils.FindBestUnit(bytesPerSecond)
 
 	if totalDocs > 0 {
-
 		fmt.Fprintf(
 			strBuilder,
 			"Total source documents compared: %s of %s (%s%%, %s/sec)\n",
@@ -478,7 +501,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 
 	tableHasRows := false
 
-	for _, result := range stats {
+	for _, result := range compareStats.nsStats {
 		if result.PartitionsProcessing == 0 {
 			continue
 		}
@@ -490,7 +513,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		docsCompared := result.DocsCompared
 		bytesCompared := result.BytesCompared
 
-		if nsWorkerStats, ok := perNamespaceWorkerStats[result.Namespace]; ok {
+		if nsWorkerStats, ok := compareStats.nsWorkerStatus[result.Namespace]; ok {
 			threads = len(nsWorkerStats)
 
 			for _, workerStats := range nsWorkerStats {
@@ -550,8 +573,13 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 	return true, nil
 }
 
-func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, strBuilder *strings.Builder, now time.Time) (bool, error) {
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+func (verifier *Verifier) printEndOfGenerationStatistics(
+	ctx context.Context,
+	generation int,
+	strBuilder *strings.Builder,
+	now time.Time,
+) (bool, error) {
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, generation)
 	if err != nil {
 		return false, err
 	}
@@ -620,10 +648,10 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 	var lastSrcOpTime, lastDstOpTime bson.Timestamp
 
-	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+	verifier.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
 		lastSrcOpTime = t
 	})
-	verifier.lastProcessedDstOptime.Load(func(t bson.Timestamp) {
+	verifier.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
 		lastDstOpTime = t
 	})
 
@@ -671,7 +699,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			)
 		}
 
-		times, hasTimes := cluster.csReader.getCurrentTimes().Get()
+		times, hasTimes := cluster.csReader.getCurrentTimestamps().Get()
 
 		if hasTimes {
 			lag := times.Lag()

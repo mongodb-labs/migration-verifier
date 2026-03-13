@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
@@ -31,7 +32,12 @@ func MarshalD[T ~[]byte](buf T, d bson.D) (bson.Raw, error) {
 
 	buf = append(buf, 0)
 
-	binary.LittleEndian.PutUint32(buf[sizeAt:], uint32(len(buf[sizeAt:])))
+	l, err := safecast.Convert[uint32, int](len(buf[sizeAt:]))
+	if err != nil {
+		return nil, err
+	}
+
+	binary.LittleEndian.PutUint32(buf[sizeAt:], l)
 
 	return bson.Raw(buf), nil
 }
@@ -55,11 +61,17 @@ func MarshalA[T ~[]byte](buf T, a bson.A) (bson.RawArray, error) {
 
 	buf = append(buf, 0)
 
-	binary.LittleEndian.PutUint32(buf[sizeAt:], uint32(len(buf[sizeAt:])))
+	l, err := safecast.Convert[uint32, int](len(buf[sizeAt:]))
+	if err != nil {
+		return nil, err
+	}
+
+	binary.LittleEndian.PutUint32(buf[sizeAt:], l)
 
 	return bson.RawArray(buf), nil
 }
 
+//nolint:cyclop
 func marshalEl(buf []byte, key string, val any) ([]byte, error) {
 	switch typedVal := val.(type) {
 	case float64:
