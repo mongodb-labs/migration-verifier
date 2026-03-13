@@ -26,7 +26,7 @@ const (
 	defaultUserDocumentSize = 1024
 
 	// The number of batches we’ll hold in memory at once.
-	batchChanBufferSize = 100
+	batchChanBufferSize = 10
 
 	onDDLEventAllow ddlEventHandling = "allow"
 

@@ -235,9 +235,6 @@ func (c *comparator) processSingleDoc(curDocWithTS compare.DocWithTS, isSrc bool
 	delete(theirMap, mapKey)
 	c.cachedVariableBytes -= types.ByteCount(len(mapKey) + len(theirDocWithTS.Doc))
 
-	defer curDocWithTS.PutInPool()
-	defer theirDocWithTS.PutInPool()
-
 	var srcDoc, dstDoc compare.DocWithTS
 	if isSrc {
 		srcDoc, dstDoc = curDocWithTS, theirDocWithTS
@@ -349,7 +346,6 @@ func (c *comparator) sweepMissingDocs() {
 			SrcTimestamp:    option.Some(docWithTS.TS),
 			MismatchHistory: createMismatchTimes(firstMismatchTime),
 		})
-		docWithTS.PutInPool()
 	}
 
 	for _, docWithTS := range c.dstCache {
@@ -363,6 +359,5 @@ func (c *comparator) sweepMissingDocs() {
 			DstTimestamp:    option.Some(docWithTS.TS),
 			MismatchHistory: createMismatchTimes(firstMismatchTime),
 		})
-		docWithTS.PutInPool()
 	}
 }

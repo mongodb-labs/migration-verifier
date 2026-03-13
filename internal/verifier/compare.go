@@ -8,6 +8,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/10gen/migration-verifier/arenabuf"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
@@ -377,10 +378,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				option.None[*readpref.ReadPref](),
 			)
 
-			for _, id := range docIDs {
-				id.PutInPool()
-			}
-
 			if err != nil {
 				return errors.Wrapf(err, "finding %d documents", len(docIDs))
 			}
@@ -596,6 +593,8 @@ func iterateCursorToChannel(
 	var docsCount int
 	var bytesEnqueued types.ByteCount
 
+	docsBuf := &arenabuf.Buffer[bson.Raw]{}
+
 	var docsWithTSCache []compare.DocWithTS
 
 	flush := func() error {
@@ -620,6 +619,7 @@ func iterateCursorToChannel(
 			reportutils.FmtBytes(bytesEnqueued),
 		)
 
+		docsBuf.Reset()
 		docsWithTSCache = docsWithTSCache[:0]
 		bytesEnqueued = 0
 
@@ -649,7 +649,10 @@ func iterateCursorToChannel(
 
 		docsWithTSCache = append(
 			docsWithTSCache,
-			compare.NewDocWithTSFromPool(cursor.Current, clusterTime),
+			compare.DocWithTS{
+				Doc: docsBuf.Add(cursor.Current),
+				TS: clusterTime,
+			},
 		)
 
 		bytesEnqueued += types.ByteCount(len(cursor.Current))

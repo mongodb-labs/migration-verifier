@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/10gen/migration-verifier/arenabuf"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
@@ -241,6 +242,9 @@ func processCursor(
 	var batch []DocWithTS
 	var batchDocIDs []DocID
 
+	       docsBuf := &arenabuf.Buffer[bson.Raw]{}
+       docIDsBuf := &arenabuf.Buffer[[]byte]{}
+
 cursorLoop:
 	for {
 		if !cursor.Next(ctx) {
@@ -301,19 +305,36 @@ cursorLoop:
 			)
 		}
 
-		batch = append(batch, NewDocWithTSFromPool(userDoc, *opTime))
+		batch = append(
+			batch,
+			DocWithTS{
+				Doc: docsBuf.Add(userDoc),
+				TS: *opTime,
+			},
+		)
 
 		docID, err := compareMethod.RawDocIDForComparison(userDoc)
 		if err != nil {
 			return errors.Wrapf(err, "parsing doc ID for comparison")
 		}
 
-		batchDocIDs = append(batchDocIDs, NewDocIDFromPool(docID))
+		batchDocIDs = append(
+			batchDocIDs,
+			DocID{
+				ID: bson.RawValue{
+					Type: docID.Type,
+					Value: docIDsBuf.Add(docID.Value),
+				},
+			},
+		)
 
 		if cursor.RemainingBatchLength() == 0 {
 			if err := flushSourceBatch(ctx, logger, retryState, task, &batch, &batchDocIDs, toCompare, toDst); err != nil {
 				return errors.Wrapf(err, "flushing docs")
 			}
+
+		        docsBuf.Reset()
+                	docIDsBuf.Reset()
 		}
 	}
 
@@ -323,6 +344,9 @@ cursorLoop:
 		if err := flushSourceBatch(ctx, logger, retryState, task, &batch, &batchDocIDs, toCompare, toDst); err != nil {
 			return errors.Wrapf(err, "flushing final docs")
 		}
+
+		docsBuf.Reset()
+		docIDsBuf.Reset()
 	}
 
 	return nil
