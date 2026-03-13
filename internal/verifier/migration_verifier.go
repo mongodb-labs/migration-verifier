@@ -966,37 +966,6 @@ func (verifier *Verifier) compareCollectionSpecifications(
 	return results, canCompareData, nil
 }
 
-func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec, dstSpec bson.Raw) (bool, error) {
-	// If the byte buffers match, then we’re done.
-	if bytes.Equal(srcSpec, dstSpec) {
-		return true, nil
-	}
-
-	var fieldsToRemove = []string{
-		// v4.4 stopped adding “ns” to index fields.
-		"ns",
-
-		// v4.2+ ignores this field.
-		"background",
-	}
-
-	return util.ServerThinksTheseMatch(
-		ctx,
-		verifier.metaClient,
-		srcSpec,
-		dstSpec,
-		option.Some(mongo.Pipeline{
-			{{"$unset", lo.Reduce(
-				fieldsToRemove,
-				func(cur []string, field string, _ int) []string {
-					return append(cur, "a."+field, "b."+field)
-				},
-				[]string{},
-			)}},
-		}),
-	)
-}
-
 func (verifier *Verifier) ProcessCollectionVerificationTask(
 	ctx context.Context,
 	workerNum int,
