@@ -7,7 +7,9 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/timeseries"
@@ -143,7 +145,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 		)
 
 		suite.Assert().Equal(
-			ClusterTarget,
+			constants.ClusterTarget,
 			prob.Cluster,
 			"Cluster in problem: %+v",
 			prob,
@@ -198,7 +200,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_BucketsOnly() {
 
 	suite.Require().NoError(coll.Drop(ctx))
 
-	runVerifier := func() (*Verifier, *CheckRunner, *VerificationStatus) {
+	runVerifier := func() (*Verifier, *CheckRunner, *api.VerificationStatus) {
 		verifier := suite.BuildVerifier()
 		verifier.SetVerifyAll(true)
 		runner := RunVerifierCheck(ctx, suite.T(), verifier)

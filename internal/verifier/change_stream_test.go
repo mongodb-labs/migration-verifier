@@ -100,6 +100,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
 		metaDBName,
 		"mongosync_reserved_for_internal_use",
 		"mongosync_internal_foo",
+		"__mdb_internal_mongosync",
 	}
 	for _, dbname := range dbsToIgnore {
 		_, err := suite.srcMongoClient.
@@ -237,6 +238,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 		metaDBName,
 		"mongosync_reserved_for_internal_use",
 		"mongosync_internal_foo",
+		"__mdb_internal_mongosync",
 	}
 	for _, dbname := range dbsToIgnore {
 		_, err := suite.srcMongoClient.
@@ -643,7 +645,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 				verifierRunner.AwaitGenerationEnd(),
 			)
 
-			return verifier.srcChangeReader.getCurrentTimes().IsSome()
+			return verifier.srcChangeReader.getCurrentTimestamps().IsSome()
 		},
 		time.Minute,
 		100*time.Millisecond,
@@ -652,7 +654,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 	// NB: The lag will include whatever time elapsed above before
 	// verifier read the event, so it can be several seconds.
 	suite.Assert().Less(
-		verifier.srcChangeReader.getCurrentTimes().MustGet().Lag(),
+		verifier.srcChangeReader.getCurrentTimestamps().MustGet().Lag(),
 		10*time.Minute,
 		"verifier lag is as expected",
 	)
@@ -1252,6 +1254,7 @@ func (suite *IntegrationTestSuite) TestDropMongosyncDB() {
 	dbs := []string{
 		"mongosync_reserved_for_internal_use",
 		"mongosync_internal_foo",
+		"__mdb_internal_mongosync",
 	}
 
 	for _, dbname := range dbs {

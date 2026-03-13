@@ -162,6 +162,7 @@ github.com/modern-go/reflect2
 # github.com/mongodb-labs/migration-tools v0.0.0-20260313153818-a91a5348fcf3
 ## explicit; go 1.25.7
 github.com/mongodb-labs/migration-tools/bsontools
+github.com/mongodb-labs/migration-tools/future
 github.com/mongodb-labs/migration-tools/mongotools
 github.com/mongodb-labs/migration-tools/mongotools/index
 github.com/mongodb-labs/migration-tools/option

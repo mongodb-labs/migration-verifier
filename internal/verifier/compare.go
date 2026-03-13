@@ -14,6 +14,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mmongo"
@@ -150,9 +151,9 @@ func (verifier *Verifier) NoteCompareOfOptime(
 
 	switch cluster {
 	case src:
-		dg = verifier.lastProcessedSrcOptime
+		dg = verifier.srcLastRecheckedTS
 	case dst:
-		dg = verifier.lastProcessedDstOptime
+		dg = verifier.dstLastRecheckedTS
 	default:
 		panic("bad cluster: " + cluster)
 	}
@@ -803,7 +804,7 @@ func compareOneDocument(
 		return []compare.Result{{
 			ID:        docID,
 			Details:   Mismatch,
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			NameSpace: namespace,
 		}}, nil
 	}
@@ -822,7 +823,7 @@ func compareOneDocument(
 		return []compare.Result{{
 			ID:        docID,
 			Details:   Mismatch + " : only field order differs",
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			NameSpace: namespace,
 			DataSize:  int32(dataSize),
 		}}, nil

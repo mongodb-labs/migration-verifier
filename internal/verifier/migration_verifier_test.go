@@ -25,7 +25,9 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
@@ -109,7 +111,7 @@ func (suite *IntegrationTestSuite) TestEmptyExceptDestination() {
 
 	assert.Equal(
 		suite.T(),
-		&VerificationStatus{
+		&api.VerificationStatus{
 			TotalTasks:     2,
 			CompletedTasks: 1,
 			FailedTasks:    1,
@@ -560,22 +562,17 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 		),
 	)
 
-	_, err := suite.srcMongoClient.
+	srcColl := suite.srcMongoClient.
 		Database(suite.DBNameForTest()).
-		Collection(collName).
-		InsertOne(ctx, bson.D{{"_id", "a"}})
+		Collection(collName)
+
+	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", "a"}})
 	suite.Require().NoError(err)
 
 	// So that the insert above isn’t the last thing in the oplog:
-	_, err = suite.srcMongoClient.
-		Database(suite.DBNameForTest()).
-		Collection(collName).
-		InsertOne(ctx, bson.D{{"_id", "qwe"}})
+	_, err = srcColl.InsertOne(ctx, bson.D{{"_id", "qwe"}})
 	suite.Require().NoError(err)
-	_, err = suite.srcMongoClient.
-		Database(suite.DBNameForTest()).
-		Collection(collName).
-		DeleteOne(ctx, bson.D{{"_id", "qwe"}})
+	_, err = srcColl.DeleteOne(ctx, bson.D{{"_id", "qwe"}})
 	suite.Require().NoError(err)
 
 	testutil.KillTransactions(ctx, suite.T(), suite.srcMongoClient)
@@ -608,7 +605,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(mismatches[0].Task),
+				verifier.generation,
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -621,7 +618,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 				},
 				reportData.Counts,
 			)
-			suite.Assert().Equal(reportData.MissingOnDst, mismatches)
+			suite.Assert().Equal(mismatches, reportData.MissingOnDst)
 		},
 	)
 
@@ -663,7 +660,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 				)
 
 				cur, err = mmColl.Find(ctx, bson.D{
-					{"task", theTasks[0].PrimaryKey},
+					{"taskID", theTasks[0].PrimaryKey},
 				})
 				suite.Require().NoError(err)
 				suite.Require().NoError(cur.All(ctx, &mismatches))
@@ -674,7 +671,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(theTasks[0].PrimaryKey),
+				verifier.generation,
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -733,7 +730,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			lastMismatchDuration := mismatches[0].Detail.MismatchHistory.DurationMS
 
 			cur, err = mmColl.Find(ctx, bson.D{
-				{"task", theTasks[0].PrimaryKey},
+				{"taskID", theTasks[0].PrimaryKey},
 			})
 			suite.Require().NoError(err)
 			suite.Require().NoError(cur.All(ctx, &mismatches))
@@ -742,7 +739,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(theTasks[0].PrimaryKey),
+				verifier.generation,
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -836,7 +833,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 	err = verifier.ProcessVerifyTask(ctx, 0, task)
 	suite.Require().NoError(err)
 
-	verifier.lastProcessedSrcOptime.Load(func(ts bson.Timestamp) {
+	verifier.srcLastRecheckedTS.Load(func(ts bson.Timestamp) {
 		suite.Assert().Equal(
 			task.SrcTimestamp.MustGet(),
 			ts,
@@ -844,7 +841,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 		)
 	})
 
-	verifier.lastProcessedDstOptime.Load(func(ts bson.Timestamp) {
+	verifier.dstLastRecheckedTS.Load(func(ts bson.Timestamp) {
 		suite.Assert().Equal(
 			task.DstTimestamp.MustGet(),
 			ts,
@@ -857,7 +854,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 	_, _, _, err = runFetchAndCompareDocuments(ctx, verifier, task)
 	suite.Require().NoError(err)
 
-	verifier.lastProcessedSrcOptime.Load(func(ts bson.Timestamp) {
+	verifier.srcLastRecheckedTS.Load(func(ts bson.Timestamp) {
 		suite.Assert().Equal(
 			bson.Timestamp{123, 234},
 			ts,
@@ -1002,7 +999,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Metadata(
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1016,7 +1013,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Metadata(
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1049,7 +1046,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_OneDoc() 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Require().NotEmpty(stats)
@@ -1071,7 +1068,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_OneDoc() 
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Require().NotEmpty(stats)
@@ -1137,7 +1134,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 
 	suite.Assert().Len(notifier.Messages(), 1)
 
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1162,7 +1159,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
 
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1180,7 +1177,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	task1, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll1")
 	suite.Require().NoError(err)
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1208,7 +1205,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	err = verifier.UpdateVerificationTask(ctx, task1)
 	suite.Require().NoError(err)
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1266,7 +1263,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 		task2parts[i] = task2part
 	}
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1294,7 +1291,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	err = verifier.UpdateVerificationTask(ctx, task1parts[0])
 	suite.Require().NoError(err)
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1333,7 +1330,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	err = verifier.UpdateVerificationTask(ctx, task2parts[1])
 	suite.Require().NoError(err)
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1549,7 +1546,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 			compareFn: func(t *testing.T, mismatchedIds []compare.Result) {
 				if assert.Equal(t, 1, len(mismatchedIds)) {
 					assert.Equal(t, mismatchedIds[0].Details, compare.Missing)
-					assert.Equal(t, mismatchedIds[0].Cluster, ClusterTarget)
+					assert.Equal(t, mismatchedIds[0].Cluster, constants.ClusterTarget)
 				}
 			},
 		},
@@ -1563,7 +1560,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 			compareFn: func(t *testing.T, mismatchedIds []compare.Result) {
 				if assert.Equal(t, 1, len(mismatchedIds)) {
 					assert.Equal(t, mismatchedIds[0].Details, compare.Missing)
-					assert.Equal(t, mismatchedIds[0].Cluster, ClusterSource)
+					assert.Equal(t, mismatchedIds[0].Cluster, constants.ClusterSource)
 				}
 			},
 		},
@@ -1763,7 +1760,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(failures[0].Field, "Options.viewOn")
-		suite.Equal(failures[0].Cluster, ClusterTarget)
+		suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 		suite.Equal(failures[0].NameSpace, "testDb.wrongColl")
 	}
 
@@ -1786,7 +1783,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(failures[0].Field, "Options.pipeline")
-		suite.Equal(failures[0].Cluster, ClusterTarget)
+		suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 		suite.Equal(failures[0].NameSpace, "testDb.wrongPipeline")
 	}
 
@@ -1814,7 +1811,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(failures[0].Field, "Options.collation")
-		suite.Equal(failures[0].Cluster, ClusterSource)
+		suite.Equal(failures[0].Cluster, constants.ClusterSource)
 		suite.Equal(failures[0].Details, "Missing")
 		suite.Equal(failures[0].NameSpace, "testDb.missingOptionsSrc")
 	}
@@ -1836,7 +1833,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(failures[0].Field, "Options.collation")
-		suite.Equal(failures[0].Cluster, ClusterTarget)
+		suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 		suite.Equal(failures[0].Details, "Missing")
 		suite.Equal(failures[0].NameSpace, "testDb.missingOptionsDst")
 	}
@@ -1859,7 +1856,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(failures[0].Field, "Options.collation")
-		suite.Equal(failures[0].Cluster, ClusterTarget)
+		suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 		suite.Equal(failures[0].NameSpace, "testDb.differentOptions")
 	}
 }
@@ -1885,7 +1882,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
 	suite.Equal(1, len(failures))
 	suite.Equal(failures[0].Details, compare.Missing)
-	suite.Equal(failures[0].Cluster, ClusterTarget)
+	suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 	suite.Equal(failures[0].NameSpace, "testDb.testColl")
 
 	// Make sure "To" is respected.
@@ -1905,7 +1902,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	suite.Equal(1, len(failures))
 	suite.Equal(failures[0].Details, compare.Missing)
-	suite.Equal(failures[0].Cluster, ClusterTarget)
+	suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 	suite.Equal(failures[0].NameSpace, "testDb.testCollTo")
 
 	// Collection exists only on dest.
@@ -1925,7 +1922,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	suite.Equal(1, len(failures))
 	suite.Equal(failures[0].Details, compare.Missing)
-	suite.Equal(failures[0].Cluster, ClusterSource)
+	suite.Equal(failures[0].Cluster, constants.ClusterSource)
 	suite.Equal(failures[0].NameSpace, "testDb.destOnlyColl")
 
 	// A view and a collection are different.
@@ -1947,7 +1944,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	suite.Equal(1, len(failures))
 	suite.Equal(failures[0].Field, "Type")
-	suite.Equal(failures[0].Cluster, ClusterTarget)
+	suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 	suite.Equal(failures[0].NameSpace, "testDb.viewOnSrc")
 
 	// Capped should not match uncapped
@@ -2034,7 +2031,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(mbson.ToRawValue(srcIndexNames[1]), failures[0].ID)
 		suite.Equal(compare.Missing, failures[0].Details)
-		suite.Equal(ClusterTarget, failures[0].Cluster)
+		suite.Equal(constants.ClusterTarget, failures[0].Cluster)
 		suite.Equal("testDb.testColl1", failures[0].NameSpace)
 	}
 
@@ -2067,7 +2064,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(mbson.ToRawValue(dstIndexNames[1]), failures[0].ID)
 		suite.Equal(compare.Missing, failures[0].Details)
-		suite.Equal(ClusterSource, failures[0].Cluster)
+		suite.Equal(constants.ClusterSource, failures[0].Cluster)
 		suite.Equal("testDb.testColl2", failures[0].NameSpace)
 	}
 
@@ -2101,11 +2098,11 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		})
 		suite.Equal(mbson.ToRawValue(dstIndexNames[1]), failures[0].ID)
 		suite.Equal(compare.Missing, failures[0].Details)
-		suite.Equal(ClusterSource, failures[0].Cluster)
+		suite.Equal(constants.ClusterSource, failures[0].Cluster)
 		suite.Equal("testDb.testColl3", failures[0].NameSpace)
 		suite.Equal(mbson.ToRawValue(srcIndexNames[0]), failures[1].ID)
 		suite.Equal(compare.Missing, failures[1].Details)
-		suite.Equal(ClusterTarget, failures[1].Cluster)
+		suite.Equal(constants.ClusterTarget, failures[1].Cluster)
 		suite.Equal("testDb.testColl3", failures[1].NameSpace)
 	}
 
@@ -2137,7 +2134,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(mbson.ToRawValue("wrong"), failures[0].ID)
 		suite.Regexp(regexp.MustCompile("^"+Mismatch), failures[0].Details)
-		suite.Equal(ClusterTarget, failures[0].Cluster)
+		suite.Equal(constants.ClusterTarget, failures[0].Cluster)
 		suite.Equal("testDb.testColl4", failures[0].NameSpace)
 	}
 }
@@ -2416,6 +2413,12 @@ func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("mongosync_reserved_for_verification_dst_metadata").CreateCollection(ctx, "auditor")
 	suite.Require().NoError(err)
+	err = suite.dstMongoClient.Database("__mdb_internal_mongosync").CreateCollection(ctx, "globalState")
+	suite.Require().NoError(err)
+	err = suite.dstMongoClient.Database("__mdb_internal_mongosync_verifier_src").CreateCollection(ctx, "auditor")
+	suite.Require().NoError(err)
+	err = suite.dstMongoClient.Database("__mdb_internal_mongosync_verifier_dst").CreateCollection(ctx, "auditor")
+	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
 	suite.Require().NoError(err)
 	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
@@ -2626,7 +2629,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 
-	waitForTasks := func() *VerificationStatus {
+	waitForTasks := func() *api.VerificationStatus {
 		status, err := verifier.GetVerificationStatus(ctx)
 		suite.Require().NoError(err)
 
@@ -2647,7 +2650,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	// wait for one generation to finish
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status := waitForTasks()
-	suite.Require().Equal(VerificationStatus{TotalTasks: 2, FailedTasks: 1, CompletedTasks: 1}, *status)
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 2, FailedTasks: 1, CompletedTasks: 1}, *status)
 
 	// now patch up the destination
 	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 2, "x": 43})
@@ -2660,13 +2663,13 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status = waitForTasks()
 	// there should be no failures now, since they are equivalent at this point in time
-	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	// The next generation should process the recheck task caused by inserting {_id: 2} on the destination.
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status = waitForTasks()
-	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	// now insert in the source, this should come up next generation
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 3, "x": 44})
@@ -2680,7 +2683,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	status = waitForTasks()
 
 	// there should be a failure from the src insert
-	suite.Require().Equal(VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
 
 	// now patch up the destination
 	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 3, "x": 44})
@@ -2694,7 +2697,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	status = waitForTasks()
 
 	// there should be no failures now, since they are equivalent at this point in time
-	suite.Assert().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	suite.Assert().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	// We could just abandon this verifier, but we might as well shut it down
 	// gracefully. That prevents a spurious error in the log from “drop”
@@ -2791,7 +2794,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 		suite.Require().NoError(err)
 	}()
 
-	waitForTasks := func() *VerificationStatus {
+	waitForTasks := func() *api.VerificationStatus {
 		status, err := verifier.GetVerificationStatus(ctx)
 		suite.Require().NoError(err)
 
@@ -2849,7 +2852,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	status = waitForTasks()
 
 	// There should be no failures, since the inserted document is not in the filter.
-	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	// Now insert in the source. This should come up next generation.
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 201, "x": 201, "inFilter": true})
@@ -2866,7 +2869,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 			<-checkDoneChan
 			status = waitForTasks()
 
-			return *status == VerificationStatus{TotalTasks: 1, FailedTasks: 1}
+			return *status == api.VerificationStatus{TotalTasks: 1, FailedTasks: 1}
 		},
 		time.Minute,
 		time.Second,
@@ -2885,7 +2888,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	status = waitForTasks()
 
 	// There should be no failures now, since they are equivalent at this point in time.
-	suite.Require().Equal(VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
 
 	suite.T().Log("Finalizing test")
 

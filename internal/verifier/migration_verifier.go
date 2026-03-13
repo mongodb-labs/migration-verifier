@@ -24,10 +24,13 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/mring"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/10gen/migration-verifier/timeseries"
@@ -51,11 +54,9 @@ import (
 type ReadConcernSetting string
 
 const (
-	//TODO: add comments for each of these so the warnings will stop :)
+	// TODO: add comments for each of these so the warnings will stop :)
 	Failed            = "Failed"
 	Mismatch          = "Mismatch"
-	ClusterTarget     = "dstClient"
-	ClusterSource     = "srcClient"
 	SrcNamespaceField = "query_filter.namespace"
 	DstNamespaceField = "query_filter.to"
 	NumWorkers        = 10
@@ -114,8 +115,8 @@ type Verifier struct {
 	srcChangeReaderMethod string
 	dstChangeReaderMethod string
 
-	lastProcessedSrcOptime *msync.DataGuard[bson.Timestamp]
-	lastProcessedDstOptime *msync.DataGuard[bson.Timestamp]
+	srcLastRecheckedTS *msync.DataGuard[bson.Timestamp]
+	dstLastRecheckedTS *msync.DataGuard[bson.Timestamp]
 
 	changeHandlingErr *util.Eventual[error]
 
@@ -165,22 +166,14 @@ type Verifier struct {
 	docsComparedHistory  *history.History[types.DocumentCount]
 	bytesComparedHistory *history.History[types.ByteCount]
 
+	recheckDurations *mring.Queue[time.Duration]
+
 	verificationStatusCheckInterval time.Duration
 
 	warnedNoResumableCollectionScan bool
 }
 
-var _ MigrationVerifierAPI = &Verifier{}
-
-// VerificationStatus holds the Verification Status
-type VerificationStatus struct {
-	TotalTasks            int `json:"totalTasks"`
-	AddedTasks            int `json:"addedTasks"`
-	ProcessingTasks       int `json:"processingTasks"`
-	FailedTasks           int `json:"failedTasks"`
-	CompletedTasks        int `json:"completedTasks"`
-	MetadataMismatchTasks int `json:"metadataMismatchTasks"`
-}
+var _ api.MigrationVerifierAPI = &Verifier{}
 
 // VerifierSettings is NewVerifier’s argument.
 type VerifierSettings struct {
@@ -211,13 +204,15 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		docsComparedHistory:  history.New[types.DocumentCount](time.Minute),
 		bytesComparedHistory: history.New[types.ByteCount](time.Minute),
 
+		recheckDurations: mring.New[time.Duration](10),
+
 		verificationStatusCheckInterval: 2 * time.Second,
 		nsMap:                           NewNSMap(),
 
 		changeHandlingErr: util.NewEventual[error](),
 
-		lastProcessedSrcOptime: msync.NewDataGuard(bson.Timestamp{}),
-		lastProcessedDstOptime: msync.NewDataGuard(bson.Timestamp{}),
+		srcLastRecheckedTS: msync.NewDataGuard(bson.Timestamp{}),
+		dstLastRecheckedTS: msync.NewDataGuard(bson.Timestamp{}),
 	}
 }
 
@@ -270,7 +265,6 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 			verifier.logger,
 			verifier.srcClient,
 		)
-
 		if err != nil {
 			return errors.Wrapf(err, "failed to fetch source's cluster time")
 		}
@@ -280,7 +274,6 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 			verifier.logger,
 			verifier.dstClient,
 		)
-
 		if err != nil {
 			return errors.Wrapf(err, "failed to fetch destination's cluster time")
 		}
@@ -342,7 +335,6 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 	model := mongo.IndexModel{Keys: bson.M{"generation": 1}}
 	_, err := verifier.verificationTaskCollection().Indexes().CreateOne(ctx, model)
-
 	if err != nil {
 		return errors.Wrapf(err, "creating generation index")
 	}
@@ -469,7 +461,6 @@ func (verifier *Verifier) SetPprofInterval(arg string) error {
 
 // DocumentStats gets various stats (TODO clarify)
 func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []string) {
-
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Doc Count", "Database", "Collection"})
 
@@ -523,7 +514,7 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 		result := compare.Result{
 			Field:     fieldPrefix + field,
 			Details:   compare.Missing,
-			Cluster:   ClusterSource,
+			Cluster:   constants.ClusterSource,
 			NameSpace: namespace,
 			ID:        id,
 		}
@@ -535,7 +526,7 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 		result := compare.Result{
 			Field:     fieldPrefix + field,
 			Details:   compare.Missing,
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			NameSpace: namespace,
 			ID:        id,
 		}
@@ -561,7 +552,7 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 		result := compare.Result{
 			Field:     fieldPrefix + field,
 			Details:   details,
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			NameSpace: namespace,
 			ID:        id,
 		}
@@ -614,7 +605,6 @@ REPORTS:
 			}
 
 			report, err := repResult.Get()
-
 			if err != nil {
 				return errors.Wrapf(
 					err,
@@ -674,7 +664,6 @@ REPORTS:
 							"failed to enqueue %d recheck(s) of mismatched documents",
 							len(idsToRecheck),
 						)
-
 					},
 				)
 			}
@@ -684,7 +673,7 @@ REPORTS:
 					err := recordMismatches(
 						egCtx,
 						verifier.metaClient.Database(verifier.metaDBName),
-						task.PrimaryKey,
+						task,
 						problems,
 					)
 
@@ -722,7 +711,6 @@ REPORTS:
 				Str("namespace", task.QueryFilter.Namespace).
 				Int("mismatchesCount", problemsCount).
 				Msg("Discrepancies found. Will recheck in the next generation.")
-
 		}
 	}
 
@@ -730,7 +718,6 @@ REPORTS:
 	task.SourceByteCount = bytesCount
 
 	err := verifier.UpdateVerificationTask(ctx, task)
-
 	if err != nil {
 		return errors.Wrapf(
 			err,
@@ -858,7 +845,9 @@ func (verifier *Verifier) partitionAndInspectNamespace(
 			},
 			Ns: &partitions.Namespace{
 				DB:   namespaceAndUUID.DBName,
-				Coll: namespaceAndUUID.CollName}}}
+				Coll: namespaceAndUUID.CollName,
+			},
+		}}
 	}
 
 	debugLog := verifier.logger.Debug()
@@ -896,21 +885,21 @@ func (verifier *Verifier) compareCollectionSpecifications(
 	if !hasSrcSpec {
 		return []compare.Result{{
 			NameSpace: srcNs,
-			Cluster:   ClusterSource,
+			Cluster:   constants.ClusterSource,
 			Details:   compare.Missing,
 		}}, false, nil
 	}
 	if !hasDstSpec {
 		return []compare.Result{{
 			NameSpace: dstNs,
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			Details:   compare.Missing,
 		}}, false, nil
 	}
 	if srcSpec.Type != dstSpec.Type {
 		return []compare.Result{{
 			NameSpace: srcNs,
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			Field:     "Type",
 			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Type, dstSpec.Type),
 		}}, false, nil
@@ -920,7 +909,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 	if srcSpec.Info.ReadOnly != dstSpec.Info.ReadOnly {
 		results = append(results, compare.Result{
 			NameSpace: dstNs,
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			Field:     "ReadOnly",
 			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Info.ReadOnly, dstSpec.Info.ReadOnly),
 		})
@@ -937,7 +926,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		if mismatchDetails == nil {
 			results = append(results, compare.Result{
 				NameSpace: dstNs,
-				Cluster:   ClusterTarget,
+				Cluster:   constants.ClusterTarget,
 				Field:     "Options (Field Order Only)",
 				Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Options, dstSpec.Options),
 			})
@@ -998,7 +987,6 @@ func getIndexesMap(
 	ctx context.Context,
 	coll *mongo.Collection,
 ) (map[string]bson.Raw, error) {
-
 	var specs []bson.Raw
 	specsMap := map[string]bson.Raw{}
 
@@ -1022,7 +1010,6 @@ func getIndexesMap(
 	for _, spec := range specs {
 		var name string
 		has, err := mbson.RawLookup(spec, &name, "name")
-
 		if err != nil {
 			return nil, errors.Wrapf(
 				err,
@@ -1052,7 +1039,6 @@ func (verifier *Verifier) verifyIndexes(
 	srcColl, dstColl *mongo.Collection,
 	srcIdIndexSpec, dstIdIndexSpec bson.Raw,
 ) ([]compare.Result, error) {
-
 	srcMap, err := getIndexesMap(ctx, srcColl)
 	if err != nil {
 		return nil, errors.Wrapf(
@@ -1101,7 +1087,7 @@ func (verifier *Verifier) verifyIndexes(
 					ID:        mbson.ToRawValue(indexName),
 					Field:     "index",
 					NameSpace: FullName(dstColl),
-					Cluster:   ClusterTarget,
+					Cluster:   constants.ClusterTarget,
 					Details:   Mismatch + ": " + diff.String(),
 				})
 			}
@@ -1110,7 +1096,7 @@ func (verifier *Verifier) verifyIndexes(
 				ID:        mbson.ToRawValue(indexName),
 				Field:     "index",
 				Details:   compare.Missing,
-				Cluster:   ClusterSource,
+				Cluster:   constants.ClusterSource,
 				NameSpace: FullName(srcColl),
 			})
 		}
@@ -1123,8 +1109,9 @@ func (verifier *Verifier) verifyIndexes(
 				ID:        mbson.ToRawValue(indexName),
 				Field:     "index",
 				Details:   compare.Missing,
-				Cluster:   ClusterTarget,
-				NameSpace: FullName(dstColl)})
+				Cluster:   constants.ClusterTarget,
+				NameSpace: FullName(dstColl),
+			})
 		}
 	}
 	return results, nil
@@ -1212,7 +1199,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		err := recordMismatches(
 			ctx,
 			verifier.verificationDatabase(),
-			task.PrimaryKey,
+			task,
 			specificationProblems,
 		)
 		if err != nil {
@@ -1260,7 +1247,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		err := recordMismatches(
 			ctx,
 			verifier.verificationDatabase(),
-			task.PrimaryKey,
+			task,
 			indexProblems,
 		)
 		if err != nil {
@@ -1290,7 +1277,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		err := recordMismatches(
 			ctx,
 			verifier.verificationDatabase(),
-			task.PrimaryKey,
+			task,
 			shardingProblems,
 		)
 		if err != nil {
@@ -1312,7 +1299,6 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			docsCount,
 			isCapped,
 		)
-
 		if err != nil {
 			return errors.Wrapf(err, "partitioning collection")
 		}
@@ -1500,7 +1486,6 @@ func (verifier *Verifier) partitionCollection(
 		}
 
 		err = mmongo.WhyFindCannotResume([2]int(verifier.srcClusterInfo.VersionArray))
-
 		if err != nil {
 			if !verifier.warnedNoResumableCollectionScan {
 				verifier.logger.Warn().
@@ -1597,7 +1582,7 @@ func (verifier *Verifier) partitionCollection(
 	return nil
 }
 
-func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*VerificationStatus, error) {
+func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*api.VerificationStatus, error) {
 	generation, _ := verifier.getGeneration()
 
 	return verifier.getVerificationStatusForGeneration(ctx, generation)
@@ -1606,7 +1591,7 @@ func (verifier *Verifier) GetVerificationStatus(ctx context.Context) (*Verificat
 func (verifier *Verifier) getVerificationStatusForGeneration(
 	ctx context.Context,
 	generation int,
-) (*VerificationStatus, error) {
+) (*api.VerificationStatus, error) {
 	taskCollection := verifier.verificationTaskCollection()
 
 	var results []bson.Raw
@@ -1639,7 +1624,6 @@ func (verifier *Verifier) getVerificationStatusForGeneration(
 		"counting generation %d's (non-primary) tasks by status",
 		generation,
 	).Run(ctx, verifier.logger)
-
 	if err != nil {
 		return nil, errors.Wrapf(
 			err,
@@ -1648,7 +1632,7 @@ func (verifier *Verifier) getVerificationStatusForGeneration(
 		)
 	}
 
-	verificationStatus := VerificationStatus{}
+	verificationStatus := api.VerificationStatus{}
 
 	for _, result := range results {
 		idRaw := result.Lookup("_id")
@@ -1747,7 +1731,6 @@ func (verifier *Verifier) StartServer() error {
 // Returned boolean indicates that namespaces are cached, and
 // whatever needs them can proceed.
 func (verifier *Verifier) ensureNamespaces(ctx context.Context) bool {
-
 	// cache namespace
 	if len(verifier.srcNamespaces) == 0 {
 		namespaces, err := verifier.getNamespaces(ctx, SrcNamespaceField)
@@ -1767,7 +1750,6 @@ func (verifier *Verifier) ensureNamespaces(ctx context.Context) bool {
 
 	if len(verifier.dstNamespaces) == 0 {
 		namespaces, err := verifier.getNamespaces(ctx, DstNamespaceField)
-
 		if err != nil {
 			verifier.logger.Err(err).Msgf("Failed to learn destination namespaces")
 			return false
@@ -1857,9 +1839,9 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 	case Gen0MetadataAnalysisComplete:
 		fallthrough
 	case GenerationInProgress:
-		hasTasks, err = verifier.printNamespaceStatistics(ctx, strBuilder)
+		hasTasks, err = verifier.printNamespaceStatistics(ctx, generation, strBuilder)
 	case GenerationComplete:
-		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, strBuilder, reportGenStartTime)
+		hasTasks, err = verifier.printEndOfGenerationStatistics(ctx, generation, strBuilder, reportGenStartTime)
 	default:
 		panic("Bad generation status: " + genstatus)
 	}

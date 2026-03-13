@@ -13,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mmongo/cursor"
@@ -130,7 +131,7 @@ func (suite *IntegrationTestSuite) TestFetchAndCompareAllDstDocsGone() {
 		assert.EqualValues(t, docs[i][0].Value, resultDocID)
 
 		assert.True(t, r.DocumentIsMissing(), "results[%d]: should be doc-missing")
-		assert.EqualValues(t, ClusterTarget, r.Cluster)
+		assert.EqualValues(t, constants.ClusterTarget, r.Cluster)
 	}
 }
 

@@ -28,13 +28,15 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
-require github.com/mongodb-labs/migration-tools v0.0.0-20260313153818-a91a5348fcf3
+require (
+	github.com/ccoveille/go-safecast/v2 v2.0.0
+	github.com/mongodb-labs/migration-tools v0.0.0-20260313153818-a91a5348fcf3
+)
 
 require (
 	github.com/BurntSushi/toml v0.3.1 // indirect
 	github.com/bytedance/sonic v1.13.2 // indirect
 	github.com/bytedance/sonic/loader v0.2.4 // indirect
-	github.com/ccoveille/go-safecast/v2 v2.0.0 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
