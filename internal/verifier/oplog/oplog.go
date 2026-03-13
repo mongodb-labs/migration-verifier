@@ -7,6 +7,7 @@ import (
 
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -42,6 +43,8 @@ type Op struct {
 	Ops []Op `bson:",omitempty"`
 }
 
+var _ bson.Unmarshaler = &Op{}
+
 func (*Op) UnmarshalBSON([]byte) error {
 	panic("Use UnmarshalFromBSON.")
 }
@@ -56,43 +59,44 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 			return errors.Wrap(err, "iterating BSON document")
 		}
 
-		key, err := el.KeyErr()
+		// Avoid allocating a string for this:
+		keyBytes, err := bsoncore.Element(el).KeyBytesErr()
 		if err != nil {
 			return errors.Wrap(err, "reading BSON field name")
 		}
 
-		switch key {
+		switch string(keyBytes) {
 		case "op":
 			err := mbson.UnmarshalElementValue(el, &o.Op)
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q", key)
+				return errors.Wrapf(err, "parsing %#q", string(keyBytes))
 			}
 		case "ts":
 			err := mbson.UnmarshalElementValue(el, &o.TS)
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q", key)
+				return errors.Wrapf(err, "parsing %#q", string(keyBytes))
 			}
 		case "ns":
 			err := mbson.UnmarshalElementValue(el, &o.Ns)
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q", key)
+				return errors.Wrapf(err, "parsing %#q", string(keyBytes))
 			}
 		case "cmdName":
 			var cmdName string
 			err := mbson.UnmarshalElementValue(el, &cmdName)
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q", key)
+				return errors.Wrapf(err, "parsing %#q", string(keyBytes))
 			}
 			o.CmdName = option.Some(cmdName)
 		case "docLen":
 			err := mbson.UnmarshalElementValue(el, &o.DocLen)
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q", key)
+				return errors.Wrapf(err, "parsing %#q", string(keyBytes))
 			}
 		case "docID":
 			o.DocID, err = el.ValueErr()
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q value", key)
+				return errors.Wrapf(err, "parsing %#q value", string(keyBytes))
 			}
 			o.DocID.Value = slices.Clone(o.DocID.Value)
 		case "ops":
@@ -101,22 +105,30 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 				mbson.UnmarshalElementValue(el, &arr),
 				"parsing ops",
 			)
-
 			if err != nil {
 				return err
 			}
 
-			vals, err := arr.Values()
+			opsCount, err := bsontools.CountRawElements(arr)
 			if err != nil {
-				return errors.Wrap(err, "parsing applyOps")
+				return errors.Wrap(err, "counting applyOps")
 			}
 
-			o.Ops = make([]Op, len(vals))
+			o.Ops = make([]Op, opsCount)
 
-			for i, val := range vals {
+			i := 0
+			for el, err := range bsontools.RawElements(arr) {
+				if err != nil {
+					return errors.Wrap(err, "iterating applyOps (after counting??)")
+				}
+
+				val, err := el.ValueErr()
+				if err != nil {
+					return errors.Wrap(err, "extracting applyOps value")
+				}
 
 				var opRaw bson.Raw
-				err := mbson.UnmarshalRawValue(val, &opRaw)
+				err = mbson.UnmarshalRawValue(val, &opRaw)
 				if err != nil {
 					return errors.Wrapf(err, "parsing applyOps field")
 				}
@@ -124,9 +136,11 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 				if err := (&o.Ops[i]).UnmarshalFromBSON(opRaw); err != nil {
 					return errors.Wrapf(err, "parsing applyOps[%d]", i)
 				}
+
+				i++
 			}
 		default:
-			return errors.Wrapf(err, "unexpected field %#q", key)
+			return errors.Wrapf(err, "unexpected field %#q", string(keyBytes))
 		}
 	}
 
@@ -138,6 +152,8 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 type ResumeToken struct {
 	TS bson.Timestamp
 }
+
+var _ bson.Marshaler = ResumeToken{}
 
 func (ResumeToken) MarshalBSON() ([]byte, error) {
 	panic("Use MarshalToBSON.")
@@ -165,10 +181,5 @@ func (rt ResumeToken) MarshalToBSON() []byte {
 
 // GetRawResumeTokenTimestamp extracts the timestamp from a given oplog entry.
 func GetRawResumeTokenTimestamp(token bson.Raw) (bson.Timestamp, error) {
-	rv, err := token.LookupErr("ts")
-	if err != nil {
-		return bson.Timestamp{}, errors.Wrap(err, "getting ts")
-	}
-
-	return mbson.CastRawValue[bson.Timestamp](rv)
+	return bsontools.RawLookup[bson.Timestamp](token, "ts")
 }
