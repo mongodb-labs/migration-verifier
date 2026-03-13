@@ -1128,9 +1128,6 @@ func (verifier *Verifier) verifyIndexes(
 			}
 
 			if diff, has := diffOpt.Get(); has {
-				fmt.Printf("------ src: %+v\n\n", srcSpec)
-				fmt.Printf("------ dst: %+v\n\n", dstSpec)
-				fmt.Printf("------- diff: %+v\n\n", diff.String())
 				results = append(results, compare.Result{
 					ID:        mbson.ToRawValue(indexName),
 					Field:     "index",

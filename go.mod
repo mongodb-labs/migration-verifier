@@ -28,7 +28,7 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
-require github.com/mongodb-labs/migration-tools v0.0.0-20260307064642-77b45828429d
+require github.com/mongodb-labs/migration-tools v0.0.0-20260313153818-a91a5348fcf3
 
 require (
 	github.com/BurntSushi/toml v0.3.1 // indirect
