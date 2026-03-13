@@ -114,7 +114,6 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 				},
 				"comparing documents",
 			).Run(givenCtx, verifier.logger)
-
 		if err != nil {
 			writeErr := chanutil.WriteWithDoneCheck(
 				givenCtx,
@@ -174,7 +173,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 	srcChannel, dstChannel <-chan []compare.DocWithTS,
 	reportsChan chan<- DocCompareReport,
 ) error {
-
 	// 1. Initialize State
 	c := newComparator(verifier, workerNum, fi, task)
 	defer func() {
@@ -221,7 +219,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 		}
 
 		whyFlush, err := c.flushIfNeeded(ctx, reportsChan)
-
 		if err != nil {
 			return errors.Wrapf(err, "flushing problems")
 		}
@@ -341,7 +338,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 
 		for {
 			docIDsOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
-
 			if err != nil {
 				return err
 			}
@@ -604,7 +600,6 @@ func iterateCursorToChannel(
 			writer,
 			slices.Clone(docsWithTSCache),
 		)
-
 		if err != nil {
 			return errors.Wrapf(
 				err,
