@@ -111,7 +111,6 @@ func getModernizedKeySpec(keySpec bson.Raw) (bson.D, bool, error) {
 
 // shouldModernizeSpec returns true if the index is pre-v2.
 func shouldModernizeSpec(indexSpec bson.Raw) (bool, error) {
-
 	// All the versions of the server that migrations support have a v field
 	// in their indices.
 	indexVersion, err := bsontools.RawLookup[int](indexSpec, "v")
@@ -154,10 +153,4 @@ func shouldModernizeValue(value bson.RawValue) bool {
 		// Convert all types that aren't strings or numbers.
 		return true
 	}
-}
-
-func omitVersionFromIndexSpec(spec bson.Raw) (bson.Raw, error) {
-	newSpec, _, err := bsontools.RemoveFromRaw(spec, "v")
-
-	return newSpec, err
 }

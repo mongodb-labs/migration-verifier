@@ -27,6 +27,12 @@ var optsWhereOrderMatters = []string{
 }
 
 var optsToIgnore = mapset.NewSet(
+	// We can ignore the `v` field when comparing indexes. This is because:
+	// - We already validated that the version is v1 or v2.
+	// - There are no backwards-incompatible features between v1 & v2 indexes.
+	//   (v2 indexes only added `NumberDecimal` and `Collation`.)
+	"v",
+
 	// v4.4 stopped adding “ns” to index fields.
 	"ns",
 
@@ -88,7 +94,7 @@ func DescribeSpecDifferences(specA, specB bson.Raw) (option.Option[SpecDiff], er
 		return option.None[SpecDiff](), err
 	}
 
-	equalNoOrder, err := bsontools.EqualIgnoringOrder(specA, specB)
+	equalNoOrder, err := equalIgnoringOrder(specA, specB)
 	if err != nil {
 		return option.None[SpecDiff](), err
 	}
@@ -108,12 +114,10 @@ func DescribeSpecDifferences(specA, specB bson.Raw) (option.Option[SpecDiff], er
 			}), nil
 		}
 
-		fmt.Printf("a ejson: %#q\n\n", string(specAExtJSON))
-		fmt.Printf("b ejson: %#q\n\n", string(specBExtJSON))
-
 		patch, err := jsondiff.CompareJSON(
 			specAExtJSON,
 			specBExtJSON,
+			// jsondiff.Factorize(), // https://github.com/wI2L/jsondiff/issues/45
 		)
 
 		return option.Some(SpecDiff{
@@ -124,7 +128,10 @@ func DescribeSpecDifferences(specA, specB bson.Raw) (option.Option[SpecDiff], er
 
 	orderDifferFields, err := getOrderDifferOpts(specA, specB)
 	if err != nil {
-		return option.None[SpecDiff](), fmt.Errorf("compare order-sensitive index spec fields: %w", err)
+		return option.None[SpecDiff](), fmt.Errorf(
+			"compare order-sensitive index spec fields: %w",
+			err,
+		)
 	}
 
 	if len(orderDifferFields) == 0 {
@@ -147,15 +154,6 @@ func prepareIndexSpecForEqualityCheck(spec bson.Raw) (bson.Raw, error) {
 		return nil, fmt.Errorf("normalizing types: %w", err)
 	}
 
-	// We can ignore the `v` field when comparing indexes. This is because:
-	// - We already validated that the version is v1 or v2.
-	// - There are no backwards-incompatible features between v1 & v2 indexes.
-	//   (v2 indexes only added `NumberDecimal` and `Collation`.)
-	spec, err = omitVersionFromIndexSpec(spec)
-	if err != nil {
-		return nil, err
-	}
-
 	for field := range optsToIgnore.Iter() {
 		spec, _, err = bsontools.RemoveFromRaw(spec, field)
 		if err != nil {
@@ -166,7 +164,7 @@ func prepareIndexSpecForEqualityCheck(spec bson.Raw) (bson.Raw, error) {
 	return spec, nil
 }
 
-// This assumes the specs are pre-prepared as above.
+// This assumes the specs have been through prepareIndexSpecForEqualityCheck.
 func getOrderDifferOpts(specA, specB bson.Raw) ([]string, error) {
 	var orderDifferOpts []string
 
@@ -292,9 +290,9 @@ func convertToInt32(spec bson.Raw, keyName string, maxBound int32) (bson.Raw, er
 	case bson.TypeInt64, bson.TypeDouble:
 		if val.AsFloat64() > float64(maxBound) {
 			return nil, fmt.Errorf(
-				"%#q value (%d) cannot exceed %d",
+				"%#q value (%f) cannot exceed %d",
 				keyName,
-				val.Int64(),
+				val.AsFloat64(),
 				maxBound,
 			)
 		}

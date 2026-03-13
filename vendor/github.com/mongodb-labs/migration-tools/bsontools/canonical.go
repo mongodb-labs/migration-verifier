@@ -1,11 +1,11 @@
 package bsontools
 
 import (
-	"bytes"
 	"cmp"
 	"fmt"
 	"slices"
 
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -13,20 +13,6 @@ import (
 // It modifies the provided bson.Raw directly.
 func SortFields(in bson.Raw) error {
 	return sortInPlaceInternal(in, false)
-}
-
-func EqualIgnoringOrder(a, b bson.Raw) (bool, error) {
-	sortedA := slices.Clone(a)
-	if err := SortFields(sortedA); err != nil {
-		return false, fmt.Errorf("sorting A’s fields: %w", err)
-	}
-
-	sortedB := slices.Clone(b)
-	if err := SortFields(sortedB); err != nil {
-		return false, fmt.Errorf("sorting B’s fields: %w", err)
-	}
-
-	return bytes.Equal(sortedA, sortedB), nil
 }
 
 func sortInPlaceInternal(in bson.Raw, isArray bool) error {
@@ -85,6 +71,14 @@ func sortInPlaceInternal(in bson.Raw, isArray bool) error {
 	for _, field := range fields {
 		scratch = append(scratch, field.el...)
 	}
+
+	// sanity-check that `scratch` is, in fact, the expected size:
+	lo.Assertf(
+		len(scratch) == elementsBlockSize,
+		"scratch (%d bytes) should be %d bytes",
+		len(scratch),
+		elementsBlockSize,
+	)
 
 	// 5. Overwrite the original elements space with the sorted bytes.
 	copy(in[4:len(in)-1], scratch)

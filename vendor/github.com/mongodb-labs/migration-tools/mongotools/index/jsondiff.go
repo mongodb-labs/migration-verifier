@@ -6,27 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
-	"github.com/wI2L/jsondiff"
 )
-
-func describeJSONDiff(a, b []byte) (string, error) {
-	patch, err := jsondiff.CompareJSON(
-		a,
-		b,
-		jsondiff.Factorize(),
-	)
-	if err != nil {
-		return "", fmt.Errorf("creating JSON patch: %w", err)
-	}
-
-	patchStr, err := fixJSONPatchFieldOrder([]byte(patch.String()))
-	if err != nil {
-		patchStr = fmt.Appendf(nil, "%s (failed to normalize order: %v)", patch.String(), err)
-	}
-
-	return string(patchStr), nil
-}
 
 // The jsondiff library’s patch.String() puts the fields in a weird order:
 //
