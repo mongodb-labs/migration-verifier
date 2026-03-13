@@ -242,8 +242,8 @@ func processCursor(
 	var batch []DocWithTS
 	var batchDocIDs []DocID
 
-	       docsBuf := &arenabuf.Buffer[bson.Raw]{}
-       docIDsBuf := &arenabuf.Buffer[[]byte]{}
+	docsBuf := &arenabuf.Buffer[bson.Raw]{}
+	docIDsBuf := &arenabuf.Buffer[[]byte]{}
 
 cursorLoop:
 	for {
@@ -309,7 +309,7 @@ cursorLoop:
 			batch,
 			DocWithTS{
 				Doc: docsBuf.Add(userDoc),
-				TS: *opTime,
+				TS:  *opTime,
 			},
 		)
 
@@ -322,7 +322,7 @@ cursorLoop:
 			batchDocIDs,
 			DocID{
 				ID: bson.RawValue{
-					Type: docID.Type,
+					Type:  docID.Type,
 					Value: docIDsBuf.Add(docID.Value),
 				},
 			},
@@ -333,8 +333,8 @@ cursorLoop:
 				return errors.Wrapf(err, "flushing docs")
 			}
 
-		        docsBuf.Reset()
-                	docIDsBuf.Reset()
+			docsBuf.Reset()
+			docIDsBuf.Reset()
 		}
 	}
 
