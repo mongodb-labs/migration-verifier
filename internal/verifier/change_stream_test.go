@@ -69,7 +69,6 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_InitialNonempty() {
 				)
 			},
 		)
-
 	}
 }
 

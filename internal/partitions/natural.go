@@ -124,7 +124,6 @@ func PartitionCollectionNaturalOrder(
 	srcURI string,
 	readPref *readpref.ReadPref,
 ) (chan mo.Result[Partition], error) {
-
 	// Time-series bucket collections’ `_id`s are always auto-assigned, which
 	// means we might as well always partition them by ID.
 	lo.Assertf(
@@ -325,7 +324,6 @@ func GetTopRecordID(
 				SetProjection(bson.D{{"id", 0}}).
 				SetShowRecordID(true),
 		)
-
 	if err != nil {
 		return option.None[bson.RawValue](), errors.Wrap(
 			err,

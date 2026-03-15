@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	_ "net/http/pprof"
 	"os"
 	"strings"
 	"sync"
@@ -53,7 +52,7 @@ import (
 type ReadConcernSetting string
 
 const (
-	//TODO: add comments for each of these so the warnings will stop :)
+	// TODO: add comments for each of these so the warnings will stop :)
 	Failed            = "Failed"
 	Mismatch          = "Mismatch"
 	SrcNamespaceField = "query_filter.namespace"
@@ -264,7 +263,6 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 			verifier.logger,
 			verifier.srcClient,
 		)
-
 		if err != nil {
 			return errors.Wrapf(err, "failed to fetch source's cluster time")
 		}
@@ -274,7 +272,6 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 			verifier.logger,
 			verifier.dstClient,
 		)
-
 		if err != nil {
 			return errors.Wrapf(err, "failed to fetch destination's cluster time")
 		}
@@ -336,7 +333,6 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 	model := mongo.IndexModel{Keys: bson.M{"generation": 1}}
 	_, err := verifier.verificationTaskCollection().Indexes().CreateOne(ctx, model)
-
 	if err != nil {
 		return errors.Wrapf(err, "creating generation index")
 	}
@@ -463,7 +459,6 @@ func (verifier *Verifier) SetPprofInterval(arg string) error {
 
 // DocumentStats gets various stats (TODO clarify)
 func DocumentStats(ctx context.Context, client *mongo.Client, namespaces []string) {
-
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Doc Count", "Database", "Collection"})
 
@@ -608,7 +603,6 @@ REPORTS:
 			}
 
 			report, err := repResult.Get()
-
 			if err != nil {
 				return errors.Wrapf(
 					err,
@@ -668,7 +662,6 @@ REPORTS:
 							"failed to enqueue %d recheck(s) of mismatched documents",
 							len(idsToRecheck),
 						)
-
 					},
 				)
 			}
@@ -716,7 +709,6 @@ REPORTS:
 				Str("namespace", task.QueryFilter.Namespace).
 				Int("mismatchesCount", problemsCount).
 				Msg("Discrepancies found. Will recheck in the next generation.")
-
 		}
 	}
 
@@ -724,7 +716,6 @@ REPORTS:
 	task.SourceByteCount = bytesCount
 
 	err := verifier.UpdateVerificationTask(ctx, task)
-
 	if err != nil {
 		return errors.Wrapf(
 			err,
@@ -738,7 +729,7 @@ REPORTS:
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace).
-		Int64("documentCount", int64(task.SourceDocumentCount)).
+		Uint64("documentCount", uint64(task.SourceDocumentCount)).
 		Str("dataSize", reportutils.FmtBytes(task.SourceByteCount)).
 		Stringer("timeElapsed", time.Since(start)).
 		Msg("Finished document comparison task.")
@@ -852,7 +843,9 @@ func (verifier *Verifier) partitionAndInspectNamespace(
 			},
 			Ns: &partitions.Namespace{
 				DB:   namespaceAndUUID.DBName,
-				Coll: namespaceAndUUID.CollName}}}
+				Coll: namespaceAndUUID.CollName,
+			},
+		}}
 	}
 
 	debugLog := verifier.logger.Debug()
@@ -966,7 +959,7 @@ func (verifier *Verifier) doIndexSpecsMatch(ctx context.Context, srcSpec, dstSpe
 		return true, nil
 	}
 
-	var fieldsToRemove = []string{
+	fieldsToRemove := []string{
 		// v4.4 stopped adding “ns” to index fields.
 		"ns",
 
@@ -1023,7 +1016,6 @@ func getIndexesMap(
 	ctx context.Context,
 	coll *mongo.Collection,
 ) (map[string]bson.Raw, error) {
-
 	var specs []bson.Raw
 	specsMap := map[string]bson.Raw{}
 
@@ -1047,7 +1039,6 @@ func getIndexesMap(
 	for _, spec := range specs {
 		var name string
 		has, err := mbson.RawLookup(spec, &name, "name")
-
 		if err != nil {
 			return nil, errors.Wrapf(
 				err,
@@ -1077,7 +1068,6 @@ func (verifier *Verifier) verifyIndexes(
 	srcColl, dstColl *mongo.Collection,
 	srcIdIndexSpec, dstIdIndexSpec bson.Raw,
 ) ([]compare.Result, error) {
-
 	srcMap, err := getIndexesMap(ctx, srcColl)
 	if err != nil {
 		return nil, errors.Wrapf(
@@ -1149,7 +1139,8 @@ func (verifier *Verifier) verifyIndexes(
 				Field:     "index",
 				Details:   compare.Missing,
 				Cluster:   constants.ClusterTarget,
-				NameSpace: FullName(dstColl)})
+				NameSpace: FullName(dstColl),
+			})
 		}
 	}
 	return results, nil
@@ -1337,7 +1328,6 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			docsCount,
 			isCapped,
 		)
-
 		if err != nil {
 			return errors.Wrapf(err, "partitioning collection")
 		}
@@ -1382,8 +1372,8 @@ func (verifier *Verifier) setCollectionSizeInTask(
 		verifier.logger.Warn().
 			Any("task", task.PrimaryKey).
 			Str("namespace", FullName(srcColl)).
-			Int64("documentsCount", int64(docsCount)).
-			Int64("sizeInBytes", int64(collBytes)).
+			Uint64("documentsCount", uint64(docsCount)).
+			Uint64("sizeInBytes", uint64(collBytes)).
 			Err(err).
 			Msg("Failed to update verification task with collection stats.")
 	}
@@ -1428,9 +1418,9 @@ func (verifier *Verifier) partitionCollection(
 		verifier.logger.Debug().
 			Any("task", task.PrimaryKey).
 			Str("namespace", FullName(srcColl)).
-			Int64("documentsCount", int64(docsCount)).
-			Int64("collectionBytes", int64(collBytes)).
-			Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
+			Uint64("documentsCount", uint64(docsCount)).
+			Uint64("collectionBytes", uint64(collBytes)).
+			Uint64("targetPartitionBytes", uint64(verifier.partitionSizeInBytes)).
 			Msg("Collection is small enough not to need partitioning.")
 
 		partition := partitions.Partition{
@@ -1474,9 +1464,9 @@ func (verifier *Verifier) partitionCollection(
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
 		Str("namespace", FullName(srcColl)).
-		Int64("documentsCount", int64(docsCount)).
-		Int64("collectionBytes", int64(collBytes)).
-		Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
+		Uint64("documentsCount", uint64(docsCount)).
+		Uint64("collectionBytes", uint64(collBytes)).
+		Uint64("targetPartitionBytes", uint64(verifier.partitionSizeInBytes)).
 		Float64("idealPartitionsCount", idealNumPartitions).
 		Stringer("scheme", schemeToUse).
 		Msg("Partitioning collection.")
@@ -1525,7 +1515,6 @@ func (verifier *Verifier) partitionCollection(
 		}
 
 		err = mmongo.WhyFindCannotResume([2]int(verifier.srcClusterInfo.VersionArray))
-
 		if err != nil {
 			if !verifier.warnedNoResumableCollectionScan {
 				verifier.logger.Warn().
@@ -1664,7 +1653,6 @@ func (verifier *Verifier) getVerificationStatusForGeneration(
 		"counting generation %d's (non-primary) tasks by status",
 		generation,
 	).Run(ctx, verifier.logger)
-
 	if err != nil {
 		return nil, errors.Wrapf(
 			err,
@@ -1772,7 +1760,6 @@ func (verifier *Verifier) StartServer() error {
 // Returned boolean indicates that namespaces are cached, and
 // whatever needs them can proceed.
 func (verifier *Verifier) ensureNamespaces(ctx context.Context) bool {
-
 	// cache namespace
 	if len(verifier.srcNamespaces) == 0 {
 		namespaces, err := verifier.getNamespaces(ctx, SrcNamespaceField)
@@ -1792,7 +1779,6 @@ func (verifier *Verifier) ensureNamespaces(ctx context.Context) bool {
 
 	if len(verifier.dstNamespaces) == 0 {
 		namespaces, err := verifier.getNamespaces(ctx, DstNamespaceField)
-
 		if err != nil {
 			verifier.logger.Err(err).Msgf("Failed to learn destination namespaces")
 			return false

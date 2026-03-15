@@ -295,7 +295,6 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 					{"to", shardIds[0]},
 					{"_waitForDelete", true},
 				}).Err()
-
 				if err != nil {
 					suite.T().Logf("Failed to move %s’s lower chunk to shard %#q: %v", clientLabel, shardIds[0], err)
 					return false
@@ -316,7 +315,6 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 					{"to", shardIds[1]},
 					{"_waitForDelete", true},
 				}).Err()
-
 				if err != nil {
 					suite.T().Logf("Failed to move %s’s upper chunk to shard %#q: %v", clientLabel, shardIds[1], err)
 					return false
@@ -384,7 +382,6 @@ func getShardIds(t *testing.T, client *mongo.Client) []string {
 }
 
 func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
-
 	ctx := suite.Context()
 	t := suite.T()
 
@@ -877,7 +874,6 @@ func runFetchAndCompareDocuments(
 
 	for _, result := range payload {
 		report, err := result.Get()
-
 		if err != nil {
 			return nil, 0, 0, err
 		}
@@ -1734,7 +1730,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.sameView",
-			To:        "testDb.sameView"}}
+			To:        "testDb.sameView",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1751,7 +1749,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.wrongColl",
-			To:        "testDb.wrongColl"}}
+			To:        "testDb.wrongColl",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1774,7 +1774,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.wrongPipeline",
-			To:        "testDb.wrongPipeline"}}
+			To:        "testDb.wrongPipeline",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1802,7 +1804,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.missingOptionsSrc",
-			To:        "testDb.missingOptionsSrc"}}
+			To:        "testDb.missingOptionsSrc",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1825,7 +1829,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.missingOptionsDst",
-			To:        "testDb.missingOptionsDst"}}
+			To:        "testDb.missingOptionsDst",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1847,7 +1853,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.differentOptions",
-			To:        "testDb.differentOptions"}}
+			To:        "testDb.differentOptions",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1873,7 +1881,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl",
-			To:        "testDb.testColl"}}
+			To:        "testDb.testColl",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1893,7 +1903,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl",
-			To:        "testDb.testCollTo"}}
+			To:        "testDb.testCollTo",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1913,7 +1925,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.destOnlyColl",
-			To:        "testDb.destOnlyColl"}}
+			To:        "testDb.destOnlyColl",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1935,7 +1949,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.viewOnSrc",
-			To:        "testDb.viewOnSrc"}}
+			To:        "testDb.viewOnSrc",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1957,7 +1973,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.cappedOnDst",
-			To:        "testDb.cappedOnDst"}}
+			To:        "testDb.cappedOnDst",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1979,7 +1997,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl",
-			To:        "testDb.testColl"}}
+			To:        "testDb.testColl",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1991,7 +2011,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testCollDNE",
-			To:        "testDb.testCollDNE"}}
+			To:        "testDb.testCollDNE",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -2052,7 +2074,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl2",
-			To:        "testDb.testColl2"}}
+			To:        "testDb.testColl2",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -2085,7 +2109,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl3",
-			To:        "testDb.testColl3"}}
+			To:        "testDb.testColl3",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -2125,7 +2151,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl4",
-			To:        "testDb.testColl4"}}
+			To:        "testDb.testColl4",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -2421,11 +2449,15 @@ func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
 	suite.Require().NoError(err)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
-		"testDb3.testColl5", "testDb4.testColl6"},
+	suite.ElementsMatch([]string{
+		"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
+		"testDb3.testColl5", "testDb4.testColl6",
+	},
 		verifier.srcNamespaces)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
-		"testDb3.testColl5", "testDb4.testColl6"},
+	suite.ElementsMatch([]string{
+		"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
+		"testDb3.testColl5", "testDb4.testColl6",
+	},
 		verifier.dstNamespaces)
 
 	err = suite.srcMongoClient.Database("testDb2").Drop(ctx)
@@ -3014,7 +3046,6 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 		50*time.Millisecond,
 		"Mismatches should disappear.",
 	)
-
 }
 
 func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {

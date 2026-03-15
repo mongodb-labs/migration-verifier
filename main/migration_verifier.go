@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	// #nosec G108 - pprof by default is OK
 	_ "net/http/pprof"
 	"os"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/mongodb-labs/migration-tools/mongotools"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -382,10 +384,11 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		if partitionSizeMB > math.MaxInt64 {
 			return nil, fmt.Errorf("%q may not exceed %d", partitionSizeMB, math.MaxInt64)
 		}
-
 	}
 
-	v.SetPartitionSizeMB(uint32(cmp.Or(partitionSizeMB, partitions.DefaultPartitionMiB)))
+	v.SetPartitionSizeMB(
+		safecast.MustConvert[uint32](cmp.Or(partitionSizeMB, partitions.DefaultPartitionMiB)),
+	)
 
 	v.SetStartClean(cCtx.Bool(startClean))
 

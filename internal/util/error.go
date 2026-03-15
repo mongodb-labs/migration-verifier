@@ -387,7 +387,7 @@ func GetActualCollectionFromCollectionUUIDMismatchError(logger *logger.Logger, e
 	err = errors.Cause(err)
 	// XXX - commented out for now because we cannot call util functions from
 	// this package (error) since util calls error.
-	//Invariant(logger, IsCollectionUUIDMismatchError(err), "GetActualCollectionFromCollectionUUIDMismatchError must be called with a UUIDMismatchError, received %s", err)
+	// Invariant(logger, IsCollectionUUIDMismatchError(err), "GetActualCollectionFromCollectionUUIDMismatchError must be called with a UUIDMismatchError, received %s", err)
 
 	actualCollection, lookupErr := getErrorRaw(err).LookupErr("actualCollection")
 

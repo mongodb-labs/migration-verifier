@@ -14,6 +14,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -184,7 +185,7 @@ func partitionCollectionWithParameters(
 		Str("namespace", uuidEntry.DBName+"."+uuidEntry.CollName).
 		Float64("sampleRate", sampleRate).
 		Int("sampleMinNumDocs", sampleMinNumDocs).
-		Int64("desiredPartitionSizeInBytes", int64(partitionBytes)).
+		Uint64("desiredPartitionSizeInBytes", uint64(partitionBytes)).
 		Msg("Partitioning collection.")
 
 	// Get the source collection.
@@ -255,7 +256,6 @@ func partitionCollectionWithParameters(
 			prevSampleErr = err
 			return err
 		}, "sampling documents to get partition mid bounds").Run(ctx, subLogger)
-
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +395,7 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 		Bool("isCapped", value.Capped).
 		Msg("Collection stats.")
 
-	return types.ByteCount(value.Size), types.DocumentCount(value.Count), value.Capped, nil
+	return safecast.MustConvert[types.ByteCount](value.Size), safecast.MustConvert[types.DocumentCount](value.Count), value.Capped, nil
 }
 
 // GetDocumentCountAfterFiltering counts the number of filtered documents in a collection.
@@ -513,11 +513,13 @@ func getMidIDBounds(
 	pipeline = append(pipeline, []bson.D{
 		{{"$sample", bson.D{{"size", numDocsToSample}}}},
 		{{"$project", bson.D{{"_id", 1}}}},
-		{{"$bucketAuto",
+		{{
+			"$bucketAuto",
 			bson.D{
 				{"groupBy", "$_id"},
 				{"buckets", numPartitions},
-			}}},
+			},
+		}},
 	}...)
 
 	// Get a cursor for the $sample and $bucketAuto aggregation.
@@ -568,7 +570,6 @@ func getMidIDBounds(
 			"finding %#q's _id partition boundaries",
 			srcDB.Name()+"."+collName,
 		).Run(ctx, logger)
-
 	if err != nil {
 		return nil, false, errors.Wrapf(err, "encountered a problem in the cursor when trying to $sample and $bucketAuto aggregation for source namespace '%s.%s'", srcDB.Name(), collName)
 	}

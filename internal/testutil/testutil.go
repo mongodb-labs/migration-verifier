@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"log"
-	mrand "math/rand/v2"
 	"testing"
 
 	"github.com/10gen/migration-verifier/internal/util"
@@ -176,7 +175,8 @@ func KillApplicationChangeStreams(
 				{"$match", bson.D{
 					{"clientMetadata.application.name", appName},
 					{"command.collection", "$cmd.aggregate"},
-					{"cursor.originatingCommand.pipeline.0.$_internalChangeStreamOplogMatch",
+					{
+						"cursor.originatingCommand.pipeline.0.$_internalChangeStreamOplogMatch",
 						bson.D{{"$type", "object"}},
 					},
 				}},
@@ -198,15 +198,13 @@ func KillApplicationChangeStreams(
 	for _, op := range ops {
 		t.Logf("Killing change stream op %+v", op.Opid)
 
-		err :=
-			client.Database("admin").RunCommand(
-				ctx,
-				bson.D{
-					{"killOp", 1},
-					{"op", op.Opid},
-				},
-			).Err()
-
+		err := client.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"killOp", 1},
+				{"op", op.Opid},
+			},
+		).Err()
 		if err != nil {
 			return errors.Wrapf(err, "failed to kill change stream with opId %#q", op.Opid)
 		}
@@ -215,12 +213,12 @@ func KillApplicationChangeStreams(
 	return nil
 }
 
-const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+var charset = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
 func RandomString(n int) string {
 	b := make([]byte, n)
 	for i := range b {
-		b[i] = charset[mrand.IntN(len(charset))]
+		b[i] = lo.Sample(charset)
 	}
 	return string(b)
 }

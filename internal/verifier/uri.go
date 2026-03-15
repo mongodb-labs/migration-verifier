@@ -39,7 +39,6 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 			verifier.logger,
 			opts,
 		)
-
 		if err != nil {
 			return errors.Wrap(
 				err,
@@ -124,7 +123,6 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 			verifier.logger,
 			opts,
 		)
-
 		if err != nil {
 			return errors.Wrap(
 				err,
@@ -142,7 +140,6 @@ func checkURIAgainstServerVersion(uri string, bi util.ClusterInfo) error {
 	}
 
 	cs, err := connstring.ParseAndValidate(uri)
-
 	if err != nil {
 		return errors.Wrap(err, "failed to parse and validate connection string")
 	}

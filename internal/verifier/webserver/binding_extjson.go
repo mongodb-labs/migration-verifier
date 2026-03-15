@@ -14,8 +14,10 @@ type extJSONBindingType struct{}
 
 var ExtJSONBinding = extJSONBindingType{}
 
-var _ binding.Binding = extJSONBindingType{}
-var _ binding.BindingBody = extJSONBindingType{}
+var (
+	_ binding.Binding     = extJSONBindingType{}
+	_ binding.BindingBody = extJSONBindingType{}
+)
 
 func (extJSONBindingType) Name() string {
 	return "extJSON"

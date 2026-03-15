@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -159,14 +160,14 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 		var dataSize int32
 		if changeEvent.FullDocLen.OrZero() > 0 {
-			dataSize = int32(changeEvent.FullDocLen.OrZero())
+			dataSize = safecast.MustConvert[int32](changeEvent.FullDocLen.OrZero())
 		} else if changeEvent.FullDocument == nil {
 			// This happens for deletes and for some updates.
 			// The document is probably, but not necessarily, deleted.
 			dataSize = defaultUserDocumentSize
 		} else {
 			// This happens for inserts, replaces, and most updates.
-			dataSize = int32(len(changeEvent.FullDocument))
+			dataSize = safecast.MustConvert[int32](len(changeEvent.FullDocument))
 		}
 
 		dataSizes = append(dataSizes, dataSize)

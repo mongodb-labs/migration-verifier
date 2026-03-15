@@ -1,5 +1,7 @@
 version: "2"
 linters:
+  enable-default: true
+
   enable:
     - forbidigo
     - gomodguard
@@ -38,5 +40,4 @@ linters:
 formatters:
   enable:
     - gci
-    - gofmt
-    - goimports
+    - gofumpt

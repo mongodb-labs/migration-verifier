@@ -39,7 +39,6 @@ func GetNewClusterTime(
 		},
 		"appending oplog note to get cluster time",
 	).Run(ctx, logger)
-
 	if err != nil {
 		return bson.Timestamp{}, err
 	}

@@ -29,7 +29,6 @@ func AppendDocKeyFields(
 		// splits on the dot and looks deeply into the document.
 		parts := strings.Split(field, ".")
 		val, err := doc.LookupErr(parts...)
-
 		if err != nil {
 			if errors.Is(err, bsoncore.ErrElementNotFound) || errors.As(err, &bsoncore.InvalidDepthTraversalError{}) {
 				// If the document lacks a value for this field

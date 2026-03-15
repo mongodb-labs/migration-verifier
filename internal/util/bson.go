@@ -34,7 +34,6 @@ func (b *BSONArraySizer) Add(el bson.RawValue) {
 
 // Len() returns the encoded BSON array’s length in bytes.
 func (b *BSONArraySizer) Len() int {
-
 	// 4 bytes for BSON length, the elems, then a final NUL.
 	return 5 + b.elemsSize
 }

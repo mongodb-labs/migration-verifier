@@ -94,7 +94,6 @@ func (r *Retryer) runRetryLoop(
 
 		if beforeFunc, hasBefore := r.before.Get(); hasBefore {
 			err := beforeFunc()
-
 			if err != nil {
 				return errors.Wrapf(err, "before %#q", r.description.OrZero())
 			}
@@ -147,7 +146,6 @@ func (r *Retryer) runRetryLoop(
 				}()
 
 				err := curFunc(egCtx, funcinfos[i])
-
 				if err != nil {
 					return errgroupErr{
 						funcNum:         i,

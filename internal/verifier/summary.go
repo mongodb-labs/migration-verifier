@@ -107,7 +107,6 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		tasks.VerifyDocuments,
 		generation,
 	)
-
 	if err != nil {
 		return option.None[time.Duration](), false, err
 	}
@@ -115,7 +114,6 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	anyAreIncomplete := len(incompleteTasks) > 0
 
 	if len(failedTasks) == 0 {
-
 		// Nothing has failed/mismatched, so there’s nothing to print.
 		return option.None[time.Duration](), anyAreIncomplete, nil
 	}
@@ -832,7 +830,6 @@ func (verifier *Verifier) getPerNamespaceWorkerStats() map[string][]WorkerStatus
 }
 
 func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
-
 	table := tablewriter.NewWriter(builder)
 	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed", "Detail"})
 

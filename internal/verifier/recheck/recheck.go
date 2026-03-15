@@ -6,6 +6,7 @@ import (
 
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -35,8 +36,10 @@ type PrimaryKey struct {
 	Rand int32
 }
 
-var _ bson.Marshaler = PrimaryKey{}
-var _ bson.Unmarshaler = &PrimaryKey{}
+var (
+	_ bson.Marshaler   = PrimaryKey{}
+	_ bson.Unmarshaler = &PrimaryKey{}
+)
 
 // MarshalBSON implements bson.Marshaler .. which is only done to prevent
 // the inefficiency of bson.Marshal().
@@ -67,7 +70,7 @@ func (pk PrimaryKey) MarshalToBSON() []byte {
 		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", pk, len(doc), expectedLen))
 	}
 
-	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
+	binary.LittleEndian.PutUint32(doc, safecast.MustConvert[uint32](len(doc)))
 
 	return doc
 }
@@ -121,8 +124,10 @@ type MismatchHistory struct {
 
 var MismatchHistoryBSONLength = len(MismatchHistory{}.MarshalToBSON())
 
-var _ bson.Marshaler = MismatchHistory{}
-var _ bson.Unmarshaler = &MismatchHistory{}
+var (
+	_ bson.Marshaler   = MismatchHistory{}
+	_ bson.Unmarshaler = &MismatchHistory{}
+)
 
 func (mt MismatchHistory) MarshalBSON() ([]byte, error) {
 	panic("Prefer MarshalToBSON.")
@@ -141,7 +146,7 @@ func (mt MismatchHistory) MarshalToBSON() []byte {
 		1
 
 	doc := make(bson.Raw, 4, expectedLen)
-	binary.LittleEndian.PutUint32(doc, uint32(cap(doc)))
+	binary.LittleEndian.PutUint32(doc, safecast.MustConvert[uint32](cap(doc)))
 
 	doc = bsoncore.AppendDateTimeElement(doc, "first", int64(mt.First))
 	doc = bsoncore.AppendInt64Element(doc, "durationMS", mt.DurationMS)
@@ -198,8 +203,10 @@ type Doc struct {
 	FirstMismatchTime option.Option[bson.DateTime] `bson:"firstMismatchTime"`
 }
 
-var _ bson.Marshaler = Doc{}
-var _ bson.Unmarshaler = &Doc{}
+var (
+	_ bson.Marshaler   = Doc{}
+	_ bson.Unmarshaler = &Doc{}
+)
 
 // MarshalBSON implements bson.Marshaler .. which is only done to prevent
 // the inefficiency of bson.Marshal().
@@ -229,7 +236,7 @@ func (rd Doc) MarshalToBSON() []byte {
 
 	doc := make(bson.Raw, 4, expectedLen)
 	doc = bsoncore.AppendDocumentElement(doc, "_id", keyRaw)
-	doc = bsoncore.AppendInt32Element(doc, "dataSize", int32(rd.DataSize))
+	doc = bsoncore.AppendInt32Element(doc, "dataSize", rd.DataSize)
 
 	if cot, has := rd.ChangeOpTime.Get(); has {
 		doc = bsoncore.AppendTimestampElement(doc, "changeOpTime", cot.T, cot.I)
@@ -249,7 +256,7 @@ func (rd Doc) MarshalToBSON() []byte {
 		panic(fmt.Sprintf("Unexpected %T BSON size %d; expected %d", rd, len(doc), expectedLen))
 	}
 
-	binary.LittleEndian.PutUint32(doc, uint32(len(doc)))
+	binary.LittleEndian.PutUint32(doc, safecast.MustConvert[uint32](len(doc)))
 
 	return doc
 }

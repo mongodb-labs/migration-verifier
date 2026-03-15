@@ -69,5 +69,4 @@ func (suite *IntegrationTestSuite) TestGetSizeAndDocumentCount() {
 		suite.Require().Error(err, "fail on timeseries view")
 		suite.Assert().ErrorContains(err, timeseries.BucketPrefix)
 	}
-
 }

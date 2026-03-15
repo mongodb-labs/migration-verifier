@@ -135,7 +135,6 @@ func refreshMongoses(
 			},
 			"refreshing mongos shard cache",
 		).Run(ctx, l)
-
 		if err != nil {
 			return err
 		}

@@ -196,7 +196,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 		opType := changeEvents[eventsRead].OpType
 		if !supportedEventOpTypes.Contains(opType) {
-
 			// We expect certain DDL events on the destination as part of
 			// a migration. For example, mongosync enables indexes’ uniqueness
 			// constraints and sets capped collection sizes, and sometimes
@@ -319,7 +318,6 @@ changeStreamLoop:
 				}
 
 				err = csr.readAndHandleOneChangeEventBatch(sctx, ri, cs)
-
 				if err != nil {
 					return errors.Wrap(err, "finishing change stream after writes-off")
 				}
@@ -327,7 +325,6 @@ changeStreamLoop:
 
 		default:
 			err = csr.readAndHandleOneChangeEventBatch(sctx, ri, cs)
-
 			if err != nil {
 				return err
 			}
@@ -411,7 +408,6 @@ func (csr *ChangeStreamReader) createChangeStream(
 		// they’ve already happened, and our initial scan is yet to come.
 		if len(changeStream.ResumeToken()) == 0 {
 			_, _, err := mmongo.GetBatch(ctx, changeStream, nil, nil)
-
 			if err != nil {
 				return bson.Timestamp{}, errors.Wrap(err, "discarding change stream’s initial events")
 			}
@@ -469,7 +465,6 @@ func extractTSFromChangeStreamResumeToken(resumeToken bson.Raw) (bson.Timestamp,
 
 	// Change stream token is always a V1 keystring in the _data field
 	tokenDataRV, err := resumeToken.LookupErr("_data")
-
 	if err != nil {
 		return bson.Timestamp{}, errors.Wrapf(err, "extracting %#q from resume token (%v)", "_data", resumeToken)
 	}

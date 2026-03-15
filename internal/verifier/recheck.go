@@ -17,6 +17,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -122,7 +123,6 @@ func (verifier *Verifier) insertRecheckDocs(
 		insertThreads++
 
 		eg.Go(func() error {
-
 			retryer := retry.New()
 			err := retryer.WithCallback(
 				func(retryCtx context.Context, _ *retry.FuncInfo) error {
@@ -189,7 +189,9 @@ func (verifier *Verifier) insertRecheckDocs(
 				SrcDatabaseName:   dbName,
 				SrcCollectionName: collNames[i],
 				DocumentID:        documentIDs[i],
-				Rand:              rand.Int32(),
+
+				// #nosec G404 - speed is better here
+				Rand: rand.Int32(),
 			},
 			DataSize:          dataSizes[i],
 			ChangeOpTime:      opTime,
@@ -245,7 +247,7 @@ func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
 	rechecksBSONSize := mbson.GetBSONArraySize(rechecks)
 
 	rechecksBSON := make(bson.RawArray, 4, rechecksBSONSize)
-	binary.LittleEndian.PutUint32(rechecksBSON, uint32(rechecksBSONSize))
+	binary.LittleEndian.PutUint32(rechecksBSON, safecast.MustConvert[uint32](rechecksBSONSize))
 	for i, recheck := range rechecks {
 		rechecksBSON = bsoncore.AppendDocumentElement(
 			rechecksBSON,
@@ -289,7 +291,7 @@ func buildRequestBSON(collName string, rechecks []bson.Raw) bson.Raw {
 		panic(fmt.Sprintf("request BSON size (%d) mismatches expected (%d)", len(requestBSON), expectedBSONSize))
 	}
 
-	binary.LittleEndian.PutUint32(requestBSON, uint32(len(requestBSON)))
+	binary.LittleEndian.PutUint32(requestBSON, safecast.MustConvert[uint32](len(requestBSON)))
 
 	return requestBSON
 }
@@ -467,7 +469,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		if doc.PrimaryKey.SrcDatabaseName != prevDBName ||
 			doc.PrimaryKey.SrcCollectionName != prevCollName ||
 			len(idAccum) > maxRecheckIDs ||
-			types.ByteCount(idsSizer.Len()) >= maxRecheckIDsBytes ||
+			idsSizer.Len() >= maxRecheckIDsBytes ||
 			dataSizeAccum >= verifier.partitionSizeInBytes {
 
 			err := persistBufferedRechecks()
@@ -487,7 +489,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		}
 
 		// This is the index for storing info about the doc in metadata.
-		metadataIndex := int32(len(idAccum))
+		metadataIndex := safecast.MustConvert[int32](len(idAccum))
 
 		// If we’ve already seen this ID, then we don’t re-add it. We may,
 		// though, still want to incorporate the duplicate into the task’s
@@ -514,7 +516,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 				latestSrcTimestamp = newerTimestamp(latestSrcTimestamp, optime)
 			}
 
-			delete(firstMismatchTime, int32(metadataIndex))
+			delete(firstMismatchTime, safecast.MustConvert[int32](metadataIndex))
 		} else if fmt, has := doc.FirstMismatchTime.Get(); has {
 			if !isSameDoc {
 				firstMismatchTime[metadataIndex] = fmt
@@ -528,11 +530,11 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		lastIDRaw = idRaw
 
 		idsSizer.Add(idRaw)
-		dataSizeAccum += types.ByteCount(doc.DataSize)
+		dataSizeAccum += safecast.MustConvert[types.ByteCount](doc.DataSize)
 
 		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 
-		totalRecheckData += types.ByteCount(doc.DataSize)
+		totalRecheckData += safecast.MustConvert[types.ByteCount](doc.DataSize)
 		totalDocs++
 	}
 

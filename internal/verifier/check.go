@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/ccoveille/go-safecast/v2"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goaux/timer"
 	"github.com/pkg/errors"
@@ -220,7 +221,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	// Now that we’ve initialized verifier.generation we can
 	// start the change readers.
 	err = verifier.initializeChangeReaders()
-
 	if err != nil {
 		return err
 	}
@@ -241,7 +241,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		},
 		"setting up verifier metadata",
 	).Run(ctx, verifier.logger)
-
 	if err != nil {
 		return err
 	}
@@ -490,7 +489,7 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 		}
 	}
 
-	verifier.gen0PendingCollectionTasks.Store(int32(len(verifier.srcNamespaces)))
+	verifier.gen0PendingCollectionTasks.Store(safecast.MustConvert[int32](len(verifier.srcNamespaces)))
 
 	err = verifier.UpdatePrimaryTaskComplete(ctx)
 	if err != nil {
