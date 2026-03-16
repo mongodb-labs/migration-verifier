@@ -30,7 +30,7 @@ require (
 
 require (
 	github.com/ccoveille/go-safecast/v2 v2.0.0
-	github.com/mongodb-labs/migration-tools v0.0.0-20260313153818-a91a5348fcf3
+	github.com/mongodb-labs/migration-tools v0.0.0-20260316172641-87d081cfecc3
 )
 
 require (

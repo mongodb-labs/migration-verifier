@@ -151,7 +151,7 @@ func prepareIndexSpecForEqualityCheck(spec bson.Raw) (bson.Raw, error) {
 
 	spec, err = normalizeTypesInSpec(spec)
 	if err != nil {
-		return nil, fmt.Errorf("normalizing types: %w", err)
+		return nil, fmt.Errorf("normalizing spec types: %w", err)
 	}
 
 	for field := range optsToIgnore.Iter() {
@@ -160,6 +160,89 @@ func prepareIndexSpecForEqualityCheck(spec bson.Raw) (bson.Raw, error) {
 			return nil, err
 		}
 	}
+
+	spec, err = normalizeTypesInKey(spec)
+	if err != nil {
+		return nil, fmt.Errorf("normalizing spec types: %w", err)
+	}
+
+	return spec, nil
+}
+
+func normalizeTypesInKey(spec bson.Raw) (bson.Raw, error) {
+	specKey, err := bsontools.RawLookup[bson.Raw](spec, "key")
+	if err != nil {
+		return nil, fmt.Errorf("extracting key from index spec: %w", err)
+	}
+
+	keyEls, err := specKey.Elements()
+	if err != nil {
+		return nil, fmt.Errorf("parsing index spec key’s elements: %w", err)
+	}
+
+	// Reverse the elements so that we can replace values without corrupting
+	// later elements in the iteration.
+	slices.Reverse(keyEls)
+
+	for _, el := range keyEls {
+		spec, err = normalizeKeyEl(spec, el)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return spec, nil
+}
+
+func normalizeKeyEl(spec bson.Raw, el bson.RawElement) (bson.Raw, error) {
+	var i32 int32
+	var err error
+
+	elType := bson.Type(el[0])
+
+	switch elType {
+	case bson.TypeInt32:
+		return spec, nil
+	case bson.TypeInt64:
+		val := lo.Must(el.ValueErr())
+
+		i32, err = safecast.Convert[int32](val.Int64())
+		if err != nil {
+			return nil, fmt.Errorf("%#q (int64 %d) to %T: %w", el.Key(), val.Int64(), i32, err)
+		}
+
+	case bson.TypeDouble:
+		val := lo.Must(el.ValueErr())
+
+		i32, err = safecast.Convert[int32](val.Double())
+		if err != nil {
+			return nil, fmt.Errorf("%#q (float64 %f) to %T: %w", el.Key(), val.Double(), i32, err)
+		}
+
+		if float64(i32) != val.Double() {
+			// We can’t normalize this, so just let it be.
+			return spec, nil
+		}
+
+	default:
+		return spec, nil
+	}
+
+	fieldName := lo.Must(el.KeyErr())
+
+	var found bool
+	spec, found, err = bsontools.ReplaceInRaw(spec, bsontools.ToRawValue(i32), "key", fieldName)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"replacing %#q (%s) with %s: %w",
+			fieldName,
+			elType,
+			bson.TypeInt32,
+			err,
+		)
+	}
+
+	lo.Assertf(found, "must have found field %#q", fieldName)
 
 	return spec, nil
 }
