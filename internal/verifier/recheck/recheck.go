@@ -35,8 +35,10 @@ type PrimaryKey struct {
 	Rand int32
 }
 
-var _ bson.Marshaler = PrimaryKey{}
-var _ bson.Unmarshaler = &PrimaryKey{}
+var (
+	_ bson.Marshaler   = PrimaryKey{}
+	_ bson.Unmarshaler = &PrimaryKey{}
+)
 
 // MarshalBSON implements bson.Marshaler .. which is only done to prevent
 // the inefficiency of bson.Marshal().
@@ -82,12 +84,12 @@ func (pk *PrimaryKey) UnmarshalFromBSON(in []byte) error {
 			return errors.Wrap(err, "iterating BSON doc fields")
 		}
 
-		key, err := el.KeyErr()
+		key, err := bsoncore.Element(el).KeyBytesErr()
 		if err != nil {
 			return errors.Wrap(err, "extracting BSON doc’s field name")
 		}
 
-		switch key {
+		switch string(key) {
 		case "db":
 			if err := mbson.UnmarshalElementValue(el, &pk.SrcDatabaseName); err != nil {
 				return err
@@ -99,7 +101,7 @@ func (pk *PrimaryKey) UnmarshalFromBSON(in []byte) error {
 		case "docID":
 			rv, err := el.ValueErr()
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q field", key)
+				return errors.Wrapf(err, "parsing %#q field", string(key))
 			}
 
 			pk.DocumentID = rv
@@ -121,8 +123,10 @@ type MismatchHistory struct {
 
 var MismatchHistoryBSONLength = len(MismatchHistory{}.MarshalToBSON())
 
-var _ bson.Marshaler = MismatchHistory{}
-var _ bson.Unmarshaler = &MismatchHistory{}
+var (
+	_ bson.Marshaler   = MismatchHistory{}
+	_ bson.Unmarshaler = &MismatchHistory{}
+)
 
 func (mt MismatchHistory) MarshalBSON() ([]byte, error) {
 	panic("Prefer MarshalToBSON.")
@@ -160,12 +164,12 @@ func (mt *MismatchHistory) UnmarshalFromBSON(in []byte) error {
 			return errors.Wrap(err, "iterating BSON doc fields")
 		}
 
-		key, err := el.KeyErr()
+		key, err := bsoncore.Element(el).KeyBytesErr()
 		if err != nil {
 			return errors.Wrap(err, "extracting BSON doc’s field name")
 		}
 
-		switch key {
+		switch string(key) {
 		case "first":
 			if err = mbson.UnmarshalElementValue(el, &mt.First); err != nil {
 				return err
@@ -175,7 +179,7 @@ func (mt *MismatchHistory) UnmarshalFromBSON(in []byte) error {
 				return err
 			}
 		default:
-			return fmt.Errorf("unmarshaling to %T: unknown BSON field %#q", *mt, key)
+			return fmt.Errorf("unmarshaling to %T: unknown BSON field %#q", *mt, string(key))
 		}
 	}
 
@@ -198,8 +202,10 @@ type Doc struct {
 	FirstMismatchTime option.Option[bson.DateTime] `bson:"firstMismatchTime"`
 }
 
-var _ bson.Marshaler = Doc{}
-var _ bson.Unmarshaler = &Doc{}
+var (
+	_ bson.Marshaler   = Doc{}
+	_ bson.Unmarshaler = &Doc{}
+)
 
 // MarshalBSON implements bson.Marshaler .. which is only done to prevent
 // the inefficiency of bson.Marshal().
@@ -264,12 +270,12 @@ func (rd *Doc) UnmarshalFromBSON(in []byte) error {
 			return errors.Wrap(err, "iterating BSON doc fields")
 		}
 
-		key, err := el.KeyErr()
+		key, err := bsoncore.Element(el).KeyBytesErr()
 		if err != nil {
 			return errors.Wrap(err, "extracting BSON doc’s field name")
 		}
 
-		switch key {
+		switch string(key) {
 		case "_id":
 			var rvDoc bson.Raw
 			if err := mbson.UnmarshalElementValue(el, &rvDoc); err != nil {
@@ -302,7 +308,7 @@ func (rd *Doc) UnmarshalFromBSON(in []byte) error {
 
 			rd.FirstMismatchTime = option.Some(fmt)
 		default:
-			return fmt.Errorf("unrecognized BSON field name for Go %T: %#q", *rd, key)
+			return fmt.Errorf("unrecognized BSON field name for Go %T: %#q", *rd, string(key))
 		}
 	}
 

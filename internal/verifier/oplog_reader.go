@@ -198,7 +198,6 @@ func (o *OplogReader) createCursor(
 			oplogFilter,
 			findOpts,
 		)
-
 	if err != nil {
 		return bson.Timestamp{}, errors.Wrapf(err, "opening cursor to tail %s’s oplog", o.readerType)
 	}
@@ -533,12 +532,12 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 				return nil, bson.Timestamp{}, errors.Wrap(err, "getting first el of o doc")
 			}
 
-			cmdName, err := el.KeyErr()
+			cmdName, err := bsoncore.Element(el).KeyBytesErr()
 			if err != nil {
 				return nil, bson.Timestamp{}, errors.Wrap(err, "getting first field name of o doc")
 			}
 
-			if cmdName != "applyOps" {
+			if string(cmdName) != "applyOps" {
 				if o.onDDLEvent == onDDLEventAllow {
 					o.logIgnoredDDL(rawDoc)
 					continue
@@ -597,7 +596,6 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 }
 
 func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBeforeTS bson.Timestamp) ([]ParsedEvent, bson.Timestamp, error) {
-
 	var latestTS bson.Timestamp
 
 	for _, rawDoc := range o.curDocs {
