@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 // Specify states
@@ -63,12 +64,12 @@ func (ns *Namespace) UnmarshalFromBSON(in []byte) error {
 			return errors.Wrap(err, "iterating BSON fields")
 		}
 
-		key, err := el.KeyErr()
+		key, err := bsoncore.Element(el).KeyBytesErr()
 		if err != nil {
 			return errors.Wrap(err, "reading BSON field name")
 		}
 
-		switch key {
+		switch string(key) {
 		case "db":
 			if err := mbson.UnmarshalElementValue(el, &ns.DB); err != nil {
 				return err
