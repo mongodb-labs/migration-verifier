@@ -56,43 +56,43 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 			return errors.Wrap(err, "iterating BSON document")
 		}
 
-		key, err := el.KeyErr()
+		key, err := bsoncore.Element(el).KeyBytesErr()
 		if err != nil {
 			return errors.Wrap(err, "reading BSON field name")
 		}
 
-		switch key {
+		switch string(key) {
 		case "op":
 			err := mbson.UnmarshalElementValue(el, &o.Op)
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q", key)
+				return errors.Wrapf(err, "parsing %#q", string(key))
 			}
 		case "ts":
 			err := mbson.UnmarshalElementValue(el, &o.TS)
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q", key)
+				return errors.Wrapf(err, "parsing %#q", string(key))
 			}
 		case "ns":
 			err := mbson.UnmarshalElementValue(el, &o.Ns)
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q", key)
+				return errors.Wrapf(err, "parsing %#q", string(key))
 			}
 		case "cmdName":
 			var cmdName string
 			err := mbson.UnmarshalElementValue(el, &cmdName)
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q", key)
+				return errors.Wrapf(err, "parsing %#q", string(key))
 			}
 			o.CmdName = option.Some(cmdName)
 		case "docLen":
 			err := mbson.UnmarshalElementValue(el, &o.DocLen)
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q", key)
+				return errors.Wrapf(err, "parsing %#q", string(key))
 			}
 		case "docID":
 			o.DocID, err = el.ValueErr()
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q value", key)
+				return errors.Wrapf(err, "parsing %#q value", string(key))
 			}
 			o.DocID.Value = slices.Clone(o.DocID.Value)
 		case "ops":
@@ -101,7 +101,6 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 				mbson.UnmarshalElementValue(el, &arr),
 				"parsing ops",
 			)
-
 			if err != nil {
 				return err
 			}
@@ -126,7 +125,7 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 				}
 			}
 		default:
-			return errors.Wrapf(err, "unexpected field %#q", key)
+			return errors.Wrapf(err, "unexpected field %#q", string(key))
 		}
 	}
 
