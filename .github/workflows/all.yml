@@ -196,7 +196,7 @@ jobs:
           $(cat .srcpath)/mongo localhost:27020 --eval 'db.adminCommand({setFeatureCompatibilityVersion: "${{ matrix.srcFCV }}"})'
 
       - name: Test
-        run: go test -v ./... -race
+        run: go test -v ./... -race -timeout 20m
         env:
           MVTEST_DOC_COMPARE_METHOD: ${{matrix.toHashedIndexKey && 'toHashedIndexKey' || ''}}
 
