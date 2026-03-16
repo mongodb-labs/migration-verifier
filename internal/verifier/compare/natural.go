@@ -344,11 +344,9 @@ func flushSourceBatch(
 		Int("count", len(*batchDocIDs)).
 		Msg("Flushing source document IDs to dst.")
 
-	for chunk := range mslices.Chunk(*batchDocIDs, 10_000) {
-		err := chanutil.WriteWithDoneCheck(ctx, toDst, slices.Clone(chunk))
-		if err != nil {
-			return errors.Wrapf(err, "sending %d doc IDs to dst", len(*batchDocIDs))
-		}
+	err := chanutil.WriteWithDoneCheck(ctx, toDst, slices.Clone(*batchDocIDs))
+	if err != nil {
+		return errors.Wrapf(err, "sending %d doc IDs to dst", len(*batchDocIDs))
 	}
 
 	retryState.NoteSuccess("sent %d-doc batch to dst", len(*batch))
@@ -362,8 +360,8 @@ func flushSourceBatch(
 
 	toCompareStart := time.Now()
 
-	for chunk := range mslices.Chunk(*batch, ToComparatorBatchSize) {
-		err := chanutil.WriteWithDoneCheck(ctx, toCompare, slices.Clone(chunk))
+	for chunk := range mslices.Chunk(slices.Clone(*batch), ToComparatorBatchSize) {
+		err = chanutil.WriteWithDoneCheck(ctx, toCompare, chunk)
 		if err != nil {
 			return errors.Wrapf(err, "sending %d of %d src docs to compare", len(chunk), len(*batch))
 		}
