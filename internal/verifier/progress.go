@@ -84,7 +84,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 		Phase:      verifier.getPhaseWhileLocked(),
 		Generation: verifier.generation,
 
-		RecheckGenerationSecs: mslices.Map1(
+		RecentRecheckSecs: mslices.Map1(
 			verifier.recheckDurations.Get(),
 			time.Duration.Seconds,
 		),
