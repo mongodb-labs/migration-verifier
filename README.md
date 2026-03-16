@@ -156,6 +156,11 @@ This is sample output:
       "totalDocs": 2040204,
       "srcBytesCompared": 0
     },
+    "recentRecheckSecs": [
+        20.3,
+        10.254,
+        23.2
+    ],
     "error": null,
     "verificationStatus": {
       "totalTasks": 204,
