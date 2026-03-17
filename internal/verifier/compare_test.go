@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -37,12 +38,21 @@ func (s *IntegrationTestSuite) TestChannelShardedLargeDocs() {
 		err := s.srcMongoClient.Database("admin").RunCommand(
 			ctx,
 			bson.D{
+				{"enableSharding", srcColl.Database().Name()},
+			},
+		).Err()
+
+		s.Require().NoError(err, "enabling sharding on %#q", srcColl.Database().Name())
+
+		err = s.srcMongoClient.Database("admin").RunCommand(
+			ctx,
+			bson.D{
 				{"shardCollection", FullName(srcColl)},
 				{"key", bson.D{{"_id", "hashed"}}},
 			},
 		).Err()
 
-		s.Require().NoError(err)
+		s.Require().NoError(err, "sharding %#q", FullName(srcColl))
 	}
 
 	dstColl := s.dstMongoClient.Database(s.DBNameForTest()).Collection(srcColl.Name())
@@ -51,8 +61,12 @@ func (s *IntegrationTestSuite) TestChannelShardedLargeDocs() {
 
 	docIDs := make([]int, 0, 10_000)
 
+	s.T().Log("Populating clusters …")
+
 	eg, egCtx := contextplus.ErrGroup(ctx)
-	for range 100 {
+	eg.SetLimit(10)
+
+	for range 50 {
 		docs := lo.RepeatBy(
 			10,
 			func(_ int) bson.D {
@@ -75,37 +89,69 @@ func (s *IntegrationTestSuite) TestChannelShardedLargeDocs() {
 
 	s.Require().NoError(eg.Wait())
 
-	task := tasks.Task{
-		PrimaryKey: bson.NewObjectID(),
-		Type:       tasks.VerifyDocuments,
-		Status:     tasks.Processing,
-		QueryFilter: tasks.QueryFilter{
-			Namespace: FullName(srcColl),
-			Partition: &partitions.Partition{
-				Key: partitions.PartitionKey{
-					Lower: bsontools.ToRawValue(bson.MinKey{}),
-				},
-				Upper: bsontools.ToRawValue(bson.MaxKey{}),
-			},
-		},
+	ensureNoProblems := func(ctx context.Context, task tasks.Task) {
+		subCtx, cancel := contextplus.WithCancelCause(ctx)
+		defer cancel(fmt.Errorf("test over"))
+
+		verifier := s.BuildVerifier()
+		s.Require().NoError(verifier.startChangeHandling(subCtx))
+
+		results := lo.ChannelToSlice(verifier.FetchAndCompareDocuments(
+			subCtx,
+			0,
+			&task,
+		))
+
+		s.Assert().Len(results, 1)
+		s.Require().NotEmpty(results)
+
+		report, err := results[0].Get()
+		s.Require().NoError(err)
+
+		s.Assert().Empty(report.Problems)
 	}
 
-	verifier := s.BuildVerifier()
-	s.Require().NoError(verifier.startChangeHandling(ctx))
+	s.Run(
+		"_id range partition",
+		func() {
+			task := tasks.Task{
+				PrimaryKey: bson.NewObjectID(),
+				Type:       tasks.VerifyDocuments,
+				Status:     tasks.Processing,
+				QueryFilter: tasks.QueryFilter{
+					Namespace: FullName(srcColl),
+					Partition: &partitions.Partition{
+						Key: partitions.PartitionKey{
+							Lower: bsontools.ToRawValue(bson.MinKey{}),
+						},
+						Upper: bsontools.ToRawValue(bson.MaxKey{}),
+					},
+				},
+			}
 
-	results := lo.ChannelToSlice(verifier.FetchAndCompareDocuments(
-		ctx,
-		0,
-		&task,
-	))
+			ensureNoProblems(ctx, task)
+		},
+	)
 
-	s.Assert().Len(results, 1)
-	s.Require().NotEmpty(results)
+	s.Run(
+		"recheck",
+		func() {
+			task := tasks.Task{
+				PrimaryKey: bson.NewObjectID(),
+				Type:       tasks.VerifyDocuments,
+				Status:     tasks.Processing,
+				Ids: mslices.Map1(
+					docIDs,
+					bsontools.ToRawValue[int],
+				),
+				QueryFilter: tasks.QueryFilter{
+					Namespace: FullName(srcColl),
+				},
+			}
 
-	report, err := results[0].Get()
-	s.Require().NoError(err)
-
-	s.Assert().Empty(report.Problems)
+			ensureNoProblems(ctx, task)
+		},
+	)
 }
 
 // This tests behavior when there are enough small documents to necessitate
