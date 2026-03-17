@@ -35,7 +35,7 @@ func (s *IntegrationTestSuite) TestChannelShardedLargeDocs() {
 			continue
 		}
 
-		err := s.srcMongoClient.Database("admin").RunCommand(
+		err := client.Database("admin").RunCommand(
 			ctx,
 			bson.D{
 				{"enableSharding", srcColl.Database().Name()},
@@ -44,7 +44,7 @@ func (s *IntegrationTestSuite) TestChannelShardedLargeDocs() {
 
 		s.Require().NoError(err, "enabling sharding on %#q", srcColl.Database().Name())
 
-		err = s.srcMongoClient.Database("admin").RunCommand(
+		err = client.Database("admin").RunCommand(
 			ctx,
 			bson.D{
 				{"shardCollection", FullName(srcColl)},
