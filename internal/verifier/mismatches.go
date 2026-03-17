@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
@@ -322,26 +323,35 @@ func recordMismatches(
 	task *tasks.Task,
 	problems []compare.Result,
 ) error {
-	models := lo.Map(
-		problems,
-		func(r compare.Result, _ int) mongo.WriteModel {
-			return &mongo.InsertOneModel{
-				Document: MismatchInfo{
-					TaskID:     task.PrimaryKey,
-					TaskType:   task.Type,
-					Generation: task.Generation,
-					Detail:     r,
-				}.MarshalToBSON(),
-			}
-		},
-	)
+	eg, egCtx := contextplus.ErrGroup(ctx)
+	eg.SetLimit(20)
 
-	_, err := db.Collection(mismatchesCollectionName).BulkWrite(
-		ctx,
-		models,
-	)
+	for curProbs := range mslices.Chunk(problems, 10_000) {
+		eg.Go(func() error {
+			models := lo.Map(
+				curProbs,
+				func(r compare.Result, _ int) mongo.WriteModel {
+					return &mongo.InsertOneModel{
+						Document: MismatchInfo{
+							TaskID:     task.PrimaryKey,
+							TaskType:   task.Type,
+							Generation: task.Generation,
+							Detail:     r,
+						}.MarshalToBSON(),
+					}
+				},
+			)
 
-	return errors.Wrapf(err, "recording %d mismatches", len(models))
+			_, err := db.Collection(mismatchesCollectionName).BulkWrite(
+				egCtx,
+				models,
+			)
+
+			return errors.Wrapf(err, "recording %d mismatches", len(models))
+		})
+	}
+
+	return eg.Wait()
 }
 
 func getLongestLivedDocumentMismatch(
