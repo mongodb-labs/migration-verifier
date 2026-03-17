@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
@@ -20,6 +21,92 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
+
+// This tests that sharded collections don’t trigger spurious mismatch reports.
+// See REP-7144 for context.
+func (s *IntegrationTestSuite) TestChannelShardedLargeDocs() {
+	ctx := s.Context()
+
+	srcColl := s.srcMongoClient.Database(s.DBNameForTest()).Collection("stuff")
+
+	for _, client := range mslices.Of(s.srcMongoClient, s.dstMongoClient) {
+		if s.GetTopology(client) != util.TopologySharded {
+			continue
+		}
+
+		err := s.srcMongoClient.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"shardCollection", FullName(srcColl)},
+				{"key", bson.D{{"_id", "hashed"}}},
+			},
+		).Err()
+
+		s.Require().NoError(err)
+	}
+
+	dstColl := s.dstMongoClient.Database(s.DBNameForTest()).Collection(srcColl.Name())
+
+	bigStr := strings.Repeat("x", 1_000_000)
+
+	docIDs := make([]int, 0, 10_000)
+
+	eg, egCtx := contextplus.ErrGroup(ctx)
+	for range 100 {
+		docs := lo.RepeatBy(
+			10,
+			func(_ int) bson.D {
+				id := len(docIDs)
+				docIDs = append(docIDs, id)
+				return bson.D{
+					{"_id", id},
+					{"str", bigStr},
+				}
+			},
+		)
+
+		for _, coll := range mslices.Of(srcColl, dstColl) {
+			eg.Go(func() error {
+				_, err := coll.InsertMany(egCtx, docs)
+				return err
+			})
+		}
+	}
+
+	s.Require().NoError(eg.Wait())
+
+	task := tasks.Task{
+		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
+		Status:     tasks.Processing,
+		QueryFilter: tasks.QueryFilter{
+			Namespace: FullName(srcColl),
+			Partition: &partitions.Partition{
+				Key: partitions.PartitionKey{
+					Lower: bsontools.ToRawValue(bson.MinKey{}),
+				},
+				Upper: bsontools.ToRawValue(bson.MaxKey{}),
+			},
+		},
+	}
+
+	verifier := s.BuildVerifier()
+	s.Require().NoError(verifier.startChangeHandling(ctx))
+
+	results := lo.ChannelToSlice(verifier.FetchAndCompareDocuments(
+		ctx,
+		0,
+		&task,
+	))
+
+	s.Assert().Len(results, 1)
+	s.Require().NotEmpty(results)
+
+	report, err := results[0].Get()
+	s.Require().NoError(err)
+
+	s.Assert().Empty(report.Problems)
+}
 
 // This tests behavior when there are enough small documents to necessitate
 // multiple problem reports. (This hits the comparator’s docs-cached max.)
@@ -245,7 +332,6 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 				// Nothing to do
 			case 1:
 				_, err := reports[0].Get()
-
 				if err != nil {
 					s.Assert().ErrorIs(
 						err,
