@@ -7,6 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/ccoveille/go-safecast/v2"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -82,6 +83,11 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 	progress := api.Progress{
 		Phase:      verifier.getPhaseWhileLocked(),
 		Generation: verifier.generation,
+
+		RecentRecheckSecs: mslices.Map1(
+			verifier.recheckDurations.Get(),
+			time.Duration.Seconds,
+		),
 
 		GenerationStats: api.ProgressGenerationStats{
 			DocsCompared:     compareStats.comparedDocs,

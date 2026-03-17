@@ -56,6 +56,8 @@ type Progress struct {
 	Generation      int                     `bson:"generation"`
 	GenerationStats ProgressGenerationStats `bson:"generationStats"`
 
+	RecentRecheckSecs []float64 `bson:"recentRecheckSecs,omitempty"`
+
 	Error  error               `bson:"error"`
 	Status *VerificationStatus `bson:"verificationStatus"`
 

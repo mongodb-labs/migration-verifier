@@ -129,6 +129,7 @@ These represent a logical time in MongoDB’s replication protocol.
     - `totalDocs` (unsigned)
     - `srcBytesCompared` (unsigned)
     - `totalSrcBytes` (unsigned, only present in `check` phase)
+  - `recentRecheckSecs` (array of recent recheck generations’ durations)
   - `srcChangeStats`
     - `eventsPerSecond` (unsigned)
     - `lagSecs` (unsigned)
@@ -156,6 +157,11 @@ This is sample output:
       "totalDocs": 2040204,
       "srcBytesCompared": 0
     },
+    "recentRecheckSecs": [
+        20.3,
+        10.254,
+        23.2
+    ],
     "error": null,
     "verificationStatus": {
       "totalTasks": 204,
