@@ -48,7 +48,7 @@ func ReadNaturalPartitionFromSource(
 	task *tasks.Task,
 	docFilter option.Option[bson.D],
 	compareMethod Method,
-	toCompare chan<- []DocWithTS,
+	toCompare chan<- ToComparatorMsg,
 	toDst chan<- []DocID,
 ) error {
 	defer close(toCompare)
@@ -235,7 +235,7 @@ func processCursor(
 	hasResumeToken bool,
 	startRecordID option.Option[bson.RawValue],
 	upperRecordID bson.RawValue,
-	toCompare chan<- []DocWithTS,
+	toCompare chan<- ToComparatorMsg,
 	toDst chan<- []DocID,
 ) error {
 	var batch []DocWithTS
@@ -335,7 +335,7 @@ func flushSourceBatch(
 	task *tasks.Task,
 	batch *[]DocWithTS,
 	batchDocIDs *[]DocID,
-	toCompare chan<- []DocWithTS,
+	toCompare chan<- ToComparatorMsg,
 	toDst chan<- []DocID,
 ) error {
 	logger.Trace().
@@ -361,7 +361,13 @@ func flushSourceBatch(
 	toCompareStart := time.Now()
 
 	for chunk := range mslices.Chunk(slices.Clone(*batch), ToComparatorBatchSize) {
-		err = chanutil.WriteWithDoneCheck(ctx, toCompare, chunk)
+		err = chanutil.WriteWithDoneCheck(
+			ctx,
+			toCompare,
+			ToComparatorMsg{
+				DocsWithTS: chunk,
+			},
+		)
 		if err != nil {
 			return errors.Wrapf(err, "sending %d of %d src docs to compare", len(chunk), len(*batch))
 		}

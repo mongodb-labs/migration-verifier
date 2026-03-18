@@ -49,7 +49,7 @@ type comparator struct {
 	curHistoryDocCount  types.DocumentCount
 	curHistoryByteCount types.ByteCount
 
-	// We flush the comparator’s caches whenever len(problems) or this value
+	// We may flush the comparator’s caches when len(problems) or this value
 	// exceed predefined limits.
 	//
 	// Note that this is a lower bound to memory
@@ -95,14 +95,21 @@ func (c *comparator) stillReading() bool {
 }
 
 // readBatches handles the concurrent errgroup I/O and timeout logic.
+// It returns: a batch of src docs, a batch of dst docs, a flag to indicate
+// reception of cursor-done from the destination, and an error.
+//
+// NB: The cursor-done flag means that the cursor finished *before* reading
+// the dst docs. Thus, the caller MUST process that flag before
+// processing the returned dst docs.
 func (c *comparator) readBatches(
 	ctx context.Context,
-	srcChannel, dstChannel <-chan []compare.DocWithTS,
-) ([]compare.DocWithTS, []compare.DocWithTS, error) {
-
+	srcChannel, dstChannel <-chan compare.ToComparatorMsg,
+) ([]compare.DocWithTS, []compare.DocWithTS, bool, error) {
 	simpleTimerReset(c.readTimer, readTimeout)
 
 	var srcBatch, dstBatch []compare.DocWithTS
+	var dstCursorDone bool
+
 	eg, egCtx := contextplus.ErrGroup(ctx)
 
 	if !c.srcClosed {
@@ -112,22 +119,30 @@ func (c *comparator) readBatches(
 				return egCtx.Err()
 			case <-c.readTimer.C:
 				return errors.Errorf("failed to read from source after %s", readTimeout)
-			case docs, alive := <-srcChannel:
+			case msg, alive := <-srcChannel:
 				if !alive {
 					c.srcClosed = true
 					return nil
 				}
 
+				c.fi.NoteSuccess("received message from source reader")
+
 				lo.Assertf(
-					len(docs) <= compare.ToComparatorBatchSize,
-					"src reader should send <= %d docs but sent %d",
-					compare.ToComparatorBatchSize,
-					len(docs),
+					msg.Type == compare.MsgTypeDocs,
+					"source reader must send only docs (got: %v)",
+					msg.Type,
 				)
 
-				c.fi.NoteSuccess("received document from source")
-				c.recordSrcMetrics(docs)
-				srcBatch = docs
+				lo.Assertf(
+					len(msg.DocsWithTS) <= compare.ToComparatorBatchSize,
+					"src reader should send <= %d docs but sent %d",
+					compare.ToComparatorBatchSize,
+					len(msg.DocsWithTS),
+				)
+
+				c.recordSrcMetrics(msg.DocsWithTS)
+
+				srcBatch = msg.DocsWithTS
 			}
 			return nil
 		})
@@ -135,36 +150,62 @@ func (c *comparator) readBatches(
 
 	if !c.dstClosed {
 		eg.Go(func() error {
-			select {
-			case <-egCtx.Done():
-				return egCtx.Err()
-			case <-c.readTimer.C:
-				return errors.Errorf("failed to read from destination after %s", readTimeout)
-			case docs, alive := <-dstChannel:
-				if !alive {
-					c.dstClosed = true
-					return nil
+			// Reading from the destination reader is trickier than reading
+			// from the source reader because the messages can contain flags.
+			for {
+				select {
+				case <-egCtx.Done():
+					return egCtx.Err()
+				case <-c.readTimer.C:
+					return errors.Errorf("failed to read from destination after %s", readTimeout)
+				case msg, alive := <-dstChannel:
+					if !alive {
+						c.dstClosed = true
+						return nil
+					}
+
+					c.fi.NoteSuccess("received message (type=%v) from destination reader", msg.Type)
+
+					switch msg.Type {
+					case compare.MsgTypePadding:
+						lo.Assertf(
+							len(msg.DocsWithTS) == 0,
+							"expect no documents (found: %d)",
+							len(msg.DocsWithTS),
+						)
+
+						return nil
+					case compare.MsgTypeDocs:
+						lo.Assertf(
+							len(msg.DocsWithTS) <= compare.ToComparatorBatchSize,
+							"dst reader should send <= %d docs but sent %d",
+							compare.ToComparatorBatchSize,
+							len(msg.DocsWithTS),
+						)
+
+						dstBatch = msg.DocsWithTS
+						return nil
+					case compare.MsgTypeCursorDone:
+						lo.Assertf(
+							len(msg.DocsWithTS) == 0,
+							"expect no documents (found: %d)",
+							len(msg.DocsWithTS),
+						)
+
+						dstCursorDone = true
+					default:
+						lo.Assertf(false, "unknown msg type: %v", msg.Type)
+					}
 				}
-
-				lo.Assertf(
-					len(docs) <= compare.ToComparatorBatchSize,
-					"dst reader should send <= %d docs but sent %d",
-					compare.ToComparatorBatchSize,
-					len(docs),
-				)
-
-				c.fi.NoteSuccess("received document from destination")
-				dstBatch = docs
 			}
-			return nil
 		})
 	}
 
 	if err := eg.Wait(); err != nil {
-		return nil, nil, errors.Wrap(err, "failed to read documents")
+		return nil, nil, false, errors.Wrap(err, "failed to read documents")
 	}
 
-	return srcBatch, dstBatch, nil
+	return srcBatch, dstBatch, dstCursorDone, nil
 }
 
 func simpleTimerReset(t *time.Timer, dur time.Duration) {
@@ -312,7 +353,6 @@ func (c *comparator) flush(
 			ByteCount: c.srcByteCount,
 		},
 	)
-
 	if err != nil {
 		return errors.Wrapf(err, "flushing %d problems", len(probsToFlush))
 	}
