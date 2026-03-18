@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -15,8 +16,24 @@ type MigrationVerifierAPI interface {
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
 	SendDocumentMismatches(context.Context, uint32, chan<- MismatchInfo) error
-	SendNamespaceMismatches(context.Context, chan<- MismatchInfo) error
+	SendNamespaceMismatches(
+		context.Context,
+		[]IndexSpecTolerance,
+		chan<- MismatchInfo,
+	) error
 }
+
+type IndexSpecTolerance string
+
+const (
+	IndexSpecIgnoreTTL    IndexSpecTolerance = "expireAfterSeconds"
+	IndexSpecIgnoreUnique IndexSpecTolerance = "unique"
+)
+
+var IndexMismatchTolerances = mslices.Of(
+	IndexSpecIgnoreTTL,
+	IndexSpecIgnoreUnique,
+)
 
 // VerificationStatus holds the Verification Status
 type VerificationStatus struct {

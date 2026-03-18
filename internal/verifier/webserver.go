@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
@@ -22,7 +23,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/mongodb-labs/migration-tools/future"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"golang.org/x/exp/slices"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -289,6 +292,33 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 }
 
 func (server *WebServer) nsMismatchesEndpoint(c *gin.Context) {
+	const ignoreKey = "indexSpecIgnore"
+
+	var specIgnore []api.IndexSpecTolerance
+
+	if val := c.Query(ignoreKey); val != "" {
+		specIgnore = lo.Map(
+			strings.Split(val, ","),
+			func(in string, _ int) api.IndexSpecTolerance {
+				return api.IndexSpecTolerance(in)
+			},
+		)
+
+		invalid := lo.Filter(
+			specIgnore,
+			func(piece api.IndexSpecTolerance, _ int) bool {
+				return !slices.Contains(api.IndexMismatchTolerances, piece)
+			},
+		)
+
+		if len(invalid) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("invalid %#q: %#q", ignoreKey, invalid),
+			})
+			return
+		}
+	}
+
 	server.serveMismatches(
 		c,
 		func(
@@ -298,6 +328,7 @@ func (server *WebServer) nsMismatchesEndpoint(c *gin.Context) {
 		) {
 			err := server.Mapi.SendNamespaceMismatches(
 				ctx,
+				specIgnore,
 				mmChan,
 			)
 

@@ -60,6 +60,7 @@ func (verifier *MockVerifier) SendDocumentMismatches(
 
 func (verifier *MockVerifier) SendNamespaceMismatches(
 	ctx context.Context,
+	tolerances []api.IndexSpecTolerance,
 	out chan<- api.MismatchInfo,
 ) error {
 	if verifier.sendNamespaceMismatches == nil {

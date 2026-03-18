@@ -1088,7 +1088,7 @@ func (verifier *Verifier) verifyIndexes(
 					Field:     "index",
 					NameSpace: FullName(dstColl),
 					Cluster:   constants.ClusterTarget,
-					Details:   Mismatch + ": " + diff.String(),
+					Details:   diff.String(),
 				})
 			}
 		} else {

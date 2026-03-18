@@ -58,6 +58,48 @@ func TestMismatchesInfoMarshal(t *testing.T) {
 	}
 }
 
+func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_IgnoreTTL() {
+	ctx := suite.Context()
+
+	srcDB := suite.srcMongoClient.Database(suite.DBNameForTest())
+	dstDB := suite.dstMongoClient.Database(suite.DBNameForTest())
+
+	_, err := srcDB.Collection("mismatchedIndex").Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys:    bson.D{{"field", 1}},
+			Options: options.Index().SetExpireAfterSeconds(123),
+		},
+	)
+	suite.Require().NoError(err)
+
+	_, err = dstDB.Collection("mismatchedIndex").Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys:    bson.D{{"field", 1}},
+			Options: options.Index().SetExpireAfterSeconds(12123),
+		},
+	)
+	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	mmChan := make(chan api.MismatchInfo, 100)
+	suite.Require().NoError(verifier.SendNamespaceMismatches(
+		ctx,
+		mslices.Of(api.IndexSpecIgnoreTTL),
+		mmChan,
+	))
+
+	mismatches := lo.ChannelToSlice(mmChan)
+
+	suite.Assert().Empty(mismatches)
+}
+
 func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	ctx := suite.Context()
 
@@ -196,7 +238,7 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
 	mmChan := make(chan api.MismatchInfo, 100)
-	suite.Require().NoError(verifier.SendNamespaceMismatches(ctx, mmChan))
+	suite.Require().NoError(verifier.SendNamespaceMismatches(ctx, nil, mmChan))
 
 	mismatches := lo.ChannelToSlice(mmChan)
 

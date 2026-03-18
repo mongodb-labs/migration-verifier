@@ -1,12 +1,17 @@
 package verifier
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
+	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
@@ -16,6 +21,7 @@ import (
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/wI2L/jsondiff"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -382,19 +388,90 @@ func getLongestLivedDocumentMismatch(
 // generation (or, in generation 0, the current generation).
 func (verifier *Verifier) SendNamespaceMismatches(
 	ctx context.Context,
+	indexSpecTolerances []api.IndexSpecTolerance,
 	out chan<- api.MismatchInfo,
 ) error {
 	defer close(out)
 
 	generation, _ := verifier.getGeneration()
 
+	unfiltered, cancelFilter := chanutil.StartIngestFilter(
+		ctx,
+		out,
+		func(in api.MismatchInfo) bool {
+			detail, hasDetail := in.Detail.Get()
+			if !hasDetail {
+				return true
+			}
+
+			patch, err := parseJSONDiffOps(detail)
+			if err != nil {
+				return true
+			}
+
+			// Parse the Detail to see if all diff operations concern the
+			// relevant fields
+			return lo.SomeBy(
+				patch,
+				func(curOp jsondiff.Operation) bool {
+					return cmp.Or(
+						lo.Map(
+							indexSpecTolerances,
+							func(tolerance api.IndexSpecTolerance, _ int) bool {
+								return !strings.HasPrefix(curOp.Path, "/"+string(tolerance))
+							},
+						)...,
+					)
+				},
+			)
+		},
+	)
+	defer cancelFilter(ctx)
+
 	return verifier.findAndSendMismatches(
 		ctx,
 		generation,
 		tasks.VerifyCollection,
 		0,
-		out,
+		unfiltered,
 	)
+}
+
+func parseJSONDiffOps(in string) (jsondiff.Patch, error) {
+	var patch jsondiff.Patch
+
+	err := decodeConcatenatedJSON(strings.NewReader(in), &patch)
+
+	return patch, err
+}
+
+// DecodeConcatenatedJSON reads a stream of consecutive JSON entities from 'r'
+// and appends them to the slice pointed to by 'out'.
+func decodeConcatenatedJSON[T any, S ~[]T](r io.Reader, out *S) error {
+	if out == nil {
+		return errors.New("output slice pointer cannot be nil")
+	}
+
+	decoder := json.NewDecoder(r)
+
+	for {
+		var item T
+
+		// Decode reads the next valid JSON value from the stream
+		err := decoder.Decode(&item)
+		if err != nil {
+			// io.EOF means we cleanly hit the end of the buffer
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			// Any other error means malformed JSON or a read error
+			return err
+		}
+
+		*out = append(*out, item)
+	}
+
+	return nil
 }
 
 // SendDocumentMismatches outputs all document mismatches found in the prior
