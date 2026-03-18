@@ -164,7 +164,7 @@ func (c *comparator) readBatches(
 						return nil
 					}
 
-					c.fi.NoteSuccess("received message from destination reader")
+					c.fi.NoteSuccess("received message (type=%v) from destination reader", msg.Type)
 
 					switch msg.Type {
 					case compare.MsgTypePadding:
@@ -174,7 +174,7 @@ func (c *comparator) readBatches(
 							len(msg.DocsWithTS),
 						)
 
-						fallthrough
+						return nil
 					case compare.MsgTypeDocs:
 						lo.Assertf(
 							len(msg.DocsWithTS) <= compare.ToComparatorBatchSize,
