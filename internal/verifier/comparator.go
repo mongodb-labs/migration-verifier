@@ -95,6 +95,12 @@ func (c *comparator) stillReading() bool {
 }
 
 // readBatches handles the concurrent errgroup I/O and timeout logic.
+// It returns: a batch of src docs, a batch of dst docs, a flag to indicate
+// reception of cursor-done from the destination, and an error.
+//
+// NB: The cursor-done flag means that the cursor finished *before* reading
+// the dst docs. Thus, the caller MUST process that flag before
+// processing the returned dst docs.
 func (c *comparator) readBatches(
 	ctx context.Context,
 	srcChannel, dstChannel <-chan compare.ToComparatorMsg,
@@ -144,9 +150,8 @@ func (c *comparator) readBatches(
 
 	if !c.dstClosed {
 		eg.Go(func() error {
-			// Reading from the destination reader is a bit trickier than
-			// reading from the source reader because the messages can contain
-			// flags.
+			// Reading from the destination reader is trickier than reading
+			// from the source reader because the messages can contain flags.
 			for {
 				select {
 				case <-egCtx.Done():
@@ -162,7 +167,13 @@ func (c *comparator) readBatches(
 					c.fi.NoteSuccess("received message from destination reader")
 
 					switch msg.Type {
-					case compare.MsgTypeDocs, compare.MsgTypePadding:
+					case compare.MsgTypePadding:
+						lo.Assertf(
+							len(msg.DocsWithTS) == 0,
+							"expect no documents (found: %d)",
+							len(msg.DocsWithTS),
+						)
+					case compare.MsgTypeDocs:
 						lo.Assertf(
 							len(msg.DocsWithTS) <= compare.ToComparatorBatchSize,
 							"dst reader should send <= %d docs but sent %d",
@@ -173,6 +184,12 @@ func (c *comparator) readBatches(
 						dstBatch = msg.DocsWithTS
 						return nil
 					case compare.MsgTypeCursorDone:
+						lo.Assertf(
+							len(msg.DocsWithTS) == 0,
+							"expect no documents (found: %d)",
+							len(msg.DocsWithTS),
+						)
+
 						dstCursorDone = true
 					default:
 						lo.Assertf(false, "unknown msg type: %v", msg.Type)

@@ -50,9 +50,9 @@ type DocCompareReport struct {
 	ByteCount types.ByteCount
 }
 
-// FetchAndCompareDocuments spawns a separate goroutine that fetches src & dst
-// documents for the given task, compares those documents, and sends the
-// results into the returned channel.
+// FetchAndCompareDocuments spawns a separate goroutine that fetches the given
+// task’s src & dstdocuments, compares those documents, then sends the results
+// into the returned channel.
 func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
 	workerNum int,
@@ -190,11 +190,12 @@ func (verifier *Verifier) compareDocsFromChannels(
 	// 2. Stream Processing Loop
 	for c.stillReading() {
 		srcBatch, dstBatch, dstCursorDone, err := c.readBatches(ctx, srcChannel, dstChannel)
-		// srcBatch, dstBatch, _, err := c.readBatches(ctx, srcChannel, dstChannel)
 		if err != nil {
 			return err
 		}
 
+		// NB: This MUST precede the actual comparison because any dst documents
+		// will be from the next dst cursor.
 		if dstCursorDone {
 			whyFlush, err := c.flushIfNeeded(ctx, reportsChan)
 			if err != nil {
@@ -469,6 +470,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 
 			// We send one more to tell the comparator that any mismatches
 			// seen heretofore are “real” and should trigger persistence.
+			//
+			// NB: This has to be a dedicated message rather than a flag
+			// attached to documents. This is because because there might be
+			// no documents.
 			err = chanutil.WriteWithDoneCheck(
 				ctx,
 				dstToCompareChannel,
