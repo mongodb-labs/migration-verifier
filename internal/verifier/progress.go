@@ -7,6 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/ccoveille/go-safecast/v2"
@@ -136,7 +137,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 	}
 
 	if mm, has := mismatch.Get(); has {
-		progress.LongestDocMismatch = option.Some(mm.Detail.APIMismatchInfo())
+		progress.LongestDocMismatch = option.Some(mm.Detail.APIMismatchInfo(tasks.VerifyDocuments))
 	}
 
 	return progress, nil

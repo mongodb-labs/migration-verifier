@@ -2,18 +2,19 @@ package verifier
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/wI2L/jsondiff"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -95,7 +96,8 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	_, err := srcDB.Collection("mismatchedIndex").Indexes().CreateOne(
 		ctx,
 		mongo.IndexModel{
-			Keys: bson.D{{"foo", 1}},
+			Keys:    bson.D{{"field", 1}},
+			Options: options.Index().SetName("missing_1"),
 		},
 	)
 	suite.Require().NoError(err)
@@ -103,7 +105,26 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	_, err = dstDB.Collection("mismatchedIndex").Indexes().CreateOne(
 		ctx,
 		mongo.IndexModel{
-			Keys: bson.D{{"foo", -1}},
+			Keys:    bson.D{{"someField", 1}},
+			Options: options.Index().SetName("extra_1"),
+		},
+	)
+	suite.Require().NoError(err)
+
+	_, err = srcDB.Collection("mismatchedIndex").Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys:    bson.D{{"foo", 1}},
+			Options: options.Index().SetName("foo_1"),
+		},
+	)
+	suite.Require().NoError(err)
+
+	_, err = dstDB.Collection("mismatchedIndex").Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys:    bson.D{{"foo", -1}},
+			Options: options.Index().SetName("foo_1"),
 		},
 	)
 	suite.Require().NoError(err)
@@ -171,34 +192,99 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 			Namespace: srcDB.Name() + ".missingOnDst",
 			Type:      api.MismatchMissing,
 		},
+
+		// mismatched collation:
 		{
+			Type:      api.MismatchContent,
+			Namespace: srcDB.Name() + ".mismatchedCollation",
+			ID:        bsontools.ToRawValue("spec"),
+			Field:     option.Some("Options.collation"),
+			Detail:    option.Some(Mismatch),
+		},
+		{
+			Type:      api.MismatchContent,
 			Namespace: srcDB.Name() + ".mismatchedCollation",
 			ID:        bsontools.ToRawValue("_id"),
 			Field:     option.Some("index"),
 			Detail: option.Some(fmt.Sprintf(
-				"%s: %s",
+				"%s: {%s}",
 				Mismatch,
-				jsondiff.Operation{
-					Type:  "replace",
-					Path:  "/collation/strength/$numberInt",
-					Value: "2",
-				},
+				strings.Join(
+					mslices.Of(
+						`"op":"replace"`,
+						`"path":"/collation/strength/$numberInt"`,
+						`"value":"2"`,
+					),
+					",",
+				),
 			)),
 		},
 		{
+			Type:      api.MismatchContent,
 			Namespace: srcDB.Name() + ".mismatchedCollation",
-			ID:        bsontools.ToRawValue("_id"),
+			ID:        bsontools.ToRawValue("_id_"),
 			Field:     option.Some("index"),
 			Detail: option.Some(fmt.Sprintf(
-				"%s: %s",
+				"%s: {%s}",
 				Mismatch,
-				jsondiff.Operation{
-					Type:  "replace",
-					Path:  "/collation/strength/$numberInt",
-					Value: "2",
-				},
+				strings.Join(
+					mslices.Of(
+						`"op":"replace"`,
+						`"path":"/collation/strength/$numberInt"`,
+						`"value":"2"`,
+					),
+					",",
+				),
 			)),
 		},
+
+		// missing, extra, & mismatched indexes:
+		{
+			Type:      api.MismatchMissing,
+			Namespace: srcDB.Name() + ".mismatchedIndex",
+			ID:        bsontools.ToRawValue("missing_1"),
+			Field:     option.Some("index"),
+		},
+		{
+			Type:      api.MismatchExtra,
+			Namespace: srcDB.Name() + ".mismatchedIndex",
+			ID:        bsontools.ToRawValue("extra_1"),
+			Field:     option.Some("index"),
+		},
+		{
+			Type:      api.MismatchContent,
+			Namespace: srcDB.Name() + ".mismatchedIndex",
+			ID:        bsontools.ToRawValue("foo_1"),
+			Field:     option.Some("index"),
+			Detail: option.Some(fmt.Sprintf(
+				"%s: {%s}",
+				Mismatch,
+				strings.Join(
+					mslices.Of(
+						`"op":"replace"`,
+						`"path":"/key/foo/$numberInt"`,
+						`"value":"-1"`,
+					),
+					",",
+				),
+			)),
+		},
+		/*
+			{
+				Namespace: srcDB.Name() + ".mismatchedCollation",
+				ID:        bsontools.ToRawValue("_id"),
+				Field:     option.Some("index"),
+				Detail: option.Some(fmt.Sprintf(
+					"%s: %s",
+					Mismatch,
+					jsondiff.Operation{
+						Type:  "replace",
+						Path:  "/collation/strength/$numberInt",
+						Value: "2",
+					},
+				)),
+			},
+		*/
 	}
 
 	suite.Assert().ElementsMatch(expected, mismatches)

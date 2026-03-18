@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -59,14 +60,28 @@ func (vr Result) DocumentIsMissing() bool {
 	return vr.Details == Missing && vr.Field == ""
 }
 
-func (vr Result) APIMismatchInfo() api.MismatchInfo {
+func (vr Result) APIMismatchInfo(taskType tasks.Type) api.MismatchInfo {
 	apiMM := api.MismatchInfo{
 		ID:           vr.ID,
 		Namespace:    vr.NameSpace,
 		DurationSecs: vr.MismatchDuration().Seconds(),
 	}
 
-	if vr.DocumentIsMissing() {
+	var isMissing bool
+	switch taskType {
+	case tasks.VerifyCollection:
+		isMissing = vr.Details == Missing
+	case tasks.VerifyDocuments:
+		isMissing = vr.DocumentIsMissing()
+	default:
+		lo.Assertf(
+			false,
+			"bad task type: %+v",
+			taskType,
+		)
+	}
+
+	if isMissing {
 		apiMM.Type = lo.Ternary(
 			vr.Cluster == constants.ClusterSource,
 			api.MismatchExtra,
@@ -74,12 +89,13 @@ func (vr Result) APIMismatchInfo() api.MismatchInfo {
 		)
 	} else {
 		apiMM.Type = api.MismatchContent
-
-		// In hashed comparison we don’t know the field name.
-		apiMM.Field = option.IfNotZero(vr.Field)
-
 		apiMM.Detail = option.Some(vr.Details)
 	}
+
+	// NB: In hashed comparison we don’t know the field name.
+	// Also, with collection-level mismatches the Field indicates the
+	// mismatch “subtype” (e.g., index, …)
+	apiMM.Field = option.IfNotZero(vr.Field)
 
 	return apiMM
 }

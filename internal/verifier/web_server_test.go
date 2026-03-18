@@ -29,7 +29,8 @@ type WebServerTestSuite struct {
 type MockVerifier struct {
 	filter                  bson.D
 	sendDocumentMismatches  func(context.Context, uint32, chan<- api.MismatchInfo) error
-	sendNamespaceMismatches func(context.Context, chan<- api.MismatchInfo) error
+	sendNamespaceMismatches func(context.Context,
+		chan<- api.MismatchInfo) error
 }
 
 func NewMockVerifier() *MockVerifier {
