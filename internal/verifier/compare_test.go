@@ -641,3 +641,197 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_Context() {
 		)
 	}
 }
+
+func (s *IntegrationTestSuite) TestExactMismatchCount() {
+	ctx := s.Context()
+
+	srcColl := s.srcMongoClient.Database(s.DBNameForTest()).Collection("stuff")
+
+	for _, client := range mslices.Of(s.srcMongoClient, s.dstMongoClient) {
+		if s.GetTopology(client) != util.TopologySharded {
+			continue
+		}
+
+		err := client.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"enableSharding", srcColl.Database().Name()},
+			},
+		).Err()
+
+		s.Require().NoError(err, "enabling sharding on %#q", srcColl.Database().Name())
+
+		err = client.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"shardCollection", FullName(srcColl)},
+				{"key", bson.D{{"_id", "hashed"}}},
+			},
+		).Err()
+
+		s.Require().NoError(err, "sharding %#q", FullName(srcColl))
+	}
+
+	dstColl := s.dstMongoClient.Database(s.DBNameForTest()).Collection(srcColl.Name())
+
+	bigStr := strings.Repeat("x", 1_000_000)
+
+	docIDs := make([]int, 0, 10_000)
+
+	s.T().Log("Populating clusters …")
+
+	eg, egCtx := contextplus.ErrGroup(ctx)
+	eg.SetLimit(10)
+
+	mismatchesToExpect := 0
+
+	for range 50 {
+		docs := lo.RepeatBy(
+			10,
+			func(_ int) bson.D {
+				id := len(docIDs)
+				docIDs = append(docIDs, id)
+				return bson.D{
+					{"_id", id},
+					{"str", bigStr},
+				}
+			},
+		)
+
+		for i, coll := range mslices.Of(srcColl, dstColl) {
+			docs := docs
+
+			if i > 0 {
+				docs = lo.Map(
+					docs,
+					func(d bson.D, _ int) bson.D {
+						if rand.Float64() > 0.5 {
+							d = d[:1]
+
+							mismatchesToExpect++
+						}
+
+						return d
+					},
+				)
+			}
+
+			eg.Go(func() error {
+				_, err := coll.InsertMany(egCtx, docs)
+				return err
+			})
+		}
+	}
+
+	s.Require().NoError(eg.Wait())
+
+	ensureExpectedProblems := func(ctx context.Context, task tasks.Task) {
+		subCtx, cancel := contextplus.WithCancelCause(ctx)
+		defer cancel(fmt.Errorf("test over"))
+
+		verifier := s.BuildVerifier()
+		s.Require().NoError(verifier.startChangeHandling(subCtx))
+
+		results := lo.ChannelToSlice(verifier.FetchAndCompareDocuments(
+			subCtx,
+			0,
+			&task,
+		))
+
+		var allProblems []compare.Result
+		var missingCount int
+
+		for _, r := range results {
+			report, err := r.Get()
+			s.Require().NoError(err)
+
+			allProblems = append(allProblems, report.Problems...)
+		}
+
+		// Avoid Len() because if the slice is long then Testify shows nothing.
+		s.Assert().Equal(mismatchesToExpect, len(allProblems), "expect exact # of mismatches")
+
+		missingCount += lo.CountBy(
+			allProblems,
+			func(p compare.Result) bool {
+				return p.DocumentIsMissing()
+			},
+		)
+
+		s.Assert().Zero(missingCount, "no docs should be marked missing")
+	}
+
+	s.Run(
+		"_id range partition",
+		func() {
+			task := tasks.Task{
+				PrimaryKey: bson.NewObjectID(),
+				Type:       tasks.VerifyDocuments,
+				Status:     tasks.Processing,
+				QueryFilter: tasks.QueryFilter{
+					Namespace: FullName(srcColl),
+					Partition: &partitions.Partition{
+						Key: partitions.PartitionKey{
+							Lower: bsontools.ToRawValue(bson.MinKey{}),
+						},
+						Upper: bsontools.ToRawValue(bson.MaxKey{}),
+					},
+				},
+			}
+
+			ensureExpectedProblems(ctx, task)
+		},
+	)
+
+	s.Run(
+		"natural partition",
+		func() {
+			if s.GetTopology(s.srcMongoClient) == util.TopologySharded {
+				s.T().Skip("no natural partition with sharded source")
+			}
+
+			_, hostname := getDirectClientAndHostname(
+				ctx,
+				s.T(),
+				s.srcMongoClient,
+				s.srcConnStr,
+			)
+
+			task := tasks.Task{
+				PrimaryKey: bson.NewObjectID(),
+				Type:       tasks.VerifyDocuments,
+				Status:     tasks.Processing,
+				QueryFilter: tasks.QueryFilter{
+					Namespace: FullName(srcColl),
+					Partition: &partitions.Partition{
+						Natural:         true,
+						HostnameAndPort: option.Some(hostname),
+						Upper:           bsontools.ToRawValue(int64(999_999_999_999)),
+					},
+				},
+			}
+
+			ensureExpectedProblems(ctx, task)
+		},
+	)
+
+	s.Run(
+		"recheck",
+		func() {
+			task := tasks.Task{
+				PrimaryKey: bson.NewObjectID(),
+				Type:       tasks.VerifyDocuments,
+				Status:     tasks.Processing,
+				Ids: mslices.Map1(
+					docIDs,
+					bsontools.ToRawValue[int],
+				),
+				QueryFilter: tasks.QueryFilter{
+					Namespace: FullName(srcColl),
+				},
+			}
+
+			ensureExpectedProblems(ctx, task)
+		},
+	)
+}
