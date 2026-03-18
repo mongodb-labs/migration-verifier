@@ -378,6 +378,25 @@ func getLongestLivedDocumentMismatch(
 	return option.Some(mmInfo), nil
 }
 
+// SendNamespaceMismatches outputs all namespace mismatches found in the prior
+// generation (or, in generation 0, the current generation).
+func (verifier *Verifier) SendNamespaceMismatches(
+	ctx context.Context,
+	out chan<- api.MismatchInfo,
+) error {
+	defer close(out)
+
+	generation, _ := verifier.getGeneration()
+
+	return verifier.findAndSendMismatches(
+		ctx,
+		generation,
+		tasks.VerifyCollection,
+		0,
+		out,
+	)
+}
+
 // SendDocumentMismatches outputs all document mismatches found in the prior
 // generation (or, in generation 0, the current generation).
 func (verifier *Verifier) SendDocumentMismatches(
@@ -395,13 +414,30 @@ func (verifier *Verifier) SendDocumentMismatches(
 		return nil
 	}
 
-	if generation > 0 {
-		generation--
+	return verifier.findAndSendMismatches(
+		ctx,
+		generation,
+		tasks.VerifyDocuments,
+		minDurationSecs,
+		out,
+	)
+}
+
+func (verifier *Verifier) findAndSendMismatches(
+	ctx context.Context,
+	curGeneration int,
+	taskType tasks.Type,
+	minDurationSecs uint32,
+	out chan<- api.MismatchInfo,
+) error {
+	queryGeneration := curGeneration
+	if queryGeneration > 0 {
+		queryGeneration--
 	}
 
 	filter := bson.D{
-		{"generation", generation},
-		{"taskType", tasks.VerifyDocuments},
+		{"generation", queryGeneration},
+		{"taskType", taskType},
 	}
 
 	if minDurationSecs > 0 {
@@ -428,14 +464,14 @@ func (verifier *Verifier) SendDocumentMismatches(
 		),
 	)
 	if err != nil {
-		return fmt.Errorf("fetching generation %d’s mismatches: %w", generation, err)
+		return fmt.Errorf("fetching generation %d’s mismatches: %w", queryGeneration, err)
 	}
 
 	for cursor.Next(ctx) {
 		var mm MismatchInfo
 
 		if err := cursor.Decode(&mm); err != nil {
-			return fmt.Errorf("parsing generation %d’s mismatches: %w", generation, err)
+			return fmt.Errorf("parsing generation %d’s mismatches: %w", queryGeneration, err)
 		}
 
 		select {
@@ -446,7 +482,7 @@ func (verifier *Verifier) SendDocumentMismatches(
 	}
 
 	if err := cursor.Err(); err != nil {
-		return fmt.Errorf("reading generation %d’s mismatches: %w", generation, err)
+		return fmt.Errorf("reading generation %d’s mismatches: %w", queryGeneration, err)
 	}
 
 	return nil
