@@ -82,6 +82,8 @@ func (s *IntegrationTestSuite) TestChannelShardedLargeDocs_DstLarger() {
 
 		for i, coll := range mslices.Of(srcColl, dstColl) {
 			eg.Go(func() error {
+				docs := docs
+
 				if i == 0 {
 					docs = lo.Map(
 						docs,
