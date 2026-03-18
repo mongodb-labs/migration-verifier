@@ -102,7 +102,7 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore() {
 	mmChan := make(chan api.MismatchInfo, 100)
 	suite.Require().NoError(verifier.SendNamespaceMismatches(
 		ctx,
-		mslices.Of(api.IndexSpecIgnoreTTL),
+		mslices.Of(api.IndexSpecIgnoreTTL, api.IndexSpecIgnoreUnique),
 		mmChan,
 	))
 
