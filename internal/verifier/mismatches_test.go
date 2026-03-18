@@ -1,8 +1,10 @@
 package verifier
 
 import (
+	"fmt"
 	"testing"
 
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/mbson"
@@ -11,7 +13,10 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/wI2L/jsondiff"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func TestMismatchesInfoMarshal(t *testing.T) {
@@ -50,6 +55,153 @@ func TestMismatchesInfoMarshal(t *testing.T) {
 
 		assert.Equal(t, mi, rt, "should round-trip")
 	}
+}
+
+func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
+	ctx := suite.Context()
+
+	srcDB := suite.srcMongoClient.Database(suite.DBNameForTest())
+	dstDB := suite.dstMongoClient.Database(suite.DBNameForTest())
+
+	suite.Require().NoError(
+		srcDB.CreateCollection(ctx, "missingOnDst"),
+	)
+
+	suite.Require().NoError(
+		srcDB.CreateCollection(
+			ctx,
+			"mismatchedCollation",
+			options.CreateCollection().SetCollation(
+				&options.Collation{
+					Locale:   "en",
+					Strength: 1,
+				},
+			),
+		),
+	)
+	suite.Require().NoError(
+		dstDB.CreateCollection(
+			ctx,
+			"mismatchedCollation",
+			options.CreateCollection().SetCollation(
+				&options.Collation{
+					Locale:   "en",
+					Strength: 2,
+				},
+			),
+		),
+	)
+
+	_, err := srcDB.Collection("mismatchedIndex").Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys: bson.D{{"foo", 1}},
+		},
+	)
+	suite.Require().NoError(err)
+
+	_, err = dstDB.Collection("mismatchedIndex").Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys: bson.D{{"foo", -1}},
+		},
+	)
+	suite.Require().NoError(err)
+
+	testShardKey := suite.GetTopology(suite.srcMongoClient) == util.TopologySharded
+
+	if testShardKey {
+		suite.Require().Equal(
+			suite.GetTopology(suite.dstMongoClient),
+			util.TopologySharded,
+		)
+
+		suite.Require().NoError(
+			suite.srcMongoClient.Database("admin").RunCommand(
+				ctx,
+				bson.D{
+					{"enableSharding", srcDB.Name()},
+				},
+			).Err(),
+		)
+		suite.Require().NoError(
+			suite.dstMongoClient.Database("admin").RunCommand(
+				ctx,
+				bson.D{
+					{"enableSharding", dstDB.Name()},
+				},
+			).Err(),
+		)
+
+		suite.Require().NoError(
+			suite.srcMongoClient.Database("admin").RunCommand(
+				ctx,
+				bson.D{
+					{"shardCollection", srcDB.Name() + ".mismatchedShardKey"},
+					{"key", bson.D{{"_id", "hashed"}}},
+				},
+			).Err(),
+		)
+		suite.Require().NoError(
+			suite.dstMongoClient.Database("admin").RunCommand(
+				ctx,
+				bson.D{
+					{"shardCollection", dstDB.Name() + ".mismatchedShardKey"},
+					{"key", bson.D{{"_id", 1}}},
+				},
+			).Err(),
+		)
+	}
+
+	// Now that the namespaces are created, let’s see some mismatches …
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	mmChan := make(chan api.MismatchInfo, 10)
+	suite.Require().NoError(verifier.SendNamespaceMismatches(ctx, mmChan))
+
+	mismatches := lo.ChannelToSlice(mmChan)
+
+	expected := []api.MismatchInfo{
+		{
+			Namespace: srcDB.Name() + ".missingOnDst",
+			Type:      api.MismatchMissing,
+		},
+		{
+			Namespace: srcDB.Name() + ".mismatchedCollation",
+			ID:        bsontools.ToRawValue("_id"),
+			Field:     option.Some("index"),
+			Detail: option.Some(fmt.Sprintf(
+				"%s: %s",
+				Mismatch,
+				jsondiff.Operation{
+					Type:  "replace",
+					Path:  "/collation/strength/$numberInt",
+					Value: "2",
+				},
+			)),
+		},
+		{
+			Namespace: srcDB.Name() + ".mismatchedCollation",
+			ID:        bsontools.ToRawValue("_id"),
+			Field:     option.Some("index"),
+			Detail: option.Some(fmt.Sprintf(
+				"%s: %s",
+				Mismatch,
+				jsondiff.Operation{
+					Type:  "replace",
+					Path:  "/collation/strength/$numberInt",
+					Value: "2",
+				},
+			)),
+		},
+	}
+
+	suite.Assert().ElementsMatch(expected, mismatches)
 }
 
 func (suite *IntegrationTestSuite) TestSendDocumentMismatches() {
