@@ -173,6 +173,8 @@ func (c *comparator) readBatches(
 							"expect no documents (found: %d)",
 							len(msg.DocsWithTS),
 						)
+
+						fallthrough
 					case compare.MsgTypeDocs:
 						lo.Assertf(
 							len(msg.DocsWithTS) <= compare.ToComparatorBatchSize,
