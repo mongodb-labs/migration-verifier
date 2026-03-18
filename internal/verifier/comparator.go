@@ -97,12 +97,11 @@ func (c *comparator) stillReading() bool {
 // readBatches handles the concurrent errgroup I/O and timeout logic.
 func (c *comparator) readBatches(
 	ctx context.Context,
-	srcChannel, dstChannel <-chan []compare.DocWithTS,
-) ([]compare.DocWithTS, []compare.DocWithTS, error) {
-
+	srcChannel, dstChannel <-chan compare.ToComparatorMsg,
+) ([]compare.DocWithTS, []compare.DocWithTS, compare.ComparatorMsgFlags, error) {
 	simpleTimerReset(c.readTimer, readTimeout)
 
-	var srcBatch, dstBatch []compare.DocWithTS
+	var srcMsg, dstMsg compare.ToComparatorMsg
 	eg, egCtx := contextplus.ErrGroup(ctx)
 
 	if !c.srcClosed {
@@ -112,22 +111,30 @@ func (c *comparator) readBatches(
 				return egCtx.Err()
 			case <-c.readTimer.C:
 				return errors.Errorf("failed to read from source after %s", readTimeout)
-			case docs, alive := <-srcChannel:
+			case msg, alive := <-srcChannel:
 				if !alive {
 					c.srcClosed = true
 					return nil
 				}
 
+				c.fi.NoteSuccess("received message from source reader")
+
 				lo.Assertf(
-					len(docs) <= compare.ToComparatorBatchSize,
-					"src reader should send <= %d docs but sent %d",
-					compare.ToComparatorBatchSize,
-					len(docs),
+					msg.Flags == 0,
+					"source reader must send no flags (got: %v)",
+					msg.Flags,
 				)
 
-				c.fi.NoteSuccess("received document from source")
-				c.recordSrcMetrics(docs)
-				srcBatch = docs
+				lo.Assertf(
+					len(msg.DocsWithTS) <= compare.ToComparatorBatchSize,
+					"src reader should send <= %d docs but sent %d",
+					compare.ToComparatorBatchSize,
+					len(msg.DocsWithTS),
+				)
+
+				c.recordSrcMetrics(msg.DocsWithTS)
+
+				srcMsg = msg
 			}
 			return nil
 		})
@@ -140,31 +147,32 @@ func (c *comparator) readBatches(
 				return egCtx.Err()
 			case <-c.readTimer.C:
 				return errors.Errorf("failed to read from destination after %s", readTimeout)
-			case docs, alive := <-dstChannel:
+			case msg, alive := <-dstChannel:
 				if !alive {
 					c.dstClosed = true
 					return nil
 				}
 
 				lo.Assertf(
-					len(docs) <= compare.ToComparatorBatchSize,
+					len(msg.DocsWithTS) <= compare.ToComparatorBatchSize,
 					"dst reader should send <= %d docs but sent %d",
 					compare.ToComparatorBatchSize,
-					len(docs),
+					len(msg.DocsWithTS),
 				)
 
-				c.fi.NoteSuccess("received document from destination")
-				dstBatch = docs
+				c.fi.NoteSuccess("received message from destination reader")
+
+				dstMsg = msg
 			}
 			return nil
 		})
 	}
 
 	if err := eg.Wait(); err != nil {
-		return nil, nil, errors.Wrap(err, "failed to read documents")
+		return nil, nil, 0, errors.Wrap(err, "failed to read documents")
 	}
 
-	return srcBatch, dstBatch, nil
+	return srcMsg.DocsWithTS, dstMsg.DocsWithTS, dstMsg.Flags, nil
 }
 
 func simpleTimerReset(t *time.Timer, dur time.Duration) {
@@ -312,7 +320,6 @@ func (c *comparator) flush(
 			ByteCount: c.srcByteCount,
 		},
 	)
-
 	if err != nil {
 		return errors.Wrapf(err, "flushing %d problems", len(probsToFlush))
 	}

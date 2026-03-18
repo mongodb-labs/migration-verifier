@@ -16,12 +16,194 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
+
+// This tests that sharded collections don’t trigger spurious mismatch reports.
+// See REP-7144 for context.
+func (s *IntegrationTestSuite) TestChannelShardedLargeDocs_DstLarger() {
+	ctx := s.Context()
+
+	srcColl := s.srcMongoClient.Database(s.DBNameForTest()).Collection("stuff")
+
+	for _, client := range mslices.Of(s.srcMongoClient, s.dstMongoClient) {
+		if s.GetTopology(client) != util.TopologySharded {
+			continue
+		}
+
+		err := client.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"enableSharding", srcColl.Database().Name()},
+			},
+		).Err()
+
+		s.Require().NoError(err, "enabling sharding on %#q", srcColl.Database().Name())
+
+		err = client.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"shardCollection", FullName(srcColl)},
+				{"key", bson.D{{"_id", "hashed"}}},
+			},
+		).Err()
+
+		s.Require().NoError(err, "sharding %#q", FullName(srcColl))
+	}
+
+	dstColl := s.dstMongoClient.Database(s.DBNameForTest()).Collection(srcColl.Name())
+
+	bigStr := strings.Repeat("x", 1_000_000)
+
+	docIDs := make([]int, 0, 10_000)
+
+	s.T().Log("Populating clusters …")
+
+	eg, egCtx := contextplus.ErrGroup(ctx)
+	eg.SetLimit(10)
+
+	for range 50 {
+		docs := lo.RepeatBy(
+			10,
+			func(_ int) bson.D {
+				id := len(docIDs)
+				docIDs = append(docIDs, id)
+				return bson.D{
+					{"_id", id},
+					{"str", bigStr},
+				}
+			},
+		)
+
+		for i, coll := range mslices.Of(srcColl, dstColl) {
+			eg.Go(func() error {
+				if i == 0 {
+					docs = lo.Map(
+						docs,
+						func(d bson.D, _ int) bson.D {
+							return bson.D{d[0]}
+						},
+					)
+				}
+
+				_, err := coll.InsertMany(egCtx, docs)
+				return err
+			})
+		}
+	}
+
+	s.Require().NoError(eg.Wait())
+
+	ensureAllContentMismatch := func(ctx context.Context, task tasks.Task) {
+		subCtx, cancel := contextplus.WithCancelCause(ctx)
+		defer cancel(fmt.Errorf("test over"))
+
+		verifier := s.BuildVerifier()
+		s.Require().NoError(verifier.startChangeHandling(subCtx))
+
+		results := lo.ChannelToSlice(verifier.FetchAndCompareDocuments(
+			subCtx,
+			0,
+			&task,
+		))
+
+		s.Assert().Len(results, 1)
+		s.Require().NotEmpty(results)
+
+		report, err := results[0].Get()
+		s.Require().NoError(err)
+
+		nonContentMismatches := lo.Filter(
+			report.Problems,
+			func(r compare.Result, _ int) bool {
+				return r.DocumentIsMissing()
+			},
+		)
+
+		if !s.Assert().Empty(nonContentMismatches, "all mismatches must be content-mismatch") {
+			s.T().Logf("first: %+v", nonContentMismatches[0])
+		}
+	}
+
+	s.Run(
+		"_id range partition",
+		func() {
+			task := tasks.Task{
+				PrimaryKey: bson.NewObjectID(),
+				Type:       tasks.VerifyDocuments,
+				Status:     tasks.Processing,
+				QueryFilter: tasks.QueryFilter{
+					Namespace: FullName(srcColl),
+					Partition: &partitions.Partition{
+						Key: partitions.PartitionKey{
+							Lower: bsontools.ToRawValue(bson.MinKey{}),
+						},
+						Upper: bsontools.ToRawValue(bson.MaxKey{}),
+					},
+				},
+			}
+
+			ensureAllContentMismatch(ctx, task)
+		},
+	)
+
+	s.Run(
+		"natural partition",
+		func() {
+			if s.GetTopology(s.srcMongoClient) == util.TopologySharded {
+				s.T().Skip("no natural partition with sharded source")
+			}
+
+			_, hostname := getDirectClientAndHostname(
+				ctx,
+				s.T(),
+				s.srcMongoClient,
+				s.srcConnStr,
+			)
+
+			task := tasks.Task{
+				PrimaryKey: bson.NewObjectID(),
+				Type:       tasks.VerifyDocuments,
+				Status:     tasks.Processing,
+				QueryFilter: tasks.QueryFilter{
+					Namespace: FullName(srcColl),
+					Partition: &partitions.Partition{
+						Natural:         true,
+						HostnameAndPort: option.Some(hostname),
+						Upper:           bsontools.ToRawValue(int64(999_999_999_999)),
+					},
+				},
+			}
+
+			ensureAllContentMismatch(ctx, task)
+		},
+	)
+
+	s.Run(
+		"recheck",
+		func() {
+			task := tasks.Task{
+				PrimaryKey: bson.NewObjectID(),
+				Type:       tasks.VerifyDocuments,
+				Status:     tasks.Processing,
+				Ids: mslices.Map1(
+					docIDs,
+					bsontools.ToRawValue[int],
+				),
+				QueryFilter: tasks.QueryFilter{
+					Namespace: FullName(srcColl),
+				},
+			}
+
+			ensureAllContentMismatch(ctx, task)
+		},
+	)
+}
 
 // This tests that sharded collections don’t trigger spurious mismatch reports.
 // See REP-7144 for context.
@@ -125,6 +307,38 @@ func (s *IntegrationTestSuite) TestChannelShardedLargeDocs() {
 							Lower: bsontools.ToRawValue(bson.MinKey{}),
 						},
 						Upper: bsontools.ToRawValue(bson.MaxKey{}),
+					},
+				},
+			}
+
+			ensureNoProblems(ctx, task)
+		},
+	)
+
+	s.Run(
+		"natural partition",
+		func() {
+			if s.GetTopology(s.srcMongoClient) == util.TopologySharded {
+				s.T().Skip("no natural partition with sharded source")
+			}
+
+			_, hostname := getDirectClientAndHostname(
+				ctx,
+				s.T(),
+				s.srcMongoClient,
+				s.srcConnStr,
+			)
+
+			task := tasks.Task{
+				PrimaryKey: bson.NewObjectID(),
+				Type:       tasks.VerifyDocuments,
+				Status:     tasks.Processing,
+				QueryFilter: tasks.QueryFilter{
+					Namespace: FullName(srcColl),
+					Partition: &partitions.Partition{
+						Natural:         true,
+						HostnameAndPort: option.Some(hostname),
+						Upper:           bsontools.ToRawValue(int64(999_999_999_999)),
 					},
 				},
 			}

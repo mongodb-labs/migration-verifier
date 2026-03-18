@@ -8,6 +8,13 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+type ComparatorMsgFlags int
+
+type ToComparatorMsg struct {
+	DocsWithTS []DocWithTS
+	Flags      ComparatorMsgFlags
+}
+
 const (
 	// ToComparatorBatchSize is the max # of docs that readers send
 	// to the comparator thread at once.
@@ -16,6 +23,9 @@ const (
 	// ToComparatorByteLimit is the max # of bytes that readers send to the
 	// comparator thread at once. This value is somewhat arbitrarily chosen.
 	ToComparatorByteLimit = 32 << 20
+
+	MsgFlagPadding    ComparatorMsgFlags = 1
+	MsgFlagCursorDone ComparatorMsgFlags = 2
 )
 
 func ToComparatorBatchCount(totalDocs int) int {

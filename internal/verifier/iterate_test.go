@@ -37,7 +37,7 @@ func (s *IntegrationTestSuite) TestIterateCursorToChannel() {
 	_, err := coll.InsertMany(ctx, docs)
 	s.Require().NoError(err)
 
-	receiver := make(chan []compare.DocWithTS, 100)
+	receiver := make(chan compare.ToComparatorMsg, 100)
 
 	sess, err := s.srcMongoClient.StartSession()
 	s.Require().NoError(err)
@@ -65,5 +65,5 @@ func (s *IntegrationTestSuite) TestIterateCursorToChannel() {
 	s.Assert().NotEmpty(gotBatches[0], "1st batch")
 
 	s.Require().Greater(len(gotBatches), 1)
-	s.Assert().Len(gotBatches[1], len(docs)-len(gotBatches[0]), "2nd batch")
+	s.Assert().Len(gotBatches[1], len(docs)-len(gotBatches[0].DocsWithTS), "2nd batch")
 }
