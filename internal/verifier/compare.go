@@ -189,9 +189,26 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 	// 2. Stream Processing Loop
 	for c.stillReading() {
-		srcBatch, dstBatch, dstFlags, err := c.readBatches(ctx, srcChannel, dstChannel)
+		srcBatch, dstBatch, dstCursorDone, err := c.readBatches(ctx, srcChannel, dstChannel)
+		// srcBatch, dstBatch, _, err := c.readBatches(ctx, srcChannel, dstChannel)
 		if err != nil {
 			return err
+		}
+
+		if dstCursorDone {
+			whyFlush, err := c.flushIfNeeded(ctx, reportsChan)
+			if err != nil {
+				return errors.Wrapf(err, "flushing problems")
+			}
+
+			if reason, has := whyFlush.Get(); has {
+				verifier.logger.Debug().
+					Any("task", task.PrimaryKey).
+					Int("workerNum", workerNum).
+					Str("namespace", task.QueryFilter.Namespace).
+					Str("reason", reason).
+					Msg("Recorded document-disparity problems.")
+			}
 		}
 
 		// Interleave processing the batches
@@ -220,23 +237,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 				}
 			}
 		}
-
-		if dstFlags&compare.MsgFlagCursorDone > 0 {
-			whyFlush, err := c.flushIfNeeded(ctx, reportsChan)
-			if err != nil {
-				return errors.Wrapf(err, "flushing problems")
-			}
-
-			if reason, has := whyFlush.Get(); has {
-				verifier.logger.Debug().
-					Any("task", task.PrimaryKey).
-					Int("workerNum", workerNum).
-					Str("namespace", task.QueryFilter.Namespace).
-					Str("reason", reason).
-					Msg("Recorded document-disparity problems.")
-			}
-		}
-
 	}
 
 	return c.flush(ctx, reportsChan)
@@ -452,7 +452,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				err := chanutil.WriteWithDoneCheck(
 					ctx,
 					dstToCompareChannel,
-					compare.ToComparatorMsg{},
+					compare.ToComparatorMsg{
+						Type: compare.MsgTypePadding,
+					},
 				)
 				if err != nil {
 					return errors.Wrapf(err, "sending dummy doc %d of %d dst->compare", 1+i, missingDocsCount)
@@ -471,7 +473,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				ctx,
 				dstToCompareChannel,
 				compare.ToComparatorMsg{
-					Flags: compare.MsgFlagCursorDone,
+					Type: compare.MsgTypeCursorDone,
 				},
 			)
 			if err != nil {
