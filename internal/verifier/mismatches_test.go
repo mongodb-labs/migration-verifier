@@ -65,6 +65,9 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	dstDB := suite.dstMongoClient.Database(suite.DBNameForTest())
 
 	suite.Require().NoError(
+		dstDB.CreateCollection(ctx, "extraOnDst"),
+	)
+	suite.Require().NoError(
 		srcDB.CreateCollection(ctx, "missingOnDst"),
 	)
 
@@ -188,9 +191,14 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	mismatches := lo.ChannelToSlice(mmChan)
 
 	expected := []api.MismatchInfo{
+		// missing/extra collections:
 		{
 			Namespace: srcDB.Name() + ".missingOnDst",
 			Type:      api.MismatchMissing,
+		},
+		{
+			Namespace: srcDB.Name() + ".extraOnDst",
+			Type:      api.MismatchExtra,
 		},
 
 		// mismatched collation:
@@ -269,22 +277,6 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 				),
 			)),
 		},
-		/*
-			{
-				Namespace: srcDB.Name() + ".mismatchedCollation",
-				ID:        bsontools.ToRawValue("_id"),
-				Field:     option.Some("index"),
-				Detail: option.Some(fmt.Sprintf(
-					"%s: %s",
-					Mismatch,
-					jsondiff.Operation{
-						Type:  "replace",
-						Path:  "/collation/strength/$numberInt",
-						Value: "2",
-					},
-				)),
-			},
-		*/
 	}
 
 	suite.Assert().ElementsMatch(expected, mismatches)
