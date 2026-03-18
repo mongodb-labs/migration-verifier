@@ -58,26 +58,37 @@ func TestMismatchesInfoMarshal(t *testing.T) {
 	}
 }
 
-func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_IgnoreTTL() {
+func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore() {
 	ctx := suite.Context()
 
 	srcDB := suite.srcMongoClient.Database(suite.DBNameForTest())
 	dstDB := suite.dstMongoClient.Database(suite.DBNameForTest())
 
-	_, err := srcDB.Collection("mismatchedIndex").Indexes().CreateOne(
+	_, err := srcDB.Collection("mismatchedIndex").Indexes().CreateMany(
 		ctx,
-		mongo.IndexModel{
-			Keys:    bson.D{{"field", 1}},
-			Options: options.Index().SetExpireAfterSeconds(123),
+		[]mongo.IndexModel{
+			{
+				Keys:    bson.D{{"field", 1}},
+				Options: options.Index().SetExpireAfterSeconds(123),
+			},
+			{
+				Keys:    bson.D{{"foo", 1}},
+				Options: options.Index().SetUnique(true),
+			},
 		},
 	)
 	suite.Require().NoError(err)
 
-	_, err = dstDB.Collection("mismatchedIndex").Indexes().CreateOne(
+	_, err = dstDB.Collection("mismatchedIndex").Indexes().CreateMany(
 		ctx,
-		mongo.IndexModel{
-			Keys:    bson.D{{"field", 1}},
-			Options: options.Index().SetExpireAfterSeconds(12123),
+		[]mongo.IndexModel{
+			{
+				Keys:    bson.D{{"field", 1}},
+				Options: options.Index().SetExpireAfterSeconds(12123),
+			},
+			{
+				Keys: bson.D{{"foo", 1}},
+			},
 		},
 	)
 	suite.Require().NoError(err)
