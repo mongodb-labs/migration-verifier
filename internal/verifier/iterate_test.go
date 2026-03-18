@@ -65,5 +65,5 @@ func (s *IntegrationTestSuite) TestIterateCursorToChannel() {
 	s.Assert().NotEmpty(gotBatches[0], "1st batch")
 
 	s.Require().Greater(len(gotBatches), 1)
-	s.Assert().Len(gotBatches[1], len(docs)-len(gotBatches[0].DocsWithTS), "2nd batch")
+	s.Assert().Len(gotBatches[1].DocsWithTS, len(docs)-len(gotBatches[0].DocsWithTS), "2nd batch length")
 }
