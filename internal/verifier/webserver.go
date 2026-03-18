@@ -255,19 +255,12 @@ func (server *WebServer) progressEndpoint(c *gin.Context) {
 }
 
 func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
-	c.Header("Content-Type", "application/x-ndjson")
-
-	// Optional: Prevent proxies/load balancers from buffering the response
-	c.Header("X-Accel-Buffering", "no")
-	c.Header("Cache-Control", "no-cache")
-
 	const minDurationSecsKey = "minDurationSecs"
 
 	var minDurationSecs uint64
 	if val := c.Query(minDurationSecsKey); val != "" {
 		var err error
 		minDurationSecs, err = strconv.ParseUint(val, 10, 32)
-
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("invalid %#q", minDurationSecsKey),
@@ -276,21 +269,63 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 		}
 	}
 
+	server.anyMismatchesEndpoint(
+		c,
+		func(
+			ctx context.Context,
+			mmChan chan<- api.MismatchInfo,
+			errSetter future.Setter[error],
+		) {
+			err := server.Mapi.SendDocumentMismatches(
+				ctx,
+				safecast.MustConvert[uint32](minDurationSecs),
+				mmChan,
+			)
+
+			errSetter(err)
+		},
+	)
+}
+
+func (server *WebServer) nsMismatchesEndpoint(c *gin.Context) {
+	server.anyMismatchesEndpoint(
+		c,
+		func(
+			ctx context.Context,
+			mmChan chan<- api.MismatchInfo,
+			errSetter future.Setter[error],
+		) {
+			err := server.Mapi.SendNamespaceMismatches(
+				ctx,
+				mmChan,
+			)
+
+			errSetter(err)
+		},
+	)
+}
+
+func (server *WebServer) anyMismatchesEndpoint(
+	c *gin.Context,
+	sender func(
+		context.Context,
+		chan<- api.MismatchInfo,
+		future.Setter[error],
+	),
+) {
+	c.Header("Content-Type", "application/x-ndjson")
+
+	// Prevent proxies/load balancers from buffering the response
+	c.Header("X-Accel-Buffering", "no")
+	c.Header("Cache-Control", "no-cache")
+
 	mmChan := make(chan api.MismatchInfo)
 
 	senderCtx, senderCancel := contextplus.WithCancelCause(c)
 	defer senderCancel(fmt.Errorf("OK"))
 
 	mmErr, errSetter := future.New[error]()
-	go func() {
-		err := server.Mapi.SendDocumentMismatches(
-			senderCtx,
-			safecast.MustConvert[uint32](minDurationSecs),
-			mmChan,
-		)
-
-		errSetter(err)
-	}()
+	go sender(senderCtx, mmChan, errSetter)
 
 	encoder := json.NewEncoder(c.Writer)
 

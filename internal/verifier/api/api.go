@@ -15,6 +15,7 @@ type MigrationVerifierAPI interface {
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
 	SendDocumentMismatches(context.Context, uint32, chan<- MismatchInfo) error
+	SendNamespaceMismatches(context.Context, chan<- MismatchInfo) error
 }
 
 // VerificationStatus holds the Verification Status

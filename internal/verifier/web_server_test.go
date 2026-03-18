@@ -27,8 +27,9 @@ type WebServerTestSuite struct {
 }
 
 type MockVerifier struct {
-	filter                 bson.D
-	sendDocumentMismatches func(context.Context, uint32, chan<- api.MismatchInfo) error
+	filter                  bson.D
+	sendDocumentMismatches  func(context.Context, uint32, chan<- api.MismatchInfo) error
+	sendNamespaceMismatches func(context.Context, chan<- api.MismatchInfo) error
 }
 
 func NewMockVerifier() *MockVerifier {
@@ -54,6 +55,17 @@ func (verifier *MockVerifier) SendDocumentMismatches(
 	}
 
 	return verifier.sendDocumentMismatches(ctx, minDurationSecs, out)
+}
+
+func (verifier *MockVerifier) SendNamespaceMismatches(
+	ctx context.Context,
+	out chan<- api.MismatchInfo,
+) error {
+	if verifier.sendNamespaceMismatches == nil {
+		panic("need sendNamespaceMismatches set")
+	}
+
+	return verifier.sendNamespaceMismatches(ctx, out)
 }
 
 func NewWebServerSuite() *WebServerTestSuite {
