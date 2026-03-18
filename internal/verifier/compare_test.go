@@ -406,6 +406,13 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_ManySmallProblems() 
 		),
 	)
 
+	_, hostname := getDirectClientAndHostname(
+		ctx,
+		s.T(),
+		s.srcMongoClient,
+		s.srcConnStr,
+	)
+
 	task := tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
 		Type:       tasks.VerifyDocuments,
@@ -413,10 +420,9 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_ManySmallProblems() 
 		QueryFilter: tasks.QueryFilter{
 			Namespace: s.DBNameForTest() + ".stuff",
 			Partition: &partitions.Partition{
-				Key: partitions.PartitionKey{
-					Lower: bsontools.ToRawValue(bson.MinKey{}),
-				},
-				Upper: bsontools.ToRawValue(bson.MaxKey{}),
+				Natural:         true,
+				HostnameAndPort: option.Some(hostname),
+				Upper:           bsontools.ToRawValue(int64(999_999_999_999)),
 			},
 		},
 	}
@@ -488,6 +494,13 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_BigProblems() {
 		),
 	)
 
+	_, hostname := getDirectClientAndHostname(
+		ctx,
+		s.T(),
+		s.srcMongoClient,
+		s.srcConnStr,
+	)
+
 	task := tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
 		Type:       tasks.VerifyDocuments,
@@ -495,10 +508,9 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_BigProblems() {
 		QueryFilter: tasks.QueryFilter{
 			Namespace: s.DBNameForTest() + ".stuff",
 			Partition: &partitions.Partition{
-				Key: partitions.PartitionKey{
-					Lower: bsontools.ToRawValue(bson.MinKey{}),
-				},
-				Upper: bsontools.ToRawValue(bson.MaxKey{}),
+				Natural:         true,
+				HostnameAndPort: option.Some(hostname),
+				Upper:           bsontools.ToRawValue(int64(999_999_999_999)),
 			},
 		},
 	}

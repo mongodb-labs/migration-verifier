@@ -49,7 +49,7 @@ type comparator struct {
 	curHistoryDocCount  types.DocumentCount
 	curHistoryByteCount types.ByteCount
 
-	// We flush the comparator’s caches whenever len(problems) or this value
+	// We may flush the comparator’s caches when len(problems) or this value
 	// exceed predefined limits.
 	//
 	// Note that this is a lower bound to memory
