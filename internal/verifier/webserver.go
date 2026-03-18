@@ -134,6 +134,7 @@ func (server *WebServer) setupRouter() *gin.Engine {
 			v1.POST("/writesOff", server.operationalAPILockMiddleware(), server.writesOffEndpoint)
 			v1.GET("/progress", server.progressEndpoint)
 			v1.GET("/docMismatches", server.docMismatchesEndpoint)
+			v1.GET("/nsMismatches", server.nsMismatchesEndpoint)
 		}
 	}
 
@@ -269,7 +270,7 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 		}
 	}
 
-	server.anyMismatchesEndpoint(
+	server.serveMismatches(
 		c,
 		func(
 			ctx context.Context,
@@ -288,7 +289,7 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 }
 
 func (server *WebServer) nsMismatchesEndpoint(c *gin.Context) {
-	server.anyMismatchesEndpoint(
+	server.serveMismatches(
 		c,
 		func(
 			ctx context.Context,
@@ -305,7 +306,7 @@ func (server *WebServer) nsMismatchesEndpoint(c *gin.Context) {
 	)
 }
 
-func (server *WebServer) anyMismatchesEndpoint(
+func (server *WebServer) serveMismatches(
 	c *gin.Context,
 	sender func(
 		context.Context,
