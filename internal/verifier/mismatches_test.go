@@ -72,6 +72,13 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	)
 
 	suite.Require().NoError(
+		dstDB.CreateCollection(ctx, "mismatchedType"),
+	)
+	suite.Require().NoError(
+		srcDB.CreateView(ctx, "mismatchedType", "targetColl", mongo.Pipeline{}),
+	)
+
+	suite.Require().NoError(
 		srcDB.CreateCollection(
 			ctx,
 			"mismatchedCollation",
@@ -132,7 +139,10 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	)
 	suite.Require().NoError(err)
 
-	testShardKey := suite.GetTopology(suite.srcMongoClient) == util.TopologySharded
+	srcIsSharded := suite.GetTopology(suite.srcMongoClient) == util.TopologySharded
+	dstIsSharded := suite.GetTopology(suite.dstMongoClient) == util.TopologySharded
+
+	testShardKey := srcIsSharded && dstIsSharded
 
 	if testShardKey {
 		suite.Require().Equal(
@@ -185,7 +195,7 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	mmChan := make(chan api.MismatchInfo, 10)
+	mmChan := make(chan api.MismatchInfo, 100)
 	suite.Require().NoError(verifier.SendNamespaceMismatches(ctx, mmChan))
 
 	mismatches := lo.ChannelToSlice(mmChan)
@@ -193,12 +203,20 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	expected := []api.MismatchInfo{
 		// missing/extra collections:
 		{
-			Namespace: srcDB.Name() + ".missingOnDst",
 			Type:      api.MismatchMissing,
+			Namespace: srcDB.Name() + ".missingOnDst",
 		},
 		{
-			Namespace: srcDB.Name() + ".extraOnDst",
 			Type:      api.MismatchExtra,
+			Namespace: srcDB.Name() + ".extraOnDst",
+		},
+
+		// mismatched namespace type:
+		{
+			Type:      api.MismatchContent,
+			Namespace: srcDB.Name() + ".mismatchedType",
+			Field:     option.Some("type"),
+			Detail:    option.Some(Mismatch + ": src: view, dst: collection"),
 		},
 
 		// mismatched collation:
@@ -206,7 +224,7 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 			Type:      api.MismatchContent,
 			Namespace: srcDB.Name() + ".mismatchedCollation",
 			ID:        bsontools.ToRawValue("spec"),
-			Field:     option.Some("Options.collation"),
+			Field:     option.Some("options.collation"),
 			Detail:    option.Some(Mismatch),
 		},
 		{
@@ -277,6 +295,28 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 				),
 			)),
 		},
+	}
+
+	if testShardKey {
+		expected = append(expected, []api.MismatchInfo{
+			{
+				Type:      api.MismatchContent,
+				Namespace: srcDB.Name() + ".mismatchedShardKey",
+				Field:     option.Some(ShardKeyField),
+				Detail: option.Some(fmt.Sprintf(
+					"%s: src={%s}; dst={%s}",
+					Mismatch,
+					`"_id": "hashed"`,
+					`"_id": {"$numberInt":"1"}`,
+				)),
+			},
+			{
+				Type:      api.MismatchMissing,
+				Namespace: srcDB.Name() + ".mismatchedShardKey",
+				ID:        bsontools.ToRawValue("_id_hashed"),
+				Field:     option.Some("index"),
+			},
+		}...)
 	}
 
 	suite.Assert().ElementsMatch(expected, mismatches)

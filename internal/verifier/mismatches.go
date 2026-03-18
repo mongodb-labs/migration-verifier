@@ -474,8 +474,6 @@ func (verifier *Verifier) findAndSendMismatches(
 			return fmt.Errorf("parsing generation %d’s mismatches: %w", queryGeneration, err)
 		}
 
-		fmt.Printf("---- mismatch: %+v\n", mm)
-
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
