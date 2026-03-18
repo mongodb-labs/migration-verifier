@@ -50,6 +50,9 @@ type DocCompareReport struct {
 	ByteCount types.ByteCount
 }
 
+// FetchAndCompareDocuments spawns a separate goroutine that fetches src & dst
+// documents for the given task, compares those documents, and sends the
+// results into the returned channel.
 func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
 	workerNum int,
