@@ -48,7 +48,7 @@ func (s *IntegrationTestSuite) TestIterateCursorToChannel() {
 
 	docsSent, err := iterateCursorToChannel(
 		sctx,
-		&testutil.MockSuccessNotifier{},
+		&testutil.MockSuccessNotifier{T: s.T()},
 		theCursor,
 		receiver,
 	)
