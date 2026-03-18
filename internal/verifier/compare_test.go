@@ -372,7 +372,12 @@ func (s *IntegrationTestSuite) TestChannelShardedLargeDocs() {
 
 // This tests behavior when there are enough small documents to necessitate
 // multiple problem reports. (This hits the comparator’s docs-cached max.)
+// This only runs for replset sources.
 func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_ManySmallProblems() {
+	if s.GetTopology(s.srcMongoClient) == util.TopologySharded {
+		s.T().Skip("needs unsharded source")
+	}
+
 	ctx := s.Context()
 
 	srcColl := s.srcMongoClient.Database(s.DBNameForTest()).Collection("stuff")
@@ -458,6 +463,10 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_ManySmallProblems() 
 // This tests behavior when there are enough large documents to necessitate
 // multiple problem reports. (This hits the comparator’s bytes-cached max.)
 func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_BigProblems() {
+	if s.GetTopology(s.srcMongoClient) == util.TopologySharded {
+		s.T().Skip("needs unsharded source")
+	}
+
 	ctx := s.Context()
 
 	srcColl := s.srcMongoClient.Database(s.DBNameForTest()).Collection("stuff")
