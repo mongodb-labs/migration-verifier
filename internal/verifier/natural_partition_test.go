@@ -267,7 +267,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 				var taskDocCounter int
 
 				for _, task := range theTasks {
-					toCompare := make(chan []compare.DocWithTS, len(undeletedDocs))
+					toCompare := make(chan compare.ToComparatorMsg, len(undeletedDocs))
 					toDst := make(chan []compare.DocID, len(undeletedDocs))
 
 					err = compare.ReadNaturalPartitionFromSource(
@@ -284,7 +284,8 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 					)
 					require.NoError(t, err, "should read")
 
-					for batch := range toCompare {
+					for msg := range toCompare {
+						batch := msg.DocsWithTS
 						assert.LessOrEqual(t, len(batch), compare.ToComparatorBatchSize)
 
 						for _, d := range batch {
@@ -562,7 +563,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								},
 							}
 
-							toCompare := make(chan []compare.DocWithTS, 100)
+							toCompare := make(chan compare.ToComparatorMsg, 100)
 							toDst := make(chan []compare.DocID, 100)
 
 							err = compare.ReadNaturalPartitionFromSource(
@@ -579,7 +580,12 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							)
 							suite.Require().NoError(err, "should read")
 
-							compared := lo.Flatten(lo.ChannelToSlice(toCompare))
+							compared := lo.Flatten(lo.Map(
+								lo.ChannelToSlice(toCompare),
+								func(msg compare.ToComparatorMsg, _ int) []compare.DocWithTS {
+									return msg.DocsWithTS
+								},
+							))
 							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
 							defer func() {
@@ -658,7 +664,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								},
 							}
 
-							toCompare := make(chan []compare.DocWithTS, 100)
+							toCompare := make(chan compare.ToComparatorMsg, 100)
 							toDst := make(chan []compare.DocID, 100)
 
 							err = compare.ReadNaturalPartitionFromSource(
@@ -675,7 +681,12 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							)
 							suite.Require().NoError(err, "should read")
 
-							compared := lo.Flatten(lo.ChannelToSlice(toCompare))
+							compared := lo.Flatten(lo.Map(
+								lo.ChannelToSlice(toCompare),
+								func(msg compare.ToComparatorMsg, _ int) []compare.DocWithTS {
+									return msg.DocsWithTS
+								},
+							))
 							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
 							defer func() {
@@ -756,7 +767,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								},
 							}
 
-							toCompare := make(chan []compare.DocWithTS, 100)
+							toCompare := make(chan compare.ToComparatorMsg, 100)
 							toDst := make(chan []compare.DocID, 100)
 
 							err = compare.ReadNaturalPartitionFromSource(
@@ -773,7 +784,12 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							)
 							suite.Require().NoError(err, "should read")
 
-							compared := lo.Flatten(lo.ChannelToSlice(toCompare))
+							compared := lo.Flatten(lo.Map(
+								lo.ChannelToSlice(toCompare),
+								func(msg compare.ToComparatorMsg, _ int) []compare.DocWithTS {
+									return msg.DocsWithTS
+								},
+							))
 							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
 							defer func() {
@@ -857,7 +873,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								},
 							}
 
-							toCompare := make(chan []compare.DocWithTS, 100)
+							toCompare := make(chan compare.ToComparatorMsg, 100)
 							toDst := make(chan []compare.DocID, 100)
 
 							err = compare.ReadNaturalPartitionFromSource(
@@ -874,7 +890,12 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							)
 							suite.Require().NoError(err, "should read")
 
-							compared := lo.Flatten(lo.ChannelToSlice(toCompare))
+							compared := lo.Flatten(lo.Map(
+								lo.ChannelToSlice(toCompare),
+								func(msg compare.ToComparatorMsg, _ int) []compare.DocWithTS {
+									return msg.DocsWithTS
+								},
+							))
 							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
 
 							defer func() {

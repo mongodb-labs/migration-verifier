@@ -295,7 +295,6 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 					{"to", shardIds[0]},
 					{"_waitForDelete", true},
 				}).Err()
-
 				if err != nil {
 					suite.T().Logf("Failed to move %s’s lower chunk to shard %#q: %v", clientLabel, shardIds[0], err)
 					return false
@@ -316,7 +315,6 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 					{"to", shardIds[1]},
 					{"_waitForDelete", true},
 				}).Err()
-
 				if err != nil {
 					suite.T().Logf("Failed to move %s’s upper chunk to shard %#q: %v", clientLabel, shardIds[1], err)
 					return false
@@ -384,7 +382,6 @@ func getShardIds(t *testing.T, client *mongo.Client) []string {
 }
 
 func (suite *IntegrationTestSuite) TestVerifier_DocFilter_ObjectID() {
-
 	ctx := suite.Context()
 	t := suite.T()
 
@@ -562,22 +559,17 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 		),
 	)
 
-	_, err := suite.srcMongoClient.
+	srcColl := suite.srcMongoClient.
 		Database(suite.DBNameForTest()).
-		Collection(collName).
-		InsertOne(ctx, bson.D{{"_id", "a"}})
+		Collection(collName)
+
+	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", "a"}})
 	suite.Require().NoError(err)
 
 	// So that the insert above isn’t the last thing in the oplog:
-	_, err = suite.srcMongoClient.
-		Database(suite.DBNameForTest()).
-		Collection(collName).
-		InsertOne(ctx, bson.D{{"_id", "qwe"}})
+	_, err = srcColl.InsertOne(ctx, bson.D{{"_id", "qwe"}})
 	suite.Require().NoError(err)
-	_, err = suite.srcMongoClient.
-		Database(suite.DBNameForTest()).
-		Collection(collName).
-		DeleteOne(ctx, bson.D{{"_id", "qwe"}})
+	_, err = srcColl.DeleteOne(ctx, bson.D{{"_id", "qwe"}})
 	suite.Require().NoError(err)
 
 	testutil.KillTransactions(ctx, suite.T(), suite.srcMongoClient)
@@ -610,7 +602,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(mismatches[0].Task),
+				verifier.generation,
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -623,7 +615,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 				},
 				reportData.Counts,
 			)
-			suite.Assert().Equal(reportData.MissingOnDst, mismatches)
+			suite.Assert().Equal(mismatches, reportData.MissingOnDst)
 		},
 	)
 
@@ -665,7 +657,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 				)
 
 				cur, err = mmColl.Find(ctx, bson.D{
-					{"task", theTasks[0].PrimaryKey},
+					{"taskID", theTasks[0].PrimaryKey},
 				})
 				suite.Require().NoError(err)
 				suite.Require().NoError(cur.All(ctx, &mismatches))
@@ -676,7 +668,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(theTasks[0].PrimaryKey),
+				verifier.generation,
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -735,7 +727,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			lastMismatchDuration := mismatches[0].Detail.MismatchHistory.DurationMS
 
 			cur, err = mmColl.Find(ctx, bson.D{
-				{"task", theTasks[0].PrimaryKey},
+				{"taskID", theTasks[0].PrimaryKey},
 			})
 			suite.Require().NoError(err)
 			suite.Require().NoError(cur.All(ctx, &mismatches))
@@ -744,7 +736,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 			reportData, err := getDocumentMismatchReportData(
 				ctx,
 				verifier.verificationDatabase(),
-				mslices.Of(theTasks[0].PrimaryKey),
+				verifier.generation,
 				verifier.failureDisplaySize,
 			)
 			suite.Require().NoError(err)
@@ -838,7 +830,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 	err = verifier.ProcessVerifyTask(ctx, 0, task)
 	suite.Require().NoError(err)
 
-	verifier.lastProcessedSrcOptime.Load(func(ts bson.Timestamp) {
+	verifier.srcLastRecheckedTS.Load(func(ts bson.Timestamp) {
 		suite.Assert().Equal(
 			task.SrcTimestamp.MustGet(),
 			ts,
@@ -846,7 +838,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 		)
 	})
 
-	verifier.lastProcessedDstOptime.Load(func(ts bson.Timestamp) {
+	verifier.dstLastRecheckedTS.Load(func(ts bson.Timestamp) {
 		suite.Assert().Equal(
 			task.DstTimestamp.MustGet(),
 			ts,
@@ -859,7 +851,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 	_, _, _, err = runFetchAndCompareDocuments(ctx, verifier, task)
 	suite.Require().NoError(err)
 
-	verifier.lastProcessedSrcOptime.Load(func(ts bson.Timestamp) {
+	verifier.srcLastRecheckedTS.Load(func(ts bson.Timestamp) {
 		suite.Assert().Equal(
 			bson.Timestamp{123, 234},
 			ts,
@@ -882,7 +874,6 @@ func runFetchAndCompareDocuments(
 
 	for _, result := range payload {
 		report, err := result.Get()
-
 		if err != nil {
 			return nil, 0, 0, err
 		}
@@ -1004,7 +995,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Metadata(
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1018,7 +1009,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Metadata(
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1051,7 +1042,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_OneDoc() 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Require().NotEmpty(stats)
@@ -1073,7 +1064,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_OneDoc() 
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Require().NotEmpty(stats)
@@ -1139,7 +1130,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 
 	suite.Assert().Len(notifier.Messages(), 1)
 
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1164,7 +1155,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
 
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1182,7 +1173,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	task1, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll1")
 	suite.Require().NoError(err)
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1210,7 +1201,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	err = verifier.UpdateVerificationTask(ctx, task1)
 	suite.Require().NoError(err)
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1268,7 +1259,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 		task2parts[i] = task2part
 	}
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1296,7 +1287,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	err = verifier.UpdateVerificationTask(ctx, task1parts[0])
 	suite.Require().NoError(err)
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1335,7 +1326,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	err = verifier.UpdateVerificationTask(ctx, task2parts[1])
 	suite.Require().NoError(err)
 
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx)
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(
@@ -1591,18 +1582,20 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	namespace := "testdb.testns"
 
-	makeDocBatchChannel := func(docs []bson.D) <-chan []compare.DocWithTS {
-		theChan := make(chan []compare.DocWithTS, 1)
+	makeDocBatchChannel := func(docs []bson.D) <-chan compare.ToComparatorMsg {
+		theChan := make(chan compare.ToComparatorMsg, 1)
 
-		theChan <- lo.Map(
-			docs,
-			func(doc bson.D, i int) compare.DocWithTS {
-				return compare.NewDocWithTSFromPool(
-					testutil.MustMarshal(doc),
-					bson.Timestamp{1, uint32(i)},
-				)
-			},
-		)
+		theChan <- compare.ToComparatorMsg{
+			DocsWithTS: lo.Map(
+				docs,
+				func(doc bson.D, i int) compare.DocWithTS {
+					return compare.NewDocWithTSFromPool(
+						testutil.MustMarshal(doc),
+						bson.Timestamp{1, uint32(i)},
+					)
+				},
+			),
+		}
 
 		close(theChan)
 
@@ -1739,7 +1732,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.sameView",
-			To:        "testDb.sameView"}}
+			To:        "testDb.sameView",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1756,7 +1751,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.wrongColl",
-			To:        "testDb.wrongColl"}}
+			To:        "testDb.wrongColl",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1779,7 +1776,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.wrongPipeline",
-			To:        "testDb.wrongPipeline"}}
+			To:        "testDb.wrongPipeline",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1807,7 +1806,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.missingOptionsSrc",
-			To:        "testDb.missingOptionsSrc"}}
+			To:        "testDb.missingOptionsSrc",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1830,7 +1831,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.missingOptionsDst",
-			To:        "testDb.missingOptionsDst"}}
+			To:        "testDb.missingOptionsDst",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1852,7 +1855,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.differentOptions",
-			To:        "testDb.differentOptions"}}
+			To:        "testDb.differentOptions",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1878,7 +1883,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl",
-			To:        "testDb.testColl"}}
+			To:        "testDb.testColl",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1898,7 +1905,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl",
-			To:        "testDb.testCollTo"}}
+			To:        "testDb.testCollTo",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1918,7 +1927,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.destOnlyColl",
-			To:        "testDb.destOnlyColl"}}
+			To:        "testDb.destOnlyColl",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1940,7 +1951,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.viewOnSrc",
-			To:        "testDb.viewOnSrc"}}
+			To:        "testDb.viewOnSrc",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1962,7 +1975,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.cappedOnDst",
-			To:        "testDb.cappedOnDst"}}
+			To:        "testDb.cappedOnDst",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1984,7 +1999,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl",
-			To:        "testDb.testColl"}}
+			To:        "testDb.testColl",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -1996,7 +2013,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testCollDNE",
-			To:        "testDb.testCollDNE"}}
+			To:        "testDb.testCollDNE",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -2057,7 +2076,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl2",
-			To:        "testDb.testColl2"}}
+			To:        "testDb.testColl2",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -2090,7 +2111,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl3",
-			To:        "testDb.testColl3"}}
+			To:        "testDb.testColl3",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -2130,7 +2153,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl4",
-			To:        "testDb.testColl4"}}
+			To:        "testDb.testColl4",
+		},
+	}
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
@@ -2258,107 +2283,6 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	)
 }
 
-func (suite *IntegrationTestSuite) TestVerifierCompareIndexSpecs() {
-	ctx := suite.Context()
-	verifier := suite.BuildVerifier()
-
-	cases := []struct {
-		label       string
-		src         bson.D
-		dst         bson.D
-		shouldMatch bool
-	}{
-		{
-			label: "simple",
-			src: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.M{"foo": 123}},
-			},
-			dst: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.M{"foo": 123}},
-			},
-			shouldMatch: true,
-		},
-
-		{
-			label: "ignore `ns` field",
-			src: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.M{"foo": 123}},
-				{"ns", "foo.bar"},
-			},
-			dst: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.M{"foo": 123}},
-			},
-			shouldMatch: true,
-		},
-
-		{
-			label: "ignore number types",
-			src: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.M{"foo": 123}},
-			},
-			dst: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.M{"foo": float64(123)}},
-			},
-			shouldMatch: true,
-		},
-
-		{
-			label: "ignore number types, deep",
-			src: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.M{"foo.bar": float64(123)}},
-			},
-			dst: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.M{"foo.bar": 123}},
-			},
-			shouldMatch: true,
-		},
-
-		{
-			label: "find number differences",
-			src: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.M{"foo": 1}},
-			},
-			dst: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.M{"foo": -1}},
-			},
-			shouldMatch: false,
-		},
-
-		{
-			label: "key order differences",
-			src: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.D{{"foo", 1}, {"bar", 1}}},
-			},
-			dst: bson.D{
-				{"name", "testIndex"},
-				{"key", bson.D{{"bar", 1}, {"foo", 1}}},
-			},
-			shouldMatch: false,
-		},
-	}
-
-	for _, curCase := range cases {
-		matchYN, err := verifier.doIndexSpecsMatch(
-			ctx,
-			testutil.MustMarshal(curCase.src),
-			testutil.MustMarshal(curCase.dst),
-		)
-		suite.Require().NoError(err)
-		suite.Assert().Equal(curCase.shouldMatch, matchYN, curCase.label)
-	}
-}
-
 func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
@@ -2426,11 +2350,15 @@ func (suite *IntegrationTestSuite) TestVerifierNamespaceList() {
 	suite.Require().NoError(err)
 	err = verifier.setupAllNamespaceList(ctx)
 	suite.Require().NoError(err)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
-		"testDb3.testColl5", "testDb4.testColl6"},
+	suite.ElementsMatch([]string{
+		"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
+		"testDb3.testColl5", "testDb4.testColl6",
+	},
 		verifier.srcNamespaces)
-	suite.ElementsMatch([]string{"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
-		"testDb3.testColl5", "testDb4.testColl6"},
+	suite.ElementsMatch([]string{
+		"testDb1.testColl1", "testDb1.testColl2", "testDb2.testColl3", "testDb2.testColl4",
+		"testDb3.testColl5", "testDb4.testColl6",
+	},
 		verifier.dstNamespaces)
 
 	err = suite.srcMongoClient.Database("testDb2").Drop(ctx)
@@ -3019,7 +2947,6 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 		50*time.Millisecond,
 		"Mismatches should disappear.",
 	)
-
 }
 
 func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {

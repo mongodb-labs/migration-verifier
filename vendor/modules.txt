@@ -159,11 +159,13 @@ github.com/modern-go/concurrent
 # github.com/modern-go/reflect2 v1.0.2
 ## explicit; go 1.12
 github.com/modern-go/reflect2
-# github.com/mongodb-labs/migration-tools v0.0.0-20260304162448-60c569fdfde1
+# github.com/mongodb-labs/migration-tools v0.0.0-20260316172641-87d081cfecc3
 ## explicit; go 1.25.7
 github.com/mongodb-labs/migration-tools/bsontools
 github.com/mongodb-labs/migration-tools/future
 github.com/mongodb-labs/migration-tools/mongotools
+github.com/mongodb-labs/migration-tools/mongotools/index
+github.com/mongodb-labs/migration-tools/option
 # github.com/olekukonko/tablewriter v0.0.5
 ## explicit; go 1.12
 github.com/olekukonko/tablewriter
@@ -210,6 +212,18 @@ github.com/stretchr/testify/assert
 github.com/stretchr/testify/assert/yaml
 github.com/stretchr/testify/require
 github.com/stretchr/testify/suite
+# github.com/tidwall/gjson v1.18.0
+## explicit; go 1.12
+github.com/tidwall/gjson
+# github.com/tidwall/match v1.1.1
+## explicit; go 1.15
+github.com/tidwall/match
+# github.com/tidwall/pretty v1.2.1
+## explicit; go 1.16
+github.com/tidwall/pretty
+# github.com/tidwall/sjson v1.2.5
+## explicit; go 1.14
+github.com/tidwall/sjson
 # github.com/twitchyliquid64/golang-asm v0.15.1
 ## explicit; go 1.13
 github.com/twitchyliquid64/golang-asm/asm/arch
@@ -236,6 +250,9 @@ github.com/ugorji/go/codec
 ## explicit; go 1.11
 github.com/urfave/cli
 github.com/urfave/cli/altsrc
+# github.com/wI2L/jsondiff v0.7.0
+## explicit; go 1.21
+github.com/wI2L/jsondiff
 # github.com/xdg-go/pbkdf2 v1.0.0
 ## explicit; go 1.9
 github.com/xdg-go/pbkdf2

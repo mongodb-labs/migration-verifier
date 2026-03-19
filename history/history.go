@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
 	"golang.org/x/exp/constraints"
 )
 
@@ -90,4 +91,19 @@ func SumLogs[T realNumber](l []Log[T]) T {
 	}
 
 	return sum
+}
+
+// RatePer gives a rate per unit time.
+func RatePer[T realNumber](logs []Log[T], dur time.Duration) float64 {
+	lo.Assert(dur > 0, "duration must be nonzero")
+
+	if len(logs) == 0 {
+		return 0
+	}
+
+	denom := float64(time.Since(logs[0].At)) / float64(dur)
+
+	lo.Assert(denom > 0, "time.Since should never be 0")
+
+	return float64(SumLogs(logs)) / denom
 }

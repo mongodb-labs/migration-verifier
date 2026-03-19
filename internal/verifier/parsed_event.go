@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 // ParsedEvent contains the fields of an event that we have parsed from 'bson.Raw'.
@@ -40,14 +41,14 @@ func (pe *ParsedEvent) UnmarshalFromBSON(in []byte) error {
 			return errors.Wrapf(err, "parsing elements")
 		}
 
-		key, err := el.KeyErr()
+		key, err := bsoncore.Element(el).KeyBytesErr()
 		if err != nil {
 			return errors.Wrapf(err, "parsing field name")
 		}
 
 		var rv bson.RawValue
 
-		switch key {
+		switch string(key) {
 		case "operationType":
 			err := mbson.UnmarshalElementValue(el, &pe.OpType)
 			if err != nil {
@@ -65,14 +66,14 @@ func (pe *ParsedEvent) UnmarshalFromBSON(in []byte) error {
 
 			err = (&ns).UnmarshalFromBSON(rvDoc)
 			if err != nil {
-				return errors.Wrapf(err, "unmarshaling %#q value", key)
+				return errors.Wrapf(err, "unmarshaling %#q value", string(key))
 			}
 
 			pe.Ns = &ns
 		case "_docID":
 			rv, err = el.ValueErr()
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q field", key)
+				return errors.Wrapf(err, "parsing %#q field", string(key))
 			}
 
 			pe.DocID = rv
@@ -84,14 +85,14 @@ func (pe *ParsedEvent) UnmarshalFromBSON(in []byte) error {
 		case "_fullDocLen":
 			rv, err = el.ValueErr()
 			if err != nil {
-				return errors.Wrapf(err, "parsing %#q field", key)
+				return errors.Wrapf(err, "parsing %#q field", string(key))
 			}
 
 			if rv.Type != bson.TypeNull {
 				docLen, ok := rv.AsInt64OK()
 
 				if !ok {
-					return fmt.Errorf("%#q BSON type %s (value: %v) cannot be %T", key, rv.Type, rv, docLen)
+					return fmt.Errorf("%#q BSON type %s (value: %v) cannot be %T", string(key), rv.Type, rv, docLen)
 				} else {
 					pe.FullDocLen = option.Some(types.ByteCount(docLen))
 				}

@@ -108,7 +108,11 @@ func RawValueToStringBytes(in bson.RawValue) ([]byte, error) {
 		strlen := binary.LittleEndian.Uint32(in.Value)
 
 		if len(in.Value)-4 != int(strlen) {
-			return nil, fmt.Errorf("BSON string header says %d bytes but found %d", strlen, len(in.Value))
+			return nil, fmt.Errorf(
+				"BSON string header says %d bytes but found %d",
+				strlen,
+				len(in.Value),
+			)
 		}
 
 		return in.Value[4 : len(in.Value)-1], nil
@@ -127,6 +131,8 @@ func RawValueToStringBytes(in bson.RawValue) ([]byte, error) {
 // Example usage:
 //
 //	str, err := RawValueTo[string](rv)
+//
+//nolint:cyclop,errcheck,funlen,gocognit,gocyclo
 func RawValueTo[T unmarshalTargets](in bson.RawValue) (T, error) {
 	var zero T
 
@@ -249,6 +255,8 @@ func RawValueTo[T unmarshalTargets](in bson.RawValue) (T, error) {
 // ToRawValue is a bit like bson.MarshalValue, but:
 // - It’s faster since it avoids reflection.
 // - It always succeeds since it only accepts certain known types.
+//
+//nolint:cyclop,funlen
 func ToRawValue[T alwaysMarshalableTypes](in T) bson.RawValue {
 	switch typedIn := any(in).(type) {
 	case float64:

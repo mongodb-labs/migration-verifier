@@ -159,6 +159,8 @@ func (o *OplogReader) createCursor(
 
 	if util.ClusterHasBSONSize([2]int(o.clusterInfo.VersionArray)) {
 		findOpts.SetProjection(o.getExprProjection())
+	} else {
+		findOpts.SetOplogReplay(true) //nolint:staticcheck
 	}
 
 	oplogFilter := bson.D{{"$and", []any{
@@ -196,7 +198,6 @@ func (o *OplogReader) createCursor(
 			oplogFilter,
 			findOpts,
 		)
-
 	if err != nil {
 		return bson.Timestamp{}, errors.Wrapf(err, "opening cursor to tail %s’s oplog", o.readerType)
 	}
@@ -292,10 +293,10 @@ CursorLoop:
 		select {
 		case <-sctx.Done():
 			return sctx.Err()
-		case <-o.writesOffTs.Ready():
+		case <-o.writesOffTS.Ready():
 			o.logger.Debug().
 				Stringer("reader", o).
-				Any("timestamp", o.writesOffTs.Get()).
+				Any("timestamp", o.writesOffTS.Get()).
 				Msg("Received writes-off timestamp.")
 
 			break CursorLoop
@@ -309,7 +310,7 @@ CursorLoop:
 		}
 	}
 
-	writesOffTS := o.writesOffTs.Get()
+	writesOffTS := o.writesOffTS.Get()
 
 	for {
 		if !o.lastChangeEventTime.Load().OrZero().Before(writesOffTS) {
@@ -333,7 +334,7 @@ CursorLoop:
 	infoLog := o.logger.Info()
 	if ts, has := o.lastChangeEventTime.Load().Get(); has {
 		infoLog = infoLog.Any("lastEventTime", ts)
-		o.startAtTs = lo.ToPtr(ts)
+		o.startAtTS = lo.ToPtr(ts)
 	} else {
 		infoLog = infoLog.Str("lastEventTime", "none")
 	}
@@ -401,7 +402,7 @@ func (o *OplogReader) readAndHandleOneBatch(
 	sess := mongo.SessionFromContext(sctx)
 	resumeToken := oplog.ResumeToken{latestTS}.MarshalToBSON()
 
-	o.updateTimes(sess, resumeToken)
+	o.updateTimestamps(sess, resumeToken)
 
 	select {
 	case <-sctx.Done():
@@ -531,12 +532,12 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 				return nil, bson.Timestamp{}, errors.Wrap(err, "getting first el of o doc")
 			}
 
-			cmdName, err := el.KeyErr()
+			cmdName, err := bsoncore.Element(el).KeyBytesErr()
 			if err != nil {
 				return nil, bson.Timestamp{}, errors.Wrap(err, "getting first field name of o doc")
 			}
 
-			if cmdName != "applyOps" {
+			if string(cmdName) != "applyOps" {
 				if o.onDDLEvent == onDDLEventAllow {
 					o.logIgnoredDDL(rawDoc)
 					continue
@@ -595,7 +596,6 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 }
 
 func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBeforeTS bson.Timestamp) ([]ParsedEvent, bson.Timestamp, error) {
-
 	var latestTS bson.Timestamp
 
 	for _, rawDoc := range o.curDocs {
