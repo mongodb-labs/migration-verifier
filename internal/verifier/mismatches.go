@@ -398,25 +398,7 @@ func (verifier *Verifier) SendNamespaceMismatches(
 		ctx,
 		out,
 		func(in api.MismatchInfo) bool {
-			detail, hasDetail := in.Detail.Get()
-			if !hasDetail {
-				return true
-			}
-
-			patch, err := parseJSONDiffOps(detail)
-			if err != nil {
-				return true
-			}
-
-			return lo.ContainsBy(patch, func(op jsondiff.Operation) bool {
-				for _, tolerance := range indexSpecTolerances {
-					if strings.HasPrefix(op.Path, "/"+string(tolerance)+"/") {
-						return false // This op is ignored. Keep searching.
-					}
-				}
-
-				return true // Found a non-ignored op.
-			})
+			return !tolerancesObscureMismatch(indexSpecTolerances, in)
 		},
 	)
 	defer cancelFilter(ctx)
@@ -428,6 +410,35 @@ func (verifier *Verifier) SendNamespaceMismatches(
 		0,
 		unfiltered,
 	)
+}
+
+func tolerancesObscureMismatch(
+	indexSpecTolerances []api.IndexSpecTolerance,
+	in api.MismatchInfo,
+) bool {
+	detail, hasDetail := in.Detail.Get()
+	if !hasDetail {
+		return false
+	}
+
+	patch, err := parseJSONDiffOps(detail)
+	if err != nil {
+		return false
+	}
+
+	// Only return this mismatch if there is >=1 op in its JSON diff
+	// with a non-ignored JSON path.
+	return lo.SomeBy(patch, func(op jsondiff.Operation) bool {
+		for _, tolerance := range indexSpecTolerances {
+			if strings.HasPrefix(op.Path, "/"+string(tolerance)+"/") {
+				// The tolerance says to ignore this option in the diff.
+				// Keep looking for a non-ognored op.
+				return true
+			}
+		}
+
+		return false // Found a non-ignored op.
+	})
 }
 
 func parseJSONDiffOps(in string) (jsondiff.Patch, error) {
