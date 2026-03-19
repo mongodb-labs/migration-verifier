@@ -250,10 +250,10 @@ cutover.
 
 The following API command:
 ```
-curl http://127.0.0.1:27020/api/v1/docMismatches
+curl http://localhost:27020/api/v1/docMismatches
 ```
 … will return a stream of newline-delimited JSON documents that describe
-currently-known mismatches.
+currently-tracked mismatches.
 
 Each mismatch document looks like:
 - `durationSecs`: the # of seconds between when the mismatch was first
@@ -268,11 +268,40 @@ Each mismatch document looks like:
 
 The results are returned sorted by `durationSecs`, descending.
 
+Example output:
+```
+{
+    "type": "missingOnDst",
+    "namespace": "test.coll",
+    "_id": 111,
+    "durationSecs": 8.454
+}
+{
+    "type": "content",
+    "namespace": "test.coll",
+    "_id": 222,
+    "field": "name",
+    "detail": "Mismatch",
+    "durationSecs": 8.454
+}
+{
+    "type": "extraOnDst",
+    "namespace": "test.coll",
+    "_id": 333,
+    "durationSecs": 8.454
+}
+```
 During generation 0, this API command returns mismatches for generation 0.
 Thereafter it returns mismatches for the _prior_ generation.
 
-You can optionally send a `minDurationSecs` parameter to fetch mismatches
-by a minimum duration.
+## Limiting Results
+
+You can optionally send a `minDurationSecs` parameter to limit results by
+a minimum duration. For example, the following suppresses all mismatches
+that have been seen for less than 1 minute:
+```
+curl 'http://localhost:27020/api/v1/docMismatches?minDurationSecs=60'
+```
 
 # Tests
 
