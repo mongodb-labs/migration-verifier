@@ -84,6 +84,8 @@ const (
 	progressReportTimeWarnThreshold = 10 * time.Second
 
 	DefaultRecheckMaxSizeMB = 8
+
+	collTypeMismatchField = "type"
 )
 
 type whichCluster string
@@ -900,7 +902,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		return []compare.Result{{
 			NameSpace: srcNs,
 			Cluster:   constants.ClusterTarget,
-			Field:     "type",
+			Field:     collTypeMismatchField,
 			Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec.Type, dstSpec.Type),
 		}}, false, nil
 		// If the types differ, the rest is not important.

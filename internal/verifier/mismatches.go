@@ -401,7 +401,9 @@ func (verifier *Verifier) SendNamespaceMismatches(
 			return !tolerancesObscureMismatch(indexSpecTolerances, in)
 		},
 	)
-	defer cancelFilter(ctx)
+	defer func() {
+		_ = cancelFilter(ctx)
+	}()
 
 	return verifier.findAndSendMismatches(
 		ctx,

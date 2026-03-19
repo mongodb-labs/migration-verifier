@@ -1759,7 +1759,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 
 	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
-		suite.Equal(failures[0].Field, "Options.viewOn")
+		suite.Equal(failures[0].Field, "options.viewOn")
 		suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 		suite.Equal(failures[0].NameSpace, "testDb.wrongColl")
 	}
@@ -1784,7 +1784,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
-		suite.Equal(failures[0].Field, "Options.pipeline")
+		suite.Equal(failures[0].Field, "options.pipeline")
 		suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 		suite.Equal(failures[0].NameSpace, "testDb.wrongPipeline")
 	}
@@ -1814,9 +1814,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
-		suite.Equal(failures[0].Field, "Options.collation")
+		suite.Equal(failures[0].Field, "options.collation")
 		suite.Equal(failures[0].Cluster, constants.ClusterSource)
-		suite.Equal(failures[0].Details, "Missing")
+		suite.Equal(failures[0].Details, compare.Missing)
 		suite.Equal(failures[0].NameSpace, "testDb.missingOptionsSrc")
 	}
 
@@ -1838,9 +1838,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
-		suite.Equal(failures[0].Field, "Options.collation")
+		suite.Equal(failures[0].Field, "options.collation")
 		suite.Equal(failures[0].Cluster, constants.ClusterTarget)
-		suite.Equal(failures[0].Details, "Missing")
+		suite.Equal(failures[0].Details, compare.Missing)
 		suite.Equal(failures[0].NameSpace, "testDb.missingOptionsDst")
 	}
 
@@ -1863,7 +1863,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
-		suite.Equal(failures[0].Field, "Options.collation")
+		suite.Equal(failures[0].Field, "options.collation")
 		suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 		suite.Equal(failures[0].NameSpace, "testDb.differentOptions")
 	}
@@ -1959,7 +1959,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	suite.Equal(1, len(failures))
-	suite.Equal(failures[0].Field, "Type")
+	suite.Equal(failures[0].Field, collTypeMismatchField)
 	suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 	suite.Equal(failures[0].NameSpace, "testDb.viewOnSrc")
 
@@ -1989,7 +1989,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		suite.Require().NotNil(field)
 		wrongFields = append(wrongFields, field)
 	}
-	suite.ElementsMatch([]string{"Options.capped", "Options.size"}, wrongFields)
+	suite.ElementsMatch([]string{"options.capped", "options.size"}, wrongFields)
 
 	// Default success case
 	task = &tasks.Task{
@@ -2161,7 +2161,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(mbson.ToRawValue("wrong"), failures[0].ID)
-		suite.Regexp(regexp.MustCompile("^"+Mismatch), failures[0].Details)
+		suite.Contains(failures[0].Details, "/key/q")
+		suite.Contains(failures[0].Details, "/key/x")
+		suite.Contains(failures[0].Details, "/key/z")
 		suite.Equal(constants.ClusterTarget, failures[0].Cluster)
 		suite.Equal("testDb.testColl4", failures[0].NameSpace)
 	}
