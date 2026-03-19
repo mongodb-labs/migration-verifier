@@ -50,12 +50,15 @@ type DocCompareReport struct {
 	ByteCount types.ByteCount
 }
 
+// FetchAndCompareDocuments spawns a separate goroutine that fetches the given
+// task’s src & dstdocuments, compares those documents, then sends the results
+// into the returned channel.
 func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
 	workerNum int,
 	task *tasks.Task,
 ) <-chan mo.Result[DocCompareReport] {
-	var srcChannel, dstChannel <-chan []compare.DocWithTS
+	var srcChannel, dstChannel <-chan compare.ToComparatorMsg
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
 	retryer := retry.New().WithDescription(
@@ -170,7 +173,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	workerNum int,
 	fi retry.SuccessNotifier,
 	task *tasks.Task,
-	srcChannel, dstChannel <-chan []compare.DocWithTS,
+	srcChannel, dstChannel <-chan compare.ToComparatorMsg,
 	reportsChan chan<- DocCompareReport,
 ) error {
 	// 1. Initialize State
@@ -186,9 +189,27 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 	// 2. Stream Processing Loop
 	for c.stillReading() {
-		srcBatch, dstBatch, err := c.readBatches(ctx, srcChannel, dstChannel)
+		srcBatch, dstBatch, dstCursorDone, err := c.readBatches(ctx, srcChannel, dstChannel)
 		if err != nil {
 			return err
+		}
+
+		// NB: This MUST precede the actual comparison because any dst documents
+		// will be from the next dst cursor.
+		if dstCursorDone {
+			whyFlush, err := c.flushIfNeeded(ctx, reportsChan)
+			if err != nil {
+				return errors.Wrapf(err, "flushing problems")
+			}
+
+			if reason, has := whyFlush.Get(); has {
+				verifier.logger.Debug().
+					Any("task", task.PrimaryKey).
+					Int("workerNum", workerNum).
+					Str("namespace", task.QueryFilter.Namespace).
+					Str("reason", reason).
+					Msg("Recorded document-disparity problems.")
+			}
 		}
 
 		// Interleave processing the batches
@@ -217,20 +238,6 @@ func (verifier *Verifier) compareDocsFromChannels(
 				}
 			}
 		}
-
-		whyFlush, err := c.flushIfNeeded(ctx, reportsChan)
-		if err != nil {
-			return errors.Wrapf(err, "flushing problems")
-		}
-
-		if reason, has := whyFlush.Get(); has {
-			verifier.logger.Debug().
-				Any("task", task.PrimaryKey).
-				Int("workerNum", workerNum).
-				Str("namespace", task.QueryFilter.Namespace).
-				Str("reason", reason).
-				Msg("Recorded document-disparity problems.")
-		}
 	}
 
 	return c.flush(ctx, reportsChan)
@@ -252,8 +259,8 @@ func createMismatchTimes(firstDateTime option.Option[bson.DateTime]) recheck.Mis
 func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 	task *tasks.Task,
 ) (
-	<-chan []compare.DocWithTS,
-	<-chan []compare.DocWithTS,
+	<-chan compare.ToComparatorMsg,
+	<-chan compare.ToComparatorMsg,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
@@ -270,8 +277,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	task *tasks.Task,
 ) (
-	<-chan []compare.DocWithTS,
-	<-chan []compare.DocWithTS,
+	<-chan compare.ToComparatorMsg,
+	<-chan compare.ToComparatorMsg,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
@@ -285,8 +292,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 		return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
 	}
 
-	srcToCompareChannel := make(chan []compare.DocWithTS)
-	dstToCompareChannel := make(chan []compare.DocWithTS)
+	srcToCompareChannel := make(chan compare.ToComparatorMsg)
+	dstToCompareChannel := make(chan compare.ToComparatorMsg)
 
 	srcToDstChannel := make(chan []compare.DocID, 1_000)
 
@@ -446,7 +453,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				err := chanutil.WriteWithDoneCheck(
 					ctx,
 					dstToCompareChannel,
-					nil,
+					compare.ToComparatorMsg{
+						Type: compare.MsgTypePadding,
+					},
 				)
 				if err != nil {
 					return errors.Wrapf(err, "sending dummy doc %d of %d dst->compare", 1+i, missingDocsCount)
@@ -459,6 +468,22 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				)
 			}
 
+			// We send one more to tell the comparator that any mismatches
+			// seen heretofore are “real” and should trigger persistence.
+			//
+			// NB: This has to be a dedicated message rather than a flag
+			// attached to documents. This is because because there might be
+			// no documents.
+			err = chanutil.WriteWithDoneCheck(
+				ctx,
+				dstToCompareChannel,
+				compare.ToComparatorMsg{
+					Type: compare.MsgTypeCursorDone,
+				},
+			)
+			if err != nil {
+				return errors.Wrap(err, "sending cursor-done msg dst->compare")
+			}
 		}
 
 		return nil
@@ -470,13 +495,13 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 	task *tasks.Task,
 ) (
-	<-chan []compare.DocWithTS,
-	<-chan []compare.DocWithTS,
+	<-chan compare.ToComparatorMsg,
+	<-chan compare.ToComparatorMsg,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 ) {
-	srcChannel := make(chan []compare.DocWithTS)
-	dstChannel := make(chan []compare.DocWithTS)
+	srcChannel := make(chan compare.ToComparatorMsg)
+	dstChannel := make(chan compare.ToComparatorMsg)
 
 	readSrcCallback := func(ctx context.Context, state retry.SuccessNotifier) error {
 		// We open a session here so that we can read the session’s cluster
@@ -582,7 +607,7 @@ func iterateCursorToChannel(
 	sctx context.Context,
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
-	writer chan<- []compare.DocWithTS,
+	writer chan<- compare.ToComparatorMsg,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
 	if sess == nil {
@@ -598,7 +623,9 @@ func iterateCursorToChannel(
 		err := chanutil.WriteWithDoneCheck(
 			sctx,
 			writer,
-			slices.Clone(docsWithTSCache),
+			compare.ToComparatorMsg{
+				DocsWithTS: slices.Clone(docsWithTSCache),
+			},
 		)
 		if err != nil {
 			return errors.Wrapf(
@@ -693,7 +720,9 @@ func (verifier *Verifier) getDocumentsCursor(
 			{"filter", filter},
 
 			// This is necessary because the comparator assumes it receives
-			// documents in ascending _id order.
+			// documents in ascending _id order. (NB: This is irrelevant to
+			// natural partitions because the documents we’ll receive should
+			// fit inside a single cursor response.)
 			{"sort", bson.D{{"_id", 1}}},
 
 			// The server limits the initial response to 101 documents by

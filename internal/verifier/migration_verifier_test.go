@@ -1582,18 +1582,20 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	namespace := "testdb.testns"
 
-	makeDocBatchChannel := func(docs []bson.D) <-chan []compare.DocWithTS {
-		theChan := make(chan []compare.DocWithTS, 1)
+	makeDocBatchChannel := func(docs []bson.D) <-chan compare.ToComparatorMsg {
+		theChan := make(chan compare.ToComparatorMsg, 1)
 
-		theChan <- lo.Map(
-			docs,
-			func(doc bson.D, i int) compare.DocWithTS {
-				return compare.NewDocWithTSFromPool(
-					testutil.MustMarshal(doc),
-					bson.Timestamp{1, uint32(i)},
-				)
-			},
-		)
+		theChan <- compare.ToComparatorMsg{
+			DocsWithTS: lo.Map(
+				docs,
+				func(doc bson.D, i int) compare.DocWithTS {
+					return compare.NewDocWithTSFromPool(
+						testutil.MustMarshal(doc),
+						bson.Timestamp{1, uint32(i)},
+					)
+				},
+			),
+		}
 
 		close(theChan)
 
