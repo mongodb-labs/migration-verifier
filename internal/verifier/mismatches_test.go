@@ -71,12 +71,10 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore() {
 				Keys:    bson.D{{"field", 1}},
 				Options: options.Index().SetExpireAfterSeconds(123),
 			},
-			/*
-				{
-					Keys:    bson.D{{"foo", 1}},
-					Options: options.Index().SetUnique(true),
-				},
-			*/
+			{
+				Keys:    bson.D{{"foo", 1}},
+				Options: options.Index().SetUnique(true),
+			},
 		},
 	)
 	suite.Require().NoError(err)
@@ -88,11 +86,9 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore() {
 				Keys:    bson.D{{"field", 1}},
 				Options: options.Index().SetExpireAfterSeconds(12123),
 			},
-			/*
-				{
-					Keys: bson.D{{"foo", 1}},
-				},
-			*/
+			{
+				Keys: bson.D{{"foo", 1}},
+			},
 		},
 	)
 	suite.Require().NoError(err)
@@ -103,7 +99,7 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	mmChan := make(chan api.MismatchInfo, 100)
+	mmChan := make(chan api.NSMismatchInfo, 100)
 	suite.Require().NoError(verifier.SendNamespaceMismatches(
 		ctx,
 		mslices.Of(api.IndexSpecIgnoreTTL, api.IndexSpecIgnoreUnique),
@@ -252,27 +248,29 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	mmChan := make(chan api.MismatchInfo, 100)
+	mmChan := make(chan api.NSMismatchInfo, 100)
 	suite.Require().NoError(verifier.SendNamespaceMismatches(ctx, nil, mmChan))
 
 	mismatches := lo.ChannelToSlice(mmChan)
 
-	expected := []api.MismatchInfo{
+	expected := []api.NSMismatchInfo{
 		// missing/extra collections:
 		{
 			Type:      api.MismatchMissing,
 			Namespace: srcDB.Name() + ".missingOnDst",
+			Aspect:    api.NSMismatchAspectExist,
 		},
 		{
 			Type:      api.MismatchExtra,
 			Namespace: srcDB.Name() + ".extraOnDst",
+			Aspect:    api.NSMismatchAspectExist,
 		},
 
 		// mismatched namespace type:
 		{
 			Type:      api.MismatchContent,
 			Namespace: srcDB.Name() + ".mismatchedType",
-			Field:     option.Some("type"),
+			Aspect:    api.NSMismatchAspectType,
 			Detail:    option.Some(Mismatch + ": src: view, dst: collection"),
 		},
 
@@ -280,15 +278,15 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 		{
 			Type:      api.MismatchContent,
 			Namespace: srcDB.Name() + ".mismatchedCollation",
-			ID:        bsontools.ToRawValue("spec"),
-			Field:     option.Some("options.collation"),
+			Aspect:    api.NSMismatchAspectSpec,
+			Component: option.Some("options.collation"),
 			Detail:    option.Some(Mismatch),
 		},
 		{
 			Type:      api.MismatchContent,
 			Namespace: srcDB.Name() + ".mismatchedCollation",
-			ID:        bsontools.ToRawValue("_id"),
-			Field:     option.Some("index"),
+			Aspect:    api.NSMismatchAspectIndex,
+			Component: option.Some("_id"),
 			Detail: option.Some(fmt.Sprintf(
 				"{%s}",
 				strings.Join(
@@ -304,8 +302,8 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 		{
 			Type:      api.MismatchContent,
 			Namespace: srcDB.Name() + ".mismatchedCollation",
-			ID:        bsontools.ToRawValue("_id_"),
-			Field:     option.Some("index"),
+			Component: option.Some("_id_"),
+			Aspect:    api.NSMismatchAspectIndex,
 			Detail: option.Some(fmt.Sprintf(
 				"{%s}",
 				strings.Join(
@@ -323,20 +321,20 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 		{
 			Type:      api.MismatchMissing,
 			Namespace: srcDB.Name() + ".mismatchedIndex",
-			ID:        bsontools.ToRawValue("missing_1"),
-			Field:     option.Some("index"),
+			Component: option.Some("missing_1"),
+			Aspect:    api.NSMismatchAspectIndex,
 		},
 		{
 			Type:      api.MismatchExtra,
 			Namespace: srcDB.Name() + ".mismatchedIndex",
-			ID:        bsontools.ToRawValue("extra_1"),
-			Field:     option.Some("index"),
+			Component: option.Some("extra_1"),
+			Aspect:    api.NSMismatchAspectIndex,
 		},
 		{
 			Type:      api.MismatchContent,
 			Namespace: srcDB.Name() + ".mismatchedIndex",
-			ID:        bsontools.ToRawValue("foo_1"),
-			Field:     option.Some("index"),
+			Component: option.Some("foo_1"),
+			Aspect:    api.NSMismatchAspectIndex,
 			Detail: option.Some(fmt.Sprintf(
 				"{%s}",
 				strings.Join(
@@ -352,11 +350,11 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	}
 
 	if testShardKey {
-		expected = append(expected, []api.MismatchInfo{
+		expected = append(expected, []api.NSMismatchInfo{
 			{
 				Type:      api.MismatchContent,
 				Namespace: srcDB.Name() + ".mismatchedShardKey",
-				Field:     option.Some(ShardKeyField),
+				Aspect:    api.NSMismatchAspectShardKey,
 				Detail: option.Some(fmt.Sprintf(
 					"%s: src={%s}; dst={%s}",
 					Mismatch,
@@ -367,8 +365,8 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 			{
 				Type:      api.MismatchMissing,
 				Namespace: srcDB.Name() + ".mismatchedShardKey",
-				ID:        bsontools.ToRawValue("_id_hashed"),
-				Field:     option.Some("index"),
+				Component: option.Some("_id_hashed"),
+				Aspect:    api.NSMismatchAspectIndex,
 			},
 		}...)
 	}
@@ -411,13 +409,13 @@ func (suite *IntegrationTestSuite) TestSendDocumentMismatches() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	mmChan := make(chan api.MismatchInfo, 10)
+	mmChan := make(chan api.DocMismatchInfo, 10)
 	suite.Require().NoError(verifier.SendDocumentMismatches(ctx, 0, mmChan))
 
 	mismatches := lo.ChannelToSlice(mmChan)
 
 	suite.Assert().ElementsMatch(
-		[]api.MismatchInfo{
+		[]api.DocMismatchInfo{
 			{
 				Namespace: FullName(srcColl),
 				ID:        bsontools.ToRawValue("onSource"),

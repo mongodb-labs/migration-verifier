@@ -388,7 +388,7 @@ func getLongestLivedDocumentMismatch(
 func (verifier *Verifier) SendNamespaceMismatches(
 	ctx context.Context,
 	indexSpecTolerances []api.IndexSpecTolerance,
-	out chan<- api.MismatchInfo,
+	out chan<- api.NSMismatchInfo,
 ) error {
 	defer close(out)
 
@@ -397,7 +397,11 @@ func (verifier *Verifier) SendNamespaceMismatches(
 	unfiltered, cancelFilter := chanutil.StartIngestFilter(
 		ctx,
 		out,
-		func(in api.MismatchInfo) bool {
+		func(in api.NSMismatchInfo) bool {
+			if in.Aspect != api.NSMismatchAspectIndex {
+				return true
+			}
+
 			return !tolerancesObscureMismatch(indexSpecTolerances, in)
 		},
 	)
@@ -405,20 +409,23 @@ func (verifier *Verifier) SendNamespaceMismatches(
 		_ = cancelFilter(ctx)
 	}()
 
-	return verifier.findAndSendMismatches(
+	return findAndSendMismatches(
 		ctx,
+		verifier,
 		generation,
 		tasks.VerifyCollection,
 		0,
 		unfiltered,
+		compare.Result.APINSMismatchInfo,
 	)
 }
 
 func tolerancesObscureMismatch(
 	indexSpecTolerances []api.IndexSpecTolerance,
-	in api.MismatchInfo,
+	in api.NSMismatchInfo,
 ) bool {
 	detail, hasDetail := in.Detail.Get()
+	fmt.Printf("---- detail: (%s)\n", detail)
 	if !hasDetail {
 		return false
 	}
@@ -432,7 +439,9 @@ func tolerancesObscureMismatch(
 	// with a non-ignored JSON path.
 	return lo.SomeBy(patch, func(op jsondiff.Operation) bool {
 		for _, tolerance := range indexSpecTolerances {
-			if strings.HasPrefix(op.Path, "/"+string(tolerance)+"/") {
+			tolerancePath := "/" + string(tolerance)
+
+			if op.Path == tolerancePath || strings.HasPrefix(op.Path, tolerancePath+"/") {
 				// The tolerance says to ignore this option in the diff.
 				// Keep looking for a non-ognored op.
 				return true
@@ -485,7 +494,7 @@ func decodeConcatenatedJSON[T any, S ~[]T](r io.Reader, out *S) error {
 func (verifier *Verifier) SendDocumentMismatches(
 	ctx context.Context,
 	minDurationSecs uint32,
-	out chan<- api.MismatchInfo,
+	out chan<- api.DocMismatchInfo,
 ) error {
 	defer close(out)
 
@@ -497,21 +506,25 @@ func (verifier *Verifier) SendDocumentMismatches(
 		return nil
 	}
 
-	return verifier.findAndSendMismatches(
+	return findAndSendMismatches(
 		ctx,
+		verifier,
 		generation,
 		tasks.VerifyDocuments,
 		minDurationSecs,
 		out,
+		compare.Result.APIDocMismatchInfo,
 	)
 }
 
-func (verifier *Verifier) findAndSendMismatches(
+func findAndSendMismatches[MT api.MismatchInfo](
 	ctx context.Context,
+	verifier *Verifier,
 	curGeneration int,
 	taskType tasks.Type,
 	minDurationSecs uint32,
-	out chan<- api.MismatchInfo,
+	out chan<- MT,
+	toAPI func(compare.Result) MT,
 ) error {
 	queryGeneration := curGeneration
 	if queryGeneration > 0 {
@@ -560,7 +573,7 @@ func (verifier *Verifier) findAndSendMismatches(
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case out <- mm.Detail.APIMismatchInfo(taskType):
+		case out <- toAPI(mm.Detail):
 		}
 	}
 

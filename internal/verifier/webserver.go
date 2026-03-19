@@ -273,11 +273,12 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 		}
 	}
 
-	server.serveMismatches(
+	serveMismatches(
 		c,
+		server,
 		func(
 			ctx context.Context,
-			mmChan chan<- api.MismatchInfo,
+			mmChan chan<- api.DocMismatchInfo,
 			errSetter future.Setter[error],
 		) {
 			err := server.Mapi.SendDocumentMismatches(
@@ -319,11 +320,12 @@ func (server *WebServer) nsMismatchesEndpoint(c *gin.Context) {
 		}
 	}
 
-	server.serveMismatches(
+	serveMismatches(
 		c,
+		server,
 		func(
 			ctx context.Context,
-			mmChan chan<- api.MismatchInfo,
+			mmChan chan<- api.NSMismatchInfo,
 			errSetter future.Setter[error],
 		) {
 			err := server.Mapi.SendNamespaceMismatches(
@@ -337,11 +339,12 @@ func (server *WebServer) nsMismatchesEndpoint(c *gin.Context) {
 	)
 }
 
-func (server *WebServer) serveMismatches(
+func serveMismatches[T api.MismatchInfo](
 	c *gin.Context,
+	server *WebServer,
 	sender func(
 		context.Context,
-		chan<- api.MismatchInfo,
+		chan<- T,
 		future.Setter[error],
 	),
 ) {
@@ -351,7 +354,7 @@ func (server *WebServer) serveMismatches(
 	c.Header("X-Accel-Buffering", "no")
 	c.Header("Cache-Control", "no-cache")
 
-	mmChan := make(chan api.MismatchInfo)
+	mmChan := make(chan T)
 
 	senderCtx, senderCancel := contextplus.WithCancelCause(c)
 	defer senderCancel(fmt.Errorf("OK"))
