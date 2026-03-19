@@ -425,7 +425,6 @@ func tolerancesObscureMismatch(
 	in api.NSMismatchInfo,
 ) bool {
 	detail, hasDetail := in.Detail.Get()
-	fmt.Printf("---- detail: (%s)\n", detail)
 	if !hasDetail {
 		return false
 	}
