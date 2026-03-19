@@ -1,7 +1,6 @@
 package verifier
 
 import (
-	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -409,21 +408,15 @@ func (verifier *Verifier) SendNamespaceMismatches(
 				return true
 			}
 
-			// Parse the Detail to see if all diff operations concern the
-			// relevant fields
-			return lo.SomeBy(
-				patch,
-				func(curOp jsondiff.Operation) bool {
-					return cmp.Or(
-						lo.Map(
-							indexSpecTolerances,
-							func(tolerance api.IndexSpecTolerance, _ int) bool {
-								return !strings.HasPrefix(curOp.Path, "/"+string(tolerance))
-							},
-						)...,
-					)
-				},
-			)
+			return lo.ContainsBy(patch, func(op jsondiff.Operation) bool {
+				for _, tolerance := range indexSpecTolerances {
+					if strings.HasPrefix(op.Path, "/"+string(tolerance)+"/") {
+						return false // This op is ignored. Keep searching.
+					}
+				}
+
+				return true // Found a non-ignored op.
+			})
 		},
 	)
 	defer cancelFilter(ctx)

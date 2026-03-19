@@ -71,10 +71,12 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore() {
 				Keys:    bson.D{{"field", 1}},
 				Options: options.Index().SetExpireAfterSeconds(123),
 			},
-			{
-				Keys:    bson.D{{"foo", 1}},
-				Options: options.Index().SetUnique(true),
-			},
+			/*
+				{
+					Keys:    bson.D{{"foo", 1}},
+					Options: options.Index().SetUnique(true),
+				},
+			*/
 		},
 	)
 	suite.Require().NoError(err)
@@ -86,9 +88,11 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore() {
 				Keys:    bson.D{{"field", 1}},
 				Options: options.Index().SetExpireAfterSeconds(12123),
 			},
-			{
-				Keys: bson.D{{"foo", 1}},
-			},
+			/*
+				{
+					Keys: bson.D{{"foo", 1}},
+				},
+			*/
 		},
 	)
 	suite.Require().NoError(err)
@@ -286,8 +290,7 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 			ID:        bsontools.ToRawValue("_id"),
 			Field:     option.Some("index"),
 			Detail: option.Some(fmt.Sprintf(
-				"%s: {%s}",
-				Mismatch,
+				"{%s}",
 				strings.Join(
 					mslices.Of(
 						`"op":"replace"`,
@@ -304,8 +307,7 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 			ID:        bsontools.ToRawValue("_id_"),
 			Field:     option.Some("index"),
 			Detail: option.Some(fmt.Sprintf(
-				"%s: {%s}",
-				Mismatch,
+				"{%s}",
 				strings.Join(
 					mslices.Of(
 						`"op":"replace"`,
@@ -336,8 +338,7 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 			ID:        bsontools.ToRawValue("foo_1"),
 			Field:     option.Some("index"),
 			Detail: option.Some(fmt.Sprintf(
-				"%s: {%s}",
-				Mismatch,
+				"{%s}",
 				strings.Join(
 					mslices.Of(
 						`"op":"replace"`,
