@@ -362,7 +362,7 @@ func serveMismatches[T api.MismatchInfo](
 	mmErr, errSetter := future.New[error]()
 	go sender(senderCtx, mmChan, errSetter)
 
-	encoder := json.NewEncoder(c.Writer)
+	errEncoder := json.NewEncoder(c.Writer)
 
 	sendError := func(err error) {
 		errRef := strconv.FormatUint(rand.Uint64(), 16)
@@ -376,7 +376,7 @@ func serveMismatches[T api.MismatchInfo](
 		payload := gin.H{
 			"error": fmt.Sprintf("internal error (ref #: %s)", errRef),
 		}
-		if err := encoder.Encode(payload); err != nil {
+		if err := errEncoder.Encode(payload); err != nil {
 			server.logger.Error().
 				Str("ref", errRef).
 				Err(err).
