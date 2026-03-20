@@ -239,6 +239,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				return errors.Wrap(err, "resetting in-progress tasks")
 			}
 
+			fmt.Printf("----------- recall last rechecked optimes\n")
 			err = verifier.recallLastRecheckedOpTimes(ctx)
 			if err != nil {
 				return errors.Wrap(err, "recalling last-rechecked optimes")
@@ -405,7 +406,10 @@ func (verifier *Verifier) recallLastRecheckedOpTimes(ctx context.Context) error 
 				egCtx,
 				bson.D{
 					{"generation", bson.D{{"$gt", 0}}},
-					{"status", tasks.Completed},
+					{"status", bson.D{{"$in", mslices.Of(
+						tasks.Completed,
+						tasks.Failed,
+					)}}},
 				},
 				options.FindOne().
 					SetSort(
@@ -417,6 +421,8 @@ func (verifier *Verifier) recallLastRecheckedOpTimes(ctx context.Context) error 
 			)
 
 			raw, err := res.Raw()
+
+			fmt.Printf("--------- raw, err: %+v %v\n\n", raw, err)
 			if errors.Is(err, mongo.ErrNoDocuments) {
 				return nil
 			}
