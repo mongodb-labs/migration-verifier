@@ -62,9 +62,8 @@ func (vr Result) DocumentIsMissing() bool {
 
 func (vr Result) APINSMismatchInfo() api.NSMismatchInfo {
 	apiMM := api.NSMismatchInfo{
-		Namespace:    vr.NameSpace,
-		DurationSecs: vr.MismatchDuration().Seconds(),
-		Detail:       option.IfNotZero(vr.Details),
+		Namespace: vr.NameSpace,
+		Detail:    option.IfNotZero(vr.Details),
 	}
 
 	if vr.Details == Missing {
@@ -107,6 +106,14 @@ func (vr Result) APINSMismatchInfo() api.NSMismatchInfo {
 			)
 
 			apiMM.Component = option.Some(indexName)
+
+		// This shouldn’t happen. It’s only here for completeness since
+		// Verifier checks for it internally.
+		case "readOnly":
+			apiMM.Aspect = api.NSMismatchAspectReadOnly
+
+		default:
+			lo.Assertf(false, "unexpected mismatch field: %#q", vr.Field)
 		}
 	}
 

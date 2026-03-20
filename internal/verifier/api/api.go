@@ -110,6 +110,7 @@ const (
 	NSMismatchAspectIndex    NSMismatchAspect = "index"
 	NSMismatchAspectSpec     NSMismatchAspect = "spec"
 	NSMismatchAspectShardKey NSMismatchAspect = "shard key"
+	NSMismatchAspectReadOnly NSMismatchAspect = "readOnly"
 )
 
 type DocMismatchInfo struct {
@@ -122,12 +123,11 @@ type DocMismatchInfo struct {
 }
 
 type NSMismatchInfo struct {
-	Type         MismatchType
-	Namespace    string
-	Aspect       NSMismatchAspect
-	Component    option.Option[string] `bson:",omitempty"`
-	Detail       option.Option[string] `bson:",omitempty"`
-	DurationSecs float64               `bson:"durationSecs"`
+	Type      MismatchType
+	Namespace string
+	Aspect    NSMismatchAspect
+	Component option.Option[string] `bson:",omitempty"`
+	Detail    option.Option[string] `bson:",omitempty"`
 }
 
 // Response is the schema for Operational API response

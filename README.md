@@ -314,12 +314,12 @@ curl http://localhost:27020/api/v1/nsMismatches
 … is like `/docMismatches` but returns namespace-level mismatches.
 
 Each mismatch document looks like:
-- `durationSecs`: as in `/docMismatches`
-- `type`: as in `/docMismatches`
+- `type`: As in `/docMismatches`.
 - `namespace`
 - `aspect`: The mismatching characteristic of the namespace.
 - `component`: Depends on `aspect`. See below.
-- `detail`: As in `/docMismatches`.
+- `detail`: As in `/docMismatches`, though with some `aspect`s this can
+  assume a specific meaning.
 
 `aspect` can be any of the following:
 
@@ -331,6 +331,8 @@ Each mismatch document looks like:
   `component` names the part of the spec that differs, and `detail`
   describes the difference.
 - `shard key`: The collection’s shard key differs between source and
+  destination.
+- `readOnly`: The collection’s read-only flag differs between source and
   destination.
 
 ### Limiting Index Mismatches
