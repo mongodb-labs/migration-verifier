@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -59,8 +60,68 @@ func (vr Result) DocumentIsMissing() bool {
 	return vr.Details == Missing && vr.Field == ""
 }
 
-func (vr Result) APIMismatchInfo() api.MismatchInfo {
-	apiMM := api.MismatchInfo{
+func (vr Result) APINSMismatchInfo() api.NSMismatchInfo {
+	apiMM := api.NSMismatchInfo{
+		Namespace: vr.NameSpace,
+		Detail:    option.IfNotZero(vr.Details),
+	}
+
+	if vr.Details == Missing {
+		apiMM.Type = lo.Ternary(
+			vr.Cluster == constants.ClusterSource,
+			api.MismatchExtra,
+			api.MismatchMissing,
+		)
+
+		apiMM.Detail = option.None[string]()
+	} else {
+		apiMM.Type = api.MismatchContent
+	}
+
+	if vr.ID.Equal(bsontools.ToRawValue("spec")) {
+		apiMM.Aspect = api.NSMismatchAspectSpec
+		apiMM.Component = option.Some(vr.Field)
+	} else {
+		switch vr.Field {
+		case "":
+			apiMM.Aspect = api.NSMismatchAspectExist
+
+			lo.Assertf(
+				vr.Details == Missing,
+				"exist ns mismatch but have details (%s)",
+				vr.Details,
+			)
+		case "type":
+			apiMM.Aspect = api.NSMismatchAspectType
+		case "shard key":
+			apiMM.Aspect = api.NSMismatchAspectShardKey
+		case "index":
+			apiMM.Aspect = api.NSMismatchAspectIndex
+
+			indexName, err := bsontools.RawValueToString(vr.ID)
+			lo.Assertf(
+				err == nil,
+				"extracting _id: %v",
+				err,
+			)
+
+			apiMM.Component = option.Some(indexName)
+
+		// This shouldn’t happen. It’s only here for completeness since
+		// Verifier checks for it internally.
+		case "readOnly":
+			apiMM.Aspect = api.NSMismatchAspectReadOnly
+
+		default:
+			lo.Assertf(false, "unexpected mismatch field: %#q", vr.Field)
+		}
+	}
+
+	return apiMM
+}
+
+func (vr Result) APIDocMismatchInfo() api.DocMismatchInfo {
+	apiMM := api.DocMismatchInfo{
 		ID:           vr.ID,
 		Namespace:    vr.NameSpace,
 		DurationSecs: vr.MismatchDuration().Seconds(),
@@ -74,12 +135,13 @@ func (vr Result) APIMismatchInfo() api.MismatchInfo {
 		)
 	} else {
 		apiMM.Type = api.MismatchContent
-
-		// In hashed comparison we don’t know the field name.
-		apiMM.Field = option.IfNotZero(vr.Field)
-
 		apiMM.Detail = option.Some(vr.Details)
 	}
+
+	// NB: In hashed comparison we don’t know the field name.
+	// Also, with collection-level mismatches the Field indicates the
+	// mismatch “subtype” (e.g., index, …)
+	apiMM.Field = option.IfNotZero(vr.Field)
 
 	return apiMM
 }

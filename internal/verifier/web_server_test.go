@@ -27,8 +27,10 @@ type WebServerTestSuite struct {
 }
 
 type MockVerifier struct {
-	filter                 bson.D
-	sendDocumentMismatches func(context.Context, uint32, chan<- api.MismatchInfo) error
+	filter                  bson.D
+	sendDocumentMismatches  func(context.Context, uint32, chan<- api.DocMismatchInfo) error
+	sendNamespaceMismatches func(context.Context,
+		chan<- api.NSMismatchInfo) error
 }
 
 func NewMockVerifier() *MockVerifier {
@@ -47,13 +49,25 @@ func (verifier *MockVerifier) GetProgress(ctx context.Context) (api.Progress, er
 func (verifier *MockVerifier) SendDocumentMismatches(
 	ctx context.Context,
 	minDurationSecs uint32,
-	out chan<- api.MismatchInfo,
+	out chan<- api.DocMismatchInfo,
 ) error {
 	if verifier.sendDocumentMismatches == nil {
 		panic("need sendDocumentMismatches set")
 	}
 
 	return verifier.sendDocumentMismatches(ctx, minDurationSecs, out)
+}
+
+func (verifier *MockVerifier) SendNamespaceMismatches(
+	ctx context.Context,
+	tolerances []api.IndexSpecTolerance,
+	out chan<- api.NSMismatchInfo,
+) error {
+	if verifier.sendNamespaceMismatches == nil {
+		panic("need sendNamespaceMismatches set")
+	}
+
+	return verifier.sendNamespaceMismatches(ctx, out)
 }
 
 func NewWebServerSuite() *WebServerTestSuite {
@@ -72,7 +86,7 @@ func (suite *WebServerTestSuite) TestDocMismatchesEndPoint_ImmediateError() {
 	suite.mockVerifier.sendDocumentMismatches = func(
 		ctx context.Context,
 		u uint32,
-		c chan<- api.MismatchInfo,
+		c chan<- api.DocMismatchInfo,
 	) error {
 		close(c)
 
@@ -101,9 +115,9 @@ func (suite *WebServerTestSuite) TestDocMismatchesEndPoint_Success() {
 	suite.mockVerifier.sendDocumentMismatches = func(
 		ctx context.Context,
 		u uint32,
-		c chan<- api.MismatchInfo,
+		c chan<- api.DocMismatchInfo,
 	) error {
-		c <- api.MismatchInfo{
+		c <- api.DocMismatchInfo{
 			Type:      api.MismatchContent,
 			Namespace: "name.space1",
 			ID:        bsontools.ToRawValue("onBoth"),
@@ -111,13 +125,13 @@ func (suite *WebServerTestSuite) TestDocMismatchesEndPoint_Success() {
 			Detail:    option.Some("something something"),
 		}
 
-		c <- api.MismatchInfo{
+		c <- api.DocMismatchInfo{
 			Type:      api.MismatchExtra,
 			Namespace: "name.space2",
 			ID:        bsontools.ToRawValue("onDst"),
 		}
 
-		c <- api.MismatchInfo{
+		c <- api.DocMismatchInfo{
 			Type:      api.MismatchMissing,
 			Namespace: "name.space3",
 			ID:        bsontools.ToRawValue("onSrc"),

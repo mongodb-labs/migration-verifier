@@ -3,10 +3,14 @@ package verifier
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
+	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
@@ -16,6 +20,7 @@ import (
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/wI2L/jsondiff"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -378,12 +383,117 @@ func getLongestLivedDocumentMismatch(
 	return option.Some(mmInfo), nil
 }
 
+// SendNamespaceMismatches outputs all namespace mismatches found in the prior
+// generation (or, in generation 0, the current generation).
+func (verifier *Verifier) SendNamespaceMismatches(
+	ctx context.Context,
+	indexSpecTolerances []api.IndexSpecTolerance,
+	out chan<- api.NSMismatchInfo,
+) error {
+	defer close(out)
+
+	generation, _ := verifier.getGeneration()
+
+	unfiltered, cancelFilter := chanutil.StartIngestFilter(
+		ctx,
+		out,
+		func(in api.NSMismatchInfo) bool {
+			if in.Aspect != api.NSMismatchAspectIndex {
+				return true
+			}
+
+			return !tolerancesObscureMismatch(indexSpecTolerances, in)
+		},
+	)
+	defer func() {
+		_ = cancelFilter(ctx)
+	}()
+
+	return findAndSendMismatches(
+		ctx,
+		verifier,
+		generation,
+		tasks.VerifyCollection,
+		0,
+		unfiltered,
+		compare.Result.APINSMismatchInfo,
+	)
+}
+
+func tolerancesObscureMismatch(
+	indexSpecTolerances []api.IndexSpecTolerance,
+	in api.NSMismatchInfo,
+) bool {
+	detail, hasDetail := in.Detail.Get()
+	if !hasDetail {
+		return false
+	}
+
+	patch, err := parseJSONDiffOps(detail)
+	if err != nil {
+		return false
+	}
+
+	// Only return this mismatch if there is >=1 op in its JSON diff
+	// with a non-ignored JSON path.
+	return lo.SomeBy(patch, func(op jsondiff.Operation) bool {
+		for _, tolerance := range indexSpecTolerances {
+			tolerancePath := "/" + string(tolerance)
+
+			if op.Path == tolerancePath || strings.HasPrefix(op.Path, tolerancePath+"/") {
+				// The tolerance says to ignore this option in the diff.
+				// Keep looking for a non-ognored op.
+				return true
+			}
+		}
+
+		return false // Found a non-ignored op.
+	})
+}
+
+func parseJSONDiffOps(in string) (jsondiff.Patch, error) {
+	var patch jsondiff.Patch
+
+	err := decodeConcatenatedJSON(strings.NewReader(in), &patch)
+
+	return patch, err
+}
+
+// DecodeConcatenatedJSON reads a stream of consecutive JSON entities from 'r'
+// and appends them to the slice pointed to by 'out'.
+func decodeConcatenatedJSON[T any, S ~[]T](r io.Reader, out *S) error {
+	if out == nil {
+		return errors.New("output slice pointer cannot be nil")
+	}
+
+	decoder := json.NewDecoder(r)
+
+	for {
+		var item T
+
+		// Decode reads the next valid JSON value from the stream
+		err := decoder.Decode(&item)
+		if err != nil {
+			// io.EOF means we cleanly hit the end of the buffer
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			// Any other error means malformed JSON or a read error
+			return err
+		}
+
+		*out = append(*out, item)
+	}
+
+	return nil
+}
+
 // SendDocumentMismatches outputs all document mismatches found in the prior
 // generation (or, in generation 0, the current generation).
 func (verifier *Verifier) SendDocumentMismatches(
 	ctx context.Context,
 	minDurationSecs uint32,
-	out chan<- api.MismatchInfo,
+	out chan<- api.DocMismatchInfo,
 ) error {
 	defer close(out)
 
@@ -395,13 +505,34 @@ func (verifier *Verifier) SendDocumentMismatches(
 		return nil
 	}
 
-	if generation > 0 {
-		generation--
+	return findAndSendMismatches(
+		ctx,
+		verifier,
+		generation,
+		tasks.VerifyDocuments,
+		minDurationSecs,
+		out,
+		compare.Result.APIDocMismatchInfo,
+	)
+}
+
+func findAndSendMismatches[MT api.MismatchInfo](
+	ctx context.Context,
+	verifier *Verifier,
+	curGeneration int,
+	taskType tasks.Type,
+	minDurationSecs uint32,
+	out chan<- MT,
+	toAPI func(compare.Result) MT,
+) error {
+	queryGeneration := curGeneration
+	if queryGeneration > 0 {
+		queryGeneration--
 	}
 
 	filter := bson.D{
-		{"generation", generation},
-		{"taskType", tasks.VerifyDocuments},
+		{"generation", queryGeneration},
+		{"taskType", taskType},
 	}
 
 	if minDurationSecs > 0 {
@@ -428,25 +559,25 @@ func (verifier *Verifier) SendDocumentMismatches(
 		),
 	)
 	if err != nil {
-		return fmt.Errorf("fetching generation %d’s mismatches: %w", generation, err)
+		return fmt.Errorf("fetching generation %d’s mismatches: %w", queryGeneration, err)
 	}
 
 	for cursor.Next(ctx) {
 		var mm MismatchInfo
 
 		if err := cursor.Decode(&mm); err != nil {
-			return fmt.Errorf("parsing generation %d’s mismatches: %w", generation, err)
+			return fmt.Errorf("parsing generation %d’s mismatches: %w", queryGeneration, err)
 		}
 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case out <- mm.Detail.APIMismatchInfo():
+		case out <- toAPI(mm.Detail):
 		}
 	}
 
 	if err := cursor.Err(); err != nil {
-		return fmt.Errorf("reading generation %d’s mismatches: %w", generation, err)
+		return fmt.Errorf("reading generation %d’s mismatches: %w", queryGeneration, err)
 	}
 
 	return nil

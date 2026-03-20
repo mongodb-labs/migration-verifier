@@ -136,7 +136,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 	}
 
 	if mm, has := mismatch.Get(); has {
-		progress.LongestDocMismatch = option.Some(mm.Detail.APIMismatchInfo())
+		progress.LongestDocMismatch = option.Some(mm.Detail.APIDocMismatchInfo())
 	}
 
 	return progress, nil

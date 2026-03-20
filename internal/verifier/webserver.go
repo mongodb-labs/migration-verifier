@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
@@ -22,7 +23,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/mongodb-labs/migration-tools/future"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"golang.org/x/exp/slices"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -134,6 +137,7 @@ func (server *WebServer) setupRouter() *gin.Engine {
 			v1.POST("/writesOff", server.operationalAPILockMiddleware(), server.writesOffEndpoint)
 			v1.GET("/progress", server.progressEndpoint)
 			v1.GET("/docMismatches", server.docMismatchesEndpoint)
+			v1.GET("/nsMismatches", server.nsMismatchesEndpoint)
 		}
 	}
 
@@ -255,19 +259,12 @@ func (server *WebServer) progressEndpoint(c *gin.Context) {
 }
 
 func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
-	c.Header("Content-Type", "application/x-ndjson")
-
-	// Optional: Prevent proxies/load balancers from buffering the response
-	c.Header("X-Accel-Buffering", "no")
-	c.Header("Cache-Control", "no-cache")
-
 	const minDurationSecsKey = "minDurationSecs"
 
 	var minDurationSecs uint64
 	if val := c.Query(minDurationSecsKey); val != "" {
 		var err error
 		minDurationSecs, err = strconv.ParseUint(val, 10, 32)
-
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("invalid %#q", minDurationSecsKey),
@@ -276,23 +273,96 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 		}
 	}
 
-	mmChan := make(chan api.MismatchInfo)
+	serveMismatches(
+		c,
+		server,
+		func(
+			ctx context.Context,
+			mmChan chan<- api.DocMismatchInfo,
+			errSetter future.Setter[error],
+		) {
+			err := server.Mapi.SendDocumentMismatches(
+				ctx,
+				safecast.MustConvert[uint32](minDurationSecs),
+				mmChan,
+			)
+
+			errSetter(err)
+		},
+	)
+}
+
+func (server *WebServer) nsMismatchesEndpoint(c *gin.Context) {
+	const ignoreKey = "indexSpecIgnore"
+
+	var specIgnore []api.IndexSpecTolerance
+
+	if val := c.Query(ignoreKey); val != "" {
+		specIgnore = lo.Map(
+			strings.Split(val, ","),
+			func(in string, _ int) api.IndexSpecTolerance {
+				return api.IndexSpecTolerance(in)
+			},
+		)
+
+		invalid := lo.Filter(
+			specIgnore,
+			func(piece api.IndexSpecTolerance, _ int) bool {
+				return !slices.Contains(api.IndexMismatchTolerances, piece)
+			},
+		)
+
+		if len(invalid) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("invalid %#q: %#q", ignoreKey, invalid),
+			})
+			return
+		}
+	}
+
+	serveMismatches(
+		c,
+		server,
+		func(
+			ctx context.Context,
+			mmChan chan<- api.NSMismatchInfo,
+			errSetter future.Setter[error],
+		) {
+			err := server.Mapi.SendNamespaceMismatches(
+				ctx,
+				specIgnore,
+				mmChan,
+			)
+
+			errSetter(err)
+		},
+	)
+}
+
+func serveMismatches[T api.MismatchInfo](
+	c *gin.Context,
+	server *WebServer,
+	sender func(
+		context.Context,
+		chan<- T,
+		future.Setter[error],
+	),
+) {
+	c.Header("Content-Type", "application/x-ndjson")
+
+	// Prevent proxies/load balancers from buffering the response
+	c.Header("X-Accel-Buffering", "no")
+	c.Header("Cache-Control", "no-cache")
+
+	mmChan := make(chan T)
 
 	senderCtx, senderCancel := contextplus.WithCancelCause(c)
 	defer senderCancel(fmt.Errorf("OK"))
 
 	mmErr, errSetter := future.New[error]()
-	go func() {
-		err := server.Mapi.SendDocumentMismatches(
-			senderCtx,
-			safecast.MustConvert[uint32](minDurationSecs),
-			mmChan,
-		)
+	go sender(senderCtx, mmChan, errSetter)
 
-		errSetter(err)
-	}()
-
-	encoder := json.NewEncoder(c.Writer)
+	errEncoder := json.NewEncoder(c.Writer)
 
 	sendError := func(err error) {
 		errRef := strconv.FormatUint(rand.Uint64(), 16)
@@ -306,7 +376,7 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 		payload := gin.H{
 			"error": fmt.Sprintf("internal error (ref #: %s)", errRef),
 		}
-		if err := encoder.Encode(payload); err != nil {
+		if err := errEncoder.Encode(payload); err != nil {
 			server.logger.Error().
 				Str("ref", errRef).
 				Err(err).

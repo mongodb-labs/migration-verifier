@@ -248,6 +248,8 @@ cutover.
 
 # Investigation of Mismatches
 
+## Documents
+
 The following API command:
 ```
 curl http://localhost:27020/api/v1/docMismatches
@@ -294,7 +296,7 @@ Example output:
 During generation 0, this API command returns mismatches for generation 0.
 Thereafter it returns mismatches for the _prior_ generation.
 
-## Limiting Results
+### Limiting Results
 
 You can optionally send a `minDurationSecs` parameter to limit results by
 a minimum duration. For example, the following suppresses all mismatches
@@ -302,6 +304,73 @@ that have been seen for less than 1 minute:
 ```
 curl 'http://localhost:27020/api/v1/docMismatches?minDurationSecs=60'
 ```
+
+## Namespaces
+
+The following API command:
+```
+curl http://localhost:27020/api/v1/nsMismatches
+```
+… is like `/docMismatches` but returns namespace-level mismatches.
+
+Each mismatch document looks like:
+- `type`: As in `/docMismatches`.
+- `namespace`
+- `aspect`: The mismatching characteristic of the namespace.
+- `component`: Depends on `aspect`. See below.
+- `detail`: As in `/docMismatches`.
+
+`aspect` can be any of the following:
+
+- `exist`: The namespace is either missing or extra on the destination.
+- `type`: The namespace is of different types on source & destination.
+- `index`: An index is mismatched, missing, or extra. `component` is the
+  index’s name.
+- `spec`: An element of the collection’s specification mismatches.
+  `component` names the part of the spec that differs.
+- `shard key`: The collection’s shard key differs between source and
+  destination.
+- `readOnly`: The collection’s read-only flag differs between source and
+  destination.
+
+Sample output:
+```
+{
+  "type": "missingOnDst",
+  "namespace": "test.missingColl",
+  "aspect": "exist"
+}
+{
+  "type": "content",
+  "namespace": "test.indexesColl",
+  "aspect": "index",
+  "component": "foo_1",
+  "detail": "{\"op\":\"remove\",\"path\":\"/collation\"}"
+}
+{
+  "type": "missingOnDst",
+  "namespace": "test.lostCapped",
+  "aspect": "spec",
+  "component": "options.capped"
+}
+{
+  "type": "missingOnDst",
+  "namespace": "test.lostCapped",
+  "aspect": "spec",
+  "component": "options.size"
+}
+```
+
+### Limiting Index Mismatches
+
+You can optionally send an `indexSpecIgnore` parameter whose value is a
+comma-delimited list of any (or all) of:
+
+- `expireAfterSeconds`
+- `unique`
+
+By submitting this parameter you will cause the API to discard any
+mismatches that concern the relevant fields in an index specification.
 
 # Tests
 
