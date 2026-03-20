@@ -333,6 +333,34 @@ Each mismatch document looks like:
 - `readOnly`: The collection’s read-only flag differs between source and
   destination.
 
+Sample output:
+```
+{
+  "type": "missingOnDst",
+  "namespace": "test.missingColl",
+  "aspect": "exist"
+}
+{
+  "type": "content",
+  "namespace": "test.indexesColl",
+  "aspect": "index",
+  "component": "foo_1",
+  "detail": "{\"op\":\"remove\",\"path\":\"/collation\"}"
+}
+{
+  "type": "missingOnDst",
+  "namespace": "test.lostCapped",
+  "aspect": "spec",
+  "component": "options.capped"
+}
+{
+  "type": "missingOnDst",
+  "namespace": "test.lostCapped",
+  "aspect": "spec",
+  "component": "options.size"
+}
+```
+
 ### Limiting Index Mismatches
 
 You can optionally send an `indexSpecIgnore` parameter whose value is a
