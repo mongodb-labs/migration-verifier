@@ -318,18 +318,16 @@ Each mismatch document looks like:
 - `namespace`
 - `aspect`: The mismatching characteristic of the namespace.
 - `component`: Depends on `aspect`. See below.
-- `detail`: As in `/docMismatches`, though with some `aspect`s this can
-  assume a specific meaning.
+- `detail`: As in `/docMismatches`.
 
 `aspect` can be any of the following:
 
 - `exist`: The namespace is either missing or extra on the destination.
 - `type`: The namespace is of different types on source & destination.
 - `index`: An index is mismatched, missing, or extra. `component` is the
-  index’s name, and `detail` describes any mismatch.
+  index’s name.
 - `spec`: An element of the collection’s specification mismatches.
-  `component` names the part of the spec that differs, and `detail`
-  describes the difference.
+  `component` names the part of the spec that differs.
 - `shard key`: The collection’s shard key differs between source and
   destination.
 - `readOnly`: The collection’s read-only flag differs between source and
