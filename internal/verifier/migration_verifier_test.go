@@ -1357,7 +1357,12 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	verifier := suite.BuildVerifier()
 	err := verifier.InsertFailedCompareRecheckDocs(
 		ctx,
-		"foo.bar",
+		&tasks.Task{
+			PrimaryKey: bson.NewObjectID(),
+			QueryFilter: tasks.QueryFilter{
+				Namespace: "foo.bar",
+			},
+		},
 		mslices.Of(mbson.ToRawValue(42)),
 		[]int32{100},
 		mslices.Of(
@@ -1367,7 +1372,12 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs(
 		ctx,
-		"foo.bar",
+		&tasks.Task{
+			PrimaryKey: bson.NewObjectID(),
+			QueryFilter: tasks.QueryFilter{
+				Namespace: "foo.bar",
+			},
+		},
 		mslices.Of(mbson.ToRawValue(43), mbson.ToRawValue(44)),
 		[]int32{100, 100},
 		mslices.Of(
@@ -1378,7 +1388,12 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	suite.Require().NoError(err)
 	err = verifier.InsertFailedCompareRecheckDocs(
 		ctx,
-		"foo.bar2",
+		&tasks.Task{
+			PrimaryKey: bson.NewObjectID(),
+			QueryFilter: tasks.QueryFilter{
+				Namespace: "foo.bar2",
+			},
+		},
 		mslices.Of(mbson.ToRawValue(42)),
 		[]int32{100},
 		mslices.Of(
