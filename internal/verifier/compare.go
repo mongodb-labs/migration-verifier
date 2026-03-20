@@ -116,7 +116,8 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 					)
 				},
 				"comparing documents",
-			).Run(givenCtx, verifier.logger)
+			).
+			Run(givenCtx, verifier.logger)
 		if err != nil {
 			writeErr := chanutil.WriteWithDoneCheck(
 				givenCtx,

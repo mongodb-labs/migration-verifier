@@ -10,11 +10,14 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/msync"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goaux/timer"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type GenerationStatus string
@@ -220,7 +223,6 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	// Now that we’ve initialized verifier.generation we can
 	// start the change readers.
 	err = verifier.initializeChangeReaders()
-
 	if err != nil {
 		return err
 	}
@@ -237,11 +239,15 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 				return errors.Wrap(err, "resetting in-progress tasks")
 			}
 
+			err = verifier.recallLastRecheckedOpTimes(ctx)
+			if err != nil {
+				return errors.Wrap(err, "recalling last-rechecked optimes")
+			}
+
 			return nil
 		},
 		"setting up verifier metadata",
 	).Run(ctx, verifier.logger)
-
 	if err != nil {
 		return err
 	}
@@ -376,6 +382,63 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 
 		verifier.mux.Lock()
 	}
+}
+
+func (verifier *Verifier) recallLastRecheckedOpTimes(ctx context.Context) error {
+	curGen := verifier.generation
+
+	if curGen == 0 {
+		return nil
+	}
+
+	eg, egCtx := contextplus.ErrGroup(ctx)
+
+	for _, matrix := range []struct {
+		tsGuard *msync.DataGuard[bson.Timestamp]
+		docKey  string
+	}{
+		{verifier.srcLastRecheckedTS, "srctimestamp"},
+		{verifier.dstLastRecheckedTS, "dsttimestamp"},
+	} {
+		eg.Go(func() error {
+			res := verifier.verificationTaskCollection().FindOne(
+				egCtx,
+				bson.D{
+					{"generation", bson.D{{"$gt", 0}}},
+					{"status", tasks.Completed},
+				},
+				options.FindOne().
+					SetSort(
+						bson.D{
+							{matrix.docKey, -1},
+						},
+					).
+					SetProjection(bson.D{{matrix.docKey, 1}}),
+			)
+
+			raw, err := res.Raw()
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				return nil
+			}
+
+			if err != nil {
+				return err
+			}
+
+			ts, err := bsontools.RawLookup[bson.Timestamp](raw, matrix.docKey)
+			if err != nil {
+				return err
+			}
+
+			matrix.tsGuard.Store(func(_ bson.Timestamp) bson.Timestamp {
+				return ts
+			})
+
+			return nil
+		})
+	}
+
+	return eg.Wait()
 }
 
 // startChangeHandling starts the goroutines that read changes
