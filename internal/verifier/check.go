@@ -406,6 +406,7 @@ func (verifier *Verifier) recallLastRecheckedOpTimes(ctx context.Context) error 
 				egCtx,
 				bson.D{
 					{"generation", bson.D{{"$gt", 0}}},
+					{"type", tasks.VerifyDocuments},
 					{"status", bson.D{{"$in", mslices.Of(
 						tasks.Completed,
 						tasks.Failed,

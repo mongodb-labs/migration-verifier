@@ -727,6 +727,14 @@ REPORTS:
 		)
 	}
 
+	if ts, has := task.SrcTimestamp.Get(); has {
+		verifier.NoteCompareOfOptime(src, ts)
+	}
+
+	if ts, has := task.DstTimestamp.Get(); has {
+		verifier.NoteCompareOfOptime(dst, ts)
+	}
+
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
