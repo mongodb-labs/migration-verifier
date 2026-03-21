@@ -396,7 +396,7 @@ func (verifier *Verifier) recallLastRecheckedOpTimes(ctx context.Context) error 
 
 	for _, matrix := range []struct {
 		tsGuard *msync.DataGuard[bson.Timestamp]
-		docKey  string
+		tsName  string
 	}{
 		{verifier.srcLastRecheckedTS, compare.SrcTimestampField},
 		{verifier.dstLastRecheckedTS, compare.DstTimestampField},
@@ -411,14 +411,15 @@ func (verifier *Verifier) recallLastRecheckedOpTimes(ctx context.Context) error 
 						tasks.Completed,
 						tasks.Failed,
 					)}}},
+					{matrix.tsName, bson.D{{"$type", "timestamp"}}},
 				},
 				options.FindOne().
 					SetSort(
 						bson.D{
-							{matrix.docKey, -1},
+							{matrix.tsName, -1},
 						},
 					).
-					SetProjection(bson.D{{matrix.docKey, 1}}),
+					SetProjection(bson.D{{matrix.tsName, 1}}),
 			)
 
 			raw, err := res.Raw()
@@ -431,7 +432,7 @@ func (verifier *Verifier) recallLastRecheckedOpTimes(ctx context.Context) error 
 				return err
 			}
 
-			ts, err := bsontools.RawLookup[bson.Timestamp](raw, matrix.docKey)
+			ts, err := bsontools.RawLookup[bson.Timestamp](raw, matrix.tsName)
 			if err != nil {
 				return err
 			}

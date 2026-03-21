@@ -317,7 +317,6 @@ func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(
 	return eg
 }
 
-/*
 func (suite *IntegrationTestSuite) TestLastRecheckedOpTime_Resume() {
 	ctx := suite.T().Context()
 
@@ -450,7 +449,6 @@ func (suite *IntegrationTestSuite) TestLastRecheckedOpTime_Resume() {
 	suite.Require().NoError(err)
 	suite.Assert().Zero(status.FailedTasks, "should be no failed tasks (%+v)", status)
 }
-*/
 
 func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
 	ctx := suite.T().Context()
