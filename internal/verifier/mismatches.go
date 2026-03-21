@@ -95,12 +95,12 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 			// optimes on restart.
 			{
 				Keys: bson.D{
-					{"srctimestamp", -1},
+					{compare.SrcTimestampField, -1},
 				},
 			},
 			{
 				Keys: bson.D{
-					{"dsttimestamp", -1},
+					{compare.DstTimestampField, -1},
 				},
 			},
 		},

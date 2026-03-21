@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
@@ -397,8 +398,8 @@ func (verifier *Verifier) recallLastRecheckedOpTimes(ctx context.Context) error 
 		tsGuard *msync.DataGuard[bson.Timestamp]
 		docKey  string
 	}{
-		{verifier.srcLastRecheckedTS, "srctimestamp"},
-		{verifier.dstLastRecheckedTS, "dsttimestamp"},
+		{verifier.srcLastRecheckedTS, compare.SrcTimestampField},
+		{verifier.dstLastRecheckedTS, compare.DstTimestampField},
 	} {
 		eg.Go(func() error {
 			res := verifier.verificationTaskCollection().FindOne(
