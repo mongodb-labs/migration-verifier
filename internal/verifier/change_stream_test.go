@@ -339,9 +339,8 @@ func (suite *IntegrationTestSuite) TestLastRecheckedOpTime_Resume() {
 
 	v1Ctx, v1Cancel := contextplus.WithCancelCause(ctx)
 	defer v1Cancel(ctx.Err())
-	suite.startSrcChangeStreamReaderAndHandler(v1Ctx, verifier1)
 
-	verifierRunner := RunVerifierCheck(ctx, suite.T(), verifier1)
+	verifierRunner := RunVerifierCheck(v1Ctx, suite.T(), verifier1)
 	suite.Require().NoError(
 		verifierRunner.AwaitGenerationEnd(),
 	)
@@ -378,8 +377,6 @@ func (suite *IntegrationTestSuite) TestLastRecheckedOpTime_Resume() {
 	verifier2 := suite.BuildVerifier()
 	v2Ctx, v2Cancel := contextplus.WithCancelCause(ctx)
 	defer v2Cancel(ctx.Err())
-
-	suite.startSrcChangeStreamReaderAndHandler(v2Ctx, verifier2)
 
 	verifierRunner = RunVerifierCheck(v2Ctx, suite.T(), verifier2)
 	suite.Require().NoError(
@@ -431,7 +428,6 @@ func (suite *IntegrationTestSuite) TestLastRecheckedOpTime_Resume() {
 	v2Cancel(fmt.Errorf("stopping verifier 2"))
 
 	verifier3 := suite.BuildVerifier()
-	suite.startSrcChangeStreamReaderAndHandler(ctx, verifier3)
 
 	verifierRunner = RunVerifierCheck(ctx, suite.T(), verifier3)
 	suite.Require().NoError(
