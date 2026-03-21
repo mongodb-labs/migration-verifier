@@ -90,6 +90,19 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 					{"detail.id", 1},
 				},
 			},
+
+			// These are here so we can quickly recall last-rechecked
+			// optimes on restart.
+			{
+				Keys: bson.D{
+					{"srctimestamp", -1},
+				},
+			},
+			{
+				Keys: bson.D{
+					{"dsttimestamp", -1},
+				},
+			},
 		},
 	)
 	if err != nil {
