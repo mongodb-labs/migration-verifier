@@ -250,6 +250,8 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 
 		shardIds := getShardIds(suite.T(), client)
 
+		require.Greater(len(shardIds), 1, "need multiple shards; got: %+v", shardIds)
+
 		admin := client.Database("admin")
 
 		require.NoError(admin.RunCommand(
