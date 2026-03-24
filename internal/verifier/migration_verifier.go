@@ -925,15 +925,26 @@ func (verifier *Verifier) compareCollectionSpecifications(
 				srcNs,
 			)
 		}
+
+		resultID := mbson.ToRawValue("spec")
+
 		if mismatchDetails == nil {
 			results = append(results, compare.Result{
 				NameSpace: dstNs,
 				Cluster:   constants.ClusterTarget,
+				ID:        resultID,
 				Field:     "options (field order only)",
 				Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec.Options, dstSpec.Options),
 			})
 		} else {
-			results = append(results, mismatchResultsToVerificationResults(mismatchDetails, srcSpec.Options, dstSpec.Options, srcNs, mbson.ToRawValue("spec"), "options.")...)
+			results = append(results, mismatchResultsToVerificationResults(
+				mismatchDetails,
+				srcSpec.Options,
+				dstSpec.Options,
+				srcNs,
+				resultID,
+				"options.",
+			)...)
 		}
 	}
 
