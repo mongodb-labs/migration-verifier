@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
@@ -125,6 +126,11 @@ func (server *WebServer) setupRouter() *gin.Engine {
 	router := gin.New()
 	pprof.Register(router)
 	router.Use(server.RequestAndResponseLogger(), gin.Recovery())
+
+	router.Use(func(c *gin.Context) {
+		c.Header("Server", "migration-verifier/"+buildvar.Revision)
+		c.Next()
+	})
 
 	api := router.Group("/api")
 	{
@@ -267,7 +273,6 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 	if val := c.Query(minDurationSecsKey); val != "" {
 		var err error
 		minDurationSecs, err = strconv.ParseUint(val, 10, 32)
-
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("invalid %#q", minDurationSecsKey),
