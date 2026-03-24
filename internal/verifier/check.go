@@ -225,6 +225,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 	// start the change readers.
 	err = verifier.initializeChangeReaders()
 	if err != nil {
+		verifier.mux.Unlock()
 		return err
 	}
 
@@ -250,17 +251,20 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		"setting up verifier metadata",
 	).Run(ctx, verifier.logger)
 	if err != nil {
+		verifier.mux.Unlock()
 		return err
 	}
 
 	verifier.logger.Debug().Msg("Starting Check")
 
 	if err := verifier.startChangeHandling(ctx); err != nil {
+		verifier.mux.Unlock()
 		return err
 	}
 
 	err = verifier.CreateInitialTasksIfNeeded(ctx)
 	if err != nil {
+		verifier.mux.Unlock()
 		return err
 	}
 
