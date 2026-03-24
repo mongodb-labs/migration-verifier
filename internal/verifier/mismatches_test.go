@@ -58,7 +58,11 @@ func TestMismatchesInfoMarshal(t *testing.T) {
 	}
 }
 
-func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore() {
+// buildIgnoreTestIndexes creates two indexes on "mismatchedIndex" that differ
+// between src and dst in two independent ways: TTL (expireAfterSeconds) and
+// uniqueness. This gives the tolerance tests two independent diff ops to work
+// with.
+func (suite *IntegrationTestSuite) buildIgnoreTestIndexes() {
 	ctx := suite.Context()
 
 	srcDB := suite.srcMongoClient.Database(suite.DBNameForTest())
@@ -92,6 +96,14 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore() {
 		},
 	)
 	suite.Require().NoError(err)
+}
+
+// TestSendNamespaceMismatches_Ignore_AllCovered checks that when every diff op
+// is covered by a tolerance the mismatch is suppressed entirely.
+func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore_AllCovered() {
+	ctx := suite.Context()
+
+	suite.buildIgnoreTestIndexes()
 
 	verifier := suite.BuildVerifier()
 	verifier.SetVerifyAll(true)
@@ -106,9 +118,67 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore() {
 		mmChan,
 	))
 
+	suite.Assert().Empty(lo.ChannelToSlice(mmChan))
+}
+
+// TestSendNamespaceMismatches_Ignore_PartialCoverage checks that, when a diff
+// has multiple ops and only a subset are covered by tolerances, the mismatch
+// must still be reported.
+//
+// The index has two diffs (TTL and uniqueness). Passing only IndexSpecIgnoreTTL
+// covers the TTL op but leaves the uniqueness op exposed, so the mismatch
+// should appear.
+func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore_PartialCoverage() {
+	ctx := suite.Context()
+
+	suite.buildIgnoreTestIndexes()
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	mmChan := make(chan api.NSMismatchInfo, 100)
+	suite.Require().NoError(verifier.SendNamespaceMismatches(
+		ctx,
+		mslices.Of(api.IndexSpecIgnoreTTL), // unique op is NOT covered
+		mmChan,
+	))
+
 	mismatches := lo.ChannelToSlice(mmChan)
 
-	suite.Assert().Empty(mismatches)
+	suite.Require().Len(mismatches, 1)
+	suite.Assert().Equal(api.NSMismatchAspectIndex, mismatches[0].Aspect)
+}
+
+// TestSendNamespaceMismatches_Ignore_NoMatchingTolerance checks that a
+// tolerance that doesn't match any op in the diff leaves the mismatch visible.
+func (suite *IntegrationTestSuite) TestSendNamespaceMismatches_Ignore_NoMatchingTolerance() {
+	ctx := suite.Context()
+
+	suite.buildIgnoreTestIndexes()
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	mmChan := make(chan api.NSMismatchInfo, 100)
+	suite.Require().NoError(verifier.SendNamespaceMismatches(
+		ctx,
+		nil, // no tolerances at all
+		mmChan,
+	))
+
+	mismatches := lo.ChannelToSlice(mmChan)
+
+	// Both indexes mismatched; both should be reported.
+	suite.Assert().Len(mismatches, 2)
+	for _, mm := range mismatches {
+		suite.Assert().Equal(api.NSMismatchAspectIndex, mm.Aspect)
+	}
 }
 
 func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
