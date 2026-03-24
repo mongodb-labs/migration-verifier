@@ -367,7 +367,11 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 
 	v.SetServerPort(cCtx.Int(serverPort))
-	v.SetNumWorkers(cCtx.Int(numWorkers))
+
+	if err := v.SetNumWorkers(cCtx.Int(numWorkers)); err != nil {
+		return nil, fmt.Errorf("setting num workers: %w", err)
+	}
+
 	v.SetGenerationPauseDelay(time.Duration(cCtx.Int64(generationPauseDelay)) * time.Millisecond)
 	v.SetWorkerSleepDelay(time.Duration(cCtx.Int64(workerSleepDelay)) * time.Millisecond)
 
@@ -382,7 +386,6 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		if partitionSizeMB > math.MaxInt64 {
 			return nil, fmt.Errorf("%q may not exceed %d", partitionSizeMB, math.MaxInt64)
 		}
-
 	}
 
 	v.SetPartitionSizeMB(uint32(cmp.Or(partitionSizeMB, partitions.DefaultPartitionMiB)))
