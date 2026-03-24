@@ -29,8 +29,11 @@ type WebServerTestSuite struct {
 type MockVerifier struct {
 	filter                  bson.D
 	sendDocumentMismatches  func(context.Context, uint32, chan<- api.DocMismatchInfo) error
-	sendNamespaceMismatches func(context.Context,
-		chan<- api.NSMismatchInfo) error
+	sendNamespaceMismatches func(
+		context.Context,
+		[]api.IndexSpecTolerance,
+		chan<- api.NSMismatchInfo,
+	) error
 }
 
 func NewMockVerifier() *MockVerifier {
@@ -67,7 +70,7 @@ func (verifier *MockVerifier) SendNamespaceMismatches(
 		panic("need sendNamespaceMismatches set")
 	}
 
-	return verifier.sendNamespaceMismatches(ctx, out)
+	return verifier.sendNamespaceMismatches(ctx, tolerances, out)
 }
 
 func NewWebServerSuite() *WebServerTestSuite {

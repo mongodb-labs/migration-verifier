@@ -339,7 +339,7 @@ func (server *WebServer) nsMismatchesEndpoint(c *gin.Context) {
 	)
 }
 
-func serveMismatches[T api.MismatchInfo](
+func serveMismatches[T api.AnyMismatchInfo](
 	c *gin.Context,
 	server *WebServer,
 	sender func(

@@ -434,21 +434,25 @@ func tolerancesObscureMismatch(
 		return false
 	}
 
-	// Only return this mismatch if there is >=1 op in its JSON diff
-	// with a non-ignored JSON path.
-	return lo.SomeBy(patch, func(op jsondiff.Operation) bool {
+OP:
+	for _, diffOp := range patch {
 		for _, tolerance := range indexSpecTolerances {
 			tolerancePath := "/" + string(tolerance)
 
-			if op.Path == tolerancePath || strings.HasPrefix(op.Path, tolerancePath+"/") {
+			if diffOp.Path == tolerancePath || strings.HasPrefix(diffOp.Path, tolerancePath+"/") {
 				// The tolerance says to ignore this option in the diff.
-				// Keep looking for a non-ognored op.
-				return true
+				// Keep looking for a non-ignored op.
+				continue OP
 			}
 		}
 
-		return false // Found a non-ignored op.
-	})
+		// The diff has an op that doesn’t match any tolerance.
+		// This mismatch should be reported.
+		return false
+	}
+
+	// Every field in the diff matched a tolerance, so suppress this mismatch.
+	return true
 }
 
 func parseJSONDiffOps(in string) (jsondiff.Patch, error) {
@@ -459,7 +463,7 @@ func parseJSONDiffOps(in string) (jsondiff.Patch, error) {
 	return patch, err
 }
 
-// DecodeConcatenatedJSON reads a stream of consecutive JSON entities from 'r'
+// decodeConcatenatedJSON reads a stream of consecutive JSON entities from 'r'
 // and appends them to the slice pointed to by 'out'.
 func decodeConcatenatedJSON[T any, S ~[]T](r io.Reader, out *S) error {
 	if out == nil {
@@ -516,7 +520,7 @@ func (verifier *Verifier) SendDocumentMismatches(
 	)
 }
 
-func findAndSendMismatches[MT api.MismatchInfo](
+func findAndSendMismatches[MT api.AnyMismatchInfo](
 	ctx context.Context,
 	verifier *Verifier,
 	curGeneration int,
@@ -540,7 +544,7 @@ func findAndSendMismatches[MT api.MismatchInfo](
 			filter,
 			bson.E{
 				"detail.mismatchHistory.durationMS", bson.D{
-					{"$gte", minDurationSecs},
+					{"$gte", 1000 * minDurationSecs},
 				},
 			},
 		)

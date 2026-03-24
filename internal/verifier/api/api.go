@@ -25,7 +25,7 @@ type MigrationVerifierAPI interface {
 
 type IndexSpecTolerance string
 
-type MismatchInfo interface {
+type AnyMismatchInfo interface {
 	DocMismatchInfo | NSMismatchInfo
 }
 

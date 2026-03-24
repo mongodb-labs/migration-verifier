@@ -198,11 +198,6 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	testShardKey := srcIsSharded && dstIsSharded
 
 	if testShardKey {
-		suite.Require().Equal(
-			suite.GetTopology(suite.dstMongoClient),
-			util.TopologySharded,
-		)
-
 		suite.Require().NoError(
 			suite.srcMongoClient.Database("admin").RunCommand(
 				ctx,
