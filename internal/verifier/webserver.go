@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
@@ -308,7 +309,7 @@ func (server *WebServer) nsMismatchesEndpoint(c *gin.Context) {
 		invalid := lo.Filter(
 			specIgnore,
 			func(piece api.IndexSpecTolerance, _ int) bool {
-				return !slices.Contains(api.IndexMismatchTolerances, piece)
+				return !slices.Contains(api.IndexMismatchTolerances(), piece)
 			},
 		)
 
@@ -387,6 +388,8 @@ func serveMismatches[T api.AnyMismatchInfo](
 READ:
 	for {
 		select {
+		case <-c.Done():
+			return
 		case <-mmErr.Ready():
 			break READ
 		case mismatch, open := <-mmChan:
@@ -413,7 +416,10 @@ READ:
 		}
 	}
 
-	<-mmErr.Ready()
+	_, err := chanutil.ReadWithDoneCheck(c, mmErr.Ready())
+	if err != nil {
+		return
+	}
 
 	if err := mmErr.Get(); err != nil {
 		switch {

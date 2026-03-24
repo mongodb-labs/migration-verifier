@@ -2,9 +2,9 @@ package api
 
 import (
 	"context"
+	"slices"
 
 	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -34,10 +34,14 @@ const (
 	IndexSpecIgnoreUnique IndexSpecTolerance = "unique"
 )
 
-var IndexMismatchTolerances = mslices.Of(
+var indexMismatchTolerances = [...]IndexSpecTolerance{
 	IndexSpecIgnoreTTL,
 	IndexSpecIgnoreUnique,
-)
+}
+
+func IndexMismatchTolerances() []IndexSpecTolerance {
+	return slices.Clone(indexMismatchTolerances[:])
+}
 
 // VerificationStatus holds the Verification Status
 type VerificationStatus struct {

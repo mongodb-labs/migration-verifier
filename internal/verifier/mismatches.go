@@ -241,11 +241,14 @@ func countMismatchesForGeneration(
 		return mismatchCountsPerType{}, errors.Wrapf(err, "reading mismatch aggregation")
 	}
 
-	if len(results) != 1 {
+	switch len(results) {
+	case 0:
+		return mismatchCountsPerType{}, nil
+	case 1:
+		return results[0], nil
+	default:
 		return mismatchCountsPerType{}, fmt.Errorf("surprise agg results count: %+v", results)
 	}
-
-	return results[0], nil
 }
 
 func getDocumentMismatchReportData(
@@ -430,7 +433,10 @@ func tolerancesObscureMismatch(
 	}
 
 	patch, err := parseJSONDiffOps(detail)
-	if err != nil {
+
+	// If there are no JSON patch ops, or the detail isn’t a JSON diff at all,
+	// then just indicate to show the mismatch.
+	if err != nil || len(patch) == 0 {
 		return false
 	}
 
