@@ -442,7 +442,7 @@ func tolerancesObscureMismatch(
 
 			if op.Path == tolerancePath || strings.HasPrefix(op.Path, tolerancePath+"/") {
 				// The tolerance says to ignore this option in the diff.
-				// Keep looking for a non-ognored op.
+				// Keep looking for a non-ignored op.
 				return true
 			}
 		}
