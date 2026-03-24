@@ -2,6 +2,8 @@ package chanutil
 
 import (
 	"context"
+
+	"github.com/10gen/migration-verifier/internal/util"
 )
 
 // IngestMapCanceler defines a callback that cancels an ingest map.
@@ -36,34 +38,44 @@ func StartIngestMap[In any, Out any](
 	in := make(chan In)
 	done := make(chan struct{})
 
+	// innerCtx lets the canceler unblock the goroutine even when the parent
+	// context is still live. Without this, calling the canceler while the
+	// goroutine is blocked on `out <- fn(val)` would deadlock.
+	innerCtx, innerCancel := context.WithCancel(ctx)
+
 	go func() {
 		defer close(done)
+		defer innerCancel()
 
 		for {
-			select {
-			case <-ctx.Done():
-				return // Clean up if context is cancelled
-			case val, ok := <-in:
-				if !ok {
-					// The caller closed the 'in' channel we gave them.
-					// We just exit the goroutine. We DO NOT close 'out' (see below).
-					return
-				}
+			opt, err := ReadWithDoneCheck(innerCtx, in)
+			if err != nil || opt.IsNone() {
+				return
+			}
 
-				// Mutate the value and push it to the provided output channel
-				select {
-				case <-ctx.Done():
-					return
-				case out <- fn(val):
-				}
+			if WriteWithDoneCheck(innerCtx, out, fn(opt.MustGet())) != nil {
+				return
 			}
 		}
 	}()
 
-	return in, func(ctx context.Context) error {
+	return in, func(cancelCtx context.Context) error {
+		// Signal the goroutine that no more items are coming. Under normal
+		// conditions this is sufficient: the goroutine drains its current item
+		// (if any), sees the close on the next outer-select iteration, and exits.
 		close(in)
 
-		_, err := ReadWithDoneCheck(ctx, done)
-		return err
+		// Wait for the goroutine to finish. If cancelCtx expires first it means
+		// the goroutine is stuck writing to `out` (e.g. the consumer stopped
+		// reading). In that case force-cancel via innerCtx so both select
+		// branches unblock, then wait unconditionally for the goroutine to exit.
+		select {
+		case <-done:
+			return nil
+		case <-cancelCtx.Done():
+			innerCancel()
+			<-done
+			return util.WrapCtxErrWithCause(cancelCtx)
+		}
 	}
 }

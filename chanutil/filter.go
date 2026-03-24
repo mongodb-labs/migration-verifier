@@ -2,6 +2,8 @@ package chanutil
 
 import (
 	"context"
+
+	"github.com/10gen/migration-verifier/internal/util"
 )
 
 // IngestFilterCanceler defines a callback that cancels an ingest filter.
@@ -38,37 +40,49 @@ func StartIngestFilter[T any](
 	in := make(chan T)
 	done := make(chan struct{})
 
+	// innerCtx lets the canceler unblock the goroutine even when the parent
+	// context is still live. Without this, calling the canceler while the
+	// goroutine is blocked on `out <- val` would deadlock: the canceler waits
+	// for `done`, but the goroutine only unblocks if `out` is consumed or
+	// `ctx` is cancelled.
+	innerCtx, innerCancel := context.WithCancel(ctx)
+
 	go func() {
 		defer close(done)
+		defer innerCancel()
 
 		for {
-			select {
-			case <-ctx.Done():
-				return // Clean up if context is cancelled
-			case val, ok := <-in:
-				if !ok {
-					// The caller closed the 'in' channel we gave them.
-					// We just exit the goroutine. We DO NOT close 'out'.
-					return
-				}
+			opt, err := ReadWithDoneCheck(innerCtx, in)
+			if err != nil || opt.IsNone() {
+				return
+			}
 
-				// If the value passes the filter, push it to the output channel
-				if keep(val) {
-					select {
-					case <-ctx.Done():
-						return
-					case out <- val:
-					}
+			val := opt.MustGet()
+			if keep(val) {
+				if WriteWithDoneCheck(innerCtx, out, val) != nil {
+					return
 				}
 			}
 		}
 	}()
 
 	return in, func(cancelCtx context.Context) error {
+		// Signal the goroutine that no more items are coming. Under normal
+		// conditions this is sufficient: the goroutine drains its current item
+		// (if any), sees the close on the next outer-select iteration, and exits.
 		close(in)
 
-		// Relying on the same helper function used in StartIngestMap
-		_, err := ReadWithDoneCheck(cancelCtx, done)
-		return err
+		// Wait for the goroutine to finish. If cancelCtx expires first it means
+		// the goroutine is stuck writing to `out` (e.g. the consumer stopped
+		// reading). In that case force-cancel via innerCtx so both select
+		// branches unblock, then wait unconditionally for the goroutine to exit.
+		select {
+		case <-done:
+			return nil
+		case <-cancelCtx.Done():
+			innerCancel()
+			<-done
+			return util.WrapCtxErrWithCause(cancelCtx)
+		}
 	}
 }
