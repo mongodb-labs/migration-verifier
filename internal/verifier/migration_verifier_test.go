@@ -3004,6 +3004,59 @@ func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {
 	)
 }
 
+// TestGetProgress_LongestDocMismatch is a regression test for a bug where
+// GetProgress queried for the longest-lived mismatch using the current
+// generation rather than the prior generation. Since mismatches are written
+// for generation N and surfaced as results for generation N+1, querying the
+// current generation always returned nothing.
+func (suite *IntegrationTestSuite) TestGetProgress_LongestDocMismatch() {
+	ctx := suite.Context()
+
+	// Insert a document on src only so gen 0 records a mismatch.
+	_, err := suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection("stuff").
+		InsertOne(ctx, bson.D{{"_id", "onlyOnSrc"}})
+	suite.Require().NoError(err)
+
+	err = suite.dstMongoClient.
+		Database(suite.DBNameForTest()).
+		CreateCollection(ctx, "stuff")
+	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	// Gen 0: mismatch exists but GetProgress skips the longest-lived query
+	// (generation == 0), so LongestDocMismatch is always None here.
+	progress, err := verifier.GetProgress(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().True(progress.LongestDocMismatch.IsNone(), "gen 0 should have no longest-lived mismatch")
+
+	suite.Require().NoError(runner.StartNextGeneration())
+
+	// GetProgress() will, immediately after StartNextGeneration(), still be
+	// for generation 0. We thus have to retry until we get generation 1.
+	suite.Assert().Eventually(
+		func() bool {
+			progress, err = verifier.GetProgress(ctx)
+			suite.Require().NoError(err)
+			return progress.Generation == 1
+		},
+		time.Minute,
+		time.Millisecond,
+		"should get to generation 1",
+	)
+
+	suite.Assert().True(
+		progress.LongestDocMismatch.IsSome(),
+		"should report a longest-lived mismatch from the prior generation",
+	)
+}
+
 func (suite *IntegrationTestSuite) TestPartitionWithFilter() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	dbname := suite.DBNameForTest()
