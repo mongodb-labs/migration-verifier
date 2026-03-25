@@ -15,13 +15,12 @@ import (
 )
 
 // This is the Field for a VerificationResult for shard key mismatches.
-const ShardKeyField = "Shard Key"
+const ShardKeyField = "shard key"
 
 func (verifier *Verifier) verifyShardingIfNeeded(
 	ctx context.Context,
 	srcColl, dstColl *mongo.Collection,
 ) ([]compare.Result, error) {
-
 	// We only need to compare if both clusters are sharded
 	srcSharded := verifier.srcClusterInfo.Topology == util.TopologySharded
 	dstSharded := verifier.dstClusterInfo.Topology == util.TopologySharded
