@@ -333,6 +333,8 @@ Each mismatch document looks like:
 - `readOnly`: The collection’s read-only flag differs between source and
   destination.
 
+No sort order is defined.
+
 Sample output:
 ```
 {
