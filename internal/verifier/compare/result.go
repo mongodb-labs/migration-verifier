@@ -17,6 +17,9 @@ import (
 
 const (
 	Missing = "Missing"
+
+	SrcTimestampField = "srctimestamp"
+	DstTimestampField = "dsttimestamp"
 )
 
 // Result holds the result of a single comparison.
@@ -46,6 +49,7 @@ type Result struct {
 	// too many results.
 	DataSize int32
 
+	// NB: See SrcTimestampField and DstTimestampField keys.
 	SrcTimestamp option.Option[bson.Timestamp]
 	DstTimestamp option.Option[bson.Timestamp]
 }
@@ -201,11 +205,11 @@ func (vr Result) MarshalToBSON() []byte {
 	buf = bsoncore.AppendDocumentElement(buf, "mismatchHistory", vr.MismatchHistory.MarshalToBSON())
 
 	if ts, has := vr.SrcTimestamp.Get(); has {
-		buf = bsoncore.AppendTimestampElement(buf, "srctimestamp", ts.T, ts.I)
+		buf = bsoncore.AppendTimestampElement(buf, SrcTimestampField, ts.T, ts.I)
 	}
 
 	if ts, has := vr.DstTimestamp.Get(); has {
-		buf = bsoncore.AppendTimestampElement(buf, "dsttimestamp", ts.T, ts.I)
+		buf = bsoncore.AppendTimestampElement(buf, DstTimestampField, ts.T, ts.I)
 	}
 
 	buf = append(buf, 0)

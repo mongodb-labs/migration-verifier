@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
@@ -129,6 +130,11 @@ func (server *WebServer) setupRouter() *gin.Engine {
 	router := gin.New()
 	pprof.Register(router)
 	router.Use(server.RequestAndResponseLogger(), gin.Recovery())
+
+	router.Use(func(c *gin.Context) {
+		c.Header("Server", "migration-verifier/"+buildvar.Revision)
+		c.Next()
+	})
 
 	api := router.Group("/api")
 	{
