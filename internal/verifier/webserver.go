@@ -2,13 +2,15 @@ package verifier
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand/v2"
+	"math/rand"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -27,7 +29,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -372,7 +373,12 @@ func serveMismatches[T api.AnyMismatchInfo](
 	errEncoder := json.NewEncoder(c.Writer)
 
 	sendError := func(err error) {
-		errRef := strconv.FormatUint(rand.Uint64(), 16)
+		// Prefer the trace ID, which should be set. Just in case, though,
+		// we create our own ID for the error.
+		errRef := cmp.Or(
+			c.Writer.Header().Get("Trace-Id"),
+			strconv.FormatUint(rand.Uint64(), 16),
+		)
 
 		server.logger.Error().
 			Str("request", c.Request.URL.Path).
@@ -394,7 +400,7 @@ func serveMismatches[T api.AnyMismatchInfo](
 READ:
 	for {
 		select {
-		case <-c.Done():
+		case <-c.Request.Context().Done():
 			return
 		case <-mmErr.Ready():
 			break READ

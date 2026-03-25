@@ -230,7 +230,7 @@ func (suite *WebServerTestSuite) TestCheckEndPoint() {
 	suite.Require().NoError(err)
 
 	router.ServeHTTP(w, req)
-	suite.Require().Equal(400, w.Code)
+	suite.Require().Equal(http.StatusBadRequest, w.Code)
 	suite.Require().Contains(w.Body.String(), "error")
 
 	invalidJSONInput2 := `{
@@ -241,8 +241,146 @@ func (suite *WebServerTestSuite) TestCheckEndPoint() {
 	suite.Require().NoError(err)
 
 	router.ServeHTTP(w, req)
-	suite.Require().Equal(400, w.Code)
+	suite.Require().Equal(http.StatusBadRequest, w.Code)
 	suite.Require().Contains(w.Body.String(), "error")
+}
+
+func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_ImmediateError() {
+	defer func() {
+		suite.mockVerifier.sendNamespaceMismatches = nil
+	}()
+
+	suite.mockVerifier.sendNamespaceMismatches = func(
+		ctx context.Context,
+		tolerances []api.IndexSpecTolerance,
+		c chan<- api.NSMismatchInfo,
+	) error {
+		close(c)
+
+		return fmt.Errorf("sudden error")
+	}
+
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest("GET", "/api/v1/nsMismatches", nil)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(200, w.Code)
+
+	suite.Assert().NotContains(w.Body.String(), "sudden error")
+	suite.Assert().Contains(w.Body.String(), "internal error")
+}
+
+func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_Success() {
+	defer func() {
+		suite.mockVerifier.sendNamespaceMismatches = nil
+	}()
+
+	suite.mockVerifier.sendNamespaceMismatches = func(
+		ctx context.Context,
+		tolerances []api.IndexSpecTolerance,
+		c chan<- api.NSMismatchInfo,
+	) error {
+		c <- api.NSMismatchInfo{
+			Type:      api.MismatchMissing,
+			Namespace: "db.coll1",
+			Aspect:    api.NSMismatchAspectExist,
+		}
+
+		c <- api.NSMismatchInfo{
+			Type:      api.MismatchContent,
+			Namespace: "db.coll2",
+			Aspect:    api.NSMismatchAspectIndex,
+			Component: option.Some("myIndex"),
+			Detail:    option.Some("key mismatch"),
+		}
+
+		return nil
+	}
+
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest("GET", "/api/v1/nsMismatches", nil)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(200, w.Code)
+
+	decoder := json.NewDecoder(w.Body)
+
+	var resp map[string]any
+
+	suite.Require().NoError(decoder.Decode(&resp))
+	suite.Assert().EqualValues(api.MismatchMissing, resp["type"])
+	suite.Assert().Equal("db.coll1", resp["namespace"])
+	suite.Assert().EqualValues(api.NSMismatchAspectExist, resp["aspect"])
+	suite.Assert().NotContains(resp, "component")
+	suite.Assert().NotContains(resp, "detail")
+
+	clear(resp)
+
+	suite.Require().NoError(decoder.Decode(&resp))
+	suite.Assert().EqualValues(api.MismatchContent, resp["type"])
+	suite.Assert().Equal("db.coll2", resp["namespace"])
+	suite.Assert().EqualValues(api.NSMismatchAspectIndex, resp["aspect"])
+	suite.Assert().Equal("myIndex", resp["component"])
+	suite.Assert().Equal("key mismatch", resp["detail"])
+
+	suite.Assert().ErrorIs(decoder.Decode(&resp), io.EOF, "should be done")
+}
+
+func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_InvalidTolerance() {
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest("GET", "/api/v1/nsMismatches?indexSpecIgnore=bogus", nil)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(http.StatusBadRequest, w.Code)
+	suite.Assert().Contains(w.Body.String(), "error")
+	suite.Assert().Contains(w.Body.String(), "bogus")
+}
+
+func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_ValidTolerance() {
+	defer func() {
+		suite.mockVerifier.sendNamespaceMismatches = nil
+	}()
+
+	var receivedTolerances []api.IndexSpecTolerance
+
+	suite.mockVerifier.sendNamespaceMismatches = func(
+		ctx context.Context,
+		tolerances []api.IndexSpecTolerance,
+		c chan<- api.NSMismatchInfo,
+	) error {
+		receivedTolerances = tolerances
+		return nil
+	}
+
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest(
+		"GET",
+		"/api/v1/nsMismatches?indexSpecIgnore=expireAfterSeconds,unique",
+		nil,
+	)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(200, w.Code)
+	suite.Assert().Equal(
+		[]api.IndexSpecTolerance{api.IndexSpecIgnoreTTL, api.IndexSpecIgnoreUnique},
+		receivedTolerances,
+	)
 }
 
 func TestWebServer(t *testing.T) {
