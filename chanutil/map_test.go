@@ -1,11 +1,12 @@
 package chanutil
 
 import (
-	"context"
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -51,7 +52,7 @@ func TestIngestMap_cancelUnblocksGoroutineWhenOutIsFull(t *testing.T) {
 	in <- 1
 	time.Sleep(10 * time.Millisecond)
 
-	cancelCtx, cancelCancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	cancelCtx, cancelCancel := contextplus.WithTimeoutCause(ctx, 100*time.Millisecond, fmt.Errorf("cancel"))
 	defer cancelCancel()
 
 	done := make(chan struct{})
@@ -70,7 +71,7 @@ func TestIngestMap_cancelUnblocksGoroutineWhenOutIsFull(t *testing.T) {
 // TestIngestMap_parentContextCancels verifies that cancelling the parent
 // context unblocks a goroutine stuck writing to out.
 func TestIngestMap_parentContextCancels(t *testing.T) {
-	ctx, cancelCtx := context.WithCancel(context.Background())
+	ctx, cancelCtx := contextplus.WithCancelCause(t.Context())
 
 	out := make(chan string) // unbuffered — goroutine blocks on first write
 
@@ -79,7 +80,7 @@ func TestIngestMap_parentContextCancels(t *testing.T) {
 	in <- 1
 	time.Sleep(10 * time.Millisecond)
 
-	cancelCtx()
+	cancelCtx(fmt.Errorf("%s", t.Name()))
 
 	done := make(chan struct{})
 	go func() {

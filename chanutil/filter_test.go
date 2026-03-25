@@ -1,10 +1,11 @@
 package chanutil
 
 import (
-	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -95,7 +96,7 @@ func TestIngestFilter_cancelUnblocksGoroutineWhenOutIsFull(t *testing.T) {
 	// Pass a context with a short deadline to simulate the "consumer stopped
 	// reading" scenario. The canceler waits on done; when this deadline fires
 	// it force-cancels innerCtx, unblocking the stuck goroutine.
-	cancelCtx, cancelCancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	cancelCtx, cancelCancel := contextplus.WithTimeoutCause(ctx, 100*time.Millisecond, fmt.Errorf("%s", t.Name()))
 	defer cancelCancel()
 
 	done := make(chan struct{})
@@ -115,7 +116,7 @@ func TestIngestFilter_cancelUnblocksGoroutineWhenOutIsFull(t *testing.T) {
 // TestIngestFilter_parentContextCancels verifies that cancelling the parent
 // context also unblocks the goroutine (existing behaviour, not regressed).
 func TestIngestFilter_parentContextCancels(t *testing.T) {
-	ctx, cancelCtx := context.WithCancel(context.Background())
+	ctx, cancelCtx := contextplus.WithCancelCause(t.Context())
 
 	out := make(chan int) // unbuffered — goroutine will block writing
 
@@ -127,7 +128,7 @@ func TestIngestFilter_parentContextCancels(t *testing.T) {
 	// Cancelling the parent ctx cancels innerCtx (derived from it), which
 	// unblocks the goroutine. It also satisfies cancelCtx.Done() in the
 	// canceler's select, triggering the force-cancel path.
-	cancelCtx()
+	cancelCtx(fmt.Errorf("%s", t.Name()))
 
 	done := make(chan struct{})
 	go func() {

@@ -2,7 +2,9 @@ package chanutil
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/util"
 )
 
@@ -23,11 +25,11 @@ func startIngest[In any, Out any](
 ) (chan<- In, IngestCanceler) {
 	in := make(chan In)
 	done := make(chan struct{})
-	innerCtx, innerCancel := context.WithCancel(ctx)
+	innerCtx, innerCancel := contextplus.WithCancelCause(ctx)
 
 	go func() {
 		defer close(done)
-		defer innerCancel()
+		defer innerCancel(fmt.Errorf("goroutine finished"))
 
 		for {
 			opt, err := ReadWithDoneCheck(innerCtx, in)
@@ -51,7 +53,7 @@ func startIngest[In any, Out any](
 		case <-done:
 			return nil
 		case <-cancelCtx.Done():
-			innerCancel()
+			innerCancel(fmt.Errorf("cancel ctx ended"))
 			<-done
 			return util.WrapCtxErrWithCause(cancelCtx)
 		}
