@@ -126,6 +126,7 @@ func (server *WebServer) RequestAndResponseLogger(skipResponseBodyPaths ...strin
 		c.Next()
 
 		event := server.logger.Info().Int("status", c.Writer.Status()).
+			Int("bytesWritten", c.Writer.Size()).
 			Str("traceID", traceID).
 			Str("latency", time.Since(t).String())
 
