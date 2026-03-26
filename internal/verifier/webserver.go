@@ -409,8 +409,21 @@ func serveMismatches[T api.AnyMismatchInfo](
 			"error": fmt.Sprintf("internal error (ref #: %s)", errRef),
 		}
 
-		// Skip error checking.
-		_ = errEncoder.Encode(payload)
+		if encodeErr := errEncoder.Encode(payload); encodeErr != nil {
+			// If the request context is already done, the client most likely
+			// disconnected; avoid noisy logging in that case.
+			select {
+			case <-c.Request.Context().Done():
+				return
+			default:
+			}
+
+			server.logger.Error().
+				Str("request", c.Request.URL.Path).
+				Str("ref", errRef).
+				Err(encodeErr).
+				Msg("failed to encode error response")
+		}
 	}
 
 READ:
