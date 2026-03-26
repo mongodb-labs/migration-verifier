@@ -62,7 +62,7 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 	table := tablewriter.NewWriter(out)
 	table.SetHeader([]string{"Index", "Cluster", "Field", "Namespace", "Details"})
 
-	mismatches, err := getNamespaceMismatchesForTasks(
+	mismatches, err := getNamespaceMismatchesForGeneration(
 		ctx,
 		verifier.verificationDatabase(),
 		generation,

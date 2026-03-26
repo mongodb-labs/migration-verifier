@@ -144,7 +144,7 @@ type mismatchReportData struct {
 	Counts mismatchCountsPerType
 }
 
-func getNamespaceMismatchesForTasks(
+func getNamespaceMismatchesForGeneration(
 	ctx context.Context,
 	db *mongo.Database,
 	generation int,
