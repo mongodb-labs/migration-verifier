@@ -27,8 +27,13 @@ type WebServerTestSuite struct {
 }
 
 type MockVerifier struct {
-	filter                 bson.D
-	sendDocumentMismatches func(context.Context, uint32, chan<- api.MismatchInfo) error
+	filter                  bson.D
+	sendDocumentMismatches  func(context.Context, uint32, chan<- api.DocMismatchInfo) error
+	sendNamespaceMismatches func(
+		context.Context,
+		[]api.IndexSpecTolerance,
+		chan<- api.NSMismatchInfo,
+	) error
 }
 
 func NewMockVerifier() *MockVerifier {
@@ -47,13 +52,25 @@ func (verifier *MockVerifier) GetProgress(ctx context.Context) (api.Progress, er
 func (verifier *MockVerifier) SendDocumentMismatches(
 	ctx context.Context,
 	minDurationSecs uint32,
-	out chan<- api.MismatchInfo,
+	out chan<- api.DocMismatchInfo,
 ) error {
 	if verifier.sendDocumentMismatches == nil {
 		panic("need sendDocumentMismatches set")
 	}
 
 	return verifier.sendDocumentMismatches(ctx, minDurationSecs, out)
+}
+
+func (verifier *MockVerifier) SendNamespaceMismatches(
+	ctx context.Context,
+	tolerances []api.IndexSpecTolerance,
+	out chan<- api.NSMismatchInfo,
+) error {
+	if verifier.sendNamespaceMismatches == nil {
+		panic("need sendNamespaceMismatches set")
+	}
+
+	return verifier.sendNamespaceMismatches(ctx, tolerances, out)
 }
 
 func NewWebServerSuite() *WebServerTestSuite {
@@ -72,7 +89,7 @@ func (suite *WebServerTestSuite) TestDocMismatchesEndPoint_ImmediateError() {
 	suite.mockVerifier.sendDocumentMismatches = func(
 		ctx context.Context,
 		u uint32,
-		c chan<- api.MismatchInfo,
+		c chan<- api.DocMismatchInfo,
 	) error {
 		close(c)
 
@@ -101,9 +118,9 @@ func (suite *WebServerTestSuite) TestDocMismatchesEndPoint_Success() {
 	suite.mockVerifier.sendDocumentMismatches = func(
 		ctx context.Context,
 		u uint32,
-		c chan<- api.MismatchInfo,
+		c chan<- api.DocMismatchInfo,
 	) error {
-		c <- api.MismatchInfo{
+		c <- api.DocMismatchInfo{
 			Type:      api.MismatchContent,
 			Namespace: "name.space1",
 			ID:        bsontools.ToRawValue("onBoth"),
@@ -111,13 +128,13 @@ func (suite *WebServerTestSuite) TestDocMismatchesEndPoint_Success() {
 			Detail:    option.Some("something something"),
 		}
 
-		c <- api.MismatchInfo{
+		c <- api.DocMismatchInfo{
 			Type:      api.MismatchExtra,
 			Namespace: "name.space2",
 			ID:        bsontools.ToRawValue("onDst"),
 		}
 
-		c <- api.MismatchInfo{
+		c <- api.DocMismatchInfo{
 			Type:      api.MismatchMissing,
 			Namespace: "name.space3",
 			ID:        bsontools.ToRawValue("onSrc"),
@@ -213,7 +230,7 @@ func (suite *WebServerTestSuite) TestCheckEndPoint() {
 	suite.Require().NoError(err)
 
 	router.ServeHTTP(w, req)
-	suite.Require().Equal(400, w.Code)
+	suite.Require().Equal(http.StatusBadRequest, w.Code)
 	suite.Require().Contains(w.Body.String(), "error")
 
 	invalidJSONInput2 := `{
@@ -224,8 +241,146 @@ func (suite *WebServerTestSuite) TestCheckEndPoint() {
 	suite.Require().NoError(err)
 
 	router.ServeHTTP(w, req)
-	suite.Require().Equal(400, w.Code)
+	suite.Require().Equal(http.StatusBadRequest, w.Code)
 	suite.Require().Contains(w.Body.String(), "error")
+}
+
+func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_ImmediateError() {
+	defer func() {
+		suite.mockVerifier.sendNamespaceMismatches = nil
+	}()
+
+	suite.mockVerifier.sendNamespaceMismatches = func(
+		ctx context.Context,
+		tolerances []api.IndexSpecTolerance,
+		c chan<- api.NSMismatchInfo,
+	) error {
+		close(c)
+
+		return fmt.Errorf("sudden error")
+	}
+
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest("GET", "/api/v1/nsMismatches", nil)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(200, w.Code)
+
+	suite.Assert().NotContains(w.Body.String(), "sudden error")
+	suite.Assert().Contains(w.Body.String(), "internal error")
+}
+
+func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_Success() {
+	defer func() {
+		suite.mockVerifier.sendNamespaceMismatches = nil
+	}()
+
+	suite.mockVerifier.sendNamespaceMismatches = func(
+		ctx context.Context,
+		tolerances []api.IndexSpecTolerance,
+		c chan<- api.NSMismatchInfo,
+	) error {
+		c <- api.NSMismatchInfo{
+			Type:      api.MismatchMissing,
+			Namespace: "db.coll1",
+			Aspect:    api.NSMismatchAspectExist,
+		}
+
+		c <- api.NSMismatchInfo{
+			Type:      api.MismatchContent,
+			Namespace: "db.coll2",
+			Aspect:    api.NSMismatchAspectIndex,
+			Component: option.Some("myIndex"),
+			Detail:    option.Some("key mismatch"),
+		}
+
+		return nil
+	}
+
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest("GET", "/api/v1/nsMismatches", nil)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(200, w.Code)
+
+	decoder := json.NewDecoder(w.Body)
+
+	var resp map[string]any
+
+	suite.Require().NoError(decoder.Decode(&resp))
+	suite.Assert().EqualValues(api.MismatchMissing, resp["type"])
+	suite.Assert().Equal("db.coll1", resp["namespace"])
+	suite.Assert().EqualValues(api.NSMismatchAspectExist, resp["aspect"])
+	suite.Assert().NotContains(resp, "component")
+	suite.Assert().NotContains(resp, "detail")
+
+	clear(resp)
+
+	suite.Require().NoError(decoder.Decode(&resp))
+	suite.Assert().EqualValues(api.MismatchContent, resp["type"])
+	suite.Assert().Equal("db.coll2", resp["namespace"])
+	suite.Assert().EqualValues(api.NSMismatchAspectIndex, resp["aspect"])
+	suite.Assert().Equal("myIndex", resp["component"])
+	suite.Assert().Equal("key mismatch", resp["detail"])
+
+	suite.Assert().ErrorIs(decoder.Decode(&resp), io.EOF, "should be done")
+}
+
+func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_InvalidTolerance() {
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest("GET", "/api/v1/nsMismatches?indexSpecIgnore=bogus", nil)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(http.StatusBadRequest, w.Code)
+	suite.Assert().Contains(w.Body.String(), "error")
+	suite.Assert().Contains(w.Body.String(), "bogus")
+}
+
+func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_ValidTolerance() {
+	defer func() {
+		suite.mockVerifier.sendNamespaceMismatches = nil
+	}()
+
+	var receivedTolerances []api.IndexSpecTolerance
+
+	suite.mockVerifier.sendNamespaceMismatches = func(
+		ctx context.Context,
+		tolerances []api.IndexSpecTolerance,
+		c chan<- api.NSMismatchInfo,
+	) error {
+		receivedTolerances = tolerances
+		return nil
+	}
+
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest(
+		"GET",
+		"/api/v1/nsMismatches?indexSpecIgnore=expireAfterSeconds,unique",
+		nil,
+	)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(200, w.Code)
+	suite.Assert().Equal(
+		[]api.IndexSpecTolerance{api.IndexSpecIgnoreTTL, api.IndexSpecIgnoreUnique},
+		receivedTolerances,
+	)
 }
 
 func TestWebServer(t *testing.T) {

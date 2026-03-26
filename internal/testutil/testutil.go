@@ -176,7 +176,8 @@ func KillApplicationChangeStreams(
 				{"$match", bson.D{
 					{"clientMetadata.application.name", appName},
 					{"command.collection", "$cmd.aggregate"},
-					{"cursor.originatingCommand.pipeline.0.$_internalChangeStreamOplogMatch",
+					{
+						"cursor.originatingCommand.pipeline.0.$_internalChangeStreamOplogMatch",
 						bson.D{{"$type", "object"}},
 					},
 				}},
@@ -198,15 +199,13 @@ func KillApplicationChangeStreams(
 	for _, op := range ops {
 		t.Logf("Killing change stream op %+v", op.Opid)
 
-		err :=
-			client.Database("admin").RunCommand(
-				ctx,
-				bson.D{
-					{"killOp", 1},
-					{"op", op.Opid},
-				},
-			).Err()
-
+		err := client.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"killOp", 1},
+				{"op", op.Opid},
+			},
+		).Err()
 		if err != nil {
 			return errors.Wrapf(err, "failed to kill change stream with opId %#q", op.Opid)
 		}

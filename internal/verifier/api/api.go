@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"slices"
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/option"
@@ -14,7 +15,32 @@ type MigrationVerifierAPI interface {
 	WritesOff(ctx context.Context) error
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
-	SendDocumentMismatches(context.Context, uint32, chan<- MismatchInfo) error
+	SendDocumentMismatches(context.Context, uint32, chan<- DocMismatchInfo) error
+	SendNamespaceMismatches(
+		context.Context,
+		[]IndexSpecTolerance,
+		chan<- NSMismatchInfo,
+	) error
+}
+
+type IndexSpecTolerance string
+
+type AnyMismatchInfo interface {
+	DocMismatchInfo | NSMismatchInfo
+}
+
+const (
+	IndexSpecIgnoreTTL    IndexSpecTolerance = "expireAfterSeconds"
+	IndexSpecIgnoreUnique IndexSpecTolerance = "unique"
+)
+
+var indexMismatchTolerances = [...]IndexSpecTolerance{
+	IndexSpecIgnoreTTL,
+	IndexSpecIgnoreUnique,
+}
+
+func IndexMismatchTolerances() []IndexSpecTolerance {
+	return slices.Clone(indexMismatchTolerances[:])
 }
 
 // VerificationStatus holds the Verification Status
@@ -70,24 +96,42 @@ type Progress struct {
 	DocsComparedPerSecond     float64 `bson:"docsComparedPerSecond"`
 	SrcBytesComparedPerSecond float64 `bson:"srcBytesComparedPerSecond"`
 
-	LongestDocMismatch option.Option[MismatchInfo] `bson:"longestDocMismatch,omitempty"`
+	LongestDocMismatch option.Option[DocMismatchInfo] `bson:"longestDocMismatch,omitempty"`
 }
 
-type MismatchType string
+type (
+	MismatchType     string
+	NSMismatchAspect string
+)
 
 const (
 	MismatchExtra   MismatchType = "extraOnDst"
 	MismatchMissing MismatchType = "missingOnDst"
 	MismatchContent MismatchType = "content"
+
+	NSMismatchAspectExist    NSMismatchAspect = "exist"
+	NSMismatchAspectType     NSMismatchAspect = "type"
+	NSMismatchAspectIndex    NSMismatchAspect = "index"
+	NSMismatchAspectSpec     NSMismatchAspect = "spec"
+	NSMismatchAspectShardKey NSMismatchAspect = "shard key"
+	NSMismatchAspectReadOnly NSMismatchAspect = "readOnly"
 )
 
-type MismatchInfo struct {
+type DocMismatchInfo struct {
 	Type         MismatchType
 	Namespace    string
 	ID           bson.RawValue         `bson:"_id"`
 	Field        option.Option[string] `bson:",omitempty"`
 	Detail       option.Option[string] `bson:",omitempty"`
 	DurationSecs float64               `bson:"durationSecs"`
+}
+
+type NSMismatchInfo struct {
+	Type      MismatchType
+	Namespace string
+	Aspect    NSMismatchAspect
+	Component option.Option[string] `bson:",omitempty"`
+	Detail    option.Option[string] `bson:",omitempty"`
 }
 
 // Response is the schema for Operational API response
