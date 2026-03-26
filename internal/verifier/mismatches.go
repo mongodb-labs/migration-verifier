@@ -16,6 +16,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
@@ -370,10 +371,20 @@ func getLongestLivedDocumentMismatch(
 	db *mongo.Database,
 	generation int,
 ) (option.Option[MismatchInfo], error) {
+
+	// We query both the given generation and its immediate predecessor.
+	// This is because the current generation might have just gotten started,
+	// in which case there may be no mismatches recorded for that generation.
+	queriedGenerations := mslices.Of(generation, generation-1)
+	if generation == 0 {
+		// Avoid querying generation -1:
+		queriedGenerations = queriedGenerations[:1]
+	}
+
 	raw, err := db.Collection(mismatchesCollectionName).FindOne(
 		ctx,
 		bson.D{
-			{"generation", generation},
+			{"generation", bson.D{{"$in", queriedGenerations}}},
 			{"taskType", tasks.VerifyDocuments},
 		},
 		options.FindOne().SetSort(
