@@ -144,48 +144,28 @@ type mismatchReportData struct {
 	Counts mismatchCountsPerType
 }
 
-// This is a low-level function used to display metadata mismatches.
-// It’s also used in tests.
-func getMismatchesForTasks(
+func getNamespaceMismatchesForTasks(
 	ctx context.Context,
 	db *mongo.Database,
-	taskIDs []bson.ObjectID,
-) (map[bson.ObjectID][]compare.Result, error) {
+	generation int,
+) ([]compare.Result, error) {
 	cursor, err := db.Collection(mismatchesCollectionName).Find(
 		ctx,
 		bson.D{
-			{"taskID", bson.D{{"$in", taskIDs}}},
+			{"generation", generation},
+			{"taskType", tasks.VerifyCollection},
 		},
 	)
 	if err != nil {
-		return nil, errors.Wrapf(err, "querying mismatches for %d task(s)", len(taskIDs))
+		return nil, errors.Wrapf(err, "querying generation %d’s collection mismatches", generation)
 	}
 
-	result := map[bson.ObjectID][]compare.Result{}
-
-	for cursor.Next(ctx) {
-		var d MismatchInfo
-		if err := cursor.Decode(&d); err != nil {
-			return nil, errors.Wrapf(err, "parsing discrepancy %+v", cursor.Current)
-		}
-
-		result[d.TaskID] = append(
-			result[d.TaskID],
-			d.Detail,
-		)
+	var results []compare.Result
+	if err := cursor.All(ctx, &results); err != nil {
+		return nil, errors.Wrapf(err, "reading generation %d’s collection mismatches", generation)
 	}
 
-	if cursor.Err() != nil {
-		return nil, errors.Wrapf(err, "reading %d tasks’ mismatches", len(taskIDs))
-	}
-
-	for _, taskID := range taskIDs {
-		if _, ok := result[taskID]; !ok {
-			result[taskID] = []compare.Result{}
-		}
-	}
-
-	return result, nil
+	return results, nil
 }
 
 var (
@@ -371,7 +351,6 @@ func getLongestLivedDocumentMismatch(
 	db *mongo.Database,
 	generation int,
 ) (option.Option[MismatchInfo], error) {
-
 	// We query both the given generation and its immediate predecessor.
 	// This is because the current generation might have just gotten started,
 	// in which case there may be no mismatches recorded for that generation.

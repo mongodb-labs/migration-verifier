@@ -36,6 +36,7 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"github.com/cespare/permute/v2"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"github.com/samber/lo/mutable"
@@ -1719,6 +1720,49 @@ func (suite *IntegrationTestSuite) getFailuresForTask(
 	require.NotEmpty(suite.T(), discrepancies)
 
 	return slices.Collect(maps.Values(discrepancies))[0]
+}
+
+// This is no longer used in production because it entails a collection scan.
+func getMismatchesForTasks(
+	ctx context.Context,
+	db *mongo.Database,
+	taskIDs []bson.ObjectID,
+) (map[bson.ObjectID][]compare.Result, error) {
+	cursor, err := db.Collection(mismatchesCollectionName).Find(
+		ctx,
+		bson.D{
+			{"taskID", bson.D{{"$in", taskIDs}}},
+		},
+	)
+	if err != nil {
+		return nil, errors.Wrapf(err, "querying mismatches for %d task(s)", len(taskIDs))
+	}
+
+	result := map[bson.ObjectID][]compare.Result{}
+
+	for cursor.Next(ctx) {
+		var d MismatchInfo
+		if err := cursor.Decode(&d); err != nil {
+			return nil, errors.Wrapf(err, "parsing discrepancy %+v", cursor.Current)
+		}
+
+		result[d.TaskID] = append(
+			result[d.TaskID],
+			d.Detail,
+		)
+	}
+
+	if cursor.Err() != nil {
+		return nil, errors.Wrapf(err, "reading %d tasks’ mismatches", len(taskIDs))
+	}
+
+	for _, taskID := range taskIDs {
+		if _, ok := result[taskID]; !ok {
+			result[taskID] = []compare.Result{}
+		}
+	}
+
+	return result, nil
 }
 
 func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
