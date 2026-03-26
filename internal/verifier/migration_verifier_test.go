@@ -2232,6 +2232,11 @@ func (suite *IntegrationTestSuite) TestReportCollectionMetadataMismatches_IndexM
 	})
 	suite.Require().NoError(err)
 
+	suite.Require().NoError(
+		suite.dstMongoClient.Database(dbName).CreateCollection(ctx, srcColl.Name()),
+		"create dst collection",
+	)
+
 	verifier.SetSrcNamespaces([]string{ns})
 	verifier.SetDstNamespaces([]string{ns})
 	verifier.SetNamespaceMap()
@@ -2249,6 +2254,7 @@ func (suite *IntegrationTestSuite) TestReportCollectionMetadataMismatches_IndexM
 	suite.Contains(output, "Collections/Indexes in failed or retry status")
 	suite.Contains(output, ns)
 	suite.Contains(output, "x_1")
+	suite.Contains(output, compare.Missing)
 }
 
 func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
