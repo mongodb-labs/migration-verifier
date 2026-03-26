@@ -160,12 +160,17 @@ func getNamespaceMismatchesForTasks(
 		return nil, errors.Wrapf(err, "querying generation %d’s collection mismatches", generation)
 	}
 
-	var results []compare.Result
-	if err := cursor.All(ctx, &results); err != nil {
+	var infos []MismatchInfo
+	if err := cursor.All(ctx, &infos); err != nil {
 		return nil, errors.Wrapf(err, "reading generation %d’s collection mismatches", generation)
 	}
 
-	return results, nil
+	return lo.Map(
+		infos,
+		func(mi MismatchInfo, _ int) compare.Result {
+			return mi.Detail
+		},
+	), nil
 }
 
 var (

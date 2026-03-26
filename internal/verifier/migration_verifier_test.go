@@ -1753,7 +1753,7 @@ func getMismatchesForTasks(
 	}
 
 	if cursor.Err() != nil {
-		return nil, errors.Wrapf(err, "reading %d tasks’ mismatches", len(taskIDs))
+		return nil, errors.Wrapf(cursor.Err(), "reading %d tasks’ mismatches", len(taskIDs))
 	}
 
 	for _, taskID := range taskIDs {
@@ -2215,6 +2215,40 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 		suite.Equal(constants.ClusterTarget, failures[0].Cluster)
 		suite.Equal("testDb.testColl4", failures[0].NameSpace)
 	}
+}
+
+func (suite *IntegrationTestSuite) TestReportCollectionMetadataMismatches_IndexMismatch() {
+	ctx := suite.Context()
+	verifier := suite.BuildVerifier()
+
+	dbName := suite.DBNameForTest()
+	ns := dbName + ".testColl"
+
+	// Create an index on src that doesn't exist on dst.
+	srcColl := suite.srcMongoClient.Database(dbName).Collection("testColl")
+	_, err := srcColl.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{"x", 1}},
+		Options: options.Index().SetName("x_1"),
+	})
+	suite.Require().NoError(err)
+
+	verifier.SetSrcNamespaces([]string{ns})
+	verifier.SetDstNamespaces([]string{ns})
+	verifier.SetNamespaceMap()
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	var out strings.Builder
+	hasMismatches, anyIncomplete, err := verifier.reportCollectionMetadataMismatches(ctx, &out)
+	suite.Require().NoError(err)
+	suite.True(hasMismatches, "should report mismatches")
+	suite.False(anyIncomplete, "generation should be complete")
+
+	output := out.String()
+	suite.Contains(output, "Collections/Indexes in failed or retry status")
+	suite.Contains(output, ns)
+	suite.Contains(output, "x_1")
 }
 
 func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {

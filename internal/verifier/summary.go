@@ -85,7 +85,7 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		})
 	}
 
-	out.Write([]byte("\nCollections/Indexes in failed or retry status:\n"))
+	_, _ = out.Write([]byte("\nCollections/Indexes in failed or retry status:\n"))
 	table.Render()
 
 	return true, anyAreIncomplete, nil
