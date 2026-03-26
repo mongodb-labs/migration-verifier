@@ -1753,7 +1753,7 @@ func getMismatchesForTasks(
 	}
 
 	if cursor.Err() != nil {
-		return nil, errors.Wrapf(err, "reading %d tasks’ mismatches", len(taskIDs))
+		return nil, errors.Wrapf(cursor.Err(), "reading %d tasks’ mismatches", len(taskIDs))
 	}
 
 	for _, taskID := range taskIDs {
