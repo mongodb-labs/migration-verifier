@@ -15,6 +15,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -381,6 +382,109 @@ func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_ValidTolerance() {
 		[]api.IndexSpecTolerance{api.IndexSpecIgnoreTTL, api.IndexSpecIgnoreUnique},
 		receivedTolerances,
 	)
+}
+
+// findSentResponseLogEntry scans newline-delimited JSON log output and returns
+// the parsed fields of the first "sent response" log entry, or nil if not found.
+func findSentResponseLogEntry(logOutput string) map[string]any {
+	for _, line := range strings.Split(logOutput, "\n") {
+		if line == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry["message"] == "sent response" {
+			return entry
+		}
+	}
+	return nil
+}
+
+func (suite *WebServerTestSuite) TestRequestAndResponseLogger_ResponseBodySuppression() {
+	defer func() {
+		suite.mockVerifier.sendDocumentMismatches = nil
+		suite.mockVerifier.sendNamespaceMismatches = nil
+	}()
+
+	suite.mockVerifier.sendDocumentMismatches = func(
+		_ context.Context, _ uint32, c chan<- api.DocMismatchInfo,
+	) error {
+		c <- api.DocMismatchInfo{
+			Type:      api.MismatchContent,
+			Namespace: "db.coll",
+			ID:        bsontools.ToRawValue("someID"),
+		}
+		return nil
+	}
+
+	suite.mockVerifier.sendNamespaceMismatches = func(
+		_ context.Context, _ []api.IndexSpecTolerance, c chan<- api.NSMismatchInfo,
+	) error {
+		c <- api.NSMismatchInfo{
+			Type:      api.MismatchMissing,
+			Namespace: "db.coll",
+			Aspect:    api.NSMismatchAspectExist,
+		}
+		return nil
+	}
+
+	testCases := []struct {
+		method          string
+		url             string
+		reqBody         string
+		expectBodyInLog bool
+	}{
+		{
+			method:          "GET",
+			url:             "/api/v1/docMismatches",
+			expectBodyInLog: false,
+		},
+		{
+			method:          "GET",
+			url:             "/api/v1/nsMismatches",
+			expectBodyInLog: false,
+		},
+		{
+			method:          "GET",
+			url:             "/api/v1/progress",
+			expectBodyInLog: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		var logBuf bytes.Buffer
+		zl := zerolog.New(&logBuf).Level(zerolog.DebugLevel)
+		lg := logger.NewLogger(&zl, &logBuf)
+		ws := NewWebServer(27020, suite.mockVerifier, lg)
+		router := ws.setupRouter()
+
+		var reqBody io.Reader
+		if tc.reqBody != "" {
+			reqBody = strings.NewReader(tc.reqBody)
+		}
+
+		req, err := http.NewRequest(tc.method, tc.url, reqBody)
+		suite.Require().NoError(err)
+
+		router.ServeHTTP(httptest.NewRecorder(), req)
+
+		entry := findSentResponseLogEntry(logBuf.String())
+		suite.Require().NotNilf(entry, "%s %s log needs a 'sent response' entry", tc.method, tc.url)
+
+		_, hasBody := entry["body"]
+		_, hasBytesWritten := entry["bytesWritten"]
+
+		suite.Assert().Equalf(
+			tc.expectBodyInLog, hasBody,
+			"%s %s log response needs 'body' = %v", tc.method, tc.url, tc.expectBodyInLog,
+		)
+		suite.Assert().Truef(
+			hasBytesWritten,
+			"%s %s log response needs 'bytesWritten'", tc.method, tc.url,
+		)
+	}
 }
 
 func TestWebServer(t *testing.T) {
