@@ -407,12 +407,9 @@ func serveMismatches[T api.AnyMismatchInfo](
 		payload := gin.H{
 			"error": fmt.Sprintf("internal error (ref #: %s)", errRef),
 		}
-		if err := errEncoder.Encode(payload); err != nil {
-			server.logger.Error().
-				Str("ref", errRef).
-				Err(err).
-				Msg("sending error response")
-		}
+
+		// Skip error checking.
+		_ = errEncoder.Encode(payload)
 	}
 
 READ:
