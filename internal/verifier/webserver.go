@@ -83,7 +83,14 @@ func (rbw responseBodyWriter) Write(b []byte) (int, error) {
 }
 
 // RequestAndResponseLogger is the middleware for logging the request and response.
-func (server *WebServer) RequestAndResponseLogger() gin.HandlerFunc {
+// Paths passed in skipResponseBodyPaths will have their response body omitted from
+// the log (e.g. streaming endpoints that can return arbitrarily large payloads).
+func (server *WebServer) RequestAndResponseLogger(skipResponseBodyPaths ...string) gin.HandlerFunc {
+	skipSet := make(map[string]bool, len(skipResponseBodyPaths))
+	for _, p := range skipResponseBodyPaths {
+		skipSet[p] = true
+	}
+
 	return func(c *gin.Context) {
 		t := time.Now()
 
@@ -108,17 +115,26 @@ func (server *WebServer) RequestAndResponseLogger() gin.HandlerFunc {
 		// Add the UUID to the header.
 		c.Header("Trace-Id", traceID)
 
-		// Capture the response body and log it separately below.
-		rbw := &responseBodyWriter{ResponseWriter: c.Writer, body: bytes.NewBufferString("")}
-		c.Writer = rbw
+		var rbw *responseBodyWriter
+
+		if !skipSet[c.FullPath()] {
+			// Capture the response body and log it separately below.
+			rbw = &responseBodyWriter{ResponseWriter: c.Writer, body: bytes.NewBufferString("")}
+			c.Writer = rbw
+		}
 
 		c.Next()
 
-		server.logger.Info().Int("status", c.Writer.Status()).
-			Str("body", rbw.body.String()).
+		event := server.logger.Info().Int("status", c.Writer.Status()).
+			Int("bytesWritten", c.Writer.Size()).
 			Str("traceID", traceID).
-			Str("latency", time.Since(t).String()).
-			Msg("sent response")
+			Str("latency", time.Since(t).String())
+
+		if rbw != nil {
+			event = event.Str("body", rbw.body.String())
+		}
+
+		event.Msg("sent response")
 	}
 }
 
@@ -130,7 +146,10 @@ func (server *WebServer) setupRouter() *gin.Engine {
 
 	router := gin.New()
 	pprof.Register(router)
-	router.Use(server.RequestAndResponseLogger(), gin.Recovery())
+	router.Use(server.RequestAndResponseLogger(
+		"/api/v1/docMismatches",
+		"/api/v1/nsMismatches",
+	), gin.Recovery())
 
 	router.Use(func(c *gin.Context) {
 		c.Header("Server", "migration-verifier/"+buildvar.Revision)
@@ -389,11 +408,21 @@ func serveMismatches[T api.AnyMismatchInfo](
 		payload := gin.H{
 			"error": fmt.Sprintf("internal error (ref #: %s)", errRef),
 		}
-		if err := errEncoder.Encode(payload); err != nil {
+
+		if encodeErr := errEncoder.Encode(payload); encodeErr != nil {
+			// If the request context is already done, the client most likely
+			// disconnected; avoid noisy logging in that case.
+			select {
+			case <-c.Request.Context().Done():
+				return
+			default:
+			}
+
 			server.logger.Error().
+				Str("request", c.Request.URL.Path).
 				Str("ref", errRef).
-				Err(err).
-				Msg("sending error response")
+				Err(encodeErr).
+				Msg("failed to encode error response")
 		}
 	}
 
