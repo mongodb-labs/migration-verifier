@@ -163,29 +163,7 @@ func (o *OplogReader) createCursor(
 		findOpts.SetOplogReplay(true) //nolint:staticcheck
 	}
 
-	oplogFilter := bson.D{{"$and", []any{
-		bson.D{{"ts", bson.D{{"$gte", startTS}}}},
-
-		bson.D{{"$expr", agg.Or{
-			// plain ops: one write per op
-			append(
-				agg.And{agg.In("$op", mslices.Of("d", "i", "u"))},
-				o.getNSFilter("$$ROOT")...,
-			),
-
-			// op=n is for no-ops, so we stay up-to-date.
-			agg.Eq{"$op", "n"},
-
-			// op=c is for applyOps, and also to detect forbidden DDL.
-			agg.And{
-				agg.Eq{"$op", "c"},
-				agg.Not{helpers.StringHasPrefix{
-					FieldRef: "$ns",
-					Prefix:   "config.",
-				}},
-			},
-		}}},
-	}}}
+	oplogFilter := o.getQueryFilter(startTS)
 
 	cursor, err := o.watcherClient.
 		Database("local").
@@ -206,6 +184,42 @@ func (o *OplogReader) createCursor(
 	o.allowDDLBeforeTS = allowDDLBeforeTS
 
 	return startTS, nil
+}
+
+func (o *OplogReader) getQueryFilter(startTS bson.Timestamp) bson.D {
+	return bson.D{{"$and", []bson.D{
+		{{"ts", bson.D{{"$gte", startTS}}}},
+
+		{{"$expr", agg.Or{
+			// plain ops: one write per op
+			append(
+				agg.And{agg.In("$op", mslices.Of("d", "i", "u"))},
+				o.getNSFilter("$$ROOT")...,
+			),
+
+			// op=n is for no-ops, so we stay up-to-date.
+			agg.Eq{"$op", "n"},
+
+			// op=c is for applyOps & other commands (e.g., most DDL).
+			agg.And{
+				agg.Eq{"$op", "c"},
+
+				agg.Not{helpers.StringHasPrefix{
+					FieldRef: "$ns",
+					Prefix:   "config.",
+				}},
+
+				// For any non-applyOps commands, ignore excluded namespaces.
+				// Note that this does NOT exclude out-filter namespaces for
+				// namespace filtering because we want such DDL events to
+				// trigger a failure.
+				agg.Or{
+					"$o.applyOps",
+					o.getNotExcludedNSPrefixFilter("$$ROOT"),
+				},
+			},
+		}}},
+	}}}
 }
 
 func (o *OplogReader) getExprProjection() bson.D {
@@ -675,8 +689,9 @@ func (o *OplogReader) getExcludedNSPrefixes() []string {
 	)
 }
 
-func (o *OplogReader) getNSFilter(docroot string) agg.And {
-	filter := agg.And(lo.Map(
+// The returned filter excludes according to getExcludedNSPrefixes().
+func (o *OplogReader) getNotExcludedNSPrefixFilter(docroot string) agg.And {
+	return agg.And(lo.Map(
 		o.getExcludedNSPrefixes(),
 		func(prefix string, _ int) any {
 			return agg.Not{helpers.StringHasPrefix{
@@ -685,6 +700,11 @@ func (o *OplogReader) getNSFilter(docroot string) agg.And {
 			}}
 		},
 	))
+}
+
+// Returns a filter that only matches ops in appropriate namespaces.
+func (o *OplogReader) getNSFilter(docroot string) agg.And {
+	filter := o.getNotExcludedNSPrefixFilter(docroot)
 
 	if len(o.namespaces) > 0 {
 		filter = append(

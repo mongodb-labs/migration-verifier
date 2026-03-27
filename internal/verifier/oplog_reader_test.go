@@ -3,6 +3,7 @@ package verifier
 import (
 	"time"
 
+	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
@@ -10,6 +11,96 @@ import (
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
+
+// TestOplogReader_IgnoreMetaDDL verifies that the oplog reader ignores
+// metadata DDL but catches DDL on other namespaces.
+func (suite *IntegrationTestSuite) TestOplogReader_IgnoreMetaDDL() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+
+	dbName := suite.DBNameForTest()
+	verifier.SetSrcNamespaces(mslices.Of(dbName + ".coll"))
+	verifier.SetDstNamespaces(mslices.Of(dbName + ".coll"))
+	verifier.SetNamespaceMap()
+
+	if suite.GetTopology(verifier.dstClient) == util.TopologySharded {
+		suite.T().Skipf("oplog mode is only for unsharded clusters")
+	}
+
+	var reader changeReader = verifier.newOplogReader(
+		nil,
+		dst,
+		verifier.dstClient,
+		*verifier.dstClusterInfo,
+	)
+
+	eg, egCtx := contextplus.ErrGroup(ctx)
+	suite.Require().NoError(reader.start(egCtx, eg))
+
+	err := verifier.dstClient.Database(verifier.metaDBName).CreateCollection(
+		ctx,
+		"must_not_be_seen",
+	)
+	suite.Require().NoError(err)
+
+	err = verifier.dstClient.Database("admin").RunCommand(
+		ctx,
+		bson.D{
+			{"appendOplogNote", 1},
+			{"data", bson.D{
+				{suite.T().Name(), 1},
+			}},
+		},
+	).Err()
+	suite.Require().NoError(err)
+
+	batchReceiver := reader.getReadChannel()
+
+	batchOpt, err := chanutil.ReadWithDoneCheck(ctx, batchReceiver)
+	suite.Require().NoError(err)
+
+	batch := batchOpt.MustGetf("need batch")
+
+	suite.Assert().Empty(batch.events)
+}
+
+// TestOplogReader_NSFilterDDL verifies that the oplog reader fails if it
+// finds a DDL event on the source in an out-filter namespace.
+func (suite *IntegrationTestSuite) TestOplogReader_NSFilterDDL() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+
+	dbName := suite.DBNameForTest()
+	verifier.SetSrcNamespaces(mslices.Of(dbName + ".coll"))
+	verifier.SetDstNamespaces(mslices.Of(dbName + ".coll"))
+	verifier.SetNamespaceMap()
+
+	if suite.GetTopology(verifier.dstClient) == util.TopologySharded {
+		suite.T().Skipf("oplog mode is only for unsharded clusters")
+	}
+
+	var reader changeReader = verifier.newOplogReader(
+		nil,
+		src,
+		verifier.srcClient,
+		*verifier.srcClusterInfo,
+	)
+
+	eg, egCtx := contextplus.ErrGroup(ctx)
+	suite.Require().NoError(reader.start(egCtx, eg))
+
+	err := verifier.srcClient.Database(dbName).CreateCollection(
+		ctx,
+		"out-filter-coll",
+	)
+	suite.Require().NoError(err)
+
+	err = eg.Wait()
+	suite.Require().Error(err, "must fail")
+	suite.Assert().ErrorAs(err, &UnknownEventError{})
+}
 
 // TestOplogReader_SourceDDL verifies that source DDL crashes the oplog reader.
 func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
