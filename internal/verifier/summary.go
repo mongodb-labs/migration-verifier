@@ -39,7 +39,7 @@ const (
 // Returned booleans indicate:
 //   - whether any mismatches were found
 //   - whether any incomplete tasks were found
-func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context, strBuilder *strings.Builder) (bool, bool, error) {
+func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context, out io.Writer) (bool, bool, error) {
 	generation, _ := verifier.getGeneration()
 
 	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
@@ -55,46 +55,40 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 
 	anyAreIncomplete := len(incompleteTasks) > 0
 
-	if len(failedTasks) != 0 {
-		table := tablewriter.NewWriter(strBuilder)
-		table.SetHeader([]string{"Index", "Cluster", "Field", "Namespace", "Details"})
-
-		taskDiscrepancies, err := getMismatchesForTasks(
-			ctx,
-			verifier.verificationDatabase(),
-			lo.Map(
-				failedTasks,
-				func(ft tasks.Task, _ int) bson.ObjectID {
-					return ft.PrimaryKey
-				},
-			),
-		)
-		if err != nil {
-			return false, false, errors.Wrapf(
-				err,
-				"fetching %d failed tasks' discrepancies",
-				len(failedTasks),
-			)
-		}
-
-		for _, v := range failedTasks {
-			for _, f := range taskDiscrepancies[v.PrimaryKey] {
-				table.Append([]string{
-					fmt.Sprintf("%v", f.ID),
-					f.Cluster,
-					f.Field,
-					f.NameSpace,
-					f.Details,
-				})
-			}
-		}
-		strBuilder.WriteString("\nCollections/Indexes in failed or retry status:\n")
-		table.Render()
-
-		return true, anyAreIncomplete, nil
+	if len(failedTasks) == 0 {
+		return false, anyAreIncomplete, nil
 	}
 
-	return false, anyAreIncomplete, nil
+	table := tablewriter.NewWriter(out)
+	table.SetHeader([]string{"Index", "Cluster", "Field", "Namespace", "Details"})
+
+	mismatches, err := getNamespaceMismatchesForGeneration(
+		ctx,
+		verifier.verificationDatabase(),
+		generation,
+	)
+	if err != nil {
+		return false, false, errors.Wrapf(
+			err,
+			"fetching generation %d’s namespace mismatches",
+			generation,
+		)
+	}
+
+	for _, f := range mismatches {
+		table.Append([]string{
+			fmt.Sprintf("%v", f.ID),
+			f.Cluster,
+			f.Field,
+			f.NameSpace,
+			f.Details,
+		})
+	}
+
+	_, _ = out.Write([]byte("\nCollections/Indexes in failed or retry status:\n"))
+	table.Render()
+
+	return true, anyAreIncomplete, nil
 }
 
 func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (option.Option[time.Duration], bool, error) {
@@ -107,7 +101,6 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		tasks.VerifyDocuments,
 		generation,
 	)
-
 	if err != nil {
 		return option.None[time.Duration](), false, err
 	}
@@ -115,7 +108,6 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	anyAreIncomplete := len(incompleteTasks) > 0
 
 	if len(failedTasks) == 0 {
-
 		// Nothing has failed/mismatched, so there’s nothing to print.
 		return option.None[time.Duration](), anyAreIncomplete, nil
 	}
@@ -832,7 +824,6 @@ func (verifier *Verifier) getPerNamespaceWorkerStats() map[string][]WorkerStatus
 }
 
 func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
-
 	table := tablewriter.NewWriter(builder)
 	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed", "Detail"})
 
