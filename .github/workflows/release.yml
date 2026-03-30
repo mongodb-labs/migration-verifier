@@ -46,14 +46,15 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           set -o errexit
+          TAG_NAME=$(git describe --exact-match)
           ./build.sh
-          tar czf migration_verifier_${GOOS}_${GOARCH}.tar.gz migration_verifier
+          tar czf migration_verifier_${TAG_NAME}_${GOOS}_${GOARCH}.tar.gz migration_verifier
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: migration_verifier_${{ matrix.goos }}_${{ matrix.goarch }}
-          path: migration_verifier_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz
+          path: migration_verifier_*_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz
 
   release:
     needs: build
