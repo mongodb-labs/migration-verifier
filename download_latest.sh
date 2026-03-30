@@ -1,7 +1,6 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 set -o errexit
-set -o pipefail
 
 filename=migration_verifier
 
