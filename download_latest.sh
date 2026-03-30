@@ -1,6 +1,7 @@
 #!/bin/sh
 
 set -o errexit
+set -o pipefail
 
 filename=migration_verifier
 
@@ -42,7 +43,7 @@ fi
 
 echo "Downloading $DOWNLOAD_URL …"
 
-curl -sSL "$DOWNLOAD_URL" | tar -xzf -
+curl -fsSL "$DOWNLOAD_URL" > "$filename"
 
 chmod +x "$filename"
 
