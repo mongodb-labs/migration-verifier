@@ -27,6 +27,8 @@ import (
 
 const (
 	metaDBName = "VERIFIER_TEST_META"
+
+	maxDBNameLen = 63
 )
 
 type IntegrationTestSuite struct {
@@ -168,7 +170,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	task := tasks.Task{QueryFilter: qfilter}
 
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
-	//verifier.SetStartClean(true)
+	// verifier.SetStartClean(true)
 	verifier.SetNumWorkers(3)
 	verifier.SetGenerationPauseDelay(0)
 	verifier.SetWorkerSleepDelay(0)
@@ -237,9 +239,13 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 
 func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {
 	name := suite.T().Name()
-	return strings.ReplaceAll(
+	name = strings.ReplaceAll(
 		strings.ReplaceAll(name, "/", "-"),
 		".",
 		"-",
 	) + strings.Join(suffixes, "")
+
+	excess := max(0, len(name)-maxDBNameLen)
+
+	return name[excess:]
 }

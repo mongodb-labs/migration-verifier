@@ -84,6 +84,8 @@ const (
 	progressReportTimeWarnThreshold = 10 * time.Second
 
 	DefaultRecheckMaxSizeMB = 8
+
+	collTypeMismatchField = "type"
 )
 
 type whichCluster string
@@ -739,6 +741,14 @@ REPORTS:
 		)
 	}
 
+	if ts, has := task.SrcTimestamp.Get(); has {
+		verifier.NoteCompareOfOptime(src, ts)
+	}
+
+	if ts, has := task.DstTimestamp.Get(); has {
+		verifier.NoteCompareOfOptime(dst, ts)
+	}
+
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
@@ -912,8 +922,8 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		return []compare.Result{{
 			NameSpace: srcNs,
 			Cluster:   constants.ClusterTarget,
-			Field:     "Type",
-			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Type, dstSpec.Type),
+			Field:     collTypeMismatchField,
+			Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec.Type, dstSpec.Type),
 		}}, false, nil
 		// If the types differ, the rest is not important.
 	}
@@ -922,8 +932,8 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		results = append(results, compare.Result{
 			NameSpace: dstNs,
 			Cluster:   constants.ClusterTarget,
-			Field:     "ReadOnly",
-			Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Info.ReadOnly, dstSpec.Info.ReadOnly),
+			Field:     "readOnly",
+			Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec.Info.ReadOnly, dstSpec.Info.ReadOnly),
 		})
 	}
 	if !bytes.Equal(srcSpec.Options, dstSpec.Options) {
@@ -935,15 +945,26 @@ func (verifier *Verifier) compareCollectionSpecifications(
 				srcNs,
 			)
 		}
+
+		resultID := mbson.ToRawValue("spec")
+
 		if mismatchDetails == nil {
 			results = append(results, compare.Result{
 				NameSpace: dstNs,
 				Cluster:   constants.ClusterTarget,
-				Field:     "Options (Field Order Only)",
-				Details:   Mismatch + fmt.Sprintf(" : src: %v, dst: %v", srcSpec.Options, dstSpec.Options),
+				ID:        resultID,
+				Field:     "options (field order only)",
+				Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec.Options, dstSpec.Options),
 			})
 		} else {
-			results = append(results, mismatchResultsToVerificationResults(mismatchDetails, srcSpec.Options, dstSpec.Options, srcNs, mbson.ToRawValue("spec"), "Options.")...)
+			results = append(results, mismatchResultsToVerificationResults(
+				mismatchDetails,
+				srcSpec.Options,
+				dstSpec.Options,
+				srcNs,
+				resultID,
+				"options.",
+			)...)
 		}
 	}
 
@@ -1100,7 +1121,7 @@ func (verifier *Verifier) verifyIndexes(
 					Field:     "index",
 					NameSpace: FullName(dstColl),
 					Cluster:   constants.ClusterTarget,
-					Details:   Mismatch + ": " + diff.String(),
+					Details:   diff.String(),
 				})
 			}
 		} else {

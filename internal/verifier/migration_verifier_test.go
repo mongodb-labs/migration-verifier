@@ -36,6 +36,7 @@ import (
 	"github.com/10gen/migration-verifier/option"
 	"github.com/cespare/permute/v2"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"github.com/samber/lo/mutable"
@@ -249,6 +250,8 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 		require.NoError(db.Drop(ctx), "should drop database")
 
 		shardIds := getShardIds(suite.T(), client)
+
+		require.Greater(len(shardIds), 1, "need multiple shards; got: %+v", shardIds)
 
 		admin := client.Database("admin")
 
@@ -1734,6 +1737,49 @@ func (suite *IntegrationTestSuite) getFailuresForTask(
 	return slices.Collect(maps.Values(discrepancies))[0]
 }
 
+// This is no longer used in production because it entails a collection scan.
+func getMismatchesForTasks(
+	ctx context.Context,
+	db *mongo.Database,
+	taskIDs []bson.ObjectID,
+) (map[bson.ObjectID][]compare.Result, error) {
+	cursor, err := db.Collection(mismatchesCollectionName).Find(
+		ctx,
+		bson.D{
+			{"taskID", bson.D{{"$in", taskIDs}}},
+		},
+	)
+	if err != nil {
+		return nil, errors.Wrapf(err, "querying mismatches for %d task(s)", len(taskIDs))
+	}
+
+	result := map[bson.ObjectID][]compare.Result{}
+
+	for cursor.Next(ctx) {
+		var d MismatchInfo
+		if err := cursor.Decode(&d); err != nil {
+			return nil, errors.Wrapf(err, "parsing discrepancy %+v", cursor.Current)
+		}
+
+		result[d.TaskID] = append(
+			result[d.TaskID],
+			d.Detail,
+		)
+	}
+
+	if cursor.Err() != nil {
+		return nil, errors.Wrapf(cursor.Err(), "reading %d tasks’ mismatches", len(taskIDs))
+	}
+
+	for _, taskID := range taskIDs {
+		if _, ok := result[taskID]; !ok {
+			result[taskID] = []compare.Result{}
+		}
+	}
+
+	return result, nil
+}
+
 func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
@@ -1776,7 +1822,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 
 	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
-		suite.Equal(failures[0].Field, "Options.viewOn")
+		suite.Equal(failures[0].Field, "options.viewOn")
 		suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 		suite.Equal(failures[0].NameSpace, "testDb.wrongColl")
 	}
@@ -1801,7 +1847,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
-		suite.Equal(failures[0].Field, "Options.pipeline")
+		suite.Equal(failures[0].Field, "options.pipeline")
 		suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 		suite.Equal(failures[0].NameSpace, "testDb.wrongPipeline")
 	}
@@ -1831,9 +1877,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
-		suite.Equal(failures[0].Field, "Options.collation")
+		suite.Equal(failures[0].Field, "options.collation")
 		suite.Equal(failures[0].Cluster, constants.ClusterSource)
-		suite.Equal(failures[0].Details, "Missing")
+		suite.Equal(failures[0].Details, compare.Missing)
 		suite.Equal(failures[0].NameSpace, "testDb.missingOptionsSrc")
 	}
 
@@ -1855,9 +1901,9 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
-		suite.Equal(failures[0].Field, "Options.collation")
+		suite.Equal(failures[0].Field, "options.collation")
 		suite.Equal(failures[0].Cluster, constants.ClusterTarget)
-		suite.Equal(failures[0].Details, "Missing")
+		suite.Equal(failures[0].Details, compare.Missing)
 		suite.Equal(failures[0].NameSpace, "testDb.missingOptionsDst")
 	}
 
@@ -1880,7 +1926,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareViews() {
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
-		suite.Equal(failures[0].Field, "Options.collation")
+		suite.Equal(failures[0].Field, "options.collation")
 		suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 		suite.Equal(failures[0].NameSpace, "testDb.differentOptions")
 	}
@@ -1976,7 +2022,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	suite.Equal(1, len(failures))
-	suite.Equal(failures[0].Field, "Type")
+	suite.Equal(failures[0].Field, collTypeMismatchField)
 	suite.Equal(failures[0].Cluster, constants.ClusterTarget)
 	suite.Equal(failures[0].NameSpace, "testDb.viewOnSrc")
 
@@ -2006,7 +2052,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 		suite.Require().NotNil(field)
 		wrongFields = append(wrongFields, field)
 	}
-	suite.ElementsMatch([]string{"Options.capped", "Options.size"}, wrongFields)
+	suite.ElementsMatch([]string{"options.capped", "options.size"}, wrongFields)
 
 	// Default success case
 	task = &tasks.Task{
@@ -2178,10 +2224,52 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
 	if suite.Equal(1, len(failures)) {
 		suite.Equal(mbson.ToRawValue("wrong"), failures[0].ID)
-		suite.Regexp(regexp.MustCompile("^"+Mismatch), failures[0].Details)
+		suite.Contains(failures[0].Details, "/key/q")
+		suite.Contains(failures[0].Details, "/key/x")
+		suite.Contains(failures[0].Details, "/key/z")
 		suite.Equal(constants.ClusterTarget, failures[0].Cluster)
 		suite.Equal("testDb.testColl4", failures[0].NameSpace)
 	}
+}
+
+func (suite *IntegrationTestSuite) TestReportCollectionMetadataMismatches_IndexMismatch() {
+	ctx := suite.Context()
+	verifier := suite.BuildVerifier()
+
+	dbName := suite.DBNameForTest()
+	ns := dbName + ".testColl"
+
+	// Create an index on src that doesn't exist on dst.
+	srcColl := suite.srcMongoClient.Database(dbName).Collection("testColl")
+	_, err := srcColl.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{"x", 1}},
+		Options: options.Index().SetName("x_1"),
+	})
+	suite.Require().NoError(err)
+
+	suite.Require().NoError(
+		suite.dstMongoClient.Database(dbName).CreateCollection(ctx, srcColl.Name()),
+		"create dst collection",
+	)
+
+	verifier.SetSrcNamespaces([]string{ns})
+	verifier.SetDstNamespaces([]string{ns})
+	verifier.SetNamespaceMap()
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	var out strings.Builder
+	hasMismatches, anyIncomplete, err := verifier.reportCollectionMetadataMismatches(ctx, &out)
+	suite.Require().NoError(err)
+	suite.True(hasMismatches, "should report mismatches")
+	suite.False(anyIncomplete, "generation should be complete")
+
+	output := out.String()
+	suite.Contains(output, "Collections/Indexes in failed or retry status")
+	suite.Contains(output, ns)
+	suite.Contains(output, "x_1")
+	suite.Contains(output, compare.Missing)
 }
 
 func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
@@ -3014,6 +3102,59 @@ func (suite *IntegrationTestSuite) TestBackgroundInIndexSpec() {
 	suite.Assert().Zero(
 		status.MetadataMismatchTasks,
 		"no metadata mismatch",
+	)
+}
+
+// TestGetProgress_LongestDocMismatch is a regression test for a bug where
+// GetProgress queried for the longest-lived mismatch using the current
+// generation rather than the prior generation. Since mismatches are written
+// for generation N and surfaced as results for generation N+1, querying the
+// current generation always returned nothing.
+func (suite *IntegrationTestSuite) TestGetProgress_LongestDocMismatch() {
+	ctx := suite.Context()
+
+	// Insert a document on src only so gen 0 records a mismatch.
+	_, err := suite.srcMongoClient.
+		Database(suite.DBNameForTest()).
+		Collection("stuff").
+		InsertOne(ctx, bson.D{{"_id", "onlyOnSrc"}})
+	suite.Require().NoError(err)
+
+	err = suite.dstMongoClient.
+		Database(suite.DBNameForTest()).
+		CreateCollection(ctx, "stuff")
+	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	// Gen 0: mismatch exists but GetProgress skips the longest-lived query
+	// (generation == 0), so LongestDocMismatch is always None here.
+	progress, err := verifier.GetProgress(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().True(progress.LongestDocMismatch.IsNone(), "gen 0 should have no longest-lived mismatch")
+
+	suite.Require().NoError(runner.StartNextGeneration())
+
+	// GetProgress() will, immediately after StartNextGeneration(), still be
+	// for generation 0. We thus have to retry until we get generation 1.
+	suite.Assert().Eventually(
+		func() bool {
+			progress, err = verifier.GetProgress(ctx)
+			suite.Require().NoError(err)
+			return progress.Generation == 1
+		},
+		time.Minute,
+		time.Millisecond,
+		"should get to generation 1",
+	)
+
+	suite.Assert().True(
+		progress.LongestDocMismatch.IsSome(),
+		"should report a longest-lived mismatch from the prior generation",
 	)
 }
 
