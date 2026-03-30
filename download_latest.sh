@@ -43,8 +43,6 @@ fi
 
 echo "Downloading $DOWNLOAD_URL …"
 
-curl -fsSL "$DOWNLOAD_URL" > "$filename"
-
-chmod +x "$filename"
+curl -fsSL "$DOWNLOAD_URL" | tar -xzf -
 
 echo "✅ Migration Verifier $VERSION is now saved as $filename."
