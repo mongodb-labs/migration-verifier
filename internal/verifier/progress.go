@@ -66,6 +66,27 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 		return err
 	})
 
+	// Fetch and cache generation-0 stats on the first /progress call after
+	// generation 0 completes. The cache is set at most once (CompareAndSwap),
+	// so concurrent callers racing here are harmless.
+	if generation > 0 && verifier.cachedGen0Stats.Load() == nil {
+		eg.Go(func() error {
+			s, err := verifier.getComparisonStatistics(egCtx, 0)
+			if err != nil {
+				return err
+			}
+			computed := api.ProgressGenerationStats{
+				DocsCompared:     s.comparedDocs,
+				TotalDocs:        s.totalDocs,
+				SrcBytesCompared: s.comparedBytes,
+				TotalSrcBytes:    s.totalBytes,
+				TotalNamespaces:  s.totalNss,
+			}
+			verifier.cachedGen0Stats.CompareAndSwap(nil, &computed)
+			return nil
+		})
+	}
+
 	if err := eg.Wait(); err != nil {
 		return api.Progress{Error: err}, err
 	}
@@ -94,7 +115,10 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 			TotalDocs:        compareStats.totalDocs,
 			SrcBytesCompared: compareStats.comparedBytes,
 			TotalSrcBytes:    compareStats.totalBytes,
+			TotalNamespaces:  compareStats.totalNss,
 		},
+
+		Gen0Stats: option.FromPointer(verifier.cachedGen0Stats.Load()),
 
 		SrcLastRecheckedTS: srcLastRecheckedTS,
 		DstLastRecheckedTS: dstLastRecheckedTS,

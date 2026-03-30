@@ -129,6 +129,14 @@ These represent a logical time in MongoDB’s replication protocol.
     - `totalDocs` (unsigned)
     - `srcBytesCompared` (unsigned)
     - `totalSrcBytes` (unsigned, only present in `check` phase)
+    - `totalNamespaces` (unsigned)
+  - `gen0Stats` (absent during generation 0; present from generation 1 onward): final
+    doc/byte counts from the completed initial check
+    - `docsCompared` (unsigned)
+    - `totalDocs` (unsigned)
+    - `srcBytesCompared` (unsigned)
+    - `totalSrcBytes` (unsigned)
+    - `totalNamespaces` (unsigned)
   - `recentRecheckSecs` (array of recent recheck generations’ durations)
   - `srcChangeStats`
     - `eventsPerSecond` (unsigned)
