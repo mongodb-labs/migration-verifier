@@ -382,7 +382,7 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	}
 
 	verifier := suite.BuildVerifier()
-	suite.Assert().NoError(verifier.SetNumWorkers(10))
+	suite.Require().NoError(verifier.SetNumWorkers(10))
 	ctx := suite.Context()
 
 	docsCount := 12_000_000
