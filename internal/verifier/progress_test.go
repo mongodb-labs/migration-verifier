@@ -3,6 +3,8 @@ package verifier
 import (
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -61,4 +63,87 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0Stats() {
 	progress2, err := verifier.GetProgress(ctx)
 	suite.Require().NoError(err)
 	suite.Assert().Equal(progress.Gen0Stats, progress2.Gen0Stats, "gen0Stats should be stable across calls")
+}
+
+// TestGetProgress_Gen0StatsExcludesActiveWorkerCounts verifies that live
+// in-memory worker counts for the current generation are not added to the
+// cached gen0Stats. Before the fix, getComparisonStatistics unconditionally
+// added workerTracker deltas regardless of which generation was being queried,
+// so gen0Stats.DocsCompared and SrcBytesCompared could be inflated by workers
+// running in generation 1+.
+func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorkerCounts() {
+	ctx := suite.Context()
+	dbName := suite.DBNameForTest()
+
+	const numDocs = 3
+	docs := make([]any, numDocs)
+	for i := range docs {
+		docs[i] = bson.D{{"_id", i}}
+	}
+
+	_, err := suite.srcMongoClient.Database(dbName).Collection("coll").InsertMany(ctx, docs)
+	suite.Require().NoError(err)
+	_, err = suite.dstMongoClient.Database(dbName).Collection("coll").InsertMany(ctx, docs)
+	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+	suite.Require().NoError(runner.StartNextGeneration())
+
+	suite.Require().Eventually(
+		func() bool {
+			p, err := verifier.GetProgress(ctx)
+			suite.Require().NoError(err)
+			return p.Generation == 1
+		},
+		time.Minute,
+		time.Millisecond,
+		"should reach generation 1",
+	)
+
+	// Read the persisted gen 0 counts directly — these are the ground truth.
+	gen0NSStats, err := verifier.GetPersistedNamespaceStatistics(ctx, 0)
+	suite.Require().NoError(err)
+	suite.Require().NotEmpty(gen0NSStats)
+
+	var expectedDocs types.DocumentCount
+	var expectedBytes types.ByteCount
+	for _, ns := range gen0NSStats {
+		expectedDocs += ns.DocsCompared
+		expectedBytes += ns.BytesCompared
+	}
+
+	// Simulate an active gen-1 worker by injecting non-zero counts into the
+	// workerTracker. These should appear in GenerationStats (current gen) but
+	// must NOT leak into gen0Stats.
+	const fakeWorkerDocs = types.DocumentCount(999)
+	const fakeWorkerBytes = types.ByteCount(99999)
+	fakeTask := tasks.Task{
+		PrimaryKey:  bson.NewObjectID(),
+		QueryFilter: tasks.QueryFilter{Namespace: dbName + ".coll"},
+	}
+	verifier.workerTracker.Set(0, fakeTask)
+	verifier.workerTracker.SetSrcCounts(0, fakeWorkerDocs, fakeWorkerBytes)
+	defer verifier.workerTracker.Unset(0)
+
+	progress, err := verifier.GetProgress(ctx)
+	suite.Require().NoError(err)
+
+	gen0Stats, hasGen0Stats := progress.Gen0Stats.Get()
+	suite.Require().True(hasGen0Stats, "gen0Stats must be present in generation 1+")
+
+	suite.Assert().EqualValues(expectedDocs, gen0Stats.DocsCompared,
+		"gen0Stats.DocsCompared must not include live gen-1 worker counts")
+	suite.Assert().EqualValues(expectedBytes, gen0Stats.SrcBytesCompared,
+		"gen0Stats.SrcBytesCompared must not include live gen-1 worker counts")
+
+	// Sanity check: the fake counts DO appear in the current generation's stats.
+	suite.Assert().GreaterOrEqual(
+		uint64(progress.GenerationStats.DocsCompared),
+		uint64(fakeWorkerDocs),
+		"GenerationStats should include the live worker counts",
+	)
 }

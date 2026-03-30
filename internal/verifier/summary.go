@@ -362,13 +362,20 @@ func (verifier *Verifier) getComparisonStatistics(
 		}
 	}
 
+	// Worker tracker counts are live, in-memory deltas for the current
+	// generation's in-progress tasks. Only add them when the caller is asking
+	// about the current generation; adding them to a historical generation
+	// would inflate DocsCompared/SrcBytesCompared incorrectly.
 	var activeWorkers int
-	perNamespaceWorkerStats := verifier.getPerNamespaceWorkerStats()
-	for _, nsWorkerStats := range perNamespaceWorkerStats {
-		for _, workerStats := range nsWorkerStats {
-			activeWorkers++
-			comparedDocs += workerStats.SrcDocCount
-			comparedBytes += workerStats.SrcByteCount
+	var perNamespaceWorkerStats map[string][]WorkerStatus
+	if generation == verifier.generation {
+		perNamespaceWorkerStats = verifier.getPerNamespaceWorkerStats()
+		for _, nsWorkerStats := range perNamespaceWorkerStats {
+			for _, workerStats := range nsWorkerStats {
+				activeWorkers++
+				comparedDocs += workerStats.SrcDocCount
+				comparedBytes += workerStats.SrcByteCount
+			}
 		}
 	}
 
