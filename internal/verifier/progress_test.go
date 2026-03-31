@@ -125,7 +125,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorker
 
 	// The Eventually loop above already triggered a GetProgress call that
 	// populated cachedGen0Stats. Clear it so the call below recomputes
-	// gen0Stats fresh — that is what exercises the fix.
+	// gen0Stats fresh.
 	verifier.cachedGen0Stats.Store(nil)
 
 	// Inject fake in-progress counts. Use a high-numbered worker slot to avoid
@@ -147,7 +147,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorker
 	gen0Stats, hasGen0Stats := progress.Gen0Stats.Get()
 	suite.Require().True(hasGen0Stats, "gen0Stats must be present in generation 1+")
 
-	// Without the fix, getComparisonStatistics would have added fakeWorkerDocs
+	// Ensure that getComparisonStatistics doesn’t add fakeWorkerDocs
 	// and fakeWorkerBytes to gen0Stats unconditionally.
 	suite.Assert().EqualValues(expectedDocs, gen0Stats.DocsCompared,
 		"gen0Stats.DocsCompared must not include live gen-1 worker counts")
