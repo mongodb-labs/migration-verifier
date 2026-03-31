@@ -59,6 +59,8 @@ type ProgressGenerationStats struct {
 
 	SrcBytesCompared types.ByteCount `bson:"srcBytesCompared"`
 	TotalSrcBytes    types.ByteCount `bson:"totalSrcBytes,omitempty"`
+
+	TotalNamespaces types.NamespaceCount `bson:"totalNamespaces"`
 }
 
 type ProgressChangeStats struct {
@@ -81,6 +83,11 @@ type Progress struct {
 
 	Generation      int                     `bson:"generation"`
 	GenerationStats ProgressGenerationStats `bson:"generationStats"`
+
+	// Gen0Stats holds the final doc/byte counts from generation 0 (the initial
+	// check). It is absent during generation 0 itself and is populated on the
+	// first /progress call after generation 0 completes.
+	Gen0Stats option.Option[ProgressGenerationStats] `bson:"gen0Stats,omitempty"`
 
 	RecentRecheckSecs []float64 `bson:"recentRecheckSecs,omitempty"`
 

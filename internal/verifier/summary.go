@@ -331,6 +331,7 @@ type comparisonStatistics struct {
 func (verifier *Verifier) getComparisonStatistics(
 	ctx context.Context,
 	generation int,
+	includeWorkerDeltas bool,
 ) (comparisonStatistics, error) {
 	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, generation)
 	if err != nil {
@@ -363,12 +364,15 @@ func (verifier *Verifier) getComparisonStatistics(
 	}
 
 	var activeWorkers int
-	perNamespaceWorkerStats := verifier.getPerNamespaceWorkerStats()
-	for _, nsWorkerStats := range perNamespaceWorkerStats {
-		for _, workerStats := range nsWorkerStats {
-			activeWorkers++
-			comparedDocs += workerStats.SrcDocCount
-			comparedBytes += workerStats.SrcByteCount
+	var perNamespaceWorkerStats map[string][]WorkerStatus
+	if includeWorkerDeltas {
+		perNamespaceWorkerStats = verifier.getPerNamespaceWorkerStats()
+		for _, nsWorkerStats := range perNamespaceWorkerStats {
+			for _, workerStats := range nsWorkerStats {
+				activeWorkers++
+				comparedDocs += workerStats.SrcDocCount
+				comparedBytes += workerStats.SrcByteCount
+			}
 		}
 	}
 
@@ -391,7 +395,11 @@ func (verifier *Verifier) printNamespaceStatistics(
 	generation int,
 	strBuilder *strings.Builder,
 ) (bool, error) {
-	compareStats, err := verifier.getComparisonStatistics(ctx, generation)
+	compareStats, err := verifier.getComparisonStatistics(
+		ctx,
+		generation,
+		true,
+	)
 	if err != nil {
 		return false, err
 	}
