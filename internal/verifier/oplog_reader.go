@@ -163,10 +163,10 @@ func (o *OplogReader) createCursor(
 		findOpts.SetOplogReplay(true) //nolint:staticcheck
 	}
 
-	oplogFilter := bson.D{{"$and", []bson.D{
-		{{"ts", bson.D{{"$gte", startTS}}}},
+	oplogFilter := bson.D{{"$and", []any{
+		bson.D{{"ts", bson.D{{"$gte", startTS}}}},
 
-		{{"$expr", agg.Or{
+		bson.D{{"$expr", agg.Or{
 			// plain ops: one write per op
 			append(
 				agg.And{agg.In("$op", mslices.Of("d", "i", "u"))},
@@ -180,16 +180,31 @@ func (o *OplogReader) createCursor(
 			agg.And{
 				agg.Eq{"$op", "c"},
 
-				// Never consider op=c for the config DB.
+				// Never consider op=c for the config DB (even an applyOps).
 				agg.Not{helpers.StringHasPrefix{
 					FieldRef: "$ns",
 					Prefix:   "config.",
 				}},
 
-				// For any non-applyOps commands, ignore excluded namespaces.
-				// Note that this does NOT exclude out-filter namespaces for
+				// Allow applyOps, and any other command for a non-excluded
+				// namespace.
+				//
+				// Note that this does NOT exclude out-filter namespaces under
 				// namespace filtering because we want such DDL events to
 				// trigger a failure.
+				//
+				// EXAMPLE:
+				//
+				// Assume only namespaces `yes1` and `yes2` are verified.
+				//
+				// This allows:
+				// - any applyOps (though we exclude the `config` DB above)
+				// - op=c for `yes1` or `yes2` (Verifier will probably fail
+				//   because it’s DDL on a verified namespace.)
+				//
+				// This excludes:
+				// - op=c for `nope1` (DDL on an out-filter namespace)
+				// - op=c for Verifier’s metadata
 				agg.Or{
 					"$o.applyOps",
 					o.getNotExcludedNSPrefixFilter("$$ROOT"),
