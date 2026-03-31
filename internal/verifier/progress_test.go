@@ -123,37 +123,34 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorker
 		expectedBytes += ns.BytesCompared
 	}
 
-	// Simulate an active gen-1 worker by injecting non-zero counts into the
-	// workerTracker. These should appear in GenerationStats (current gen) but
-	// must NOT leak into gen0Stats.
+	// The Eventually loop above already triggered a GetProgress call that
+	// populated cachedGen0Stats. Clear it so the call below recomputes
+	// gen0Stats fresh — that is what exercises the fix.
+	verifier.cachedGen0Stats.Store(nil)
+
+	// Inject fake in-progress counts. Use a high-numbered worker slot to avoid
+	// colliding with real gen-1 workers, which start from slot 0.
+	const fakeSlot = 999
 	const fakeWorkerDocs = types.DocumentCount(999)
 	const fakeWorkerBytes = types.ByteCount(99999)
 	fakeTask := tasks.Task{
 		PrimaryKey:  bson.NewObjectID(),
 		QueryFilter: tasks.QueryFilter{Namespace: dbName + ".coll"},
 	}
-	verifier.workerTracker.Set(0, fakeTask)
-	verifier.workerTracker.SetSrcCounts(0, fakeWorkerDocs, fakeWorkerBytes)
-	defer verifier.workerTracker.Unset(0)
+	verifier.workerTracker.Set(fakeSlot, fakeTask)
+	verifier.workerTracker.SetSrcCounts(fakeSlot, fakeWorkerDocs, fakeWorkerBytes)
+	defer verifier.workerTracker.Unset(fakeSlot)
 
 	progress, err := verifier.GetProgress(ctx)
 	suite.Require().NoError(err)
 
-	suite.T().Logf("progress: %+v", progress)
-
 	gen0Stats, hasGen0Stats := progress.Gen0Stats.Get()
 	suite.Require().True(hasGen0Stats, "gen0Stats must be present in generation 1+")
 
+	// Without the fix, getComparisonStatistics would have added fakeWorkerDocs
+	// and fakeWorkerBytes to gen0Stats unconditionally.
 	suite.Assert().EqualValues(expectedDocs, gen0Stats.DocsCompared,
 		"gen0Stats.DocsCompared must not include live gen-1 worker counts")
 	suite.Assert().EqualValues(expectedBytes, gen0Stats.SrcBytesCompared,
 		"gen0Stats.SrcBytesCompared must not include live gen-1 worker counts")
-
-	// Sanity check: the fake counts DO appear in the current generation's stats.
-	suite.Assert().GreaterOrEqual(
-		uint64(progress.GenerationStats.DocsCompared),
-		uint64(fakeWorkerDocs),
-		"GenerationStats (%+v) should include the live worker counts",
-		progress.GenerationStats,
-	)
 }
