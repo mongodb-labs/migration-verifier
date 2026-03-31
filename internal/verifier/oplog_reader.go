@@ -204,6 +204,7 @@ func (o *OplogReader) getQueryFilter(startTS bson.Timestamp) bson.D {
 			agg.And{
 				agg.Eq{"$op", "c"},
 
+				// Never consider op=c for the config DB.
 				agg.Not{helpers.StringHasPrefix{
 					FieldRef: "$ns",
 					Prefix:   "config.",
@@ -689,7 +690,8 @@ func (o *OplogReader) getExcludedNSPrefixes() []string {
 	)
 }
 
-// The returned filter excludes according to getExcludedNSPrefixes().
+// Returns a filter that matches any op whose namespace is not excluded.
+// (This doesn’t consider user-specified namespace filters.)
 func (o *OplogReader) getNotExcludedNSPrefixFilter(docroot string) agg.And {
 	return agg.And(lo.Map(
 		o.getExcludedNSPrefixes(),
@@ -702,7 +704,7 @@ func (o *OplogReader) getNotExcludedNSPrefixFilter(docroot string) agg.And {
 	))
 }
 
-// Returns a filter that only matches ops in appropriate namespaces.
+// Returns a filter that only matches ops for appropriate namespaces.
 func (o *OplogReader) getNSFilter(docroot string) agg.And {
 	filter := o.getNotExcludedNSPrefixFilter(docroot)
 
