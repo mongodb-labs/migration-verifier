@@ -163,31 +163,7 @@ func (o *OplogReader) createCursor(
 		findOpts.SetOplogReplay(true) //nolint:staticcheck
 	}
 
-	oplogFilter := o.getQueryFilter(startTS)
-
-	cursor, err := o.watcherClient.
-		Database("local").
-		Collection(
-			"oplog.rs",
-			options.Collection().SetReadConcern(readconcern.Majority()),
-		).
-		Find(
-			sctx,
-			oplogFilter,
-			findOpts,
-		)
-	if err != nil {
-		return bson.Timestamp{}, errors.Wrapf(err, "opening cursor to tail %s’s oplog", o.readerType)
-	}
-
-	o.cursor = cursor
-	o.allowDDLBeforeTS = allowDDLBeforeTS
-
-	return startTS, nil
-}
-
-func (o *OplogReader) getQueryFilter(startTS bson.Timestamp) bson.D {
-	return bson.D{{"$and", []bson.D{
+	oplogFilter := bson.D{{"$and", []bson.D{
 		{{"ts", bson.D{{"$gte", startTS}}}},
 
 		{{"$expr", agg.Or{
@@ -221,6 +197,26 @@ func (o *OplogReader) getQueryFilter(startTS bson.Timestamp) bson.D {
 			},
 		}}},
 	}}}
+
+	cursor, err := o.watcherClient.
+		Database("local").
+		Collection(
+			"oplog.rs",
+			options.Collection().SetReadConcern(readconcern.Majority()),
+		).
+		Find(
+			sctx,
+			oplogFilter,
+			findOpts,
+		)
+	if err != nil {
+		return bson.Timestamp{}, errors.Wrapf(err, "opening cursor to tail %s’s oplog", o.readerType)
+	}
+
+	o.cursor = cursor
+	o.allowDDLBeforeTS = allowDDLBeforeTS
+
+	return startTS, nil
 }
 
 func (o *OplogReader) getExprProjection() bson.D {
