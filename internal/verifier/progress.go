@@ -61,7 +61,11 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 	eg.Go(func() error {
 		var err error
 
-		compareStats, err = verifier.getComparisonStatistics(egCtx, generation)
+		compareStats, err = verifier.getComparisonStatistics(
+			egCtx,
+			generation,
+			true,
+		)
 
 		return err
 	})
@@ -71,7 +75,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 	// so concurrent callers racing here are harmless.
 	if generation > 0 && verifier.cachedGen0Stats.Load() == nil {
 		eg.Go(func() error {
-			s, err := verifier.getComparisonStatistics(egCtx, 0)
+			s, err := verifier.getComparisonStatistics(egCtx, 0, false)
 			if err != nil {
 				return err
 			}

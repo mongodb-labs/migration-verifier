@@ -331,6 +331,7 @@ type comparisonStatistics struct {
 func (verifier *Verifier) getComparisonStatistics(
 	ctx context.Context,
 	generation int,
+	includeWorkerDeltas bool,
 ) (comparisonStatistics, error) {
 	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, generation)
 	if err != nil {
@@ -362,13 +363,9 @@ func (verifier *Verifier) getComparisonStatistics(
 		}
 	}
 
-	// Worker tracker counts are live, in-memory deltas for the current
-	// generation's in-progress tasks. Only add them when the caller is asking
-	// about the current generation; adding them to a historical generation
-	// would inflate DocsCompared/SrcBytesCompared incorrectly.
 	var activeWorkers int
 	var perNamespaceWorkerStats map[string][]WorkerStatus
-	if generation == verifier.generation {
+	if includeWorkerDeltas {
 		perNamespaceWorkerStats = verifier.getPerNamespaceWorkerStats()
 		for _, nsWorkerStats := range perNamespaceWorkerStats {
 			for _, workerStats := range nsWorkerStats {
@@ -398,7 +395,11 @@ func (verifier *Verifier) printNamespaceStatistics(
 	generation int,
 	strBuilder *strings.Builder,
 ) (bool, error) {
-	compareStats, err := verifier.getComparisonStatistics(ctx, generation)
+	compareStats, err := verifier.getComparisonStatistics(
+		ctx,
+		generation,
+		true,
+	)
 	if err != nil {
 		return false, err
 	}

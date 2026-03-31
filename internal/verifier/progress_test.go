@@ -6,6 +6,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"golang.org/x/exp/slices"
 )
 
 // TestGetProgress_Gen0Stats verifies that gen0Stats is absent while generation
@@ -67,23 +68,29 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0Stats() {
 
 // TestGetProgress_Gen0StatsExcludesActiveWorkerCounts verifies that live
 // in-memory worker counts for the current generation are not added to the
-// cached gen0Stats. Before the fix, getComparisonStatistics unconditionally
-// added workerTracker deltas regardless of which generation was being queried,
-// so gen0Stats.DocsCompared and SrcBytesCompared could be inflated by workers
-// running in generation 1+.
+// cached gen0Stats.
 func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorkerCounts() {
 	ctx := suite.Context()
 	dbName := suite.DBNameForTest()
 
 	const numDocs = 3
-	docs := make([]any, numDocs)
+	docs := make([]bson.D, numDocs)
 	for i := range docs {
 		docs[i] = bson.D{{"_id", i}}
 	}
 
 	_, err := suite.srcMongoClient.Database(dbName).Collection("coll").InsertMany(ctx, docs)
 	suite.Require().NoError(err)
-	_, err = suite.dstMongoClient.Database(dbName).Collection("coll").InsertMany(ctx, docs)
+
+	// The src & dst must mismatch so that gen1 has >=1 task.
+	// Otherwise /progress in gen1 will return empty.
+	_, err = suite.dstMongoClient.Database(dbName).Collection("coll").InsertMany(
+		ctx,
+		append(
+			slices.Clone(docs),
+			bson.D{{"_id", "extra"}},
+		),
+	)
 	suite.Require().NoError(err)
 
 	verifier := suite.BuildVerifier()
@@ -132,6 +139,8 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorker
 	progress, err := verifier.GetProgress(ctx)
 	suite.Require().NoError(err)
 
+	suite.T().Logf("progress: %+v", progress)
+
 	gen0Stats, hasGen0Stats := progress.Gen0Stats.Get()
 	suite.Require().True(hasGen0Stats, "gen0Stats must be present in generation 1+")
 
@@ -144,6 +153,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorker
 	suite.Assert().GreaterOrEqual(
 		uint64(progress.GenerationStats.DocsCompared),
 		uint64(fakeWorkerDocs),
-		"GenerationStats should include the live worker counts",
+		"GenerationStats (%+v) should include the live worker counts",
+		progress.GenerationStats,
 	)
 }
