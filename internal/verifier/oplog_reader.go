@@ -186,25 +186,9 @@ func (o *OplogReader) createCursor(
 					Prefix:   "config.",
 				}},
 
-				// Allow applyOps, and any other command for a non-excluded
-				// namespace.
-				//
-				// Note that this does NOT exclude out-filter namespaces under
-				// namespace filtering because we want such DDL events to
-				// trigger a failure.
-				//
-				// EXAMPLE:
-				//
-				// Assume only namespaces `yes1` and `yes2` are verified.
-				//
-				// This allows:
-				// - any applyOps (though we exclude the `config` DB above)
-				// - op=c for `yes1` or `yes2` (Verifier will probably fail
-				//   because it’s DDL on a verified namespace.)
-				//
-				// This excludes:
-				// - op=c for `nope1` (DDL on an out-filter namespace)
-				// - op=c for Verifier’s metadata
+				// Ignore DDL for any excluded namespace (e.g., Verifier
+				// metadata.) We have to special case applyOps, which has
+				// ns=`admin.$cmd`.
 				agg.Or{
 					"$o.applyOps",
 					o.getNotExcludedNSPrefixFilter("$$ROOT"),
