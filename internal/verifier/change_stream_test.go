@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/testutil"
@@ -68,7 +69,6 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_InitialNonempty() {
 				)
 			},
 		)
-
 	}
 }
 
@@ -99,6 +99,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
 		metaDBName,
 		"mongosync_reserved_for_internal_use",
 		"mongosync_internal_foo",
+		"__mdb_internal_mongosync",
 	}
 	for _, dbname := range dbsToIgnore {
 		_, err := suite.srcMongoClient.
@@ -236,6 +237,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_WithNamespaces() {
 		metaDBName,
 		"mongosync_reserved_for_internal_use",
 		"mongosync_internal_foo",
+		"__mdb_internal_mongosync",
 	}
 	for _, dbname := range dbsToIgnore {
 		_, err := suite.srcMongoClient.
@@ -313,6 +315,139 @@ func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(
 	)
 
 	return eg
+}
+
+func (suite *IntegrationTestSuite) TestLastRecheckedOpTime_Resume() {
+	ctx := suite.T().Context()
+
+	verifier1 := suite.BuildVerifier()
+
+	srcDB := verifier1.srcClient.Database(suite.DBNameForTest())
+	srcColl := srcDB.Collection("coll")
+
+	require.NoError(
+		suite.T(),
+		srcDB.CreateCollection(ctx, srcColl.Name()),
+	)
+
+	dstDB := verifier1.dstClient.Database(suite.DBNameForTest())
+	dstColl := dstDB.Collection(srcColl.Name())
+	require.NoError(
+		suite.T(),
+		dstDB.CreateCollection(ctx, dstColl.Name()),
+	)
+
+	v1Ctx, v1Cancel := contextplus.WithCancelCause(ctx)
+	defer v1Cancel(ctx.Err())
+
+	verifierRunner := RunVerifierCheck(v1Ctx, suite.T(), verifier1)
+	suite.Require().NoError(
+		verifierRunner.AwaitGenerationEnd(),
+	)
+
+	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", "foo"}})
+	suite.Require().NoError(err)
+
+	_, err = dstColl.InsertOne(ctx, bson.D{{"_id", "bar"}})
+	suite.Require().NoError(err)
+
+	suite.T().Logf("Waiting for last-recheck optimes to show …")
+
+	var srcTS, dstTS bson.Timestamp
+	for srcTS.IsZero() || dstTS.IsZero() {
+		suite.Require().NoError(
+			verifierRunner.StartNextGeneration(),
+		)
+		suite.Require().NoError(
+			verifierRunner.AwaitGenerationEnd(),
+		)
+
+		verifier1.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
+			srcTS = t
+		})
+		verifier1.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
+			dstTS = t
+		})
+	}
+
+	v1Cancel(fmt.Errorf("ending verifier 1"))
+
+	// The task in question is “failed” (i.e., docs mismatched).
+
+	verifier2 := suite.BuildVerifier()
+	v2Ctx, v2Cancel := contextplus.WithCancelCause(ctx)
+	defer v2Cancel(ctx.Err())
+
+	verifierRunner = RunVerifierCheck(v2Ctx, suite.T(), verifier2)
+	suite.Require().NoError(
+		verifierRunner.AwaitGenerationEnd(),
+	)
+
+	status, err := verifier2.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().NotZero(status.FailedTasks, "should be >1 failed task (%+v)", status)
+
+	var srcTS2, dstTS2 bson.Timestamp
+	verifier2.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
+		srcTS2 = t
+	})
+	verifier2.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
+		dstTS2 = t
+	})
+
+	suite.Assert().Equal(srcTS, srcTS2)
+	suite.Assert().Equal(dstTS, dstTS2)
+
+	// Now ensure that “completed” tasks also are loaded on resume.
+
+	_, err = srcColl.InsertOne(ctx, bson.D{{"_id", "bar"}})
+	suite.Require().NoError(err)
+
+	_, err = dstColl.InsertOne(ctx, bson.D{{"_id", "foo"}})
+	suite.Require().NoError(err)
+
+	suite.T().Logf("Waiting for last-recheck optimes to update …")
+
+	srcTS3, dstTS3 := srcTS, dstTS
+	for srcTS3.Equal(srcTS) || dstTS3.Equal(dstTS) {
+		suite.Require().NoError(
+			verifierRunner.StartNextGeneration(),
+		)
+		suite.Require().NoError(
+			verifierRunner.AwaitGenerationEnd(),
+		)
+
+		verifier2.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
+			srcTS3 = t
+		})
+		verifier2.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
+			dstTS3 = t
+		})
+	}
+
+	v2Cancel(fmt.Errorf("stopping verifier 2"))
+
+	verifier3 := suite.BuildVerifier()
+
+	verifierRunner = RunVerifierCheck(ctx, suite.T(), verifier3)
+	suite.Require().NoError(
+		verifierRunner.AwaitGenerationEnd(),
+	)
+
+	var srcTS4, dstTS4 bson.Timestamp
+	verifier3.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
+		srcTS4 = t
+	})
+	verifier3.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
+		dstTS4 = t
+	})
+
+	suite.Assert().Equal(srcTS3, srcTS4)
+	suite.Assert().Equal(dstTS3, dstTS4)
+
+	status, err = verifier3.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().Zero(status.FailedTasks, "should be no failed tasks (%+v)", status)
 }
 
 func (suite *IntegrationTestSuite) TestChangeStream_Resume_NoSkip() {
@@ -642,7 +777,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 				verifierRunner.AwaitGenerationEnd(),
 			)
 
-			return verifier.srcChangeReader.getCurrentTimes().IsSome()
+			return verifier.srcChangeReader.getCurrentTimestamps().IsSome()
 		},
 		time.Minute,
 		100*time.Millisecond,
@@ -651,7 +786,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 	// NB: The lag will include whatever time elapsed above before
 	// verifier read the event, so it can be several seconds.
 	suite.Assert().Less(
-		verifier.srcChangeReader.getCurrentTimes().MustGet().Lag(),
+		verifier.srcChangeReader.getCurrentTimestamps().MustGet().Lag(),
 		10*time.Minute,
 		"verifier lag is as expected",
 	)
@@ -848,7 +983,7 @@ func (suite *IntegrationTestSuite) TestWritesOffCursorKilledResilience() {
 				suite.T(),
 				suite.srcMongoClient,
 				verifier.srcClusterInfo.VersionArray,
-				clientAppName,
+				buildvar.GetClientAppName(),
 			),
 		)
 	}
@@ -877,7 +1012,7 @@ func (suite *IntegrationTestSuite) TestCursorKilledResilience() {
 			suite.T(),
 			suite.srcMongoClient,
 			verifier.srcClusterInfo.VersionArray,
-			clientAppName,
+			buildvar.GetClientAppName(),
 		),
 	)
 
@@ -1251,6 +1386,7 @@ func (suite *IntegrationTestSuite) TestDropMongosyncDB() {
 	dbs := []string{
 		"mongosync_reserved_for_internal_use",
 		"mongosync_internal_foo",
+		"__mdb_internal_mongosync",
 	}
 
 	for _, dbname := range dbs {

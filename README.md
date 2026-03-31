@@ -97,34 +97,123 @@ metaURI: mongodb://localhost:28012
 
 1. After launching the verifier (see above), you can send it requests to get it to start verifying. If you don’t pass the `--start` parameter, verification is started by using the `check` command. An [optional `filter` parameter](#document-filtering) can be passed within the `check` request body to only check documents within that filter. The verification process will keep running until you tell the verifier to stop. It will keep track of the inconsistencies it has found and will keep checking those inconsistencies hoping that eventually they will resolve.
 
-    ```
-    curl -H "Content-Type: application/json" -d '{}' http://127.0.0.1:27020/api/v1/check
-    ```
+```
+curl -H "Content-Type: application/json" -d '{}' http://127.0.0.1:27020/api/v1/check
+```
 
 
 2. Once writes on the source cluster have stopped, you can tell the verifier that writes have stopped. (You can see the state of mongosync’s replication by hitting mongosync’s `progress` endpoint and checking that the state is `COMMITTED`. See the documentation [here](https://www.mongodb.com/docs/cluster-to-cluster-sync/current/reference/api/progress/#response)). \
 The verifier will now check to completion to make sure that there are no inconsistencies. The command you need to send the verifier here is `writesOff`. The command doesn’t block. This means that you will have to poll the verifier, or watch its logs, to see the status of the verification (see `progress`).
 
-    ```
-    curl -H "Content-Type: application/json" -X POST -d '{}' http://127.0.0.1:27020/api/v1/writesOff
-    ```
+```
+curl -H "Content-Type: application/json" -d '{}' http://127.0.0.1:27020/api/v1/writesOff
+```
 
 
-3. You can poll the status of the verification by hitting the `progress`endpoint. In particular, the `phase`should reveal whether the verifier is done verifying; once the `phase`is `idle`the verification has completed. When the `phase`has reached `idle`, the `error`field should be `null`and the `failedTasks`field should be `0`, if the verification was successful. A non-`null``error`field indicates that the verifier itself ran into an error. `failedTasks`being non-`0`indicates that there was an inconsistency. The logs printed by the verifier itself should have more information regarding what the inconsistencies are.
+3. You can poll the verification’s status by hitting the `progress` endpoint. In particular, the `phase` should reveal whether the verifier is done verifying. Once the `phase` is `idle`, the verification has completed. Once the `phase` is `idle`, the `error` field should be null, and the `failedTasks` field should be 0, if the verification was successful. A non-null `error` field indicates that the verifier itself ran into an error. If `failedTasks` is not 0, the verifier found an inconsistency. The verifier’s logs should detail the inconsistencies.
 
-    ```
-    curl -H "Content-Type: application/json" -X GET http://127.0.0.1:27020/api/v1/progress
+```
+curl http://127.0.0.1:27020/api/v1/progress
+```
 
-    ```
+### `/progress` API Response
 
+In the below a “timestamp” is an object with `T` and `I` unsigned integers.
+These represent a logical time in MongoDB’s replication protocol.
 
-	
+- `progress`
+  - `phase` (string): either `idle`, `check`, or `recheck`
+  - `generation` (unsigned integer)
+  - `generationStats`
+    - `docsCompared` (unsigned)
+    - `totalDocs` (unsigned)
+    - `srcBytesCompared` (unsigned)
+    - `totalSrcBytes` (unsigned, only present in `check` phase)
+  - `recentRecheckSecs` (array of recent recheck generations’ durations)
+  - `srcChangeStats`
+    - `eventsPerSecond` (unsigned)
+    - `lagSecs` (unsigned)
+    - `bufferSaturation` (fraction)
+  - `dstChangeStats` (same fields as `srcChangeStats`)
+  - `srcLastRecheckedTS` (see below)
+  - `longestMismatch` (See `/docMismatches` below for format.)
+  - `error` (string, optional)
+  - `verificationStatus` (tasks for the current generation)
+    - `totalTasks` (unsigned integer)
+    - `addedTasks` (unsigned integer, unstarted tasks)
+    - `processingTasks` (unsigned integer, in-progress tasks)
+    - `failedTasks` (unsigned integer, tasks that found a document mismatch)
+    - `completedTasks` (unsigned integer, tasks that found no problems)
+    - `metadataMismatchTasks` (unsigned integer, tasks that found a collection metadata mismatch)
 
-	This is a sample output when inconsistencies are present:
+This is sample output:
+```
+{
+  "progress": {
+    "phase": "recheck",
+    "generation": 2,
+    "generationStats": {
+      "docsCompared": 0,
+      "totalDocs": 2040204,
+      "srcBytesCompared": 0
+    },
+    "recentRecheckSecs": [
+        20.3,
+        10.254,
+        23.2
+    ],
+    "error": null,
+    "verificationStatus": {
+      "totalTasks": 204,
+      "addedTasks": 204,
+      "processingTasks": 0,
+      "failedTasks": 0,
+      "completedTasks": 0,
+      "metadataMismatchTasks": 0
+    },
+    "srcLastRecheckedTS": {
+      "$timestamp": {
+        "t": 1773253202,
+        "i": 2186
+      }
+    },
+    "dstLastRecheckedTS": {
+      "$timestamp": {
+        "t": 1773253202,
+        "i": 10030
+      }
+    },
+    "srcChangeStats": {
+      "eventsPerSecond": 4881.42374871582,
+      "lagSecs": 0,
+      "bufferSaturation": 0.01
+    },
+    "dstChangeStats": {
+      "eventsPerSecond": 32803.89071205276,
+      "lagSecs": 0,
+      "bufferSaturation": 0.95
+    },
+    "docsComparedPerSecond": 75061.86338662436,
+    "srcBytesComparedPerSecond": 43954387.31067323
+  }
+}
+```
 
+#### Last recheck timestamps
 
-    	`{"progress":{"phase":"idle","error":null,"verificationStatus":{"totalTasks":1,"addedTasks":0,"processingTasks":0,"failedTasks":1,"completedTasks":0,"metadataMismatchTasks":0,"recheckTasks":0}}}`
+The `srcLastRecheckedTS` and `dstLastRecheckedTS` fields indicate the
+oplog timestamp of the last write that the verifier has rechecked.
 
+Consider a write on the source at oplog timestamp {123, 234}. Immediately
+after the write happens, the verifier will not have checked whether the
+write was replicated. By checking whether `srcLastRecheckedTS` has met or
+exceeded that value, you can know when the verifier has done a recheck
+for that write.
+
+In a migration, once you have quiesced writes on your source cluster,
+monitor the replicator & correlate its last-replicated optime with
+`srcLastRecheckedTS`. This will tell you when it’s safe to proceed with
+cutover.
 
 # CLI Options
 
@@ -159,29 +248,131 @@ The verifier will now check to completion to make sure that there are no inconsi
 
 # Investigation of Mismatches
 
-The verifier records mismatches in its metadata’s `mismatches`
-collection. Mismatches are indexed by verification task ID. To find a given
-generation’s mismatches, aggregate like this on the metadata cluster:
+## Documents
 
-    // Change this as needed if you specify a custom metadata database:
-    use migration_verification_metadata
+The following API command:
+```
+curl http://localhost:27020/api/v1/docMismatches
+```
+… will return a stream of newline-delimited JSON documents that describe
+currently-tracked mismatches.
 
-    db.verification_tasks.aggregate(
-        { $match: {
-            generation: <whichever generation>,
-            status: {$in: ["failed", "mismatch"]},
-        } },
-        { $lookup: {
-            from: "mismatches",
-            localField: "_id",
-            foreignField: "task",
-            as: "mismatch",
-        }},
-        { $unwind: "$mismatch" },
-    )
+Each mismatch document looks like:
+- `durationSecs`: the # of seconds between when the mismatch was first
+  seen and the most recent time it was seen
+- `type`: one of `missingOnDst`, `extraOnDst`, or `content`
+- `namespace`
+- `_id` (relaxed ext JSON)
+- `field`: the field in the document that mismatched (only set with
+  `content`-type mismatches when not using hashed comparison)
+- `detail`: human-readable description of the mismatch (only set with
+  `content`-type mismatches)
 
-Note that each mismatch includes timestamps. You can cross-reference
-these with the clusters’ oplogs to diagnose problems.
+The results are returned sorted by `durationSecs`, descending.
+
+Example output:
+```
+{
+    "type": "missingOnDst",
+    "namespace": "test.coll",
+    "_id": 111,
+    "durationSecs": 8.454
+}
+{
+    "type": "content",
+    "namespace": "test.coll",
+    "_id": 222,
+    "field": "name",
+    "detail": "Mismatch",
+    "durationSecs": 8.454
+}
+{
+    "type": "extraOnDst",
+    "namespace": "test.coll",
+    "_id": 333,
+    "durationSecs": 8.454
+}
+```
+During generation 0, this API command returns mismatches for generation 0.
+Thereafter it returns mismatches for the _prior_ generation.
+
+### Limiting Results
+
+You can optionally send a `minDurationSecs` parameter to limit results by
+a minimum duration. For example, the following suppresses all mismatches
+that have been seen for less than 1 minute:
+```
+curl 'http://localhost:27020/api/v1/docMismatches?minDurationSecs=60'
+```
+
+## Namespaces
+
+The following API command:
+```
+curl http://localhost:27020/api/v1/nsMismatches
+```
+… is like `/docMismatches` but returns namespace-level mismatches.
+
+Each mismatch document looks like:
+- `type`: As in `/docMismatches`.
+- `namespace`
+- `aspect`: The mismatching characteristic of the namespace.
+- `component`: Depends on `aspect`. See below.
+- `detail`: As in `/docMismatches`.
+
+`aspect` can be any of the following:
+
+- `exist`: The namespace is either missing or extra on the destination.
+- `type`: The namespace is of different types on source & destination.
+- `index`: An index is mismatched, missing, or extra. `component` is the
+  index’s name.
+- `spec`: An element of the collection’s specification mismatches.
+  `component` names the part of the spec that differs.
+- `shard key`: The collection’s shard key differs between source and
+  destination.
+- `readOnly`: The collection’s read-only flag differs between source and
+  destination.
+
+No sort order is defined.
+
+Sample output:
+```
+{
+  "type": "missingOnDst",
+  "namespace": "test.missingColl",
+  "aspect": "exist"
+}
+{
+  "type": "content",
+  "namespace": "test.indexesColl",
+  "aspect": "index",
+  "component": "foo_1",
+  "detail": "{\"op\":\"remove\",\"path\":\"/collation\"}"
+}
+{
+  "type": "missingOnDst",
+  "namespace": "test.lostCapped",
+  "aspect": "spec",
+  "component": "options.capped"
+}
+{
+  "type": "missingOnDst",
+  "namespace": "test.lostCapped",
+  "aspect": "spec",
+  "component": "options.size"
+}
+```
+
+### Limiting Index Mismatches
+
+You can optionally send an `indexSpecIgnore` parameter whose value is a
+comma-delimited list of any (or all) of:
+
+- `expireAfterSeconds`
+- `unique`
+
+By submitting this parameter you will cause the API to discard any
+mismatches that concern the relevant fields in an index specification.
 
 # Tests
 
@@ -406,10 +597,16 @@ reduce server load, for collections with custom `_id` values.
 
 The following caveats apply:
 
+### MongoDB 4.2 & earlier
+
+Source clusters running MongoDB 4.2 & earlier cannot parallelize collection
+scans in natural mode. Each non-empty collection is scanned in exactly one
+task. If Verifier is interrupted and has to restart, the entire collection
+scan restarts from the beginning.
+
 ### Unsupported configurations
 
-This scheme requires MongoDB 4.4+ and only works when connecting to a replica set
-(i.e., not a mongos).
+This scheme only works when connecting to a replica set (i.e., not a mongos).
 
 ### Lost checks
 
@@ -442,6 +639,9 @@ because these server versions expose a control that obviates this workaround.
 
 (See [SERVER-110161](https://jira.mongodb.org/browse/SERVER-110161) for more
 details.)
+
+This also does not affect source clusters running MongoDB 4.2 or earlier
+because such clusters can’t parallelize collection scans anwyay.
 
 # Change reading methods
 

@@ -3,16 +3,13 @@ package verifier
 import (
 	"cmp"
 	"context"
-	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
-	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
@@ -30,6 +27,8 @@ import (
 
 const (
 	metaDBName = "VERIFIER_TEST_META"
+
+	maxDBNameLen = 63
 )
 
 type IntegrationTestSuite struct {
@@ -171,7 +170,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	task := tasks.Task{QueryFilter: qfilter}
 
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
-	//verifier.SetStartClean(true)
+	// verifier.SetStartClean(true)
 	verifier.SetNumWorkers(3)
 	verifier.SetGenerationPauseDelay(0)
 	verifier.SetWorkerSleepDelay(0)
@@ -222,6 +221,13 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	)
 	verifier.SetPartitioningScheme(envPartitionBy)
 
+	verifier.logger.Info().
+		Str("docCompareMethod", envDocCompareMethod).
+		Str("srcChangeReader", envSrcChangeReader).
+		Str("dstChangeReader", envDstChangeReader).
+		Stringer("partitioningScheme", envPartitionBy).
+		Msg("Created verifier.")
+
 	suite.Require().NoError(verifier.initializeChangeReaders())
 
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))
@@ -233,23 +239,13 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 
 func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {
 	name := suite.T().Name()
-	return strings.ReplaceAll(
+	name = strings.ReplaceAll(
 		strings.ReplaceAll(name, "/", "-"),
 		".",
 		"-",
 	) + strings.Join(suffixes, "")
-}
 
-type MockSuccessNotifier struct {
-	messages []string
-	mu       sync.Mutex
-}
+	excess := max(0, len(name)-maxDBNameLen)
 
-var _ retry.SuccessNotifier = &MockSuccessNotifier{}
-
-func (m *MockSuccessNotifier) NoteSuccess(tmpl string, args ...any) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.messages = append(m.messages, fmt.Sprintf(tmpl, args...))
+	return name[excess:]
 }

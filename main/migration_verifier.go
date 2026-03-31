@@ -11,12 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/verifier"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
-	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-tools/mongotools"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -54,13 +55,7 @@ const (
 	pprofInterval         = "pprofInterval"
 	startFlag             = "start"
 	partitioningScheme    = "partitioningScheme"
-
-	buildVarDefaultStr = "Unknown; build with build.sh."
 )
-
-// These get set at build time, assuming use of build.sh.
-var Revision = buildVarDefaultStr
-var BuildTime = buildVarDefaultStr
 
 var logLevelStrs = lo.Map(
 	mslices.Of(
@@ -222,7 +217,7 @@ func main() {
 	app := &cli.App{
 		Name:    "migration-verifier",
 		Usage:   "verify migration correctness",
-		Version: fmt.Sprintf("%s, built at %s", Revision, BuildTime),
+		Version: fmt.Sprintf("%s, built at %s", buildvar.Revision, buildvar.BuildTime),
 		Flags:   flags,
 		Before: func(cCtx *cli.Context) error {
 			confFile := cCtx.String(configFileFlag)
@@ -324,15 +319,20 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	logger := v.GetLogger()
 
 	logger.Info().
-		Str("revision", Revision).
-		Str("buildTime", BuildTime).
+		Str("revision", buildvar.Revision).
+		Str("buildTime", buildvar.BuildTime).
 		Int("processID", os.Getpid()).
 		Msg("migration-verifier started.")
 
 	logConfig(cCtx, logger)
 
+	err := v.SetReadPreference(cCtx.String(readPreference))
+	if err != nil {
+		return nil, err
+	}
+
 	srcConnStr := cCtx.String(srcURI)
-	_, srcConnStr, err := mmongo.MaybeAddDirectConnection(srcConnStr)
+	_, srcConnStr, err = mongotools.MaybeAddDirectConnection(srcConnStr)
 	if err != nil {
 		return nil, errors.Wrap(err, "parsing source connection string")
 	}
@@ -342,7 +342,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 
 	dstConnStr := cCtx.String(dstURI)
-	_, dstConnStr, err = mmongo.MaybeAddDirectConnection(dstConnStr)
+	_, dstConnStr, err = mongotools.MaybeAddDirectConnection(dstConnStr)
 	if err != nil {
 		return nil, errors.Wrap(err, "parsing destination connection string")
 	}
@@ -352,7 +352,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 
 	metaConnStr := cCtx.String(metaURI)
-	_, metaConnStr, err = mmongo.MaybeAddDirectConnection(metaConnStr)
+	_, metaConnStr, err = mongotools.MaybeAddDirectConnection(metaConnStr)
 	if err != nil {
 		return nil, errors.Wrap(err, "parsing metadata connection string")
 	}
@@ -431,10 +431,6 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 	v.SetPartitioningScheme(partitions.Scheme(partitioningScheme))
 
-	err = v.SetReadPreference(cCtx.String(readPreference))
-	if err != nil {
-		return nil, err
-	}
 	v.SetFailureDisplaySize(cCtx.Int64(failureDisplaySize))
 	return v, nil
 }

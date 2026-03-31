@@ -7,24 +7,28 @@ on:
     tags:
       - 'v*.*.*'
 
-env:
-  TARGETS: |
-    linux/amd64
-    linux/arm64
-    darwin/arm64
-
 jobs:
-  build-and-release:
+  build:
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: arm64
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       # NB: actions/checkout quietly fetches all tags as lightweight tags,
-      # even if they’re annotated upstream. That, of course, prevents use
+      # even if they're annotated upstream. That, of course, prevents use
       # of the tag message as release notes. This works around that.
       #
       # See https://github.com/actions/checkout/issues/290 for details.
@@ -32,19 +36,48 @@ jobs:
         run: git fetch --tags --force
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
 
       - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
           set -o errexit
           TAG_NAME=$(git describe --exact-match)
+          ./build.sh
+          tar czf migration_verifier_${TAG_NAME}_${GOOS}_${GOARCH}.tar.gz migration_verifier
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: migration_verifier_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: migration_verifier_*_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Generate release notes
+        run: |
+          TAG_NAME=$(git describe --exact-match)
           git tag --list --format='%(contents)' "$TAG_NAME" > RELEASE-NOTES
-          for target in $TARGETS; do
-            export GOOS=${target%/*}
-            export GOARCH=${target#*/}
-            ./build.sh
-            mv migration_verifier migration_verifier_${GOOS}_${GOARCH}
-          done
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -52,4 +85,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           body_path: RELEASE-NOTES
-          files: migration_verifier_*
+          files: migration_verifier_*.tar.gz

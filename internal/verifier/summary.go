@@ -17,7 +17,6 @@ import (
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
@@ -40,7 +39,7 @@ const (
 // Returned booleans indicate:
 //   - whether any mismatches were found
 //   - whether any incomplete tasks were found
-func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context, strBuilder *strings.Builder) (bool, bool, error) {
+func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context, out io.Writer) (bool, bool, error) {
 	generation, _ := verifier.getGeneration()
 
 	failedTasks, incompleteTasks, err := FetchFailedAndIncompleteTasks(
@@ -56,46 +55,40 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 
 	anyAreIncomplete := len(incompleteTasks) > 0
 
-	if len(failedTasks) != 0 {
-		table := tablewriter.NewWriter(strBuilder)
-		table.SetHeader([]string{"Index", "Cluster", "Field", "Namespace", "Details"})
-
-		taskDiscrepancies, err := getMismatchesForTasks(
-			ctx,
-			verifier.verificationDatabase(),
-			lo.Map(
-				failedTasks,
-				func(ft tasks.Task, _ int) bson.ObjectID {
-					return ft.PrimaryKey
-				},
-			),
-		)
-		if err != nil {
-			return false, false, errors.Wrapf(
-				err,
-				"fetching %d failed tasks' discrepancies",
-				len(failedTasks),
-			)
-		}
-
-		for _, v := range failedTasks {
-			for _, f := range taskDiscrepancies[v.PrimaryKey] {
-				table.Append([]string{
-					fmt.Sprintf("%v", f.ID),
-					f.Cluster,
-					f.Field,
-					f.NameSpace,
-					f.Details,
-				})
-			}
-		}
-		strBuilder.WriteString("\nCollections/Indexes in failed or retry status:\n")
-		table.Render()
-
-		return true, anyAreIncomplete, nil
+	if len(failedTasks) == 0 {
+		return false, anyAreIncomplete, nil
 	}
 
-	return false, anyAreIncomplete, nil
+	table := tablewriter.NewWriter(out)
+	table.SetHeader([]string{"Index", "Cluster", "Field", "Namespace", "Details"})
+
+	mismatches, err := getNamespaceMismatchesForGeneration(
+		ctx,
+		verifier.verificationDatabase(),
+		generation,
+	)
+	if err != nil {
+		return false, false, errors.Wrapf(
+			err,
+			"fetching generation %d’s namespace mismatches",
+			generation,
+		)
+	}
+
+	for _, f := range mismatches {
+		table.Append([]string{
+			fmt.Sprintf("%v", f.ID),
+			f.Cluster,
+			f.Field,
+			f.NameSpace,
+			f.Details,
+		})
+	}
+
+	_, _ = out.Write([]byte("\nCollections/Indexes in failed or retry status:\n"))
+	table.Render()
+
+	return true, anyAreIncomplete, nil
 }
 
 func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (option.Option[time.Duration], bool, error) {
@@ -108,7 +101,6 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 		tasks.VerifyDocuments,
 		generation,
 	)
-
 	if err != nil {
 		return option.None[time.Duration](), false, err
 	}
@@ -116,40 +108,23 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	anyAreIncomplete := len(incompleteTasks) > 0
 
 	if len(failedTasks) == 0 {
-
 		// Nothing has failed/mismatched, so there’s nothing to print.
 		return option.None[time.Duration](), anyAreIncomplete, nil
 	}
 
 	strBuilder.WriteString("\n")
 
-	failedTaskMap := lo.SliceToMap(
-		lo.Range(len(failedTasks)),
-		func(i int) (bson.ObjectID, tasks.Task) {
-			return failedTasks[i].PrimaryKey, failedTasks[i]
-		},
-	)
-	failedTaskIDs := slices.Collect(maps.Keys(failedTaskMap))
-
 	reportData, err := getDocumentMismatchReportData(
 		ctx,
 		verifier.verificationDatabase(),
-		failedTaskIDs,
+		generation,
 		verifier.failureDisplaySize,
 	)
 	if err != nil {
 		return option.None[time.Duration](), false, errors.Wrapf(
 			err,
-			"fetching %d failed tasks’ most persistent discrepancies",
-			len(failedTasks),
+			"fetching most persistent discrepancies",
 		)
-	}
-
-	if reportData.Counts.Total() == 0 {
-		fmt.Printf("failedTaskIDs: %+v\n", failedTaskIDs)
-		fmt.Printf("reportData: %+v\n", reportData)
-
-		panic("No failed tasks, but no mismatches at all?!?")
 	}
 
 	showMismatchDuration := generation > 0
@@ -176,10 +151,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				panic(fmt.Sprintf("found missing-type mismatch but expected content-differs: %+v", m))
 			}
 
-			task := failedTaskMap[m.Task]
-
 			cells := mslices.Of(
-				task.QueryFilter.Namespace,
+				m.Detail.NameSpace,
 				fmt.Sprint(m.Detail.ID),
 				m.Detail.Field,
 				m.Detail.Details,
@@ -235,10 +208,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				panic(fmt.Sprintf("MissingOnDst: found content-mismatch mismatch but expected missing: %+v", reportData))
 			}
 
-			task := failedTaskMap[d.Task]
-
 			cells := mslices.Of(
-				task.QueryFilter.Namespace,
+				d.Detail.NameSpace,
 				fmt.Sprint(d.Detail.ID),
 			)
 
@@ -293,10 +264,8 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 				panic(fmt.Sprintf("ExtraOnDst: found content-mismatch mismatch but expected missing (%+v); reportData = %+v", d, reportData))
 			}
 
-			task := failedTaskMap[d.Task]
-
 			cells := mslices.Of(
-				task.QueryFilter.Namespace,
+				d.Detail.NameSpace,
 				fmt.Sprint(d.Detail.ID),
 			)
 
@@ -350,17 +319,28 @@ func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuild
 	return longestDurationOpt, anyAreIncomplete, nil
 }
 
-// Boolean returned indicates whether this generation has any tasks.
-func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuilder *strings.Builder) (bool, error) {
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+type comparisonStatistics struct {
+	totalDocs, comparedDocs   types.DocumentCount
+	totalBytes, comparedBytes types.ByteCount
+	totalNss, completedNss    types.NamespaceCount
+	activeWorkers             int
+	nsStats                   []NamespaceStats
+	nsWorkerStatus            map[string][]WorkerStatus
+}
+
+func (verifier *Verifier) getComparisonStatistics(
+	ctx context.Context,
+	generation int,
+) (comparisonStatistics, error) {
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, generation)
 	if err != nil {
-		return false, err
+		return comparisonStatistics{}, err
 	}
 
 	// The verifier sometimes ends up enqueueing an extra generation
 	// with no tasks. For now we’ll quietly no-op when that happens.
 	if len(stats) == 0 {
-		return false, nil
+		return comparisonStatistics{}, nil
 	}
 
 	var totalDocs, comparedDocs types.DocumentCount
@@ -382,16 +362,6 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		}
 	}
 
-	strBuilder.WriteString("\n")
-
-	fmt.Fprintf(
-		strBuilder,
-		"Namespaces completed: %s of %s (%s%%)\n",
-		reportutils.FmtReal(completedNss),
-		reportutils.FmtReal(totalNss),
-		reportutils.FmtPercent(completedNss, totalNss),
-	)
-
 	var activeWorkers int
 	perNamespaceWorkerStats := verifier.getPerNamespaceWorkerStats()
 	for _, nsWorkerStats := range perNamespaceWorkerStats {
@@ -402,6 +372,48 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		}
 	}
 
+	return comparisonStatistics{
+		totalDocs:      totalDocs,
+		comparedDocs:   comparedDocs,
+		totalBytes:     totalBytes,
+		comparedBytes:  comparedBytes,
+		totalNss:       totalNss,
+		completedNss:   completedNss,
+		activeWorkers:  activeWorkers,
+		nsStats:        stats,
+		nsWorkerStatus: perNamespaceWorkerStats,
+	}, nil
+}
+
+// Boolean returned indicates whether this generation has any tasks.
+func (verifier *Verifier) printNamespaceStatistics(
+	ctx context.Context,
+	generation int,
+	strBuilder *strings.Builder,
+) (bool, error) {
+	compareStats, err := verifier.getComparisonStatistics(ctx, generation)
+	if err != nil {
+		return false, err
+	}
+
+	strBuilder.WriteString("\n")
+
+	totalDocs := compareStats.totalDocs
+	comparedDocs := compareStats.comparedDocs
+	totalBytes := compareStats.totalBytes
+	comparedBytes := compareStats.comparedBytes
+	totalNss := compareStats.totalNss
+	completedNss := compareStats.completedNss
+	activeWorkers := compareStats.activeWorkers
+
+	fmt.Fprintf(
+		strBuilder,
+		"Namespaces completed: %s of %s (%s%%)\n",
+		reportutils.FmtReal(completedNss),
+		reportutils.FmtReal(totalNss),
+		reportutils.FmtPercent(completedNss, totalNss),
+	)
+
 	if activeWorkers > 0 {
 		fmt.Fprintf(
 			strBuilder,
@@ -411,38 +423,19 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		)
 	}
 
-	var docsPerSecond, bytesPerSecond float64
+	docsPerSecond := history.RatePer(
+		verifier.docsComparedHistory.Get(),
+		time.Second,
+	)
 
-	docsLogs := verifier.docsComparedHistory.Get()
-	if len(docsLogs) > 1 {
-
-		// Since each log represents the number of docs compared since the prior
-		// log, the oldest log’s datum is meaningless. Zero it out so that we
-		// sum just the meaningful data.
-		docsLogs[0].Datum = 0
-		elapsed := docsLogs[len(docsLogs)-1].At.Sub(docsLogs[0].At)
-
-		total := history.SumLogs(docsLogs)
-
-		docsPerSecond = util.DivideToF64(total, elapsed.Seconds())
-	}
-
-	bytesLogs := verifier.bytesComparedHistory.Get()
-	if len(bytesLogs) > 1 {
-
-		// See above for why we do this.
-		bytesLogs[0].Datum = 0
-		elapsed := bytesLogs[len(bytesLogs)-1].At.Sub(bytesLogs[0].At)
-
-		total := history.SumLogs(bytesLogs)
-
-		bytesPerSecond = util.DivideToF64(total, elapsed.Seconds())
-	}
+	bytesPerSecond := history.RatePer(
+		verifier.bytesComparedHistory.Get(),
+		time.Second,
+	)
 
 	perSecondDataUnit := reportutils.FindBestUnit(bytesPerSecond)
 
 	if totalDocs > 0 {
-
 		fmt.Fprintf(
 			strBuilder,
 			"Total source documents compared: %s of %s (%s%%, %s/sec)\n",
@@ -500,7 +493,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 
 	tableHasRows := false
 
-	for _, result := range stats {
+	for _, result := range compareStats.nsStats {
 		if result.PartitionsProcessing == 0 {
 			continue
 		}
@@ -512,7 +505,7 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 		docsCompared := result.DocsCompared
 		bytesCompared := result.BytesCompared
 
-		if nsWorkerStats, ok := perNamespaceWorkerStats[result.Namespace]; ok {
+		if nsWorkerStats, ok := compareStats.nsWorkerStatus[result.Namespace]; ok {
 			threads = len(nsWorkerStats)
 
 			for _, workerStats := range nsWorkerStats {
@@ -572,8 +565,13 @@ func (verifier *Verifier) printNamespaceStatistics(ctx context.Context, strBuild
 	return true, nil
 }
 
-func (verifier *Verifier) printEndOfGenerationStatistics(ctx context.Context, strBuilder *strings.Builder, now time.Time) (bool, error) {
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx)
+func (verifier *Verifier) printEndOfGenerationStatistics(
+	ctx context.Context,
+	generation int,
+	strBuilder *strings.Builder,
+	now time.Time,
+) (bool, error) {
+	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, generation)
 	if err != nil {
 		return false, err
 	}
@@ -642,10 +640,10 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 	var lastSrcOpTime, lastDstOpTime bson.Timestamp
 
-	verifier.lastProcessedSrcOptime.Load(func(t bson.Timestamp) {
+	verifier.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
 		lastSrcOpTime = t
 	})
-	verifier.lastProcessedDstOptime.Load(func(t bson.Timestamp) {
+	verifier.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
 		lastDstOpTime = t
 	})
 
@@ -693,7 +691,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			)
 		}
 
-		times, hasTimes := cluster.csReader.getCurrentTimes().Get()
+		times, hasTimes := cluster.csReader.getCurrentTimestamps().Get()
 
 		if hasTimes {
 			lag := times.Lag()
@@ -826,7 +824,6 @@ func (verifier *Verifier) getPerNamespaceWorkerStats() map[string][]WorkerStatus
 }
 
 func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
-
 	table := tablewriter.NewWriter(builder)
 	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed", "Detail"})
 

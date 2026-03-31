@@ -3,14 +3,18 @@ package util
 import (
 	"cmp"
 	"context"
+	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
 
 type ClusterTopology string
@@ -61,9 +65,7 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 
 	topology, err := getTopology(ctx, client)
 	if err != nil {
-		if err != nil {
-			return ClusterInfo{}, errors.Wrapf(err, "failed to learn topology")
-		}
+		return ClusterInfo{}, errors.Wrapf(err, "failed to learn topology")
 	}
 
 	return ClusterInfo{
@@ -73,7 +75,8 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 }
 
 func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, error) {
-	raw, err := GetHelloRaw(ctx, client)
+	// The topology won’t vary amongst the nodes.
+	raw, err := GetHelloRaw(ctx, client, option.None[*readpref.ReadPref]())
 	if err != nil {
 		return "", errors.Wrapf(err, "failed learn topology")
 	}
@@ -88,17 +91,40 @@ func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, er
 
 // GetHelloRaw returns the result of a `hello` (or, if needed,
 // `isMaster`) command.
-func GetHelloRaw(ctx context.Context, client *mongo.Client) (bson.Raw, error) {
+func GetHelloRaw(
+	ctx context.Context,
+	client *mongo.Client,
+	readPref option.Option[*readpref.ReadPref],
+) (bson.Raw, error) {
+	opts := options.RunCmd()
+	if rp, has := readPref.Get(); has {
+		opts = opts.SetReadPreference(rp)
+	}
+
 	resp := client.Database("admin").RunCommand(
 		ctx,
 		bson.D{{"hello", 1}},
+		opts,
 	)
 
 	if resp.Err() != nil {
 		resp = client.Database("admin").RunCommand(
 			ctx,
 			bson.D{{"isMaster", 1}},
+			opts,
 		)
+	}
+
+	raw, err := resp.Raw()
+
+	// Proactively check for the problem that
+	// https://jira.mongodb.org/browse/SERVER-52654 fixed:
+	if err == nil {
+		const opTimeName = "operationTime"
+		_, err := raw.LookupErr(opTimeName)
+		if err != nil {
+			return nil, fmt.Errorf("server response lacks %#q; force an election, then retry", opTimeName)
+		}
 	}
 
 	return resp.Raw()

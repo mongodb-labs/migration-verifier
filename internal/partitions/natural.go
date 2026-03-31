@@ -3,13 +3,16 @@ package partitions
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mmongo/cursor"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/10gen/migration-verifier/timeseries"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -18,12 +21,92 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
 
 const (
 	// RecordID is the server’s name for record IDs in responses.
 	RecordID = "$recordId"
 )
+
+// CreateSingleNaturalOrderPartition returns a natural-order “partition” that
+// includes the entire collection (stopping at the top record ID). This is
+// needed when the source cluster cannot partition a natural scan.
+//
+// This returns empty if the collection is empty, which means generation 0
+// should skip this collection.
+func CreateSingleNaturalOrderPartition(
+	ctx context.Context,
+	srcColl *mongo.Collection,
+	srcURI string,
+	readPref *readpref.ReadPref,
+) (option.Option[Partition], error) {
+	_, hostnameAndPort, topIDOpt, err := getDirectCollAndTopID(ctx, srcColl, srcURI, readPref)
+	if err != nil {
+		return option.None[Partition](), err
+	}
+
+	if !topIDOpt.IsSome() {
+		return option.None[Partition](), nil
+	}
+
+	return option.Some(Partition{
+		Natural:         true,
+		HostnameAndPort: option.Some(hostnameAndPort),
+		Ns: &Namespace{
+			srcColl.Database().Name(),
+			srcColl.Name(),
+		},
+		Key: PartitionKey{
+			Lower: bsontools.ToRawValue(bson.Null{}),
+		},
+		Upper: topIDOpt.MustGet(),
+	}), nil
+}
+
+func getDirectCollAndTopID(
+	ctx context.Context,
+	srcColl *mongo.Collection,
+	srcURI string,
+	readPref *readpref.ReadPref,
+) (*mongo.Collection, string, option.Option[bson.RawValue], error) {
+	helloRaw, err := util.GetHelloRaw(
+		ctx,
+		srcColl.Database().Client(),
+		option.Some(readPref),
+	)
+	if err != nil {
+		return nil, "", option.None[bson.RawValue](), errors.Wrapf(err, "sending hello/isMaster")
+	}
+
+	hostnameAndPort, err := bsontools.RawLookup[string](helloRaw, "me")
+	if err != nil {
+		return nil, "", option.None[bson.RawValue](), errors.Wrapf(err, "parsing server’s hostname/port from response")
+	}
+
+	directClient, err := mmongo.GetDirectClient(srcURI, hostnameAndPort)
+	if err != nil {
+		return nil, "", option.None[bson.RawValue](), errors.Wrapf(err, "connecting for natural partition")
+	}
+
+	coll := directClient.
+		Database(srcColl.Database().Name()).
+		Collection(srcColl.Name())
+
+		// Avoid storing a null upper limit. See architecture
+	// documentation for rationale.
+	topRecordIDOpt, err := GetTopRecordID(ctx, coll)
+	if err != nil {
+		return nil, "", option.None[bson.RawValue](), errors.Wrapf(err, "fetching top record ID")
+	}
+
+	var recIDOpt option.Option[bson.RawValue]
+	if recID, hasRecID := topRecordIDOpt.Get(); hasRecID {
+		recIDOpt = option.Some(recID)
+	}
+
+	return coll, hostnameAndPort, recIDOpt, nil
+}
 
 // PartitionCollectionNaturalOrder spawns a goroutine that partitions the
 // collection in natural order.
@@ -35,38 +118,43 @@ const (
 // scan anyway later on to compare the documents.
 func PartitionCollectionNaturalOrder(
 	ctx context.Context,
-	coll *mongo.Collection,
+	baseColl *mongo.Collection,
 	idealPartitionBytes types.ByteCount,
 	subLogger *logger.Logger,
+	srcURI string,
+	readPref *readpref.ReadPref,
 ) (chan mo.Result[Partition], error) {
-	pChan := make(chan mo.Result[Partition])
 
-	// Avoid storing a null upper limit. See architecture
-	// documentation for rationale.
-	topRecordIDOpt, err := GetTopRecordID(ctx, coll)
+	// Time-series bucket collections’ `_id`s are always auto-assigned, which
+	// means we might as well always partition them by ID.
+	lo.Assertf(
+		!strings.HasPrefix(baseColl.Name(), timeseries.BucketPrefix),
+		"timeseries buckets (%s) must be ID-partitioned",
+		baseColl.Name(),
+	)
+
+	coll, hostnameAndPort, topRecordIDOpt, err := getDirectCollAndTopID(
+		ctx,
+		baseColl,
+		srcURI,
+		readPref,
+	)
 	if err != nil {
-		return nil, errors.Wrapf(err, "fetching top record ID")
+		return nil, err
 	}
 
 	if !topRecordIDOpt.IsSome() {
 		// If the collection is empty then there’s no point in partitioning it.
 		// Any documents created during generation 0 will be rechecked in
 		// generation 1.
-		close(pChan)
-
-		return pChan, nil
+		return nil, nil
 	}
+
+	pChan := make(chan mo.Result[Partition])
 
 	collSizeInBytes, docCount, _, err := GetSizeAndDocumentCount(ctx, subLogger, coll)
 	if err != nil {
 		return nil, errors.Wrapf(err, "getting collection size & count")
-	}
-
-	if docCount == 0 {
-		// Again: if the collection is empty, there’s no point in partitioning.
-		close(pChan)
-
-		return pChan, nil
 	}
 
 	idealNumPartitions := util.DivideToF64(collSizeInBytes, idealPartitionBytes)
@@ -106,6 +194,7 @@ func PartitionCollectionNaturalOrder(
 
 	sessCtx := mongo.NewSessionContext(ctx, sess)
 
+	// No readpref is necessary because this should be a direct connection.
 	resp := coll.Database().RunCommand(sessCtx, cmd)
 
 	c, err := cursor.New(coll.Database(), resp, sess)
@@ -125,34 +214,10 @@ func PartitionCollectionNaturalOrder(
 			return nil, errors.Wrapf(err, "extracting record ID from resume token (%v)", curToken)
 		}
 
-		switch recIDRV.Type {
-		case bson.TypeInt64, bson.TypeBinary:
-			// All good! We recognize these record ID types.
-		default:
+		if !bsontools.GetComparableTypes().Contains(recIDRV.Type) {
 			// This likely indicates a new, unexpected collection type.
-			return nil, fmt.Errorf("unknown BSON type (%s) for record ID (%s)", recIDRV.Type, recIDRV)
+			return nil, fmt.Errorf("uncomparable BSON type (%s) for record ID (%s)", recIDRV.Type, recIDRV)
 		}
-	}
-
-	// Partitions by record ID are only meaningful on a single mongod.
-	// (i.e., 2 nodes within the same replica set will have different
-	// record IDs for the same document)
-	//
-	// Thus, along with the resume tokens we also persist the hostname
-	// and port.
-	helloRaw, err := util.GetHelloRaw(ctx, coll.Database().Client())
-	if err != nil {
-		return nil, errors.Wrapf(err, "sending hello/isMaster")
-	}
-
-	hostnameAndPortRV, err := helloRaw.LookupErr("me")
-	if err != nil {
-		return nil, errors.Wrapf(err, "parsing isMaster")
-	}
-
-	hostnameAndPort, err := bsontools.RawValueTo[string](hostnameAndPortRV)
-	if err != nil {
-		return nil, errors.Wrapf(err, "parsing hostname in isMaster")
 	}
 
 	go func() {

@@ -33,14 +33,14 @@ const (
 	changeReaderCollectionName = "changeReader"
 )
 
-type readerCurrentTimes struct {
-	LastHandledTime   bson.Timestamp `json:"lastHandledTime"`
-	LastOperationTime bson.Timestamp `json:"lastOperationTime"`
+type readerCurrentTimestamps struct {
+	LastHandled   bson.Timestamp `json:"lastHandledTime"`
+	LastOperation bson.Timestamp `json:"lastOperationTime"`
 }
 
-func (rp readerCurrentTimes) Lag() time.Duration {
+func (rp readerCurrentTimestamps) Lag() time.Duration {
 	return time.Second * time.Duration(
-		int(rp.LastOperationTime.T)-int(rp.LastHandledTime.T),
+		int(rp.LastOperation.T)-int(rp.LastHandled.T),
 	)
 }
 
@@ -51,7 +51,7 @@ type changeReader interface {
 	getStartTimestamp() bson.Timestamp
 	getLastSeenClusterTime() option.Option[bson.Timestamp]
 	getEventsPerSecond() option.Option[float64]
-	getCurrentTimes() option.Option[readerCurrentTimes]
+	getCurrentTimestamps() option.Option[readerCurrentTimestamps]
 	getBufferSaturation() float64
 	noteBatchSize(int)
 	setWritesOff(bson.Timestamp)
@@ -77,13 +77,13 @@ type ChangeReaderCommon struct {
 
 	running        bool
 	eventBatchChan chan eventBatch
-	writesOffTs    *util.Eventual[bson.Timestamp]
+	writesOffTS    *util.Eventual[bson.Timestamp]
 
 	lastChangeEventTime *msync.TypedAtomic[option.Option[bson.Timestamp]]
 
-	currentTimes *msync.TypedAtomic[option.Option[readerCurrentTimes]]
+	currentTimestamps *msync.TypedAtomic[option.Option[readerCurrentTimestamps]]
 
-	startAtTs *bson.Timestamp
+	startAtTS *bson.Timestamp
 
 	batchSizeHistory *history.History[int]
 
@@ -98,8 +98,8 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 		readerType:          clusterName,
 		eventBatchChan:      make(chan eventBatch, batchChanBufferSize),
 		eventRecorder:       NewEventRecorder(),
-		writesOffTs:         util.NewEventual[bson.Timestamp](),
-		currentTimes:        msync.NewTypedAtomic(option.None[readerCurrentTimes]()),
+		writesOffTS:         util.NewEventual[bson.Timestamp](),
+		currentTimestamps:   msync.NewTypedAtomic(option.None[readerCurrentTimestamps]()),
 		lastChangeEventTime: msync.NewTypedAtomic(option.None[bson.Timestamp]()),
 		batchSizeHistory:    history.New[int](time.Minute),
 		onDDLEvent: lo.Ternary(
@@ -119,15 +119,15 @@ func (rc *ChangeReaderCommon) getEventRecorder() *EventRecorder {
 }
 
 func (rc *ChangeReaderCommon) getStartTimestamp() bson.Timestamp {
-	if rc.startAtTs == nil {
+	if rc.startAtTS == nil {
 		panic("no start timestamp yet?!?")
 	}
 
-	return *rc.startAtTs
+	return *rc.startAtTS
 }
 
 func (rc *ChangeReaderCommon) setWritesOff(ts bson.Timestamp) {
-	rc.writesOffTs.Set(ts)
+	rc.writesOffTS.Set(ts)
 }
 
 func (rc *ChangeReaderCommon) isRunning() bool {
@@ -149,8 +149,8 @@ func (rc *ChangeReaderCommon) getBufferSaturation() float64 {
 	return util.DivideToF64(len(rc.eventBatchChan), cap(rc.eventBatchChan))
 }
 
-func (rc *ChangeReaderCommon) getCurrentTimes() option.Option[readerCurrentTimes] {
-	return rc.currentTimes.Load()
+func (rc *ChangeReaderCommon) getCurrentTimestamps() option.Option[readerCurrentTimestamps] {
+	return rc.currentTimestamps.Load()
 }
 
 // getEventsPerSecond returns the number of change events per second we’ve been
@@ -216,7 +216,7 @@ func (rc *ChangeReaderCommon) start(
 						panic("rc.createIteratorCb should be set")
 					}
 
-					startTs, err := rc.createIteratorCb(ctx, sess)
+					startTS, err := rc.createIteratorCb(ctx, sess)
 					if err != nil {
 						logEvent := rc.logger.Debug().
 							Err(err).
@@ -236,12 +236,12 @@ func (rc *ChangeReaderCommon) start(
 
 					logEvent := rc.logger.Debug().
 						Str("reader", string(rc.readerType)).
-						Any("startTimestamp", startTs)
+						Any("startTimestamp", startTS)
 
 					if parentThreadWaiting {
 						logEvent.Msg("First change stream open succeeded.")
 
-						initialCreateResultChan <- mo.Ok(startTs)
+						initialCreateResultChan <- mo.Ok(startTS)
 						close(initialCreateResultChan)
 						parentThreadWaiting = false
 					} else {
@@ -259,12 +259,12 @@ func (rc *ChangeReaderCommon) start(
 
 	result := <-initialCreateResultChan
 
-	startTs, err := result.Get()
+	startTS, err := result.Get()
 	if err != nil {
 		return errors.Wrapf(err, "creating change stream")
 	}
 
-	rc.startAtTs = &startTs
+	rc.startAtTS = &startTS
 
 	rc.running = true
 
@@ -340,8 +340,8 @@ func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Optio
 	return option.Some(token), nil
 }
 
-func (rc *ChangeReaderCommon) updateTimes(sess *mongo.Session, token bson.Raw) {
-	tokenTs, err := rc.resumeTokenTSExtractor(token)
+func (rc *ChangeReaderCommon) updateTimestamps(sess *mongo.Session, token bson.Raw) {
+	tokenTS, err := rc.resumeTokenTSExtractor(token)
 	if err == nil {
 		opTime := sess.OperationTime()
 
@@ -349,9 +349,9 @@ func (rc *ChangeReaderCommon) updateTimes(sess *mongo.Session, token bson.Raw) {
 			panic("session operationTime is nil … did this get called prematurely?")
 		}
 
-		rc.currentTimes.Store(option.Some(readerCurrentTimes{
-			LastHandledTime:   tokenTs,
-			LastOperationTime: *opTime,
+		rc.currentTimestamps.Store(option.Some(readerCurrentTimestamps{
+			LastHandled:   tokenTS,
+			LastOperation: *opTime,
 		}))
 	} else {
 		rc.logger.Warn().

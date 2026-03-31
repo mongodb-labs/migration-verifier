@@ -8,10 +8,34 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+type ComparatorMsgType byte
+
+type ToComparatorMsg struct {
+	DocsWithTS []DocWithTS
+	Type       ComparatorMsgType
+}
+
 const (
 	// ToComparatorBatchSize is the max # of docs that readers send
 	// to the comparator thread at once.
 	ToComparatorBatchSize = 100
+
+	// ToComparatorByteLimit is the max # of bytes that readers send to the
+	// comparator thread at once. This value is somewhat arbitrarily chosen.
+	ToComparatorByteLimit = 32 << 20
+
+	// The default (i.e., zero-value) message type. Indicates a payload of
+	// fetched documents.
+	MsgTypeDocs ComparatorMsgType = 0
+
+	// Indicates no documents; this is used in natural partitioning to ensure
+	// that the destination reader sends the same # of messages as the source
+	// reader, even if there are missing documents on the destination.
+	MsgTypePadding ComparatorMsgType = 1
+
+	// Indicates completion of a destination cursor. Used for flushing
+	// mismatches in natural partitioning.
+	MsgTypeCursorDone ComparatorMsgType = 2
 )
 
 func ToComparatorBatchCount(totalDocs int) int {

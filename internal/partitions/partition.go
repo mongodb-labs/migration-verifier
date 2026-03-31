@@ -111,15 +111,15 @@ func (pqp PartitionQueryParameters) ToFindOptions() bson.D {
 		doc = append(doc, bson.E{"filter", theFilter})
 	}
 
-	pqp.addHintIfNeeded(&doc)
+	if theHint, has := pqp.hint.Get(); has {
+		doc = append(doc, bson.E{"hint", theHint})
+	}
+
+	if sortField, has := pqp.sortField.Get(); has {
+		doc = append(doc, bson.E{"sort", bson.D{{sortField, 1}}})
+	}
 
 	return doc
-}
-
-func (pqp PartitionQueryParameters) addHintIfNeeded(docRef *bson.D) {
-	if theHint, has := pqp.hint.Get(); has {
-		*docRef = append(*docRef, bson.E{"hint", theHint})
-	}
 }
 
 // GetQueryParameters returns a PartitionQueryParameters that describes the
@@ -280,7 +280,6 @@ func getExplicitTypeCheckPredicates(lower, upper any) ([]bson.D, error) {
 	}
 
 	if len(betweenTypes) > 0 {
-
 		orPredicates = append(
 			orPredicates,
 			bson.D{{"_id", bson.D{{"$type", typesToStrings(betweenTypes)}}}},

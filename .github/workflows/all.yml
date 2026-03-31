@@ -23,10 +23,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # NB: This is the only setup we’re supporting with 4.0.
           - mongodb_versions: [ '4.0', '8.0' ]
             topology: replset
             partitioningScheme: _id
+            srcChangeReader: changeStream
+            dstChangeReader: changeStream
+
+          - mongodb_versions: [ '4.0', '8.0' ]
+            topology: replset
+            partitioningScheme: natural
             srcChangeReader: changeStream
             dstChangeReader: changeStream
 
@@ -46,6 +51,11 @@ jobs:
             topology: replset
             srcChangeReader: tailOplog
             dstChangeReader: tailOplog
+
+          - mongodb_versions: [ '4.4', '8.0' ]
+            topology: replset
+            srcFCV: 4.2
+            partitioningScheme: natural
 
           - mongodb_versions: [ '4.4', '8.0' ]
             topology: replset
@@ -75,18 +85,6 @@ jobs:
         exclude:
           # 1. No natural scan for sharded sources.
           - topology: sharded
-            partitioningScheme: natural
-
-          # 2. No natural scan before 4.4.
-          - mongodb_versions: [ '4.2', '4.2' ]
-            partitioningScheme: natural
-          - mongodb_versions: [ '4.2', '4.4' ]
-            partitioningScheme: natural
-          - mongodb_versions: [ '4.2', '5.0' ]
-            partitioningScheme: natural
-          - mongodb_versions: [ '4.2', '6.0' ]
-            partitioningScheme: natural
-          - mongodb_versions: [ '4.2', '8.0' ]
             partitioningScheme: natural
 
           # No hashed comparison before 4.4.
@@ -144,7 +142,14 @@ jobs:
     # versions need.
     runs-on: ubuntu-22.04
 
-    name: ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }}, ${{ matrix.topology }}${{ matrix.toHashedIndexKey && ', hashed doc compare' || '' }}, srcChangeReader=${{ matrix.srcChangeReader }}, dstChangeReader=${{ matrix.dstChangeReader }}, partitioningScheme=${{ matrix.partitioningScheme }}
+    name: >-
+        ${{ matrix.mongodb_versions[0] }} to ${{ matrix.mongodb_versions[1] }},
+        ${{ matrix.srcFCV && format('srcFCV={0},', matrix.srcFCV) || '' }}
+        ${{ matrix.topology }},
+        ${{ matrix.toHashedIndexKey && 'hashed doc compare,' || '' }}
+        srcChangeReader=${{ matrix.srcChangeReader }},
+        dstChangeReader=${{ matrix.dstChangeReader }},
+        partitioningScheme=${{ matrix.partitioningScheme }}
 
     steps:
       - run: uname -a
@@ -152,10 +157,10 @@ jobs:
       - run: lsb_release -a
 
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Fetch Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: stable
 
@@ -185,8 +190,13 @@ jobs:
                 echo mlaunch init --binarypath $(cat .metapath) --port 27040 --dir meta --single
             } | parallel
 
+      - name: Set Source FCV
+        if: matrix.srcFCV != ''
+        run: |
+          $(cat .srcpath)/mongo localhost:27020 --eval 'db.adminCommand({setFeatureCompatibilityVersion: "${{ matrix.srcFCV }}"})'
+
       - name: Test
-        run: go test -v ./... -race
+        run: go test -v ./... -race -timeout 20m
         env:
           MVTEST_DOC_COMPARE_METHOD: ${{matrix.toHashedIndexKey && 'toHashedIndexKey' || ''}}
 

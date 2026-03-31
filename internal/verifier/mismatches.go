@@ -3,18 +3,30 @@ package verifier
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
+	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/wI2L/jsondiff"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -22,40 +34,42 @@ const (
 )
 
 type MismatchInfo struct {
-	Task   bson.ObjectID
-	Detail VerificationResult
-}
-
-// Returns an aggregation that indicates whether the MismatchInfo refers to
-// a missing document.
-func getMismatchDocMissingAggExpr(docExpr any) any {
-	return getResultDocMissingAggExpr(
-		agg.GetField{
-			Input: docExpr,
-			Field: "detail",
-		},
-	)
+	TaskID     bson.ObjectID
+	TaskType   tasks.Type
+	Generation int
+	Detail     compare.Result
 }
 
 var _ bson.Marshaler = MismatchInfo{}
 
 func (mi MismatchInfo) MarshalBSON() ([]byte, error) {
-	panic("Use MarshalToBSON().")
+	return mi.MarshalToBSON(), nil
 }
+
+var (
+	generationBSONLen   = len(bsoncore.AppendInt32Element(nil, "generation", 0))
+	taskTypeBSONLenBase = len(bsoncore.AppendStringElement(nil, "taskType", ""))
+	taskIDBSONLen       = len(bsoncore.AppendObjectIDElement(nil, "taskID", bson.ObjectID{}))
+	detailBSONLenBase   = len(bsoncore.AppendDocumentElement(nil, "detail", nil))
+)
 
 func (mi MismatchInfo) MarshalToBSON() []byte {
 	detail := mi.Detail.MarshalToBSON()
 
 	bsonLen := 4 + // header
-		1 + 4 + 1 + len(bson.ObjectID{}) + // Task
-		1 + 6 + 1 + len(detail) + // Detail
+		generationBSONLen +
+		taskTypeBSONLenBase + len(mi.TaskType) +
+		taskIDBSONLen +
+		detailBSONLenBase + len(detail) +
 		1 // NUL
 
 	buf := make(bson.Raw, 4, bsonLen)
 
-	binary.LittleEndian.PutUint32(buf, uint32(bsonLen))
+	binary.LittleEndian.PutUint32(buf, safecast.MustConvert[uint32](bsonLen))
 
-	buf = bsoncore.AppendObjectIDElement(buf, "task", mi.Task)
+	buf = bsoncore.AppendInt32Element(buf, "generation", safecast.MustConvert[int32](mi.Generation))
+	buf = bsoncore.AppendStringElement(buf, "taskType", string(mi.TaskType))
+	buf = bsoncore.AppendObjectIDElement(buf, "taskID", mi.TaskID)
 	buf = bsoncore.AppendDocumentElement(buf, "detail", detail)
 
 	buf = append(buf, 0)
@@ -73,20 +87,30 @@ func createMismatchesCollection(ctx context.Context, db *mongo.Database) error {
 		[]mongo.IndexModel{
 			{
 				Keys: bson.D{
-					{"task", 1},
-				},
-			},
+					// We query on generation & task type …
+					{"generation", 1},
+					{"taskType", 1},
 
-			// This index supports mismatch reports.
-			{
-				Keys: bson.D{
+					// … then sort descending.
 					{"detail.mismatchHistory.durationMS", -1},
 					{"detail.id", 1},
 				},
 			},
+
+			// These are here so we can quickly recall last-rechecked
+			// optimes on restart.
+			{
+				Keys: bson.D{
+					{compare.SrcTimestampField, -1},
+				},
+			},
+			{
+				Keys: bson.D{
+					{compare.DstTimestampField, -1},
+				},
+			},
 		},
 	)
-
 	if err != nil {
 		return errors.Wrapf(err, "creating indexes for collection %#q", mismatchesCollectionName)
 	}
@@ -120,80 +144,69 @@ type mismatchReportData struct {
 	Counts mismatchCountsPerType
 }
 
-// This is a low-level function used to display metadata mismatches.
-// It’s also used in tests.
-func getMismatchesForTasks(
+func getNamespaceMismatchesForGeneration(
 	ctx context.Context,
 	db *mongo.Database,
-	taskIDs []bson.ObjectID,
-) (map[bson.ObjectID][]VerificationResult, error) {
+	generation int,
+) ([]compare.Result, error) {
 	cursor, err := db.Collection(mismatchesCollectionName).Find(
 		ctx,
 		bson.D{
-			{"task", bson.D{{"$in", taskIDs}}},
+			{"generation", generation},
+			{"taskType", tasks.VerifyCollection},
 		},
 	)
 	if err != nil {
-		return nil, errors.Wrapf(err, "querying mismatches for %d task(s)", len(taskIDs))
+		return nil, errors.Wrapf(err, "querying generation %d’s collection mismatches", generation)
 	}
 
-	result := map[bson.ObjectID][]VerificationResult{}
-
-	for cursor.Next(ctx) {
-		var d MismatchInfo
-		if err := cursor.Decode(&d); err != nil {
-			return nil, errors.Wrapf(err, "parsing discrepancy %+v", cursor.Current)
-		}
-
-		result[d.Task] = append(
-			result[d.Task],
-			d.Detail,
-		)
+	var infos []MismatchInfo
+	if err := cursor.All(ctx, &infos); err != nil {
+		return nil, errors.Wrapf(err, "reading generation %d’s collection mismatches", generation)
 	}
 
-	if cursor.Err() != nil {
-		return nil, errors.Wrapf(err, "reading %d tasks’ mismatches", len(taskIDs))
-	}
-
-	for _, taskID := range taskIDs {
-		if _, ok := result[taskID]; !ok {
-			result[taskID] = []VerificationResult{}
-		}
-	}
-
-	return result, nil
+	return lo.Map(
+		infos,
+		func(mi MismatchInfo, _ int) compare.Result {
+			return mi.Detail
+		},
+	), nil
 }
 
 var (
 	// A filter to identify docs marked “missing” (on either src or dst)
-	missingFilter = getMismatchDocMissingAggExpr("$$ROOT")
+	missingFilter = agg.And{
+		agg.Eq{"$detail.details", compare.Missing},
+		agg.Eq{"$detail.field", ""},
+	}
 
-	missingOnDstFilter = agg.And{
-		missingFilter,
+	missingOnDstFilter = append(
+		slices.Clone(missingFilter),
 		agg.Eq{
 			"$detail.cluster",
-			ClusterTarget,
+			constants.ClusterTarget,
 		},
-	}
-	extraOnDstFilter = agg.And{
-		missingFilter,
+	)
+
+	extraOnDstFilter = append(
+		slices.Clone(missingFilter),
 		agg.Eq{
 			"$detail.cluster",
-			ClusterSource,
+			constants.ClusterSource,
 		},
-	}
+	)
 
 	contentDiffersFilter = agg.Not{missingFilter}
 )
 
-func countMismatchesForTasks(
+func countMismatchesForGeneration(
 	ctx context.Context,
 	db *mongo.Database,
-	taskIDs []bson.ObjectID,
+	generation int,
 ) (mismatchCountsPerType, error) {
 	pl := mongo.Pipeline{
 		{{"$match", bson.D{
-			{"task", bson.D{{"$in", taskIDs}}},
+			{"generation", generation},
 		}}},
 		{{"$group", bson.D{
 			{"_id", nil},
@@ -218,7 +231,7 @@ func countMismatchesForTasks(
 
 	cursor, err := db.Collection(mismatchesCollectionName).Aggregate(ctx, pl)
 	if err != nil {
-		return mismatchCountsPerType{}, errors.Wrapf(err, "counting %d tasks’ discrepancies", len(taskIDs))
+		return mismatchCountsPerType{}, errors.Wrapf(err, "counting generation %d’s discrepancies", generation)
 	}
 
 	var results []mismatchCountsPerType
@@ -227,17 +240,20 @@ func countMismatchesForTasks(
 		return mismatchCountsPerType{}, errors.Wrapf(err, "reading mismatch aggregation")
 	}
 
-	if len(results) != 1 {
+	switch len(results) {
+	case 0:
+		return mismatchCountsPerType{}, nil
+	case 1:
+		return results[0], nil
+	default:
 		return mismatchCountsPerType{}, fmt.Errorf("surprise agg results count: %+v", results)
 	}
-
-	return results[0], nil
 }
 
 func getDocumentMismatchReportData(
 	ctx context.Context,
 	db *mongo.Database,
-	taskIDs []bson.ObjectID,
+	generation int,
 	limit int64,
 ) (mismatchReportData, error) {
 	eg, egCtx := contextplus.ErrGroup(ctx)
@@ -259,10 +275,15 @@ func getDocumentMismatchReportData(
 			func() error {
 				cursor, err := mismatchesColl.Find(
 					egCtx,
-					bson.D{{"$expr", agg.And{
-						categoryParts.filter,
-						agg.In("$task", taskIDs),
-					}}},
+					bson.D{
+						{"$and", []bson.D{
+							{
+								{"generation", generation},
+								{"taskType", tasks.VerifyDocuments},
+							},
+							{{"$expr", categoryParts.filter}},
+						}},
+					},
 					options.Find().
 						SetSort(
 							bson.D{
@@ -272,7 +293,6 @@ func getDocumentMismatchReportData(
 						).
 						SetLimit(limit),
 				)
-
 				if err != nil {
 					return errors.Wrapf(err, "fetching %#q", categoryParts.label)
 				}
@@ -288,7 +308,7 @@ func getDocumentMismatchReportData(
 
 	eg.Go(
 		func() error {
-			counts, err := countMismatchesForTasks(ctx, db, taskIDs)
+			counts, err := countMismatchesForGeneration(ctx, db, generation)
 
 			reportData.Counts = counts
 
@@ -306,20 +326,18 @@ func getDocumentMismatchReportData(
 func recordMismatches(
 	ctx context.Context,
 	db *mongo.Database,
-	taskID bson.ObjectID,
-	problems []VerificationResult,
+	task *tasks.Task,
+	problems []compare.Result,
 ) error {
-	if option.IfNotZero(taskID).IsNone() {
-		panic("empty task ID given")
-	}
-
 	models := lo.Map(
 		problems,
-		func(r VerificationResult, _ int) mongo.WriteModel {
+		func(r compare.Result, _ int) mongo.WriteModel {
 			return &mongo.InsertOneModel{
 				Document: MismatchInfo{
-					Task:   taskID,
-					Detail: r,
+					TaskID:     task.PrimaryKey,
+					TaskType:   task.Type,
+					Generation: task.Generation,
+					Detail:     r,
 				}.MarshalToBSON(),
 			}
 		},
@@ -331,4 +349,254 @@ func recordMismatches(
 	)
 
 	return errors.Wrapf(err, "recording %d mismatches", len(models))
+}
+
+func getLongestLivedDocumentMismatch(
+	ctx context.Context,
+	db *mongo.Database,
+	generation int,
+) (option.Option[MismatchInfo], error) {
+	// We query both the given generation and its immediate predecessor.
+	// This is because the current generation might have just gotten started,
+	// in which case there may be no mismatches recorded for that generation.
+	queriedGenerations := mslices.Of(generation, generation-1)
+	if generation == 0 {
+		// Avoid querying generation -1:
+		queriedGenerations = queriedGenerations[:1]
+	}
+
+	raw, err := db.Collection(mismatchesCollectionName).FindOne(
+		ctx,
+		bson.D{
+			{"generation", bson.D{{"$in", queriedGenerations}}},
+			{"taskType", tasks.VerifyDocuments},
+		},
+		options.FindOne().SetSort(
+			bson.D{
+				{"detail.mismatchHistory.durationMS", -1},
+				{"detail.id", 1},
+			},
+		),
+	).Raw()
+
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return option.None[MismatchInfo](), nil
+	} else if err != nil {
+		return option.None[MismatchInfo](), errors.Wrap(err, "querying mismatches")
+	}
+
+	var mmInfo MismatchInfo
+
+	if err := bson.Unmarshal(raw, &mmInfo); err != nil {
+		return option.None[MismatchInfo](), errors.Wrap(err, "parsing mismatch")
+	}
+
+	return option.Some(mmInfo), nil
+}
+
+// SendNamespaceMismatches outputs all namespace mismatches found in the prior
+// generation (or, in generation 0, the current generation).
+func (verifier *Verifier) SendNamespaceMismatches(
+	ctx context.Context,
+	indexSpecTolerances []api.IndexSpecTolerance,
+	out chan<- api.NSMismatchInfo,
+) error {
+	defer close(out)
+
+	generation, _ := verifier.getGeneration()
+
+	unfiltered, cancelFilter := chanutil.StartIngestFilter(
+		ctx,
+		out,
+		func(in api.NSMismatchInfo) bool {
+			if in.Aspect != api.NSMismatchAspectIndex {
+				return true
+			}
+
+			return !tolerancesObscureMismatch(indexSpecTolerances, in)
+		},
+	)
+	defer func() {
+		_ = cancelFilter(ctx)
+	}()
+
+	return findAndSendMismatches(
+		ctx,
+		verifier,
+		generation,
+		tasks.VerifyCollection,
+		0,
+		unfiltered,
+		compare.Result.APINSMismatchInfo,
+	)
+}
+
+func tolerancesObscureMismatch(
+	indexSpecTolerances []api.IndexSpecTolerance,
+	in api.NSMismatchInfo,
+) bool {
+	detail, hasDetail := in.Detail.Get()
+	if !hasDetail {
+		return false
+	}
+
+	patch, err := parseJSONDiffOps(detail)
+
+	// If there are no JSON patch ops, or the detail isn’t a JSON diff at all,
+	// then just indicate to show the mismatch.
+	if err != nil || len(patch) == 0 {
+		return false
+	}
+
+OP:
+	for _, diffOp := range patch {
+		for _, tolerance := range indexSpecTolerances {
+			tolerancePath := "/" + string(tolerance)
+
+			if diffOp.Path == tolerancePath || strings.HasPrefix(diffOp.Path, tolerancePath+"/") {
+				// The tolerance says to ignore this option in the diff.
+				// Keep looking for a non-ignored op.
+				continue OP
+			}
+		}
+
+		// The diff has an op that doesn’t match any tolerance.
+		// This mismatch should be reported.
+		return false
+	}
+
+	// Every field in the diff matched a tolerance, so suppress this mismatch.
+	return true
+}
+
+func parseJSONDiffOps(in string) (jsondiff.Patch, error) {
+	var patch jsondiff.Patch
+
+	err := decodeConcatenatedJSON(strings.NewReader(in), &patch)
+
+	return patch, err
+}
+
+// decodeConcatenatedJSON reads a stream of consecutive JSON entities from 'r'
+// and appends them to the slice pointed to by 'out'.
+func decodeConcatenatedJSON[T any, S ~[]T](r io.Reader, out *S) error {
+	if out == nil {
+		return errors.New("output slice pointer cannot be nil")
+	}
+
+	decoder := json.NewDecoder(r)
+
+	for {
+		var item T
+
+		// Decode reads the next valid JSON value from the stream
+		err := decoder.Decode(&item)
+		if err != nil {
+			// io.EOF means we cleanly hit the end of the buffer
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			// Any other error means malformed JSON or a read error
+			return err
+		}
+
+		*out = append(*out, item)
+	}
+
+	return nil
+}
+
+// SendDocumentMismatches outputs all document mismatches found in the prior
+// generation (or, in generation 0, the current generation).
+func (verifier *Verifier) SendDocumentMismatches(
+	ctx context.Context,
+	minDurationSecs uint32,
+	out chan<- api.DocMismatchInfo,
+) error {
+	defer close(out)
+
+	generation, _ := verifier.getGeneration()
+
+	// A quick shortcut since a significant use case here is discovering
+	// mismatches of nonzero duration.
+	if generation == 0 && minDurationSecs > 0 {
+		return nil
+	}
+
+	return findAndSendMismatches(
+		ctx,
+		verifier,
+		generation,
+		tasks.VerifyDocuments,
+		minDurationSecs,
+		out,
+		compare.Result.APIDocMismatchInfo,
+	)
+}
+
+func findAndSendMismatches[MT api.AnyMismatchInfo](
+	ctx context.Context,
+	verifier *Verifier,
+	curGeneration int,
+	taskType tasks.Type,
+	minDurationSecs uint32,
+	out chan<- MT,
+	toAPI func(compare.Result) MT,
+) error {
+	queryGeneration := curGeneration
+	if queryGeneration > 0 {
+		queryGeneration--
+	}
+
+	filter := bson.D{
+		{"generation", queryGeneration},
+		{"taskType", taskType},
+	}
+
+	if minDurationSecs > 0 {
+		filter = append(
+			filter,
+			bson.E{
+				"detail.mismatchHistory.durationMS", bson.D{
+					{"$gte", 1000 * minDurationSecs},
+				},
+			},
+		)
+	}
+
+	db := verifier.metaClient.Database(verifier.metaDBName)
+
+	cursor, err := db.Collection(mismatchesCollectionName).Find(
+		ctx,
+		filter,
+		options.Find().SetSort(
+			bson.D{
+				{"detail.mismatchHistory.durationMS", -1},
+				{"detail.id", 1},
+			},
+		),
+	)
+	if err != nil {
+		return fmt.Errorf("fetching generation %d’s mismatches: %w", queryGeneration, err)
+	}
+
+	for cursor.Next(ctx) {
+		var mm MismatchInfo
+
+		if err := cursor.Decode(&mm); err != nil {
+			return fmt.Errorf("parsing generation %d’s mismatches: %w", queryGeneration, err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case out <- toAPI(mm.Detail):
+		}
+	}
+
+	if err := cursor.Err(); err != nil {
+		return fmt.Errorf("reading generation %d’s mismatches: %w", queryGeneration, err)
+	}
+
+	return nil
 }

@@ -1,10 +1,10 @@
 module github.com/10gen/migration-verifier
 
-go 1.25.4
+go 1.25.7
 
 require (
 	github.com/cespare/permute/v2 v2.0.0-beta2
-	github.com/deckarep/golang-set/v2 v2.3.0
+	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gin-contrib/pprof v1.5.3
 	github.com/gin-gonic/gin v1.10.0
@@ -22,13 +22,16 @@ require (
 	github.com/urfave/cli v1.22.9
 
 	// NB: This is the last driver version that supported 4.0.
-	go.mongodb.org/mongo-driver/v2 v2.4.0
-	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
-	golang.org/x/sync v0.18.0
+	go.mongodb.org/mongo-driver/v2 v2.5.0
+	golang.org/x/exp v0.0.0-20260211191109-2735e65f0518
+	golang.org/x/sync v0.19.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
-require github.com/mongodb-labs/migration-tools v0.0.0-20260113170835-3d5bbec67c6e
+require (
+	github.com/ccoveille/go-safecast/v2 v2.0.0
+	github.com/mongodb-labs/migration-tools v0.0.0-20260316172641-87d081cfecc3
+)
 
 require (
 	github.com/BurntSushi/toml v0.3.1 // indirect
@@ -43,10 +46,9 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.26.0 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
-	github.com/golang/snappy v1.0.0 // indirect
 	github.com/huandu/go-clone v1.6.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.16.7 // indirect
+	github.com/klauspost/compress v1.17.6 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
@@ -57,10 +59,15 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
+	github.com/tidwall/gjson v1.18.0 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
+	github.com/wI2L/jsondiff v0.7.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
-	github.com/xdg-go/scram v1.1.2 // indirect
+	github.com/xdg-go/scram v1.2.0 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	golang.org/x/arch v0.16.0 // indirect

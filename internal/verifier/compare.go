@@ -2,27 +2,32 @@ package verifier
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"math"
 	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
-	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"golang.org/x/exp/slices"
 )
 
@@ -33,22 +38,28 @@ const (
 	comparisonHistoryThreshold = 500
 )
 
+// DocCompareReport represents a batch of document discrepancies.
+type DocCompareReport struct {
+	// Problems details the discrepancies.
+	Problems []compare.Result
+
+	// DocCount is the number of documents checked.
+	DocCount types.DocumentCount
+
+	// ByteCount is the total size of the source’s documents.
+	ByteCount types.ByteCount
+}
+
+// FetchAndCompareDocuments spawns a separate goroutine that fetches the given
+// task’s src & dstdocuments, compares those documents, then sends the results
+// into the returned channel.
 func (verifier *Verifier) FetchAndCompareDocuments(
 	givenCtx context.Context,
 	workerNum int,
 	task *tasks.Task,
-) (
-	[]VerificationResult,
-	types.DocumentCount,
-	types.ByteCount,
-	error,
-) {
-	var srcChannel, dstChannel <-chan []compare.DocWithTS
+) <-chan mo.Result[DocCompareReport] {
+	var srcChannel, dstChannel <-chan compare.ToComparatorMsg
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
-
-	results := []VerificationResult{}
-	var docCount types.DocumentCount
-	var byteCount types.ByteCount
 
 	retryer := retry.New().WithDescription(
 		"comparing task %v's documents (namespace: %s)",
@@ -56,55 +67,74 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 		task.QueryFilter.Namespace,
 	)
 
-	err := retryer.
-		WithBefore(func() error {
-			var err error
+	resultsChan := make(chan mo.Result[DocCompareReport], 100)
 
-			srcChannel, dstChannel, readSrcCallback, readDstCallback, err = verifier.getFetcherChannelsAndCallbacks(task)
+	go func() {
+		defer close(resultsChan)
 
-			return err
-		}).
-		WithErrorCodes(util.CursorKilledErrCode).
-		WithCallback(
-			func(ctx context.Context, fi *retry.FuncInfo) error {
-				return readSrcCallback(ctx, fi)
-			},
-			"reading from source",
-		).
-		WithCallback(
-			func(ctx context.Context, fi *retry.FuncInfo) error {
-				return readDstCallback(ctx, fi)
-			},
-			"reading from destination",
-		).
-		WithCallback(
-			func(ctx context.Context, fi *retry.FuncInfo) error {
+		err := retryer.
+			WithBefore(func() error {
 				var err error
-				results, docCount, byteCount, err = verifier.compareDocsFromChannels(
-					ctx,
-					workerNum,
-					fi,
-					task,
-					srcChannel,
-					dstChannel,
-				)
+
+				srcChannel, dstChannel, readSrcCallback, readDstCallback, err = verifier.getFetcherChannelsAndCallbacks(task)
 
 				return err
-			},
-			"comparing documents",
-		).Run(givenCtx, verifier.logger)
+			}).
+			WithErrorCodes(util.CursorKilledErrCode).
+			WithCallback(
+				func(ctx context.Context, fi *retry.FuncInfo) error {
+					return readSrcCallback(ctx, fi)
+				},
+				"reading from source",
+			).
+			WithCallback(
+				func(ctx context.Context, fi *retry.FuncInfo) error {
+					return readDstCallback(ctx, fi)
+				},
+				"reading from destination",
+			).
+			WithCallback(
+				func(ctx context.Context, fi *retry.FuncInfo) error {
+					reportChan, canceler := chanutil.StartIngestMap(
+						ctx,
+						resultsChan,
+						mo.Ok[DocCompareReport],
+					)
 
-	if err == nil {
-		if ts, has := task.SrcTimestamp.Get(); has {
-			verifier.NoteCompareOfOptime(src, ts)
+					defer func() {
+						_ = canceler(ctx)
+					}()
+
+					return verifier.compareDocsFromChannels(
+						ctx,
+						workerNum,
+						fi,
+						task,
+						srcChannel,
+						dstChannel,
+						reportChan,
+					)
+				},
+				"comparing documents",
+			).Run(givenCtx, verifier.logger)
+		if err != nil {
+			writeErr := chanutil.WriteWithDoneCheck(
+				givenCtx,
+				resultsChan,
+				mo.Err[DocCompareReport](err),
+			)
+
+			if writeErr != nil && !errors.Is(writeErr, context.Canceled) {
+				verifier.logger.Warn().
+					Err(err).
+					Msg("Failed to compare documents.")
+			}
+
+			return
 		}
+	}()
 
-		if ts, has := task.DstTimestamp.Get(); has {
-			verifier.NoteCompareOfOptime(dst, ts)
-		}
-	}
-
-	return results, docCount, byteCount, err
+	return resultsChan
 }
 
 func (verifier *Verifier) NoteCompareOfOptime(
@@ -115,9 +145,9 @@ func (verifier *Verifier) NoteCompareOfOptime(
 
 	switch cluster {
 	case src:
-		dg = verifier.lastProcessedSrcOptime
+		dg = verifier.srcLastRecheckedTS
 	case dst:
-		dg = verifier.lastProcessedDstOptime
+		dg = verifier.dstLastRecheckedTS
 	default:
 		panic("bad cluster: " + cluster)
 	}
@@ -135,335 +165,74 @@ func (verifier *Verifier) compareDocsFromChannels(
 	workerNum int,
 	fi retry.SuccessNotifier,
 	task *tasks.Task,
-	srcChannel, dstChannel <-chan []compare.DocWithTS,
-) (
-	[]VerificationResult,
-	types.DocumentCount,
-	types.ByteCount,
-	error,
-) {
-	results := []VerificationResult{}
-
-	// Document & byte counts for both the task and a batch of docs to tally
-	// for the Verifier’s relevant History structs to track those figures.
-	// (We don’t want to report each individual doc in the history because that
-	// could be very big.)
-	var taskSrcDocCount, curHistoryDocCount types.DocumentCount
-	var taskSrcByteCount, curHistoryByteCount types.ByteCount
-
-	// Add these so that the very first logs will be meaningful.
-	verifier.docsComparedHistory.Add(0)
-	verifier.bytesComparedHistory.Add(0)
-
-	mapKeyFieldNames := task.QueryFilter.GetDocKeyFields()
-
-	namespace := task.QueryFilter.Namespace
-
-	srcCache := map[string]compare.DocWithTS{}
-	dstCache := map[string]compare.DocWithTS{}
-
-	firstMismatchTimeLookup := firstMismatchTimeLookup{
-		task:             task,
-		docCompareMethod: verifier.docCompareMethod,
-	}
-
-	// A reusable slice of doc key values.
-	var docKeyValues []bson.RawValue
-	var mapKeyBytes []byte
-
-	// This is the core document-handling logic. It either:
-	//
-	// a) caches the new document if its mapKey is unseen, or
-	// b) compares the new doc against its previously-received, cached
-	//    counterpart and records any mismatch.
-	handleNewDoc := func(curDocWithTS compare.DocWithTS, isSrc bool) error {
-		docKeyValues = docKeyValues[:0]
-		docKeyValues, err := verifier.docCompareMethod.GetDocKeyValues(
-			docKeyValues,
-			curDocWithTS.Doc,
-			mapKeyFieldNames,
-		)
-		if err != nil {
-			return errors.Wrapf(err, "extracting doc key (fields: %v) values from doc %+v", mapKeyFieldNames, curDocWithTS.Doc)
-		}
-
-		mapKeyBytes = mapKeyBytes[:0]
-		mapKey := getMapKey(mapKeyBytes, docKeyValues)
-
-		var ourMap, theirMap map[string]compare.DocWithTS
-
-		if isSrc {
-			ourMap = srcCache
-			theirMap = dstCache
-		} else {
-			ourMap = dstCache
-			theirMap = srcCache
-		}
-
-		// See if we've already cached a document with this
-		// mapKey from the other channel.
-		theirDocWithTS, exists := theirMap[mapKey]
-
-		// If there is no such cached document, then cache the newly-received
-		// document in our map then proceed to the next document.
-		//
-		// (We'll remove the cache entry when/if the other channel yields a
-		// document with the same mapKey.)
-		if !exists {
-			ourMap[mapKey] = curDocWithTS
-			return nil
-		}
-
-		// We have two documents! First we remove the cache entry. This saves
-		// memory, but more importantly, it lets us know, once we exhaust the
-		// channels, which documents were missing on one side or the other.
-		delete(theirMap, mapKey)
-
-		// After the below we’ll be done with these documents, so we can
-		// schedule putting their buffers into the memory pool.
-		defer curDocWithTS.PutInPool()
-		defer theirDocWithTS.PutInPool()
-
-		// Now we determine which document came from whom.
-		var srcDoc, dstDoc compare.DocWithTS
-		if isSrc {
-			srcDoc = curDocWithTS
-			dstDoc = theirDocWithTS
-		} else {
-			srcDoc = theirDocWithTS
-			dstDoc = curDocWithTS
-		}
-
-		// Finally we compare the documents and save any mismatch report(s).
-		mismatches, err := verifier.compareOneDocument(srcDoc.Doc, dstDoc.Doc, namespace)
-
-		if err != nil {
-			return errors.Wrap(err, "failed to compare documents")
-		}
-
-		if len(mismatches) == 0 {
-			return nil
-		}
-
-		firstMismatchTime := firstMismatchTimeLookup.get(srcDoc.Doc)
-
-		for i := range mismatches {
-			mismatches[i].MismatchHistory = createMismatchTimes(firstMismatchTime)
-			mismatches[i].SrcTimestamp = option.Some(srcDoc.TS)
-			mismatches[i].DstTimestamp = option.Some(dstDoc.TS)
-		}
-
-		results = append(results, mismatches...)
-
-		return nil
-	}
-
-	var srcClosed, dstClosed bool
-
-	readTimer := time.NewTimer(0)
+	srcChannel, dstChannel <-chan compare.ToComparatorMsg,
+	reportsChan chan<- DocCompareReport,
+) error {
+	// 1. Initialize State
+	c := newComparator(verifier, workerNum, fi, task)
 	defer func() {
-		if !readTimer.Stop() {
-			<-readTimer.C
+		if !c.readTimer.Stop() {
+			<-c.readTimer.C
 		}
 	}()
 
-	// We always read src & dst together. This ensures that, if one side
-	// lags the other significantly, we won’t keep caching the faster side’s
-	// documents and thus consume more & more memory.
-	for !srcClosed || !dstClosed {
-		simpleTimerReset(readTimer, readTimeout)
+	verifier.docsComparedHistory.Add(0)
+	verifier.bytesComparedHistory.Add(0)
 
-		var srcDocsWithTS, dstDocsWithTS []compare.DocWithTS
-
-		eg, egCtx := contextplus.ErrGroup(ctx)
-
-		if !srcClosed {
-			eg.Go(func() error {
-				var alive bool
-				select {
-				case <-egCtx.Done():
-					return egCtx.Err()
-				case <-readTimer.C:
-					return errors.Errorf(
-						"failed to read from source after %s",
-						readTimeout,
-					)
-				case srcDocsWithTS, alive = <-srcChannel:
-					if !alive {
-						srcClosed = true
-						break
-					}
-
-					lo.Assertf(
-						len(srcDocsWithTS) <= compare.ToComparatorBatchSize,
-						"dst reader should send <= %d docs but sent %d",
-						compare.ToComparatorBatchSize,
-						len(srcDocsWithTS),
-					)
-
-					fi.NoteSuccess("received document from source")
-
-					taskSrcDocCount += types.DocumentCount(len(srcDocsWithTS))
-					curHistoryDocCount += types.DocumentCount(len(srcDocsWithTS))
-
-					for _, docWithTS := range srcDocsWithTS {
-						taskSrcByteCount += types.ByteCount(len(docWithTS.Doc))
-
-						curHistoryByteCount += types.ByteCount(len(docWithTS.Doc))
-						if curHistoryDocCount >= comparisonHistoryThreshold {
-							verifier.docsComparedHistory.Add(curHistoryDocCount)
-							verifier.bytesComparedHistory.Add(curHistoryByteCount)
-
-							curHistoryDocCount = 0
-							curHistoryByteCount = 0
-						}
-					}
-
-					verifier.workerTracker.SetSrcCounts(
-						workerNum,
-						taskSrcDocCount,
-						taskSrcByteCount,
-					)
-				}
-
-				return nil
-			})
+	// 2. Stream Processing Loop
+	for c.stillReading() {
+		srcBatch, dstBatch, dstCursorDone, err := c.readBatches(ctx, srcChannel, dstChannel)
+		if err != nil {
+			return err
 		}
 
-		if !dstClosed {
-			eg.Go(func() error {
-				var alive bool
-				select {
-				case <-egCtx.Done():
-					return egCtx.Err()
-				case <-readTimer.C:
-					return errors.Errorf(
-						"failed to read from destination after %s",
-						readTimeout,
-					)
-				case dstDocsWithTS, alive = <-dstChannel:
-					if !alive {
-						dstClosed = true
-						break
-					}
+		// NB: This MUST precede the actual comparison because any dst documents
+		// will be from the next dst cursor.
+		if dstCursorDone {
+			whyFlush, err := c.flushIfNeeded(ctx, reportsChan)
+			if err != nil {
+				return errors.Wrapf(err, "flushing problems")
+			}
 
-					lo.Assertf(
-						len(dstDocsWithTS) <= compare.ToComparatorBatchSize,
-						"dst reader should send <= %d docs but sent %d",
-						compare.ToComparatorBatchSize,
-						len(dstDocsWithTS),
-					)
-
-					fi.NoteSuccess("received document from destination")
-				}
-
-				return nil
-			})
+			if reason, has := whyFlush.Get(); has {
+				verifier.logger.Debug().
+					Any("task", task.PrimaryKey).
+					Int("workerNum", workerNum).
+					Str("namespace", task.QueryFilter.Namespace).
+					Str("reason", reason).
+					Msg("Recorded document-disparity problems.")
+			}
 		}
 
-		if err := eg.Wait(); err != nil {
-			return nil, 0, 0, errors.Wrap(
-				err,
-				"failed to read documents",
-			)
-		}
+		// Interleave processing the batches
+		for len(srcBatch)+len(dstBatch) > 0 {
+			if len(srcBatch) > 0 {
+				doc := srcBatch[0]
+				srcBatch = srcBatch[1:]
 
-		for len(srcDocsWithTS)+len(dstDocsWithTS) > 0 {
-			if len(srcDocsWithTS) > 0 {
-				srcDoc := srcDocsWithTS[0]
-				srcDocsWithTS = srcDocsWithTS[1:]
-
-				err := handleNewDoc(srcDoc, true)
-
-				if err != nil {
-
-					return nil, 0, 0, errors.Wrapf(
-						err,
-						"comparer thread failed to handle %#q's source doc (task: %s) with ID %v",
-						namespace,
-						task.PrimaryKey,
-						srcDoc.Doc.Lookup("_id"),
+				if err := c.processSingleDoc(doc, true); err != nil {
+					return errors.Wrapf(
+						err, "comparer thread failed to handle %#q's source doc (task: %s) with ID %v",
+						c.namespace, task.PrimaryKey, doc.Doc.Lookup("_id"),
 					)
 				}
 			}
 
-			if len(dstDocsWithTS) > 0 {
-				dstDoc := dstDocsWithTS[0]
-				dstDocsWithTS = dstDocsWithTS[1:]
+			if len(dstBatch) > 0 {
+				doc := dstBatch[0]
+				dstBatch = dstBatch[1:]
 
-				err := handleNewDoc(dstDoc, false)
-
-				if err != nil {
-
-					return nil, 0, 0, errors.Wrapf(
-						err,
-						"comparer thread failed to handle %#q's destination doc (task: %s) with ID %v",
-						namespace,
-						task.PrimaryKey,
-						dstDoc.Doc.Lookup("_id"),
+				if err := c.processSingleDoc(doc, false); err != nil {
+					return errors.Wrapf(
+						err, "comparer thread failed to handle %#q's destination doc (task: %s) with ID %v",
+						c.namespace, task.PrimaryKey, doc.Doc.Lookup("_id"),
 					)
 				}
 			}
 		}
 	}
 
-	// We got here because both srcChannel and dstChannel are closed,
-	// which means we have processed all documents with the same mapKey
-	// between source & destination.
-	//
-	// At this point, any documents left in the cache maps are simply
-	// missing on the other side. We add results for those.
-
-	// We might as well pre-grow the slice:
-	results = slices.Grow(results, len(srcCache)+len(dstCache))
-
-	for _, docWithTS := range srcCache {
-		firstMismatchTime := firstMismatchTimeLookup.get(docWithTS.Doc)
-
-		results = append(
-			results,
-			VerificationResult{
-				ID: lo.Must(verifier.docCompareMethod.ClonedDocIDForComparison(
-					docWithTS.Doc,
-				)),
-				Details:         Missing,
-				Cluster:         ClusterTarget,
-				NameSpace:       namespace,
-				dataSize:        int32(len(docWithTS.Doc)),
-				SrcTimestamp:    option.Some(docWithTS.TS),
-				MismatchHistory: createMismatchTimes(firstMismatchTime),
-			},
-		)
-
-		docWithTS.PutInPool()
-	}
-
-	for _, docWithTS := range dstCache {
-		firstMismatchTime := firstMismatchTimeLookup.get(docWithTS.Doc)
-
-		results = append(
-			results,
-			VerificationResult{
-				ID: lo.Must(verifier.docCompareMethod.ClonedDocIDForComparison(
-					docWithTS.Doc,
-				)),
-				Details:      Missing,
-				Cluster:      ClusterSource,
-				NameSpace:    namespace,
-				DstTimestamp: option.Some(docWithTS.TS),
-
-				dataSize:        int32(len(docWithTS.Doc)),
-				MismatchHistory: createMismatchTimes(firstMismatchTime),
-			},
-		)
-
-		docWithTS.PutInPool()
-	}
-
-	verifier.docsComparedHistory.Add(curHistoryDocCount)
-	verifier.bytesComparedHistory.Add(curHistoryByteCount)
-
-	return results, taskSrcDocCount, taskSrcByteCount, nil
+	return c.flush(ctx, reportsChan)
 }
 
 func createMismatchTimes(firstDateTime option.Option[bson.DateTime]) recheck.MismatchHistory {
@@ -479,19 +248,11 @@ func createMismatchTimes(firstDateTime option.Option[bson.DateTime]) recheck.Mis
 	}
 }
 
-func simpleTimerReset(t *time.Timer, dur time.Duration) {
-	if !t.Stop() {
-		<-t.C
-	}
-
-	t.Reset(dur)
-}
-
 func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 	task *tasks.Task,
 ) (
-	<-chan []compare.DocWithTS,
-	<-chan []compare.DocWithTS,
+	<-chan compare.ToComparatorMsg,
+	<-chan compare.ToComparatorMsg,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
@@ -508,34 +269,23 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacks(
 func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	task *tasks.Task,
 ) (
-	<-chan []compare.DocWithTS,
-	<-chan []compare.DocWithTS,
+	<-chan compare.ToComparatorMsg,
+	<-chan compare.ToComparatorMsg,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 	error,
 ) {
-	hostname := task.QueryFilter.Partition.HostnameAndPort.MustGetf(
+	hostnameAndPort := task.QueryFilter.Partition.HostnameAndPort.MustGetf(
 		"hostname/port missing; this is required for natural partitions",
 	)
 
-	connstr, err := compare.SetDirectHostInConnectionString(
-		verifier.srcURI,
-		hostname,
-	)
-	if err != nil {
-		return nil, nil, nil, nil, errors.Wrapf(err, "setting source connstr to connect directly to %#q", hostname)
-	}
-
-	client, err := mongo.Connect(options.Client().
-		ApplyURI(connstr).
-		SetAppName(clientAppName),
-	)
+	client, err := mmongo.GetDirectClient(verifier.srcURI, hostnameAndPort)
 	if err != nil {
 		return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
 	}
 
-	srcToCompareChannel := make(chan []compare.DocWithTS)
-	dstToCompareChannel := make(chan []compare.DocWithTS)
+	srcToCompareChannel := make(chan compare.ToComparatorMsg)
+	dstToCompareChannel := make(chan compare.ToComparatorMsg)
 
 	srcToDstChannel := make(chan []compare.DocID, 1_000)
 
@@ -587,7 +337,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 
 		for {
 			docIDsOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
-
 			if err != nil {
 				return err
 			}
@@ -614,12 +363,13 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 
 			cursorStartTime := time.Now()
 
-			cursor, err := verifier.getDocumentsCursor(
+			theCursor, err := verifier.getDocumentsCursor(
 				sctx,
 				coll,
 				verifier.dstClusterInfo,
 				verifier.dstChangeReader.getStartTimestamp(),
 				&dupeTask,
+				option.None[*readpref.ReadPref](),
 			)
 
 			for _, id := range docIDs {
@@ -637,7 +387,12 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				Int("idsInQuery", len(docIDs)).
 				Msg("Iterating dst cursor.")
 
-			dstDocsFound, err := iterateCursorToChannel(sctx, state, cursor, dstToCompareChannel)
+			dstDocsFound, err := iterateCursorToChannel(
+				sctx,
+				state,
+				theCursor,
+				dstToCompareChannel,
+			)
 			if err != nil {
 				return errors.Wrap(
 					err,
@@ -690,7 +445,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				err := chanutil.WriteWithDoneCheck(
 					ctx,
 					dstToCompareChannel,
-					nil,
+					compare.ToComparatorMsg{
+						Type: compare.MsgTypePadding,
+					},
 				)
 				if err != nil {
 					return errors.Wrapf(err, "sending dummy doc %d of %d dst->compare", 1+i, missingDocsCount)
@@ -703,6 +460,22 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				)
 			}
 
+			// We send one more to tell the comparator that any mismatches
+			// seen heretofore are “real” and should trigger persistence.
+			//
+			// NB: This has to be a dedicated message rather than a flag
+			// attached to documents. This is because because there might be
+			// no documents.
+			err = chanutil.WriteWithDoneCheck(
+				ctx,
+				dstToCompareChannel,
+				compare.ToComparatorMsg{
+					Type: compare.MsgTypeCursorDone,
+				},
+			)
+			if err != nil {
+				return errors.Wrap(err, "sending cursor-done msg dst->compare")
+			}
 		}
 
 		return nil
@@ -714,13 +487,13 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 	task *tasks.Task,
 ) (
-	<-chan []compare.DocWithTS,
-	<-chan []compare.DocWithTS,
+	<-chan compare.ToComparatorMsg,
+	<-chan compare.ToComparatorMsg,
 	func(context.Context, retry.SuccessNotifier) error,
 	func(context.Context, retry.SuccessNotifier) error,
 ) {
-	srcChannel := make(chan []compare.DocWithTS)
-	dstChannel := make(chan []compare.DocWithTS)
+	srcChannel := make(chan compare.ToComparatorMsg)
+	dstChannel := make(chan compare.ToComparatorMsg)
 
 	readSrcCallback := func(ctx context.Context, state retry.SuccessNotifier) error {
 		// We open a session here so that we can read the session’s cluster
@@ -735,7 +508,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 
 		sctx := mongo.NewSessionContext(ctx, sess)
 
-		cursor, err := verifier.getDocumentsCursor(
+		theCursor, err := verifier.getDocumentsCursor(
 			sctx,
 			verifier.srcClientCollection(task),
 			verifier.srcClusterInfo,
@@ -743,12 +516,18 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				verifier.srcChangeReader.getStartTimestamp(),
 			),
 			task,
+			option.IfNotZero(verifier.readPreference),
 		)
 
 		if err == nil {
 			state.NoteSuccess("opened src find cursor")
 
-			_, err = iterateCursorToChannel(sctx, state, cursor, srcChannel)
+			_, err = iterateCursorToChannel(
+				sctx,
+				state,
+				theCursor,
+				srcChannel,
+			)
 
 			err = errors.Wrap(
 				err,
@@ -774,7 +553,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 
 		sctx := mongo.NewSessionContext(ctx, sess)
 
-		cursor, err := verifier.getDocumentsCursor(
+		theCursor, err := verifier.getDocumentsCursor(
 			sctx,
 			verifier.dstClientCollection(task),
 			verifier.dstClusterInfo,
@@ -782,12 +561,18 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				verifier.dstChangeReader.getStartTimestamp(),
 			),
 			task,
+			option.None[*readpref.ReadPref](),
 		)
 
 		if err == nil {
 			state.NoteSuccess("opened dst find cursor")
 
-			_, err = iterateCursorToChannel(sctx, state, cursor, dstChannel)
+			_, err = iterateCursorToChannel(
+				sctx,
+				state,
+				theCursor,
+				dstChannel,
+			)
 			err = errors.Wrap(
 				err,
 				"failed to read destination documents",
@@ -807,20 +592,22 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 	return srcChannel, dstChannel, readSrcCallback, readDstCallback
 }
 
-// This returns the # of documents sent to the comparator and # of batches
-// used to send those documents.
+// iterateCursorToChannel returns the # of documents sent to the channel.
+//
+// NB: This DOES NOT close the given channel.
 func iterateCursorToChannel(
 	sctx context.Context,
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
-	writer chan<- []compare.DocWithTS,
+	writer chan<- compare.ToComparatorMsg,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
 	if sess == nil {
 		panic("need a session")
 	}
 
-	docsCount := 0
+	var docsCount int
+	var bytesEnqueued types.ByteCount
 
 	var docsWithTSCache []compare.DocWithTS
 
@@ -828,16 +615,27 @@ func iterateCursorToChannel(
 		err := chanutil.WriteWithDoneCheck(
 			sctx,
 			writer,
-			slices.Clone(docsWithTSCache),
+			compare.ToComparatorMsg{
+				DocsWithTS: slices.Clone(docsWithTSCache),
+			},
 		)
-
 		if err != nil {
-			return errors.Wrapf(err, "sending %d documents to compare thread", len(docsWithTSCache))
+			return errors.Wrapf(
+				err,
+				"sending %d documents (%s) to compare thread",
+				len(docsWithTSCache),
+				reportutils.FmtBytes(bytesEnqueued),
+			)
 		}
 
-		state.NoteSuccess("sent %d documents to compare thread", len(docsWithTSCache))
+		state.NoteSuccess(
+			"sent %d documents (%s) to compare thread",
+			len(docsWithTSCache),
+			reportutils.FmtBytes(bytesEnqueued),
+		)
 
 		docsWithTSCache = docsWithTSCache[:0]
+		bytesEnqueued = 0
 
 		return nil
 	}
@@ -852,16 +650,23 @@ func iterateCursorToChannel(
 			return 0, errors.Wrap(err, "reading cluster time from session")
 		}
 
+		needFlush := cmp.Or(
+			len(docsWithTSCache) == compare.ToComparatorBatchSize,
+			int(bytesEnqueued)+len(cursor.Current) > compare.ToComparatorByteLimit,
+		)
+
+		if needFlush {
+			if err := flush(); err != nil {
+				return 0, err
+			}
+		}
+
 		docsWithTSCache = append(
 			docsWithTSCache,
 			compare.NewDocWithTSFromPool(cursor.Current, clusterTime),
 		)
 
-		if len(docsWithTSCache) == compare.ToComparatorBatchSize {
-			if err := flush(); err != nil {
-				return 0, err
-			}
-		}
+		bytesEnqueued += types.ByteCount(len(cursor.Current))
 	}
 
 	if cursor.Err() != nil {
@@ -893,6 +698,7 @@ func (verifier *Verifier) getDocumentsCursor(
 	clusterInfo *util.ClusterInfo,
 	readConcernTS bson.Timestamp,
 	task *tasks.Task,
+	readPref option.Option[*readpref.ReadPref],
 ) (*mongo.Cursor, error) {
 	var findOptions bson.D
 	var andPredicates bson.A
@@ -904,6 +710,12 @@ func (verifier *Verifier) getDocumentsCursor(
 
 		findOptions = bson.D{
 			{"filter", filter},
+
+			// This is necessary because the comparator assumes it receives
+			// documents in ascending _id order. (NB: This is irrelevant to
+			// natural partitions because the documents we’ll receive should
+			// fit inside a single cursor response.)
+			{"sort", bson.D{{"_id", 1}}},
 
 			// The server limits the initial response to 101 documents by
 			// default. There are decent odds, though, that a single response
@@ -947,7 +759,11 @@ func (verifier *Verifier) getDocumentsCursor(
 		panic("No session?!?")
 	}
 
-	runCommandOptions := options.RunCmd().SetReadPreference(verifier.readPreference)
+	runCommandOptions := options.RunCmd()
+
+	if rp, has := readPref.Get(); has {
+		runCommandOptions = runCommandOptions.SetReadPreference(rp)
+	}
 
 	// We never want to read before the change stream start time,
 	// or for the last generation, the change stream end time.
@@ -987,24 +803,28 @@ func (verifier *Verifier) getDocumentsCursor(
 	)
 }
 
-func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw, namespace string) ([]VerificationResult, error) {
+func compareOneDocument(
+	docCompareMethod compare.Method,
+	srcClientDoc, dstClientDoc bson.Raw,
+	namespace string,
+) ([]compare.Result, error) {
 	match := bytes.Equal(srcClientDoc, dstClientDoc)
 	if match {
 		// Happy path! The documents binary-match.
 		return nil, nil
 	}
 
-	docID, err := verifier.docCompareMethod.ClonedDocIDForComparison(srcClientDoc)
+	docID, err := docCompareMethod.ClonedDocIDForComparison(srcClientDoc)
 	if err != nil {
 		return nil, errors.Wrapf(err, "extracting doc ID for comparison")
 	}
 
-	if verifier.docCompareMethod == compare.ToHashedIndexKey {
+	if docCompareMethod == compare.ToHashedIndexKey {
 		// With hash comparison, mismatches are opaque.
-		return []VerificationResult{{
+		return []compare.Result{{
 			ID:        docID,
 			Details:   Mismatch,
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			NameSpace: namespace,
 		}}, nil
 	}
@@ -1014,18 +834,18 @@ func (verifier *Verifier) compareOneDocument(srcClientDoc, dstClientDoc bson.Raw
 		return nil, err
 	}
 	if mismatch == nil {
-		if verifier.docCompareMethod.ShouldIgnoreFieldOrder() {
+		if docCompareMethod.ShouldIgnoreFieldOrder() {
 			return nil, nil
 		}
 		dataSize := max(len(srcClientDoc), len(dstClientDoc))
 
 		// If we're respecting field order we have just done a binary compare so we have fields in different order.
-		return []VerificationResult{{
+		return []compare.Result{{
 			ID:        docID,
 			Details:   Mismatch + " : only field order differs",
-			Cluster:   ClusterTarget,
+			Cluster:   constants.ClusterTarget,
 			NameSpace: namespace,
-			dataSize:  int32(dataSize),
+			DataSize:  int32(dataSize),
 		}}, nil
 	}
 

@@ -2,20 +2,32 @@ package verifier
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"net/http"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/buildvar"
+	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/webserver"
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/mongodb-labs/migration-tools/future"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/sync/semaphore"
 )
@@ -23,18 +35,10 @@ import (
 // RequestInProgressErrorDescription is the error description for RequestInProgressError
 const RequestInProgressErrorDescription = "Another request is currently in progress"
 
-// MigrationVerifierAPI represents the interaction webserver with mongosync
-type MigrationVerifierAPI interface {
-	Check(ctx context.Context, filter bson.D)
-	WritesOff(ctx context.Context) error
-	WritesOn(ctx context.Context)
-	GetProgress(ctx context.Context) (Progress, error)
-}
-
 // WebServer represents the HTTP server
 type WebServer struct {
 	port               int
-	Mapi               MigrationVerifierAPI
+	Mapi               api.MigrationVerifierAPI
 	logger             *logger.Logger
 	srv                *http.Server
 	operationalAPILock *semaphore.Weighted
@@ -42,15 +46,8 @@ type WebServer struct {
 	mongosyncError     error
 }
 
-// APIResponse is the schema for Operational API response
-type APIResponse struct {
-	Success          bool    `json:"success"`
-	Error            *string `json:"error,omitempty"`
-	ErrorDescription *string `json:"errorDescription,omitempty"`
-}
-
 // NewWebServer creates a WebServer object
-func NewWebServer(port int, mapi MigrationVerifierAPI, logger *logger.Logger) *WebServer {
+func NewWebServer(port int, mapi api.MigrationVerifierAPI, logger *logger.Logger) *WebServer {
 	return &WebServer{
 		port:               port,
 		Mapi:               mapi,
@@ -86,7 +83,14 @@ func (rbw responseBodyWriter) Write(b []byte) (int, error) {
 }
 
 // RequestAndResponseLogger is the middleware for logging the request and response.
-func (server *WebServer) RequestAndResponseLogger() gin.HandlerFunc {
+// Paths passed in skipResponseBodyPaths will have their response body omitted from
+// the log (e.g. streaming endpoints that can return arbitrarily large payloads).
+func (server *WebServer) RequestAndResponseLogger(skipResponseBodyPaths ...string) gin.HandlerFunc {
+	skipSet := make(map[string]bool, len(skipResponseBodyPaths))
+	for _, p := range skipResponseBodyPaths {
+		skipSet[p] = true
+	}
+
 	return func(c *gin.Context) {
 		t := time.Now()
 
@@ -111,17 +115,26 @@ func (server *WebServer) RequestAndResponseLogger() gin.HandlerFunc {
 		// Add the UUID to the header.
 		c.Header("Trace-Id", traceID)
 
-		// Capture the response body and log it separately below.
-		rbw := &responseBodyWriter{ResponseWriter: c.Writer, body: bytes.NewBufferString("")}
-		c.Writer = rbw
+		var rbw *responseBodyWriter
+
+		if !skipSet[c.FullPath()] {
+			// Capture the response body and log it separately below.
+			rbw = &responseBodyWriter{ResponseWriter: c.Writer, body: bytes.NewBufferString("")}
+			c.Writer = rbw
+		}
 
 		c.Next()
 
-		server.logger.Info().Int("status", c.Writer.Status()).
-			Str("body", rbw.body.String()).
+		event := server.logger.Info().Int("status", c.Writer.Status()).
+			Int("bytesWritten", c.Writer.Size()).
 			Str("traceID", traceID).
-			Str("latency", time.Since(t).String()).
-			Msg("sent response")
+			Str("latency", time.Since(t).String())
+
+		if rbw != nil {
+			event = event.Str("body", rbw.body.String())
+		}
+
+		event.Msg("sent response")
 	}
 }
 
@@ -133,7 +146,15 @@ func (server *WebServer) setupRouter() *gin.Engine {
 
 	router := gin.New()
 	pprof.Register(router)
-	router.Use(server.RequestAndResponseLogger(), gin.Recovery())
+	router.Use(server.RequestAndResponseLogger(
+		"/api/v1/docMismatches",
+		"/api/v1/nsMismatches",
+	), gin.Recovery())
+
+	router.Use(func(c *gin.Context) {
+		c.Header("Server", "migration-verifier/"+buildvar.Revision)
+		c.Next()
+	})
 
 	api := router.Group("/api")
 	{
@@ -142,6 +163,8 @@ func (server *WebServer) setupRouter() *gin.Engine {
 			v1.POST("/check", server.operationalAPILockMiddleware(), server.checkEndPoint)
 			v1.POST("/writesOff", server.operationalAPILockMiddleware(), server.writesOffEndpoint)
 			v1.GET("/progress", server.progressEndpoint)
+			v1.GET("/docMismatches", server.docMismatchesEndpoint)
+			v1.GET("/nsMismatches", server.nsMismatchesEndpoint)
 		}
 	}
 
@@ -240,29 +263,218 @@ func (server *WebServer) writesOffEndpoint(c *gin.Context) {
 	successResponse(c)
 }
 
-// Progress represents the structure of the JSON response from the Progress end point.
-type Progress struct {
-	Phase      string              `json:"phase"`
-	Generation int                 `json:"generation"`
-	Error      error               `json:"error"`
-	Status     *VerificationStatus `json:"verificationStatus"`
-}
-
 // progressEndpoint implements the gin handle for the progress endpoint.
 func (server *WebServer) progressEndpoint(c *gin.Context) {
+	var payload []byte
+
 	progress, err := server.Mapi.GetProgress(c.Request.Context())
+
+	if err == nil {
+		payload, err = bson.MarshalExtJSON(
+			bson.M{"progress": progress},
+			false, // relaxed
+			false, // no HTML escape
+		)
+	}
+
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"progress": progress,
-	})
+	c.Data(http.StatusOK, "application/json", payload)
+}
+
+func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
+	const minDurationSecsKey = "minDurationSecs"
+
+	var minDurationSecs uint64
+	if val := c.Query(minDurationSecsKey); val != "" {
+		var err error
+		minDurationSecs, err = strconv.ParseUint(val, 10, 32)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("invalid %#q", minDurationSecsKey),
+			})
+			return
+		}
+	}
+
+	serveMismatches(
+		c,
+		server,
+		func(
+			ctx context.Context,
+			mmChan chan<- api.DocMismatchInfo,
+			errSetter future.Setter[error],
+		) {
+			err := server.Mapi.SendDocumentMismatches(
+				ctx,
+				safecast.MustConvert[uint32](minDurationSecs),
+				mmChan,
+			)
+
+			errSetter(err)
+		},
+	)
+}
+
+func (server *WebServer) nsMismatchesEndpoint(c *gin.Context) {
+	const ignoreKey = "indexSpecIgnore"
+
+	var specIgnore []api.IndexSpecTolerance
+
+	if val := c.Query(ignoreKey); val != "" {
+		specIgnore = lo.Map(
+			strings.Split(val, ","),
+			func(in string, _ int) api.IndexSpecTolerance {
+				return api.IndexSpecTolerance(in)
+			},
+		)
+
+		invalid := lo.Filter(
+			specIgnore,
+			func(piece api.IndexSpecTolerance, _ int) bool {
+				return !slices.Contains(api.IndexMismatchTolerances(), piece)
+			},
+		)
+
+		if len(invalid) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("invalid %#q: %#q", ignoreKey, invalid),
+			})
+			return
+		}
+	}
+
+	serveMismatches(
+		c,
+		server,
+		func(
+			ctx context.Context,
+			mmChan chan<- api.NSMismatchInfo,
+			errSetter future.Setter[error],
+		) {
+			err := server.Mapi.SendNamespaceMismatches(
+				ctx,
+				specIgnore,
+				mmChan,
+			)
+
+			errSetter(err)
+		},
+	)
+}
+
+func serveMismatches[T api.AnyMismatchInfo](
+	c *gin.Context,
+	server *WebServer,
+	sender func(
+		context.Context,
+		chan<- T,
+		future.Setter[error],
+	),
+) {
+	c.Header("Content-Type", "application/x-ndjson")
+
+	// Prevent proxies/load balancers from buffering the response
+	c.Header("X-Accel-Buffering", "no")
+	c.Header("Cache-Control", "no-cache")
+
+	mmChan := make(chan T)
+
+	senderCtx, senderCancel := contextplus.WithCancelCause(c)
+	defer senderCancel(fmt.Errorf("OK"))
+
+	mmErr, errSetter := future.New[error]()
+	go sender(senderCtx, mmChan, errSetter)
+
+	errEncoder := json.NewEncoder(c.Writer)
+
+	sendError := func(err error) {
+		// Prefer the trace ID, which should be set. Just in case, though,
+		// we create our own ID for the error.
+		errRef := cmp.Or(
+			c.Writer.Header().Get("Trace-Id"),
+			strconv.FormatUint(rand.Uint64(), 16),
+		)
+
+		server.logger.Error().
+			Str("request", c.Request.URL.Path).
+			Str("ref", errRef).
+			Err(err).
+			Msgf("Internal error.")
+
+		payload := gin.H{
+			"error": fmt.Sprintf("internal error (ref #: %s)", errRef),
+		}
+
+		if encodeErr := errEncoder.Encode(payload); encodeErr != nil {
+			// If the request context is already done, the client most likely
+			// disconnected; avoid noisy logging in that case.
+			select {
+			case <-c.Request.Context().Done():
+				return
+			default:
+			}
+
+			server.logger.Error().
+				Str("request", c.Request.URL.Path).
+				Str("ref", errRef).
+				Err(encodeErr).
+				Msg("failed to encode error response")
+		}
+	}
+
+READ:
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-mmErr.Ready():
+			break READ
+		case mismatch, open := <-mmChan:
+			if !open {
+				break READ
+			}
+
+			ejson, err := bson.MarshalExtJSON(mismatch, false, false)
+			if err != nil {
+				senderCancel(fmt.Errorf("marshal ext json: %w", err))
+				sendError(err)
+				return
+			}
+
+			ejson = append(ejson, '\n')
+
+			if _, err := c.Writer.Write(ejson); err != nil {
+				server.logger.Error().
+					Err(err).
+					Msg("sending mismatch")
+
+				return
+			}
+		}
+	}
+
+	_, err := chanutil.ReadWithDoneCheck(c, mmErr.Ready())
+	if err != nil {
+		return
+	}
+
+	if err := mmErr.Get(); err != nil {
+		switch {
+		case errors.Is(err, context.Canceled):
+			fallthrough
+		case errors.Is(err, context.DeadlineExceeded):
+		default:
+			sendError(err)
+		}
+	}
 }
 
 func successResponse(c *gin.Context) {
-	c.JSON(http.StatusOK, APIResponse{true, nil, nil})
+	c.JSON(http.StatusOK, api.Response{true, nil, nil})
 }
 
 func (server *WebServer) operationalErrorResponse(c *gin.Context, err error) {
@@ -273,5 +485,5 @@ func (server *WebServer) operationalErrorResponse(c *gin.Context, err error) {
 	server.signalShutdown(err)
 
 	errorDescription := err.Error()
-	c.JSON(http.StatusOK, APIResponse{false, &errorName, &errorDescription})
+	c.JSON(http.StatusOK, api.Response{false, &errorName, &errorDescription})
 }

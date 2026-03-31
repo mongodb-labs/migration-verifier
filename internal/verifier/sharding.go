@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -13,13 +15,12 @@ import (
 )
 
 // This is the Field for a VerificationResult for shard key mismatches.
-const ShardKeyField = "Shard Key"
+const ShardKeyField = "shard key"
 
 func (verifier *Verifier) verifyShardingIfNeeded(
 	ctx context.Context,
 	srcColl, dstColl *mongo.Collection,
-) ([]VerificationResult, error) {
-
+) ([]compare.Result, error) {
 	// We only need to compare if both clusters are sharded
 	srcSharded := verifier.srcClusterInfo.Topology == util.TopologySharded
 	dstSharded := verifier.dstClusterInfo.Topology == util.TopologySharded
@@ -54,10 +55,10 @@ func (verifier *Verifier) verifyShardingIfNeeded(
 	}
 
 	if srcIsSharded != dstIsSharded {
-		return []VerificationResult{{
+		return []compare.Result{{
 			Field:     ShardKeyField,
-			Cluster:   lo.Ternary(srcIsSharded, ClusterTarget, ClusterSource),
-			Details:   Missing,
+			Cluster:   lo.Ternary(srcIsSharded, constants.ClusterTarget, constants.ClusterSource),
+			Details:   compare.Missing,
 			NameSpace: FullName(srcColl),
 		}}, nil
 	}
@@ -82,7 +83,7 @@ func (verifier *Verifier) verifyShardingIfNeeded(
 	}
 
 	if !areEqual {
-		return []VerificationResult{{
+		return []compare.Result{{
 			Field:     ShardKeyField,
 			Details:   fmt.Sprintf("%s: src=%v; dst=%v", Mismatch, srcKey, dstKey),
 			NameSpace: FullName(srcColl),

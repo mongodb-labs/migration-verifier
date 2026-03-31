@@ -12,7 +12,9 @@ import (
 )
 
 func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri)
+	opts := verifier.getClientOpts(uri).SetReadPreference(
+		verifier.readPreference,
+	)
 	var err error
 	verifier.srcClient, err = mongo.Connect(opts)
 	if err != nil {
@@ -20,6 +22,9 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 	}
 
 	verifier.srcURI = uri
+
+	verifier.logger.Info().
+		Msg("Reading source’s cluster info.")
 
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.srcClient)
 	if err != nil {
@@ -92,6 +97,9 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to connect to destination %#q", uri)
 	}
+
+	verifier.logger.Info().
+		Msg("Reading destination’s cluster info.")
 
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.dstClient)
 	if err != nil {
