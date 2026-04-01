@@ -43,8 +43,11 @@ fi
 
 echo "Downloading $DOWNLOAD_URL …"
 
-curl -fsSL "$DOWNLOAD_URL" > "$filename"
+curl -fsSL "$DOWNLOAD_URL" | tar -xvzf -
 
-chmod +x "$filename"
+if [ ! -f "$filename" ]; then
+    echo >&2 "❌ No “${filename}” found in $DOWNLOAD_URL … ??"
+    exit 1
+fi
 
 echo "✅ Migration Verifier $VERSION is now saved as $filename."

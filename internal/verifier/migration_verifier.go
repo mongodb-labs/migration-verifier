@@ -127,6 +127,11 @@ type Verifier struct {
 	// every collection.
 	gen0PendingCollectionTasks atomic.Int32
 
+	// cachedGen0Stats holds the final generation-0 comparison stats.
+	// It is populated on the first /progress call after generation 0 completes
+	// and never changes after that.
+	cachedGen0Stats atomic.Pointer[api.ProgressGenerationStats]
+
 	generationStartTime  time.Time
 	generationPauseDelay time.Duration
 	workerSleepDelay     time.Duration
