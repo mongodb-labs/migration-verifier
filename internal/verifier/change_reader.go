@@ -329,11 +329,13 @@ func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson
 		panic("empty ts in resume token is invalid!")
 	}
 
+	eventCounts := rc.GetCumulativeEventCounts()
+
 	docID := resumeTokenDocID(rc.getWhichCluster())
 	doc := resumeTokenDoc{
 		ID:          docID,
 		Token:       token,
-		EventCounts: rc.GetCumulativeEventCounts(),
+		EventCounts: eventCounts,
 	}
 
 	coll := rc.metaDB.Collection(changeReaderCollectionName)
@@ -347,11 +349,13 @@ func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson
 		return errors.Wrapf(err, "persisting %s resume token (%v)", rc.readerType, token)
 	}
 
-	logEvent := rc.logger.Debug()
+	logEvent := rc.logger.Debug().
+		Str("changeReader", string(rc.readerType)).
+		Object("changeEventCounts", eventCounts)
 
 	logEvent = addTimestampToLogEvent(ts, logEvent)
 
-	logEvent.Msgf("Persisted %s’s resume token.", rc.readerType)
+	logEvent.Msg("Persisted resume token.")
 
 	return nil
 }

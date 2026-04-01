@@ -175,7 +175,8 @@ type Verifier struct {
 
 	recheckDurations *mring.Queue[time.Duration]
 
-	verificationStatusCheckInterval time.Duration
+	verificationStatusCheckInterval  time.Duration
+	resumeTokenPersistInterval       time.Duration
 
 	warnedNoResumableCollectionScan bool
 }
@@ -214,6 +215,7 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		recheckDurations: mring.New[time.Duration](10),
 
 		verificationStatusCheckInterval: 2 * time.Second,
+		resumeTokenPersistInterval:      minResumeTokenPersistInterval,
 		nsMap:                           NewNSMap(),
 
 		changeHandlingErr: util.NewEventual[error](),

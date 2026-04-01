@@ -176,6 +176,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	verifier.SetWorkerSleepDelay(0)
 
 	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
+	verifier.resumeTokenPersistInterval = 0
 
 	docCompareMethod := compare.Default
 	envDocCompareMethod := os.Getenv("MVTEST_DOC_COMPARE_METHOD")

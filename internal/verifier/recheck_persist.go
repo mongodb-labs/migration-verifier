@@ -36,7 +36,7 @@ func (verifier *Verifier) RunChangeEventPersistor(
 
 	var lastPersistedTime time.Time
 	persistResumeTokenIfNeeded := func(ctx context.Context, token bson.Raw) {
-		if time.Since(lastPersistedTime) >= minResumeTokenPersistInterval {
+		if time.Since(lastPersistedTime) >= verifier.resumeTokenPersistInterval {
 			persistErr := persistCallback(ctx, token)
 			if persistErr != nil {
 				verifier.logger.Warn().

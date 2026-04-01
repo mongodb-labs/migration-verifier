@@ -77,19 +77,6 @@ type ProgressMismatch struct {
 	Detail          string  `bson:"detail"`
 }
 
-// ChangeEventCounts tallies cumulative change events seen by a change reader,
-// across all generations, since the verifier first started.
-type ChangeEventCounts struct {
-	Insert  int
-	Update  int
-	Replace int
-	Delete  int
-}
-
-func (cec ChangeEventCounts) Total() int {
-	return cec.Insert + cec.Update + cec.Replace + cec.Delete
-}
-
 // Progress represents the structure of the JSON response from the Progress end point.
 type Progress struct {
 	Phase string `bson:"phase"`
