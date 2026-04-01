@@ -179,6 +179,8 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 				changeEvent,
 			)
 		}
+
+		reader.addToEventCounts(changeEvent.OpType)
 	}
 
 	latestTimestampTime := time.Unix(int64(latestTimestamp.T), 0)

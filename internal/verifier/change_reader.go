@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
@@ -19,6 +20,14 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/sync/errgroup"
 )
+
+// resumeTokenDoc is the schema for the document persisted in the changeReader
+// collection. The Token field is the raw resume token BSON.
+type resumeTokenDoc struct {
+	ID          string                `bson:"_id"`
+	Token       bson.Raw              `bson:"token"`
+	EventCounts api.ChangeEventCounts `bson:"eventCounts"`
+}
 
 type ddlEventHandling string
 
@@ -59,6 +68,8 @@ type changeReader interface {
 	persistResumeToken(context.Context, bson.Raw) error
 	isRunning() bool
 	String() string
+	addToEventCounts(opType string)
+	GetCumulativeEventCounts() api.ChangeEventCounts
 }
 
 type ChangeReaderCommon struct {
@@ -91,17 +102,23 @@ type ChangeReaderCommon struct {
 	iterateCb        func(context.Context, retry.SuccessNotifier, *mongo.Session) error
 
 	onDDLEvent ddlEventHandling
+
+	// cumulativeEventCounts tallies all change events seen since the verifier
+	// first started. Unlike EventRecorder, this is never reset and is persisted
+	// alongside the resume token so it survives restarts.
+	cumulativeEventCounts *msync.DataGuard[api.ChangeEventCounts]
 }
 
 func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 	return ChangeReaderCommon{
-		readerType:          clusterName,
-		eventBatchChan:      make(chan eventBatch, batchChanBufferSize),
-		eventRecorder:       NewEventRecorder(),
-		writesOffTS:         util.NewEventual[bson.Timestamp](),
-		currentTimestamps:   msync.NewTypedAtomic(option.None[readerCurrentTimestamps]()),
-		lastChangeEventTime: msync.NewTypedAtomic(option.None[bson.Timestamp]()),
-		batchSizeHistory:    history.New[int](time.Minute),
+		readerType:            clusterName,
+		eventBatchChan:        make(chan eventBatch, batchChanBufferSize),
+		eventRecorder:         NewEventRecorder(),
+		writesOffTS:           util.NewEventual[bson.Timestamp](),
+		currentTimestamps:     msync.NewTypedAtomic(option.None[readerCurrentTimestamps]()),
+		lastChangeEventTime:   msync.NewTypedAtomic(option.None[bson.Timestamp]()),
+		batchSizeHistory:      history.New[int](time.Minute),
+		cumulativeEventCounts: msync.NewDataGuard(api.ChangeEventCounts{}),
 		onDDLEvent: lo.Ternary(
 			clusterName == dst,
 			onDDLEventAllow,
@@ -116,6 +133,33 @@ func (rc *ChangeReaderCommon) getWhichCluster() whichCluster {
 
 func (rc *ChangeReaderCommon) getEventRecorder() *EventRecorder {
 	return rc.eventRecorder
+}
+
+// AddToEventCounts increments the cumulative event counts for the given optype.
+// It is called once per change event as events are processed.
+func (rc *ChangeReaderCommon) addToEventCounts(opType string) {
+	rc.cumulativeEventCounts.Store(func(cur api.ChangeEventCounts) api.ChangeEventCounts {
+		switch opType {
+		case "insert":
+			cur.Insert++
+		case "update":
+			cur.Update++
+		case "replace":
+			cur.Replace++
+		case "delete":
+			cur.Delete++
+		}
+		return cur
+	})
+}
+
+// GetCumulativeEventCounts returns a snapshot of the cumulative event counts.
+func (rc *ChangeReaderCommon) GetCumulativeEventCounts() api.ChangeEventCounts {
+	var counts api.ChangeEventCounts
+	rc.cumulativeEventCounts.Load(func(c api.ChangeEventCounts) {
+		counts = c
+	})
+	return counts
 }
 
 func (rc *ChangeReaderCommon) getStartTimestamp() bson.Timestamp {
@@ -285,14 +329,20 @@ func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson
 		panic("empty ts in resume token is invalid!")
 	}
 
+	docID := resumeTokenDocID(rc.getWhichCluster())
+	doc := resumeTokenDoc{
+		ID:          docID,
+		Token:       token,
+		EventCounts: rc.GetCumulativeEventCounts(),
+	}
+
 	coll := rc.metaDB.Collection(changeReaderCollectionName)
 	_, err = coll.ReplaceOne(
 		ctx,
-		bson.D{{"_id", resumeTokenDocID(rc.getWhichCluster())}},
-		token,
+		bson.D{{"_id", docID}},
+		doc,
 		options.Replace().SetUpsert(true),
 	)
-
 	if err != nil {
 		return errors.Wrapf(err, "persisting %s resume token (%v)", rc.readerType, token)
 	}
@@ -324,17 +374,35 @@ func (rc *ChangeReaderCommon) getMetadataCollection() *mongo.Collection {
 func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Option[bson.Raw], error) {
 	coll := rc.getMetadataCollection()
 
-	token, err := coll.FindOne(
+	raw, err := coll.FindOne(
 		ctx,
 		bson.D{{"_id", resumeTokenDocID(rc.getWhichCluster())}},
 	).Raw()
-
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			err = nil
 		}
 
 		return option.None[bson.Raw](), err
+	}
+
+	// Decode into the wrapper struct. Old documents (written before this field
+	// was added) stored the raw token directly, so Token will be empty for
+	// those — fall back to treating the whole document as the token.
+	var doc resumeTokenDoc
+	if err := bson.Unmarshal(raw, &doc); err != nil {
+		return option.None[bson.Raw](), errors.Wrap(err, "decoding persisted resume token document")
+	}
+
+	token := doc.Token
+	if len(token) == 0 {
+		// Legacy format: the document itself is the token.
+		token = raw
+	} else {
+		// Restore cumulative counts from the persisted document.
+		rc.cumulativeEventCounts.Store(func(api.ChangeEventCounts) api.ChangeEventCounts {
+			return doc.EventCounts
+		})
 	}
 
 	return option.Some(token), nil
