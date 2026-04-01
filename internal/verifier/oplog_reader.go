@@ -400,7 +400,9 @@ func (o *OplogReader) readAndHandleOneBatch(
 	}
 
 	sess := mongo.SessionFromContext(sctx)
-	resumeToken := oplog.ResumeToken{latestTS}.MarshalToBSON()
+	// Persist one past the last processed timestamp so that $gte on resume
+	// starts strictly after the events we've already counted.
+	resumeToken := oplog.ResumeToken{incrementTS(latestTS)}.MarshalToBSON()
 
 	o.updateTimestamps(sess, resumeToken)
 
@@ -731,4 +733,12 @@ func getOplogDocIDExpr(docroot string) any {
 
 func (o *OplogReader) String() string {
 	return fmt.Sprintf("%s oplog reader", o.readerType)
+}
+
+// incrementTS returns the next oplog timestamp after ts.
+func incrementTS(ts bson.Timestamp) bson.Timestamp {
+	if ts.I < ^uint32(0) {
+		return bson.Timestamp{T: ts.T, I: ts.I + 1}
+	}
+	return bson.Timestamp{T: ts.T + 1, I: 0}
 }

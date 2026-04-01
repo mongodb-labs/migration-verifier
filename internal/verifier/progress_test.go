@@ -206,19 +206,33 @@ func (suite *IntegrationTestSuite) TestGetProgress_ChangeEventCountsPersistAcros
 	const wantSrcInserts = 2
 	const wantDstInserts = 1
 
-	// Wait for in-memory counts to reflect the inserts.
-	var v1SrcCounts, v1DstCounts api.ChangeEventCounts
+	// Wait for GetProgress to reflect both inserts. Use >= to tolerate extra
+	// events the oplog reader may have seen before verification started.
+	var progress1 api.Progress
 	suite.Require().Eventually(func() bool {
-		v1SrcCounts = verifier1.srcChangeReader.GetCumulativeEventCounts()
-		v1DstCounts = verifier1.dstChangeReader.GetCumulativeEventCounts()
-		return v1SrcCounts.Insert == wantSrcInserts && v1DstCounts.Insert == wantDstInserts
-	}, time.Minute, time.Millisecond, "in-memory change event counts should reflect inserts")
+		var err error
+		progress1, err = verifier1.GetProgress(ctx)
+		suite.Require().NoError(err)
+		return progress1.SrcChangeEventCounts.Insert >= wantSrcInserts &&
+			progress1.DstChangeEventCounts.Insert >= wantDstInserts
+	}, time.Minute, time.Millisecond,
+		"GetProgress should reflect src inserts (≥%d) and dst inserts (≥%d)",
+		wantSrcInserts, wantDstInserts,
+	)
 
-	// Confirm GetProgress exposes the same counts.
-	progress1, err := verifier1.GetProgress(ctx)
-	suite.Require().NoError(err)
-	suite.Assert().Equal(v1SrcCounts, progress1.SrcChangeEventCounts)
-	suite.Assert().Equal(v1DstCounts, progress1.DstChangeEventCounts)
+	v1SrcCounts := progress1.SrcChangeEventCounts
+	v1DstCounts := progress1.DstChangeEventCounts
+
+	// The in-memory reader counts must be >= the GetProgress snapshot (the
+	// snapshot could be slightly stale relative to the live counters).
+	suite.Assert().GreaterOrEqual(
+		verifier1.srcChangeReader.GetCumulativeEventCounts().Insert, v1SrcCounts.Insert,
+		"src reader counts should be >= GetProgress snapshot",
+	)
+	suite.Assert().GreaterOrEqual(
+		verifier1.dstChangeReader.GetCumulativeEventCounts().Insert, v1DstCounts.Insert,
+		"dst reader counts should be >= GetProgress snapshot",
+	)
 
 	// Wait for the counts to be written to MongoDB alongside the resume token.
 	// BuildVerifier sets resumeTokenPersistInterval=0, so every batch persists.
@@ -256,19 +270,23 @@ func (suite *IntegrationTestSuite) TestGetProgress_ChangeEventCountsPersistAcros
 	runner2 := RunVerifierCheck(v2Ctx, suite.T(), verifier2)
 	suite.Require().NoError(runner2.AwaitGenerationEnd())
 
-	v2SrcCounts := verifier2.srcChangeReader.GetCumulativeEventCounts()
-	v2DstCounts := verifier2.dstChangeReader.GetCumulativeEventCounts()
-
-	suite.Assert().GreaterOrEqual(v2SrcCounts.Insert, wantSrcInserts,
-		"verifier2 should restore src insert counts from persisted state")
-	suite.Assert().GreaterOrEqual(v2DstCounts.Insert, wantDstInserts,
-		"verifier2 should restore dst insert counts from persisted state")
-
-	// Confirm GetProgress exposes the restored counts.
+	// GetProgress should expose counts >= those persisted by verifier1.
 	progress2, err := verifier2.GetProgress(ctx)
 	suite.Require().NoError(err)
-	suite.Assert().Equal(v2SrcCounts, progress2.SrcChangeEventCounts)
-	suite.Assert().Equal(v2DstCounts, progress2.DstChangeEventCounts)
+	suite.Assert().GreaterOrEqual(progress2.SrcChangeEventCounts.Insert, v1SrcCounts.Insert,
+		"verifier2 should restore src insert counts from persisted state")
+	suite.Assert().GreaterOrEqual(progress2.DstChangeEventCounts.Insert, v1DstCounts.Insert,
+		"verifier2 should restore dst insert counts from persisted state")
+
+	// The in-memory reader counts must be >= the GetProgress snapshot.
+	suite.Assert().GreaterOrEqual(
+		verifier2.srcChangeReader.GetCumulativeEventCounts().Insert,
+		progress2.SrcChangeEventCounts.Insert,
+	)
+	suite.Assert().GreaterOrEqual(
+		verifier2.dstChangeReader.GetCumulativeEventCounts().Insert,
+		progress2.DstChangeEventCounts.Insert,
+	)
 
 	// Add more events and confirm they accumulate on top of restored counts.
 	_, err = srcColl.InsertOne(ctx, bson.D{{"_id", 4}})
@@ -276,13 +294,18 @@ func (suite *IntegrationTestSuite) TestGetProgress_ChangeEventCountsPersistAcros
 	_, err = dstColl.InsertOne(ctx, bson.D{{"_id", 5}})
 	suite.Require().NoError(err)
 
+	// Use GetProgress as a consistent snapshot to avoid TOCTOU between reader
+	// and progress reads.
+	var progress2Final api.Progress
 	suite.Require().Eventually(func() bool {
-		v2SrcCounts = verifier2.srcChangeReader.GetCumulativeEventCounts()
-		v2DstCounts = verifier2.dstChangeReader.GetCumulativeEventCounts()
-		return v2SrcCounts.Insert > wantSrcInserts && v2DstCounts.Insert > wantDstInserts
+		var err error
+		progress2Final, err = verifier2.GetProgress(ctx)
+		suite.Require().NoError(err)
+		return progress2Final.SrcChangeEventCounts.Insert > progress2.SrcChangeEventCounts.Insert &&
+			progress2Final.DstChangeEventCounts.Insert > progress2.DstChangeEventCounts.Insert
 	}, time.Minute, time.Millisecond, "verifier2 should tally new inserts on top of restored counts")
 
-	waitForPersistedCounts(v2SrcCounts.Insert, v2DstCounts.Insert)
+	waitForPersistedCounts(progress2Final.SrcChangeEventCounts.Insert, progress2Final.DstChangeEventCounts.Insert)
 
 	v2Cancel(fmt.Errorf("stopping verifier 2"))
 
@@ -294,18 +317,25 @@ func (suite *IntegrationTestSuite) TestGetProgress_ChangeEventCountsPersistAcros
 	runner3 := RunVerifierCheck(ctx, suite.T(), verifier3)
 	suite.Require().NoError(runner3.AwaitGenerationEnd())
 
-	v3SrcCounts := verifier3.srcChangeReader.GetCumulativeEventCounts()
-	v3DstCounts := verifier3.dstChangeReader.GetCumulativeEventCounts()
-
-	suite.Assert().GreaterOrEqual(v3SrcCounts.Insert, v2SrcCounts.Insert,
-		"verifier3 should restore verifier2's final src counts")
-	suite.Assert().GreaterOrEqual(v3DstCounts.Insert, v2DstCounts.Insert,
-		"verifier3 should restore verifier2's final dst counts")
-
+	// GetProgress should expose counts >= verifier2's final persisted counts.
 	progress3, err := verifier3.GetProgress(ctx)
 	suite.Require().NoError(err)
-	suite.Assert().Equal(v3SrcCounts, progress3.SrcChangeEventCounts)
-	suite.Assert().Equal(v3DstCounts, progress3.DstChangeEventCounts)
+	suite.Assert().GreaterOrEqual(progress3.SrcChangeEventCounts.Insert,
+		progress2Final.SrcChangeEventCounts.Insert,
+		"verifier3 should restore verifier2's final src counts")
+	suite.Assert().GreaterOrEqual(progress3.DstChangeEventCounts.Insert,
+		progress2Final.DstChangeEventCounts.Insert,
+		"verifier3 should restore verifier2's final dst counts")
+
+	// In-memory reader counts must be >= the GetProgress snapshot.
+	suite.Assert().GreaterOrEqual(
+		verifier3.srcChangeReader.GetCumulativeEventCounts().Insert,
+		progress3.SrcChangeEventCounts.Insert,
+	)
+	suite.Assert().GreaterOrEqual(
+		verifier3.dstChangeReader.GetCumulativeEventCounts().Insert,
+		progress3.DstChangeEventCounts.Insert,
+	)
 
 	_ = runner1
 	_ = runner2
