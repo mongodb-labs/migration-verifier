@@ -16,7 +16,6 @@ import (
 
 // NamespaceStats represents progress statistics for a single namespace.
 type NamespaceStats struct {
-
 	// Namespace is "$dbname.$collname", e.g., "db1.coll1"
 	Namespace string `bson:"_id"`
 
@@ -93,7 +92,7 @@ const perNsStatsPipelineTemplate = `[
 							"{{.FailedStatus}}"
 						] ] }
 					] },
-					"$source_documents_count",
+					"$found_source_documents_count",
 					0
 				]
 			},
@@ -115,23 +114,20 @@ const perNsStatsPipelineTemplate = `[
 				In generation 0 we can get the total docs from the
 				verify-collection tasks.
 
-				In later generations we may not have verify-collection tasks,
-				so we add up the individual recheck batch tasks. Note that,
-				in these tasks source_documents_count refers to the actual
-				number of docs found on the source, not all the documents
-				checked.
+				In generation 1+ we total the docs from the # of documents
+				to recheck.
 			*/}}
 			"totalDocs": {
 				"$cond": {
 					"if": {"$eq": [ "$generation", 0 ]},
 					"then": { "$cond": {
 						"if": { "$eq": [ "$type", "{{.VerifyCollType}}" ] },
-						"then": "$source_documents_count",
+						"then": "$documents_count",
 						"else": 0
 					} },
 					"else": { "$cond": {
 						"if": { "$eq": [ "$type", "{{.VerifyDocsType}}" ] },
-						"then": { "$size": "$_ids" },
+						"then": "$documents_count",
 						"else": 0
 					} }
 				}
@@ -143,9 +139,9 @@ const perNsStatsPipelineTemplate = `[
 
 				Ideally we could also approach later generations as we do with
 				totalDocs; however, the source_bytes_count figures for those
-				tasks aren’t meangingful because change stream events don’t allow
-				us to determine document size. So, after generation 0 we have to
-				report totalBytes as 0.
+				tasks aren’t meangingful because change events don’t always let
+				us know document size. So, after generation 0 we have to report
+				totalBytes as 0.
 			*/}}
 			"totalBytes": {
 				"$cond": [
@@ -171,8 +167,10 @@ const perNsStatsPipelineTemplate = `[
 	{ "$sort": { "_id": 1 } }
 ]`
 
-var templateOnce sync.Once
-var jsonTemplate *template.Template
+var (
+	templateOnce sync.Once
+	jsonTemplate *template.Template
+)
 
 // GetPersistedNamespaceStatistics queries the verifier’s metadata for statistics
 // on progress for each namespace. The returned array is sorted by

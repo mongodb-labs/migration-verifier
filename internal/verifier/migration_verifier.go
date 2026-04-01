@@ -721,8 +721,8 @@ REPORTS:
 		}
 	}
 
-	task.SourceDocumentCount = docsCount
-	task.SourceByteCount = bytesCount
+	task.FoundSourceDocumentCount = docsCount
+	task.SourceBytesCount = bytesCount
 
 	err := verifier.UpdateVerificationTask(ctx, task)
 	if err != nil {
@@ -746,8 +746,8 @@ REPORTS:
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace).
-		Int64("documentCount", int64(task.SourceDocumentCount)).
-		Str("dataSize", reportutils.FmtBytes(task.SourceByteCount)).
+		Int64("srcDocuments", int64(task.FoundSourceDocumentCount)).
+		Str("srcDataSize", reportutils.FmtBytes(task.SourceBytesCount)).
 		Stringer("timeElapsed", time.Since(start)).
 		Msg("Finished document comparison task.")
 
@@ -1343,6 +1343,13 @@ func (verifier *Verifier) setCollectionSizeInTask(
 	srcColl *mongo.Collection,
 ) (types.ByteCount, types.DocumentCount, bool, error) {
 	lo.Assertf(
+		task.Type == tasks.VerifyCollection,
+		"task %v type should be %#q but is %#q",
+		task.PrimaryKey,
+		tasks.VerifyCollection,
+		task.Type,
+	)
+	lo.Assertf(
 		task.Status == tasks.Processing,
 		"task %v status should be %#q but is %#q",
 		task.PrimaryKey,
@@ -1359,8 +1366,8 @@ func (verifier *Verifier) setCollectionSizeInTask(
 		return 0, 0, false, errors.Wrapf(err, "getting %#q’s size", FullName(srcColl))
 	}
 
-	task.SourceDocumentCount = docsCount
-	task.SourceByteCount = collBytes
+	task.DocumentsCount = docsCount
+	task.SourceBytesCount = collBytes
 
 	// Update the collection task now so that the doc count & byte count
 	// can inform logging.

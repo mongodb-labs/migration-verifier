@@ -461,10 +461,10 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 			Namespace: "testDB.testColl",
 			To:        "testDB.testColl",
 		},
-		SourceDocumentCount: 1,
-		SourceByteCount:     types.ByteCount(overlyLarge),
-		FirstMismatchTime:   map[int32]bson.DateTime{},
-		SrcTimestamp:        option.Some(bson.Timestamp{123, 0}),
+		DocumentsCount:    1,
+		SourceBytesCount:  types.ByteCount(overlyLarge),
+		FirstMismatchTime: map[int32]bson.DateTime{},
+		SrcTimestamp:      option.Some(bson.Timestamp{123, 0}),
 	}
 
 	t2 := t1
@@ -554,16 +554,16 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 			Namespace: "testDB.testColl",
 			To:        "testDB.testColl",
 		},
-		SourceDocumentCount: 2,
-		SourceByteCount:     1126400,
-		FirstMismatchTime:   map[int32]bson.DateTime{},
-		SrcTimestamp:        option.Some(bson.Timestamp{123, 1}),
+		DocumentsCount:    2,
+		SourceBytesCount:  1126400,
+		FirstMismatchTime: map[int32]bson.DateTime{},
+		SrcTimestamp:      option.Some(bson.Timestamp{123, 1}),
 	}
 
 	t2 := t1
 	t2.Ids = mslices.Of(mbson.ToRawValue(id3))
-	t2.SourceDocumentCount = 1
-	t2.SourceByteCount = 1024
+	t2.DocumentsCount = 1
+	t2.SourceBytesCount = 1024
 	t2.SrcTimestamp = option.Some(bson.Timestamp{123, 2})
 
 	suite.ElementsMatch([]tasks.Task{t1, t2}, actualTasks)
@@ -615,10 +615,10 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 			Namespace: "testDB1.testColl1",
 			To:        "testDB1.testColl1",
 		},
-		SourceDocumentCount: 3,
-		SourceByteCount:     3000,
-		FirstMismatchTime:   map[int32]bson.DateTime{},
-		SrcTimestamp:        option.Some(bson.Timestamp{123, 2}),
+		DocumentsCount:    3,
+		SourceBytesCount:  3000,
+		FirstMismatchTime: map[int32]bson.DateTime{},
+		SrcTimestamp:      option.Some(bson.Timestamp{123, 2}),
 	}
 	t2, t3, t4 := t1, t1, t1
 	t2.QueryFilter.Namespace = "testDB2.testColl1"
