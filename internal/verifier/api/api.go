@@ -104,6 +104,8 @@ type Progress struct {
 	SrcBytesComparedPerSecond float64 `bson:"srcBytesComparedPerSecond"`
 
 	LongestDocMismatch option.Option[DocMismatchInfo] `bson:"longestDocMismatch,omitempty"`
+
+	TotalRechecks int `bson:"totalRechecks"`
 }
 
 type (
