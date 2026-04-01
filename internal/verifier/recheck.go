@@ -403,7 +403,6 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			firstMismatchTime,
 			option.IfNotZero(latestSrcTimestamp),
 			option.IfNotZero(latestDstTimestamp),
-			types.ByteCount(dataSizeAccum),
 			namespace,
 		)
 		if err != nil {

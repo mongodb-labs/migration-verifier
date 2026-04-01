@@ -134,7 +134,6 @@ func (verifier *Verifier) createDocumentRecheckTask(
 	firstMismatchTime map[int32]bson.DateTime,
 	srcTimestamp option.Option[bson.Timestamp],
 	dstTimestamp option.Option[bson.Timestamp],
-	dataSize types.ByteCount,
 	srcNamespace string,
 ) (*tasks.Task, error) {
 	dstNamespace := srcNamespace
