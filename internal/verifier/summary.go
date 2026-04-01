@@ -701,7 +701,9 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 		times, hasTimes := cluster.csReader.getCurrentTimestamps().Get()
 
-		if hasTimes {
+		showLag := hasTimes && times.Lag() > lagWarnThreshold
+
+		if showLag {
 			lag := times.Lag()
 
 			logPieces = append(
@@ -718,18 +720,21 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 		}
 
 		saturation := cluster.csReader.getBufferSaturation()
+		showSaturation := saturation > saturationWarnThreshold
 
-		logPieces = append(
-			logPieces,
-			lo.Ternary(
-				saturation == 0,
-				"buffer is empty",
-				fmt.Sprintf(
-					"buffer %s%% full",
-					reportutils.FmtReal(100*saturation),
+		if showSaturation {
+			logPieces = append(
+				logPieces,
+				lo.Ternary(
+					saturation == 0,
+					"buffer is empty",
+					fmt.Sprintf(
+						"buffer %s%% full",
+						reportutils.FmtReal(100*saturation),
+					),
 				),
-			),
-		)
+			)
+		}
 
 		fmt.Fprintf(
 			builder,
@@ -753,14 +758,14 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			eventsDescr,
 		)
 
-		if hasTimes && times.Lag() > lagWarnThreshold {
+		if showLag {
 			fmt.Fprint(
 				builder,
 				"    ⚠️ Lag is excessive. Verification may fail. See documentation.\n",
 			)
 		}
 
-		if saturation > saturationWarnThreshold {
+		if showSaturation {
 			fmt.Fprint(
 				builder,
 				"    ⚠️ Buffer almost full. Metadata writes are too slow. See documentation.\n",
