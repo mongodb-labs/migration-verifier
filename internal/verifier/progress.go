@@ -124,6 +124,9 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 
 		Gen0Stats: option.FromPointer(verifier.cachedGen0Stats.Load()),
 
+		SrcChangeEventCounts: verifier.srcChangeReader.GetCumulativeEventCounts(),
+		DstChangeEventCounts: verifier.dstChangeReader.GetCumulativeEventCounts(),
+
 		SrcLastRecheckedTS: srcLastRecheckedTS,
 		DstLastRecheckedTS: dstLastRecheckedTS,
 
