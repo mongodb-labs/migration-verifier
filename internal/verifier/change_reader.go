@@ -135,7 +135,7 @@ func (rc *ChangeReaderCommon) getEventRecorder() *EventRecorder {
 	return rc.eventRecorder
 }
 
-// AddToEventCounts increments the cumulative event counts for the given optype.
+// addToEventCounts increments the cumulative event counts for the given optype.
 // It is called once per change event as events are processed.
 func (rc *ChangeReaderCommon) addToEventCounts(opType string) {
 	rc.cumulativeEventCounts.Store(func(cur api.ChangeEventCounts) api.ChangeEventCounts {

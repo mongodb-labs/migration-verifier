@@ -638,7 +638,66 @@ func (verifier *Verifier) printEndOfGenerationStatistics(
 		)
 	}
 
+	strBuilder.WriteString("\n")
+
+	verifier.printCumulativeChangeEventTable(strBuilder)
+
 	return true, nil
+}
+
+func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
+	srcCounts := verifier.srcChangeReader.GetCumulativeEventCounts()
+	dstCounts := verifier.dstChangeReader.GetCumulativeEventCounts()
+
+	rows := [][]string{
+		{
+			"insert",
+			reportutils.FmtReal(srcCounts.Insert),
+			reportutils.FmtReal(dstCounts.Insert),
+		},
+		{
+			"update",
+			reportutils.FmtReal(srcCounts.Update),
+			reportutils.FmtReal(dstCounts.Update),
+		},
+		{
+			"replace",
+			reportutils.FmtReal(srcCounts.Replace),
+			reportutils.FmtReal(dstCounts.Replace),
+		},
+		{
+			"delete",
+			reportutils.FmtReal(srcCounts.Delete),
+			reportutils.FmtReal(dstCounts.Delete),
+		},
+	}
+
+	// Hide all-zero rows:
+	rows = lo.Filter(
+		rows,
+		func(row []string, _ int) bool {
+			return row[1] != "0" || row[2] != "0"
+		},
+	)
+
+	if len(rows) == 0 {
+		fmt.Fprintf(out, "No change events seen during verification.\n")
+		return
+	}
+
+	fmt.Fprintf(out, "Cumulative changes events seen:\n")
+
+	table := tablewriter.NewWriter(out)
+
+	table.SetHeader([]string{
+		"Event",
+		"Source",
+		"Destination",
+	})
+
+	table.AppendBulk(rows)
+
+	table.Render()
 }
 
 func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
@@ -832,8 +891,7 @@ func (verifier *Verifier) getPerNamespaceWorkerStats() map[string][]WorkerStatus
 }
 
 func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
-	table := tablewriter.NewWriter(builder)
-	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed", "Detail"})
+	var tableRows [][]string
 
 	wsmap := verifier.workerTracker.Load()
 
@@ -865,7 +923,8 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 			)
 		}
 
-		table.Append(
+		tableRows = append(
+			tableRows,
 			[]string{
 				reportutils.FmtReal(w),
 				wsmap[w].Namespace,
@@ -877,6 +936,10 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 	}
 
 	fmt.Fprintf(builder, "\nWorker thread details:\n")
+
+	table := tablewriter.NewWriter(builder)
+	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed", "Detail"})
+	table.AppendBulk(tableRows)
 
 	table.Render()
 }
