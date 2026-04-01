@@ -92,6 +92,8 @@ func (o *OplogReader) createCursor(
 
 	var startTS bson.Timestamp
 
+	var startMsg string
+
 	if token, has := savedResumeToken.Get(); has {
 		var rt oplog.ResumeToken
 		if err := bson.Unmarshal(token, &rt); err != nil {
@@ -116,6 +118,7 @@ func (o *OplogReader) createCursor(
 		}
 
 		startTS = rt.TS
+		startMsg = "Resuming oplog reader."
 	} else {
 		startOpTime, latestOpTime, err := oplog.GetTailingStartTimes(ctx, o.watcherClient)
 		if err != nil {
@@ -139,6 +142,7 @@ func (o *OplogReader) createCursor(
 		}
 
 		startTS = startOpTime.TS
+		startMsg = "Starting oplog reader."
 
 		err = o.persistResumeToken(ctx, oplog.ResumeToken{startTS}.MarshalToBSON())
 		if err != nil {
@@ -150,7 +154,7 @@ func (o *OplogReader) createCursor(
 		Any("reader", o.getWhichCluster()).
 		Any("startReadTs", startTS).
 		Any("currentOplogTs", allowDDLBeforeTS).
-		Msg("Tailing oplog.")
+		Msg(startMsg)
 
 	sctx := mongo.NewSessionContext(ctx, sess)
 
@@ -164,7 +168,7 @@ func (o *OplogReader) createCursor(
 	}
 
 	oplogFilter := bson.D{{"$and", []any{
-		bson.D{{"ts", bson.D{{"$gte", startTS}}}},
+		bson.D{{"ts", bson.D{{"$gt", startTS}}}},
 
 		bson.D{{"$expr", agg.Or{
 			// plain ops: one write per op
@@ -402,7 +406,7 @@ func (o *OplogReader) readAndHandleOneBatch(
 	sess := mongo.SessionFromContext(sctx)
 	// Persist one past the last processed timestamp so that $gte on resume
 	// starts strictly after the events we've already counted.
-	resumeToken := oplog.ResumeToken{incrementTS(latestTS)}.MarshalToBSON()
+	resumeToken := oplog.ResumeToken{latestTS}.MarshalToBSON()
 
 	o.updateTimestamps(sess, resumeToken)
 
@@ -733,12 +737,4 @@ func getOplogDocIDExpr(docroot string) any {
 
 func (o *OplogReader) String() string {
 	return fmt.Sprintf("%s oplog reader", o.readerType)
-}
-
-// incrementTS returns the next oplog timestamp after ts.
-func incrementTS(ts bson.Timestamp) bson.Timestamp {
-	if ts.I < ^uint32(0) {
-		return bson.Timestamp{T: ts.T, I: ts.I + 1}
-	}
-	return bson.Timestamp{T: ts.T + 1, I: 0}
 }

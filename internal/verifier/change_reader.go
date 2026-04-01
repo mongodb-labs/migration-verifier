@@ -267,13 +267,13 @@ func (rc *ChangeReaderCommon) start(
 							Str("reader", string(rc.readerType))
 
 						if parentThreadWaiting {
-							logEvent.Msg("First change stream open failed.")
+							logEvent.Msg("Change reader open failed.")
 
 							initialCreateResultChan <- mo.Err[bson.Timestamp](err)
 							return nil
 						}
 
-						logEvent.Msg("Retried change stream open failed.")
+						logEvent.Msg("Retried change reader open failed.")
 
 						return err
 					}
@@ -283,13 +283,13 @@ func (rc *ChangeReaderCommon) start(
 						Any("startTimestamp", startTS)
 
 					if parentThreadWaiting {
-						logEvent.Msg("First change stream open succeeded.")
+						logEvent.Msg("First change reader open succeeded.")
 
 						initialCreateResultChan <- mo.Ok(startTS)
 						close(initialCreateResultChan)
 						parentThreadWaiting = false
 					} else {
-						logEvent.Msg("Retried change stream open succeeded.")
+						logEvent.Msg("Retried change reader open succeeded.")
 					}
 
 					return rc.iterateCb(ctx, ri, sess)
