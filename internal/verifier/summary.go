@@ -5,6 +5,7 @@ package verifier
 // number of docs/namespaces/bytes, progress, etc.
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -701,7 +702,10 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 		times, hasTimes := cluster.csReader.getCurrentTimestamps().Get()
 
-		showLag := hasTimes && times.Lag() > lagWarnThreshold
+		showLag := hasTimes && cmp.Or(
+			times.Lag() > lagWarnThreshold,
+			verifier.logger.Debug().Enabled(),
+		)
 
 		if showLag {
 			lag := times.Lag()
@@ -720,7 +724,11 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 		}
 
 		saturation := cluster.csReader.getBufferSaturation()
-		showSaturation := saturation > saturationWarnThreshold
+
+		showSaturation := cmp.Or(
+			saturation > saturationWarnThreshold,
+			verifier.logger.Debug().Enabled(),
+		)
 
 		if showSaturation {
 			logPieces = append(
@@ -758,14 +766,14 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			eventsDescr,
 		)
 
-		if showLag {
+		if showLag && times.Lag() > lagWarnThreshold {
 			fmt.Fprint(
 				builder,
 				"    ⚠️ Lag is excessive. Verification may fail. See documentation.\n",
 			)
 		}
 
-		if showSaturation {
+		if showSaturation && saturation > saturationWarnThreshold {
 			fmt.Fprint(
 				builder,
 				"    ⚠️ Buffer almost full. Metadata writes are too slow. See documentation.\n",
