@@ -53,6 +53,8 @@ const (
 	// and, in generation 0, inserts verify-documents tasks for _id ranges.
 	VerifyCollection Type = "verifyCollection"
 
+	CreateRechecks Type = "createRechecks"
+
 	// The primary task creates a verifyCollection task for each
 	// namespace.
 	Primary Type = "primary"

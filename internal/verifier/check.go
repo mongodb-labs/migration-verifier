@@ -363,29 +363,11 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		verifier.generationStartTime = time.Now()
 		verifier.srcChangeReader.getEventRecorder().Reset()
 		verifier.dstChangeReader.getEventRecorder().Reset()
-		verifier.mux.Unlock()
 
-		// Generation of recheck tasks can partial-fail. The following will
-		// cause a full redo in that case, which is inefficient but simple.
-		// Such failures seem unlikely anyhow.
-		err = retry.New().WithCallback(
-			func(ctx context.Context, fi *retry.FuncInfo) error {
-				return verifier.GenerateRecheckTasks(ctx, fi)
-			},
-			"generating recheck tasks",
-		).Run(ctx, verifier.logger)
+		err = verifier.ensureCreateRecheckTask(ctx, verifier.generation)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "create generation %d’s create-rechecks task", verifier.generation)
 		}
-
-		err = verifier.DropCurrentGenRecheckQueue(ctx)
-		if err != nil {
-			verifier.logger.Warn().
-				Err(err).
-				Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
-		}
-
-		verifier.mux.Lock()
 	}
 }
 
@@ -676,10 +658,43 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			if err != nil {
 				return err
 			}
+		case tasks.CreateRechecks:
+			err := verifier.processCreateRechecksTask(ctx)
+			verifier.workerTracker.Unset(workerNum)
+
+			if err != nil {
+				return err
+			}
 		default:
 			panic("Unknown verification task type: " + task.Type)
 		}
 	}
+}
+
+func (verifier *Verifier) processCreateRechecksTask(
+	ctx context.Context,
+) error {
+	// Generation of recheck tasks can partial-fail. The following will
+	// cause a full redo in that case, which is inefficient but simple.
+	// Such failures seem unlikely anyhow.
+	err := retry.New().WithCallback(
+		func(ctx context.Context, fi *retry.FuncInfo) error {
+			return verifier.GenerateRecheckTasks(ctx, fi)
+		},
+		"generating recheck tasks",
+	).Run(ctx, verifier.logger)
+	if err != nil {
+		return err
+	}
+
+	err = verifier.DropCurrentGenRecheckQueue(ctx)
+	if err != nil {
+		verifier.logger.Warn().
+			Err(err).
+			Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
+	}
+
+	return nil
 }
 
 func (v *Verifier) initializeChangeReaders() error {

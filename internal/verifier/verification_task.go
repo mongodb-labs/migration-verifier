@@ -79,6 +79,36 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 	return &verificationTask, err
 }
 
+func (verifier *Verifier) ensureCreateRecheckTask(
+	ctx context.Context,
+	generation int,
+) error {
+	newTask := tasks.Task{
+		PrimaryKey: bson.NewObjectID(),
+		Generation: generation,
+		Status:     tasks.Added,
+		Type:       tasks.CreateRechecks,
+	}
+
+	return retry.New().WithCallback(
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			_, err := verifier.verificationTaskCollection().ReplaceOne(
+				ctx,
+				bson.D{
+					{"generation", generation},
+					{"type", tasks.CreateRechecks},
+				},
+				newTask,
+				options.Replace().SetUpsert(true),
+			)
+
+			return err
+		},
+		"persisting generation %d’s create-rechecks task",
+		generation,
+	).Run(ctx, verifier.logger)
+}
+
 func (verifier *Verifier) InsertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
