@@ -77,9 +77,9 @@ type Task struct {
 	// Document-recheck tasks: the number of docs to recheck
 	DocumentsCount types.DocumentCount `bson:"documents_count"`
 
-	// FoundSourceDocumentCount is the number of docs found on the source.
+	// FoundSourceDocumentsCount is the number of docs found on the source.
 	// It is set only when the task finishes.
-	FoundSourceDocumentCount types.DocumentCount `bson:"found_source_documents_count"`
+	FoundSourceDocumentsCount types.DocumentCount `bson:"found_source_documents_count"`
 
 	// SourceBytesCount means different things for different task types:
 	//

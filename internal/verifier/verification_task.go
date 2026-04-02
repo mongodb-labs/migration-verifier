@@ -240,7 +240,7 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *task
 					"$set": bson.M{
 						"status":                       task.Status,
 						"documents_count":              task.DocumentsCount,
-						"found_source_documents_count": task.FoundSourceDocumentCount,
+						"found_source_documents_count": task.FoundSourceDocumentsCount,
 						"source_bytes_count":           task.SourceBytesCount,
 					},
 				},

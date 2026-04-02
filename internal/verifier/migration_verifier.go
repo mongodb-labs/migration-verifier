@@ -730,7 +730,7 @@ REPORTS:
 		}
 	}
 
-	task.FoundSourceDocumentCount = docsCount
+	task.FoundSourceDocumentsCount = docsCount
 	task.SourceBytesCount = bytesCount
 
 	err := verifier.UpdateVerificationTask(ctx, task)
@@ -755,7 +755,7 @@ REPORTS:
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace).
-		Int64("srcDocuments", int64(task.FoundSourceDocumentCount)).
+		Int64("srcDocuments", int64(task.FoundSourceDocumentsCount)).
 		Str("srcDataSize", reportutils.FmtBytes(task.SourceBytesCount)).
 		Stringer("timeElapsed", time.Since(start)).
 		Msg("Finished document comparison task.")
