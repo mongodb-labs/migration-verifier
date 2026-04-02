@@ -5,6 +5,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/exp/slices"
@@ -73,6 +74,8 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0Stats() {
 // in-memory worker counts for the current generation are not added to the
 // cached gen0Stats.
 func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorkerCounts() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
 	ctx := suite.Context()
 	dbName := suite.DBNameForTest()
 
@@ -156,6 +159,13 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorker
 		"gen0Stats.DocsCompared must not include live gen-1 worker counts")
 	suite.Assert().EqualValues(expectedBytes, gen0Stats.SrcBytesCompared,
 		"gen0Stats.SrcBytesCompared must not include live gen-1 worker counts")
+
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	progress, err = verifier.GetProgress(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().EqualValues(1, progress.TotalRechecksDone, "expected recheck")
 }
 
 func (suite *IntegrationTestSuite) TestGetProgress_CountTotalRechecks() {
