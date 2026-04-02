@@ -10,5 +10,6 @@ package verifier
 //    Also track mismatch duration.
 // 6: Mismatches now record `generation` and `taskType`. `task` is now `taskID`.
 // 7: Task format changed slightly to distinguish expected vs. found docs.
+//    The resume token also now stores change event counts.
 
 const verifierMetadataVersion = 7

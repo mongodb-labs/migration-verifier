@@ -1,9 +1,12 @@
 package verifier
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -221,4 +224,183 @@ func (suite *IntegrationTestSuite) TestGetProgress_CountTotalRechecks() {
 
 	suite.Assert().EqualValues(2, prog.Generation, "generation")
 	suite.Assert().EqualValues(2*len(docs0), prog.TotalRechecksDone, "expected rechecks")
+}
+
+// TestGetProgress_ChangeEventCountsPersistAcrossRestarts verifies that
+// cumulative change event tallies survive verifier restarts: counts are
+// restored from the persisted resume-token document and new events are
+// accumulated on top.
+func (suite *IntegrationTestSuite) TestGetProgress_ChangeEventCountsPersistAcrossRestarts() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
+	ctx := suite.Context()
+	dbName := suite.DBNameForTest()
+
+	srcColl := suite.srcMongoClient.Database(dbName).Collection("coll")
+	dstColl := suite.dstMongoClient.Database(dbName).Collection("coll")
+
+	suite.Require().NoError(
+		suite.srcMongoClient.Database(dbName).CreateCollection(ctx, "coll"),
+	)
+	suite.Require().NoError(
+		suite.dstMongoClient.Database(dbName).CreateCollection(ctx, "coll"),
+	)
+
+	// Insert matching docs so gen 0 tasks complete without mismatches.
+	initialDocs := []any{bson.D{{"_id", 0}}}
+	_, err := srcColl.InsertMany(ctx, initialDocs)
+	suite.Require().NoError(err)
+	_, err = dstColl.InsertMany(ctx, initialDocs)
+	suite.Require().NoError(err)
+
+	v1Ctx, v1Cancel := contextplus.WithCancelCause(ctx)
+	defer v1Cancel(nil)
+
+	verifier1 := suite.BuildVerifier()
+	verifier1.SetVerifyAll(true)
+
+	runner1 := RunVerifierCheck(v1Ctx, suite.T(), verifier1)
+	suite.Require().NoError(runner1.AwaitGenerationEnd())
+
+	// Insert change events on both src and dst after gen 0 completes.
+	_, err = srcColl.InsertOne(ctx, bson.D{{"_id", 1}})
+	suite.Require().NoError(err)
+	_, err = srcColl.InsertOne(ctx, bson.D{{"_id", 2}})
+	suite.Require().NoError(err)
+	_, err = dstColl.InsertOne(ctx, bson.D{{"_id", 3}})
+	suite.Require().NoError(err)
+
+	const wantSrcInserts = 2
+	const wantDstInserts = 1
+
+	// Wait for GetProgress to reflect both inserts. Use >= to tolerate extra
+	// events the oplog reader may have seen before verification started.
+	var progress1 api.Progress
+	suite.Require().Eventually(func() bool {
+		var err error
+		progress1, err = verifier1.GetProgress(ctx)
+		suite.Require().NoError(err)
+		return progress1.SrcChangeStats.EventCounts.Insert >= wantSrcInserts &&
+			progress1.DstChangeStats.EventCounts.Insert >= wantDstInserts
+	}, time.Minute, 10*time.Millisecond,
+		"GetProgress should reflect src inserts (≥%d) and dst inserts (≥%d)",
+		wantSrcInserts, wantDstInserts,
+	)
+
+	v1SrcCounts := progress1.SrcChangeStats.EventCounts
+	v1DstCounts := progress1.DstChangeStats.EventCounts
+
+	// The in-memory reader counts must be >= the GetProgress snapshot (the
+	// snapshot could be slightly stale relative to the live counters).
+	suite.Assert().GreaterOrEqual(
+		verifier1.srcChangeReader.GetCumulativeEventCounts().Insert, v1SrcCounts.Insert,
+		"src reader counts should be >= GetProgress snapshot",
+	)
+	suite.Assert().GreaterOrEqual(
+		verifier1.dstChangeReader.GetCumulativeEventCounts().Insert, v1DstCounts.Insert,
+		"dst reader counts should be >= GetProgress snapshot",
+	)
+
+	// Wait for the counts to be written to MongoDB alongside the resume token.
+	// BuildVerifier sets resumeTokenPersistInterval to 10ms, so batches are persisted frequently.
+	metaDB := verifier1.metaClient.Database(verifier1.metaDBName)
+	changeReaderColl := metaDB.Collection(changeReaderCollectionName)
+
+	waitForPersistedCounts := func(wantSrc, wantDst uint64) {
+		suite.T().Helper()
+		suite.Require().Eventually(func() bool {
+			var srcDoc, dstDoc resumeTokenDoc
+			srcErr := changeReaderColl.FindOne(ctx, bson.D{{"_id", "srcResumeToken"}}).Decode(&srcDoc)
+			dstErr := changeReaderColl.FindOne(ctx, bson.D{{"_id", "dstResumeToken"}}).Decode(&dstDoc)
+			return srcErr == nil && dstErr == nil &&
+				srcDoc.EventCounts.Insert >= wantSrc &&
+				dstDoc.EventCounts.Insert >= wantDst
+		},
+			time.Minute,
+			time.Millisecond,
+			"event counts (src≥%d, dst≥%d) should be written to metaDB", wantSrc, wantDst,
+		)
+	}
+
+	waitForPersistedCounts(wantSrcInserts, wantDstInserts)
+
+	v1Cancel(fmt.Errorf("stopping verifier 1"))
+
+	// --- Restart 1: verifier2 should restore verifier1's persisted counts ---
+
+	v2Ctx, v2Cancel := contextplus.WithCancelCause(ctx)
+	defer v2Cancel(nil)
+
+	verifier2 := suite.BuildVerifier()
+	verifier2.SetVerifyAll(true)
+
+	runner2 := RunVerifierCheck(v2Ctx, suite.T(), verifier2)
+	suite.Require().NoError(runner2.AwaitGenerationEnd())
+
+	// GetProgress should expose counts >= those persisted by verifier1.
+	progress2, err := verifier2.GetProgress(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().GreaterOrEqual(progress2.SrcChangeStats.EventCounts.Insert, v1SrcCounts.Insert,
+		"verifier2 should restore src insert counts from persisted state")
+	suite.Assert().GreaterOrEqual(progress2.DstChangeStats.EventCounts.Insert, v1DstCounts.Insert,
+		"verifier2 should restore dst insert counts from persisted state")
+
+	// The in-memory reader counts must be >= the GetProgress snapshot.
+	suite.Assert().GreaterOrEqual(
+		verifier2.srcChangeReader.GetCumulativeEventCounts().Insert,
+		progress2.SrcChangeStats.EventCounts.Insert,
+	)
+	suite.Assert().GreaterOrEqual(
+		verifier2.dstChangeReader.GetCumulativeEventCounts().Insert,
+		progress2.DstChangeStats.EventCounts.Insert,
+	)
+
+	// Add more events and confirm they accumulate on top of restored counts.
+	_, err = srcColl.InsertOne(ctx, bson.D{{"_id", 4}})
+	suite.Require().NoError(err)
+	_, err = dstColl.InsertOne(ctx, bson.D{{"_id", 5}})
+	suite.Require().NoError(err)
+
+	// Use GetProgress as a consistent snapshot to avoid TOCTOU between reader
+	// and progress reads.
+	var progress2Final api.Progress
+	suite.Require().Eventually(func() bool {
+		var err error
+		progress2Final, err = verifier2.GetProgress(ctx)
+		suite.Require().NoError(err)
+		return progress2Final.SrcChangeStats.EventCounts.Insert > progress2.SrcChangeStats.EventCounts.Insert &&
+			progress2Final.DstChangeStats.EventCounts.Insert > progress2.DstChangeStats.EventCounts.Insert
+	}, time.Minute, time.Millisecond, "verifier2 should tally new inserts on top of restored counts")
+
+	waitForPersistedCounts(progress2Final.SrcChangeStats.EventCounts.Insert, progress2Final.DstChangeStats.EventCounts.Insert)
+
+	v2Cancel(fmt.Errorf("stopping verifier 2"))
+
+	// --- Restart 2: verifier3 should restore verifier2's final counts ---
+
+	verifier3 := suite.BuildVerifier()
+	verifier3.SetVerifyAll(true)
+
+	runner3 := RunVerifierCheck(ctx, suite.T(), verifier3)
+	suite.Require().NoError(runner3.AwaitGenerationEnd())
+
+	// GetProgress should expose counts >= verifier2's final persisted counts.
+	progress3, err := verifier3.GetProgress(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().GreaterOrEqual(progress3.SrcChangeStats.EventCounts.Insert,
+		progress2Final.SrcChangeStats.EventCounts.Insert,
+		"verifier3 should restore verifier2's final src counts")
+	suite.Assert().GreaterOrEqual(progress3.DstChangeStats.EventCounts.Insert,
+		progress2Final.DstChangeStats.EventCounts.Insert,
+		"verifier3 should restore verifier2's final dst counts")
+
+	// In-memory reader counts must be >= the GetProgress snapshot.
+	suite.Assert().GreaterOrEqual(
+		verifier3.srcChangeReader.GetCumulativeEventCounts().Insert,
+		progress3.SrcChangeStats.EventCounts.Insert,
+	)
+	suite.Assert().GreaterOrEqual(
+		verifier3.dstChangeReader.GetCumulativeEventCounts().Insert,
+		progress3.DstChangeStats.EventCounts.Insert,
+	)
 }

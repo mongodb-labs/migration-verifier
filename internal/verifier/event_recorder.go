@@ -1,28 +1,17 @@
 package verifier
 
 import (
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/pkg/errors"
 	"golang.org/x/exp/maps"
 )
 
-type eventRecorderMap = map[string]PerNamespaceStats
+type eventRecorderMap = map[string]api.ChangeEventCounts
 
 // EventRecorder maintains statistics on change events.
 type EventRecorder struct {
 	guard *msync.DataGuard[eventRecorderMap]
-}
-
-// PerNamespaceStats records a given namespace’s event totals by optype.
-type PerNamespaceStats struct {
-	Insert  int
-	Update  int
-	Replace int
-	Delete  int
-}
-
-func (pns PerNamespaceStats) Total() int {
-	return pns.Insert + pns.Update + pns.Replace + pns.Delete
 }
 
 // NewEventRecorder creates and returns a new EventRecorder.
@@ -52,7 +41,7 @@ func (er EventRecorder) AddEvent(changeEvent *ParsedEvent) error {
 
 	er.guard.Store(func(m eventRecorderMap) eventRecorderMap {
 		if _, exists := m[nsStr]; !exists {
-			m[nsStr] = PerNamespaceStats{}
+			m[nsStr] = api.ChangeEventCounts{}
 		}
 
 		nsStats := m[nsStr]
