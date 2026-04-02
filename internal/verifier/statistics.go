@@ -139,7 +139,7 @@ const perNsStatsPipelineTemplate = `[
 
 				Ideally we could also approach later generations as we do with
 				totalDocs; however, the source_bytes_count figures for those
-				tasks aren’t meangingful because change events don’t always let
+				tasks aren’t meaningful because change events don’t always let
 				us know document size. So, after generation 0 we have to report
 				totalBytes as 0.
 			*/}}
