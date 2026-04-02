@@ -235,7 +235,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_ChangeEventCountsPersistAcros
 	)
 
 	// Wait for the counts to be written to MongoDB alongside the resume token.
-	// BuildVerifier sets resumeTokenPersistInterval=0, so every batch persists.
+	// BuildVerifier sets resumeTokenPersistInterval to 10ms, so batches are persisted frequently.
 	metaDB := verifier1.metaClient.Database(verifier1.metaDBName)
 	changeReaderColl := metaDB.Collection(changeReaderCollectionName)
 
