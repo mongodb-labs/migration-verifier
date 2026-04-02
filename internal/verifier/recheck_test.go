@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/testutil"
-	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
@@ -462,7 +461,6 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 			To:        "testDB.testColl",
 		},
 		DocumentsCount:    1,
-		SourceBytesCount:  types.ByteCount(overlyLarge),
 		FirstMismatchTime: map[int32]bson.DateTime{},
 		SrcTimestamp:      option.Some(bson.Timestamp{123, 0}),
 	}
