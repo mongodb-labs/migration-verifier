@@ -100,7 +100,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 		eg.Go(func() error {
 			var err error
 
-			totalRechecks, err = verifier.countAllRechecks(ctx)
+			totalRechecks, err = verifier.countAllRechecks(egCtx)
 
 			return err
 		})
