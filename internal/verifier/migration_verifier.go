@@ -345,6 +345,7 @@ func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 	model := mongo.IndexModel{
 		Keys: bson.D{
 			{"generation", 1},
+			{"type", 1},
 			{"documents_count", 1},
 		},
 	}
