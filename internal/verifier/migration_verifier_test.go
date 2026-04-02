@@ -622,7 +622,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 
 			progress, err := verifier.GetProgress(ctx)
 			suite.Require().NoError(err)
-			suite.Assert().Equal(0, progress.TotalRechecks,
+			suite.Assert().Zero(progress.TotalRechecksDone,
 				"no rechecked documents in gen 0")
 		},
 	)
@@ -706,7 +706,7 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 
 			progress, err := verifier.GetProgress(ctx)
 			suite.Require().NoError(err)
-			suite.Assert().Equal(2, progress.TotalRechecks,
+			suite.Assert().Equal(2, progress.TotalRechecksDone,
 				"both mismatched documents were rechecked")
 		},
 	)

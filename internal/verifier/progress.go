@@ -176,7 +176,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 			time.Second,
 		),
 
-		TotalRechecks: totalRechecks,
+		TotalRechecksDone: totalRechecks,
 
 		Status: status,
 	}
