@@ -240,7 +240,7 @@ func (verifier *Verifier) countAllRechecks(ctx context.Context) (types.DocumentC
 		return 0, nil
 	case 1:
 	default:
-		verifier.logger.Warn().Any("results", results).Msg("group returned multi?!?")
+		return 0, errors.Errorf("expected at most one aggregation result, got %d", len(results))
 	}
 
 	return safecast.Convert[types.DocumentCount](results[0].Rechecks)
