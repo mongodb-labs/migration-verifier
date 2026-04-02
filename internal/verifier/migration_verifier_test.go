@@ -1960,6 +1960,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(err)
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl",
@@ -1982,6 +1983,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(err)
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.destOnlyColl",
@@ -2006,6 +2008,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(err)
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.viewOnSrc",
@@ -2030,6 +2033,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(err)
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.cappedOnDst",
@@ -2054,6 +2058,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	// Default success case
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl",
@@ -2068,6 +2073,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	// Neither collection exists success case
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testCollDNE",
