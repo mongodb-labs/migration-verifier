@@ -2132,6 +2132,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Require().NoError(err)
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl2",
@@ -2167,6 +2168,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Require().NoError(err)
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl3",
@@ -2209,6 +2211,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Require().Equal("wrong", dstIndexNames[1])
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl4",
