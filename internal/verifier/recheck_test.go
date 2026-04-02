@@ -553,7 +553,6 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 			To:        "testDB.testColl",
 		},
 		DocumentsCount:    2,
-		SourceBytesCount:  1126400,
 		FirstMismatchTime: map[int32]bson.DateTime{},
 		SrcTimestamp:      option.Some(bson.Timestamp{123, 1}),
 	}
@@ -561,7 +560,6 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 	t2 := t1
 	t2.Ids = mslices.Of(mbson.ToRawValue(id3))
 	t2.DocumentsCount = 1
-	t2.SourceBytesCount = 1024
 	t2.SrcTimestamp = option.Some(bson.Timestamp{123, 2})
 
 	suite.ElementsMatch([]tasks.Task{t1, t2}, actualTasks)
