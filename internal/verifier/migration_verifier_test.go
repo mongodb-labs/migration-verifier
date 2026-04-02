@@ -1442,7 +1442,13 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	suite.Assert().Len(notifier.Messages(), 1)
 
 	var doc bson.M
-	cur, err := verifier.verificationTaskCollection().Find(ctx, bson.M{"generation": 1})
+	cur, err := verifier.verificationTaskCollection().Find(
+		ctx,
+		bson.M{"generation": 1},
+		options.Find().SetSort(bson.M{
+			"query_filter.namespace": 1,
+		}),
+	)
 	verifyTask := func(expectedIds bson.A, expectedNamespace string) {
 		more := cur.Next(ctx)
 		suite.Require().True(more)
