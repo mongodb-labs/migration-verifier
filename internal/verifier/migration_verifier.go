@@ -346,6 +346,7 @@ func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 		Keys: bson.D{
 			{"generation", 1},
 			{"type", 1},
+			{"status", 1},
 			{"documents_count", 1},
 		},
 	}

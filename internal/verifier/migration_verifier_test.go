@@ -619,6 +619,11 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 				reportData.Counts,
 			)
 			suite.Assert().Equal(mismatches, reportData.MissingOnDst)
+
+			progress, err := verifier.GetProgress(ctx)
+			suite.Require().NoError(err)
+			suite.Assert().Equal(0, progress.TotalRechecks,
+				"no rechecked documents in gen 0")
 		},
 	)
 

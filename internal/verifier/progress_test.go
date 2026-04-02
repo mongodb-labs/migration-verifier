@@ -38,6 +38,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0Stats() {
 	suite.Require().NoError(err)
 	suite.Assert().Equal(0, progress.Generation)
 	suite.Assert().True(progress.Gen0Stats.IsNone(), "gen0Stats should be absent during generation 0")
+	suite.Assert().Equal(0, progress.TotalRechecks, "no documents to recheck in generation 0")
 
 	suite.Require().NoError(runner.StartNextGeneration())
 
@@ -59,6 +60,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0Stats() {
 	suite.Assert().EqualValues(numDocs, gen0Stats.TotalDocs, "total docs should match what was inserted")
 	suite.Assert().EqualValues(numDocs, gen0Stats.DocsCompared, "all docs should have been compared")
 	suite.Assert().NotZero(gen0Stats.TotalSrcBytes, "byte count should be non-zero")
+	suite.Assert().Equal(0, progress.TotalRechecks, "no mismatches means zero rechecked documents")
 
 	// A second call must return the same gen0Stats (values are cached, not re-queried).
 	progress2, err := verifier.GetProgress(ctx)
@@ -153,4 +155,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorker
 		"gen0Stats.DocsCompared must not include live gen-1 worker counts")
 	suite.Assert().EqualValues(expectedBytes, gen0Stats.SrcBytesCompared,
 		"gen0Stats.SrcBytesCompared must not include live gen-1 worker counts")
+
+	// dst has one extra doc that src doesn’t have — exactly 1 document to recheck.
+	suite.Assert().Equal(1, progress.TotalRechecks, "one mismatched document should be queued for recheck")
 }

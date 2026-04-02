@@ -217,6 +217,10 @@ func (verifier *Verifier) countAllRechecks(ctx context.Context) (types.DocumentC
 			{{"$match", bson.D{
 				{"generation", bson.D{{"$gt", 0}}},
 				{"type", tasks.VerifyDocuments},
+				{"status", bson.D{{"$in", mslices.Of(
+					tasks.Completed,
+					tasks.Failed,
+				)}}},
 			}}},
 			{{"$group", bson.D{
 				{"_id", nil},
