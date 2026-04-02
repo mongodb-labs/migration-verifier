@@ -703,6 +703,11 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 				reportData.MissingOnDst[1].Detail.MismatchHistory.DurationMS,
 				"2nd reported mismatch should be less long-lived",
 			)
+
+			progress, err := verifier.GetProgress(ctx)
+			suite.Require().NoError(err)
+			suite.Assert().Equal(2, progress.TotalRechecks,
+				"both mismatched documents were rechecked")
 		},
 	)
 
