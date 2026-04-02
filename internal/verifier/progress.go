@@ -95,7 +95,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 		})
 	}
 
-	var totalRechecks int
+	var totalRechecks int64
 	if generation > 0 {
 		eg.Go(func() error {
 			var err error
@@ -207,7 +207,7 @@ func (verifier *Verifier) getPhaseWhileLocked() string {
 	return Check
 }
 
-func (verifier *Verifier) countAllRechecks(ctx context.Context) (int, error) {
+func (verifier *Verifier) countAllRechecks(ctx context.Context) (int64, error) {
 	metaDB := verifier.verificationDatabase()
 
 	cursor, err := metaDB.Collection(verificationTasksCollection).Aggregate(
@@ -228,7 +228,7 @@ func (verifier *Verifier) countAllRechecks(ctx context.Context) (int, error) {
 	}
 
 	var results []struct {
-		Rechecks int `bson:"rechecks"`
+		Rechecks int64 `bson:"rechecks"`
 	}
 	if err := cursor.All(ctx, &results); err != nil {
 		return 0, errors.Wrap(err, "reading count of rechecks")

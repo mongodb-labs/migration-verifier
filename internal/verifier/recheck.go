@@ -122,7 +122,6 @@ func (verifier *Verifier) insertRecheckDocs(
 		insertThreads++
 
 		eg.Go(func() error {
-
 			retryer := retry.New()
 			err := retryer.WithCallback(
 				func(retryCtx context.Context, _ *retry.FuncInfo) error {
@@ -403,6 +402,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			firstMismatchTime,
 			option.IfNotZero(latestSrcTimestamp),
 			option.IfNotZero(latestDstTimestamp),
+			types.ByteCount(dataSizeAccum),
 			namespace,
 		)
 		if err != nil {
