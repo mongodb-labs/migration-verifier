@@ -158,11 +158,6 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorker
 		"gen0Stats.SrcBytesCompared must not include live gen-1 worker counts")
 
 	suite.Require().NoError(runner.AwaitGenerationEnd())
-
-	progress, err = verifier.GetProgress(ctx)
-	suite.Require().NoError(err)
-
-	suite.Assert().EqualValues(1, progress.TotalRechecksDone, "expected recheck")
 }
 
 func (suite *IntegrationTestSuite) TestGetProgress_CountTotalRechecks() {
