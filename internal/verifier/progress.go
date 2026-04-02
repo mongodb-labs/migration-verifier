@@ -234,8 +234,12 @@ func (verifier *Verifier) countAllRechecks(ctx context.Context) (int64, error) {
 		return 0, errors.Wrap(err, "reading count of rechecks")
 	}
 
-	if len(results) == 0 {
+	switch len(results) {
+	case 0:
 		return 0, nil
+	case 1:
+	default:
+		verifier.logger.Warn().Any("results", results).Msg("group returned multi?!?")
 	}
 
 	return results[0].Rechecks, nil
