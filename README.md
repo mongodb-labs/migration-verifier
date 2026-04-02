@@ -144,7 +144,7 @@ These represent a logical time in MongoDB’s replication protocol.
     - `bufferSaturation` (fraction)
   - `dstChangeStats` (same fields as `srcChangeStats`)
   - `srcLastRecheckedTS` (see below)
-  - `totalRechecks`
+  - `totalRechecks` (unsigned, total number of documents scheduled for recheck across all generations)
   - `longestMismatch` (See `/docMismatches` below for format.)
   - `error` (string, optional)
   - `verificationStatus` (tasks for the current generation)
