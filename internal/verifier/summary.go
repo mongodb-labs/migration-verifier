@@ -834,6 +834,7 @@ func (verifier *Verifier) getPerNamespaceWorkerStats() map[string][]WorkerStatus
 func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
 	table := tablewriter.NewWriter(builder)
 	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed", "Detail"})
+
 	wsmap := verifier.workerTracker.Load()
 
 	activeThreadCount := 0

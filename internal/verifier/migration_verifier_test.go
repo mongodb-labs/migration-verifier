@@ -1937,6 +1937,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(err)
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl",
@@ -2097,6 +2098,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Require().NoError(err)
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl1",
