@@ -700,10 +700,10 @@ func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
 	table.Render()
 }
 
-func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
+func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) uint64 {
 	var eventsTable *tablewriter.Table
 
-	totalEventsForBothClusters := 0
+	totalEventsForBothClusters := uint64(0)
 
 	var lastSrcOpTime, lastDstOpTime bson.Timestamp
 
@@ -728,8 +728,8 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 		activeNamespacesCount := len(nsStats)
 
-		totalEvents := 0
-		nsTotals := map[string]int{}
+		totalEvents := uint64(0)
+		nsTotals := map[string]uint64{}
 		for ns, events := range nsStats {
 			nsTotals[ns] = events.Total()
 			totalEvents += nsTotals[ns]

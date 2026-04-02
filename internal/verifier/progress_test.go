@@ -239,7 +239,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_ChangeEventCountsPersistAcros
 	metaDB := verifier1.metaClient.Database(verifier1.metaDBName)
 	changeReaderColl := metaDB.Collection(changeReaderCollectionName)
 
-	waitForPersistedCounts := func(wantSrc, wantDst int) {
+	waitForPersistedCounts := func(wantSrc, wantDst uint64) {
 		suite.T().Helper()
 		suite.Require().Eventually(func() bool {
 			var srcDoc, dstDoc resumeTokenDoc
