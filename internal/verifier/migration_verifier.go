@@ -340,7 +340,7 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 }
 
 func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
-	// This includes documents_count so that the server can quickly tally up
+	// This includes additional fields so that the server can quickly tally up
 	// all documents rechecked in a given generation, or across all generations.
 	model := mongo.IndexModel{
 		Keys: bson.D{
