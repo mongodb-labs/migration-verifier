@@ -73,7 +73,7 @@ type Task struct {
 	// DocumentsCount means different things for different task types:
 	//
 	// Collection tasks: the source collection’s estimated docs count
-	// Document-check tasks: not set
+	// Document-check tasks: not meaningful/unused
 	// Document-recheck tasks: the number of docs to recheck
 	DocumentsCount types.DocumentCount `bson:"documents_count"`
 
