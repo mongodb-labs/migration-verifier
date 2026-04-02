@@ -834,7 +834,6 @@ func (verifier *Verifier) getPerNamespaceWorkerStats() map[string][]WorkerStatus
 func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
 	table := tablewriter.NewWriter(builder)
 	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed", "Detail"})
-
 	wsmap := verifier.workerTracker.Load()
 
 	activeThreadCount := 0
@@ -876,14 +875,7 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 		)
 	}
 
-	fmt.Fprintf(builder, "\n")
-
-	if activeThreadCount == 0 {
-		fmt.Fprintf(builder, "No active worker threads.\n")
-		return
-	}
-
-	fmt.Fprintf(builder, "Worker thread details:\n")
+	fmt.Fprintf(builder, "\nWorker thread details:\n")
 
 	table.Render()
 }
