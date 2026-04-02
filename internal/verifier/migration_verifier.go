@@ -340,7 +340,14 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 }
 
 func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
-	model := mongo.IndexModel{Keys: bson.M{"generation": 1}}
+	// This includes documents_count so that the server can quickly tally up
+	// all documents rechecked in a given generation, or across all generations.
+	model := mongo.IndexModel{
+		Keys: bson.D{
+			{"generation", 1},
+			{"documents_count", 1},
+		},
+	}
 	_, err := verifier.verificationTaskCollection().Indexes().CreateOne(ctx, model)
 	if err != nil {
 		return errors.Wrapf(err, "creating generation index")
