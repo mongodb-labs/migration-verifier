@@ -142,6 +142,11 @@ These represent a logical time in MongoDB’s replication protocol.
     - `eventsPerSecond` (unsigned)
     - `lagSecs` (unsigned)
     - `bufferSaturation` (fraction)
+    - `eventCounts` (totals since the migration’s start)
+      - `insert`
+      - `update`
+      - `replace`
+      - `delete`
   - `dstChangeStats` (same fields as `srcChangeStats`)
   - `srcLastRecheckedTS` (see below)
   - `longestMismatch` (See `/docMismatches` below for format.)

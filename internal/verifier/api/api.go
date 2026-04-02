@@ -67,6 +67,8 @@ type ProgressChangeStats struct {
 	EventsPerSecond  option.Option[float64] `bson:"eventsPerSecond"`
 	LagSecs          option.Option[int]     `bson:"lagSecs"`
 	BufferSaturation float64                `bson:"bufferSaturation"`
+
+	EventCounts ChangeEventCounts `bson:"changeEventCounts"`
 }
 
 type ProgressMismatch struct {
@@ -96,9 +98,6 @@ type Progress struct {
 
 	SrcLastRecheckedTS option.Option[bson.Timestamp] `bson:"srcLastRecheckedTS"`
 	DstLastRecheckedTS option.Option[bson.Timestamp] `bson:"dstLastRecheckedTS"`
-
-	SrcChangeEventCounts ChangeEventCounts `bson:"srcChangeEventCounts"`
-	DstChangeEventCounts ChangeEventCounts `bson:"dstChangeEventCounts"`
 
 	SrcChangeStats ProgressChangeStats `bson:"srcChangeStats"`
 	DstChangeStats ProgressChangeStats `bson:"dstChangeStats"`

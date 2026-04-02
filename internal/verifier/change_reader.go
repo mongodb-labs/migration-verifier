@@ -390,26 +390,16 @@ func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Optio
 		return option.None[bson.Raw](), err
 	}
 
-	// Decode into the wrapper struct. Old documents (written before this field
-	// was added) stored the raw token directly, so Token will be empty for
-	// those — fall back to treating the whole document as the token.
 	var doc resumeTokenDoc
 	if err := bson.Unmarshal(raw, &doc); err != nil {
 		return option.None[bson.Raw](), errors.Wrap(err, "decoding persisted resume token document")
 	}
 
-	token := doc.Token
-	if len(token) == 0 {
-		// Legacy format: the document itself is the token.
-		token = raw
-	} else {
-		// Restore cumulative counts from the persisted document.
-		rc.cumulativeEventCounts.Store(func(api.ChangeEventCounts) api.ChangeEventCounts {
-			return doc.EventCounts
-		})
-	}
+	rc.cumulativeEventCounts.Store(func(api.ChangeEventCounts) api.ChangeEventCounts {
+		return doc.EventCounts
+	})
 
-	return option.Some(token), nil
+	return option.Some(doc.Token), nil
 }
 
 func (rc *ChangeReaderCommon) updateTimestamps(sess *mongo.Session, token bson.Raw) {

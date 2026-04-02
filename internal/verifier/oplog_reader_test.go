@@ -120,6 +120,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 	suite.Run(
 		"insert one",
 		func() {
+
 			raw := lo.Must(bson.Marshal(bson.D{{"_id", "ho"}}))
 			lo.Must(coll.InsertOne(ctx, raw))
 			batch := getBatch()
