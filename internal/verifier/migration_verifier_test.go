@@ -1196,11 +1196,11 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now add document counts for each namespace.
 
 	task1.Status = tasks.Completed
-	task1.FoundSourceDocumentsCount = 1000
+	task1.DocumentsCount = 1000
 	task1.SourceBytesCount = 10_000
 
 	task2.Status = tasks.Completed
-	task2.FoundSourceDocumentsCount = 900
+	task2.DocumentsCount = 900
 	task2.SourceBytesCount = 9_000
 
 	err = verifier.UpdateVerificationTask(ctx, task2)
@@ -1321,11 +1321,11 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now set two other tasks to completed/failed.
 
 	task2parts[0].Status = tasks.Completed
-	task2parts[0].DocumentsCount = task2.DocumentsCount / 2
+	task2parts[0].FoundSourceDocumentsCount = task2.DocumentsCount / 2
 	task2parts[0].SourceBytesCount = task2.SourceBytesCount / 2
 
 	task2parts[1].Status = tasks.Completed
-	task2parts[1].DocumentsCount = task2.DocumentsCount / 2
+	task2parts[1].FoundSourceDocumentsCount = task2.DocumentsCount / 2
 	task2parts[1].SourceBytesCount = task2.SourceBytesCount / 2
 
 	err = verifier.UpdateVerificationTask(ctx, task2parts[0])
