@@ -876,7 +876,14 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 		)
 	}
 
-	fmt.Fprintf(builder, "\nWorker thread details:\n")
+	fmt.Fprintf(builder, "\n")
+
+	if activeThreadCount == 0 {
+		fmt.Fprintf(builder, "No active worker threads.\n")
+		return
+	}
+
+	fmt.Fprintf(builder, "Worker thread details:\n")
 
 	table.Render()
 }
