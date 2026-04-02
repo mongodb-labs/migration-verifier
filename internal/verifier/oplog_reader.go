@@ -411,8 +411,8 @@ func (o *OplogReader) readAndHandleOneBatch(
 	}
 
 	sess := mongo.SessionFromContext(sctx)
-	// Persist one past the last processed timestamp so that $gte on resume
-	// starts strictly after the events we've already counted.
+	// Persist the last processed timestamp; the resume query uses $gt startTS,
+	// so on restart we resume strictly after the events we've already counted.
 	resumeToken := oplog.ResumeToken{latestTS}.MarshalToBSON()
 
 	o.updateTimestamps(sess, resumeToken)
