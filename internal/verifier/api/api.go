@@ -68,7 +68,7 @@ type ProgressChangeStats struct {
 	LagSecs          option.Option[int]     `bson:"lagSecs"`
 	BufferSaturation float64                `bson:"bufferSaturation"`
 
-	EventCounts ChangeEventCounts `bson:"changeEventCounts"`
+	EventCounts ChangeEventCounts `bson:"eventCounts"`
 }
 
 type ProgressMismatch struct {
