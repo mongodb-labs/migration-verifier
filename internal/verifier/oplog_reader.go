@@ -91,6 +91,7 @@ func (o *OplogReader) createCursor(
 	var allowDDLBeforeTS bson.Timestamp
 
 	var startTS bson.Timestamp
+	var tsComparator string
 
 	var startMsg string
 
@@ -118,6 +119,9 @@ func (o *OplogReader) createCursor(
 		}
 
 		startTS = rt.TS
+		// On resume, startTS is the last-processed timestamp (already counted),
+		// so use $gt to skip it.
+		tsComparator = "$gt"
 		startMsg = "Resuming oplog reader."
 	} else {
 		startOpTime, latestOpTime, err := oplog.GetTailingStartTimes(ctx, o.watcherClient)
@@ -142,6 +146,9 @@ func (o *OplogReader) createCursor(
 		}
 
 		startTS = startOpTime.TS
+		// On a fresh start, startTS may be the beginning of an in-progress
+		// transaction, so use $gte to include that entry.
+		tsComparator = "$gte"
 		startMsg = "Starting oplog reader."
 
 		err = o.persistResumeToken(ctx, oplog.ResumeToken{startTS}.MarshalToBSON())
@@ -168,7 +175,7 @@ func (o *OplogReader) createCursor(
 	}
 
 	oplogFilter := bson.D{{"$and", []any{
-		bson.D{{"ts", bson.D{{"$gt", startTS}}}},
+		bson.D{{"ts", bson.D{{tsComparator, startTS}}}},
 
 		bson.D{{"$expr", agg.Or{
 			// plain ops: one write per op

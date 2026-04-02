@@ -175,8 +175,8 @@ type Verifier struct {
 
 	recheckDurations *mring.Queue[time.Duration]
 
-	verificationStatusCheckInterval  time.Duration
-	resumeTokenPersistInterval       time.Duration
+	verificationStatusCheckInterval time.Duration
+	resumeTokenPersistInterval      time.Duration
 
 	warnedNoResumableCollectionScan bool
 }
