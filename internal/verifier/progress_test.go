@@ -5,6 +5,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/exp/slices"
 )
@@ -162,4 +163,59 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorker
 	suite.Require().NoError(err)
 
 	suite.Assert().EqualValues(1, progress.TotalRechecksDone, "expected recheck")
+}
+
+func (suite *IntegrationTestSuite) TestGetProgress_CountTotalRechecks() {
+	ctx := suite.Context()
+
+	srcColl := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("stuff")
+
+	dstDB := suite.dstMongoClient.Database(srcColl.Database().Name())
+
+	suite.Require().NoError(
+		dstDB.CreateCollection(ctx, srcColl.Name()),
+	)
+
+	docs0 := lo.RepeatBy(
+		50,
+		func(i int) bson.D {
+			return bson.D{{"_id", i}}
+		},
+	)
+
+	_, err := srcColl.InsertMany(ctx, docs0)
+	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	// generation 0:
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	prog, err := verifier.GetProgress(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().EqualValues(0, prog.Generation, "generation")
+	suite.Assert().Zero(prog.TotalRechecksDone, "no rechecks in gen0")
+
+	// generation 1:
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	prog, err = verifier.GetProgress(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().EqualValues(1, prog.Generation, "generation")
+	suite.Assert().EqualValues(len(docs0), prog.TotalRechecksDone, "expected rechecks")
+
+	// generation 2:
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	prog, err = verifier.GetProgress(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().EqualValues(2, prog.Generation, "generation")
+	suite.Assert().EqualValues(2*len(docs0), prog.TotalRechecksDone, "expected rechecks")
 }
