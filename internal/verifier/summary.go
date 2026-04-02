@@ -685,7 +685,7 @@ func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
 		return
 	}
 
-	fmt.Fprintf(out, "Cumulative changes events seen:\n")
+	fmt.Fprintf(out, "Cumulative change events seen:\n")
 
 	table := tablewriter.NewWriter(out)
 
