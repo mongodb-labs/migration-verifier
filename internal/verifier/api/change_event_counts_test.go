@@ -27,9 +27,9 @@ func TestChangeEventCounts_ExtJSONKeys(t *testing.T) {
 	require.NoError(t, bson.UnmarshalExtJSON(payload, true, &got))
 
 	assert.Equal(t, map[string]any{
-		"insert":  int32(1),
-		"update":  int32(2),
-		"replace": int32(3),
-		"delete":  int32(4),
+		"insert":  int64(1),
+		"update":  int64(2),
+		"replace": int64(3),
+		"delete":  int64(4),
 	}, got)
 }
