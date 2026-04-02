@@ -336,8 +336,4 @@ func (suite *IntegrationTestSuite) TestGetProgress_ChangeEventCountsPersistAcros
 		verifier3.dstChangeReader.GetCumulativeEventCounts().Insert,
 		progress3.DstChangeStats.EventCounts.Insert,
 	)
-
-	_ = runner1
-	_ = runner2
-	_ = runner3
 }
