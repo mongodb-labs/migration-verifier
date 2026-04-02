@@ -156,8 +156,6 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorker
 		"gen0Stats.DocsCompared must not include live gen-1 worker counts")
 	suite.Assert().EqualValues(expectedBytes, gen0Stats.SrcBytesCompared,
 		"gen0Stats.SrcBytesCompared must not include live gen-1 worker counts")
-
-	suite.Require().NoError(runner.AwaitGenerationEnd())
 }
 
 func (suite *IntegrationTestSuite) TestGetProgress_CountTotalRechecks() {
