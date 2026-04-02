@@ -614,7 +614,6 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 			To:        "testDB1.testColl1",
 		},
 		DocumentsCount:    3,
-		SourceBytesCount:  3000,
 		FirstMismatchTime: map[int32]bson.DateTime{},
 		SrcTimestamp:      option.Some(bson.Timestamp{123, 2}),
 	}
