@@ -105,7 +105,7 @@ type Progress struct {
 
 	LongestDocMismatch option.Option[DocMismatchInfo] `bson:"longestDocMismatch,omitempty"`
 
-	TotalRechecks int64 `bson:"totalRechecks"`
+	TotalRechecks types.DocumentCount `bson:"totalRechecks"`
 }
 
 type (

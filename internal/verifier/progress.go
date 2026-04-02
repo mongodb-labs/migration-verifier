@@ -7,6 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/history"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
@@ -95,7 +96,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 		})
 	}
 
-	var totalRechecks int64
+	var totalRechecks types.DocumentCount
 	if generation > 0 {
 		eg.Go(func() error {
 			var err error
@@ -207,7 +208,7 @@ func (verifier *Verifier) getPhaseWhileLocked() string {
 	return Check
 }
 
-func (verifier *Verifier) countAllRechecks(ctx context.Context) (int64, error) {
+func (verifier *Verifier) countAllRechecks(ctx context.Context) (types.DocumentCount, error) {
 	metaDB := verifier.verificationDatabase()
 
 	cursor, err := metaDB.Collection(verificationTasksCollection).Aggregate(
@@ -242,5 +243,5 @@ func (verifier *Verifier) countAllRechecks(ctx context.Context) (int64, error) {
 		verifier.logger.Warn().Any("results", results).Msg("group returned multi?!?")
 	}
 
-	return results[0].Rechecks, nil
+	return safecast.Convert[types.DocumentCount](results[0].Rechecks)
 }
