@@ -215,7 +215,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_ChangeEventCountsPersistAcros
 		suite.Require().NoError(err)
 		return progress1.SrcChangeStats.EventCounts.Insert >= wantSrcInserts &&
 			progress1.DstChangeStats.EventCounts.Insert >= wantDstInserts
-	}, time.Minute, time.Millisecond,
+	}, time.Minute, 10*time.Millisecond,
 		"GetProgress should reflect src inserts (≥%d) and dst inserts (≥%d)",
 		wantSrcInserts, wantDstInserts,
 	)
