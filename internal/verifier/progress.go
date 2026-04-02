@@ -137,6 +137,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 				),
 			),
 			BufferSaturation: verifier.srcChangeReader.getBufferSaturation(),
+			EventCounts:      verifier.srcChangeReader.GetCumulativeEventCounts(),
 		},
 		DstChangeStats: api.ProgressChangeStats{
 			EventsPerSecond: verifier.dstChangeReader.getEventsPerSecond(),
@@ -148,6 +149,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 				),
 			),
 			BufferSaturation: verifier.dstChangeReader.getBufferSaturation(),
+			EventCounts:      verifier.dstChangeReader.GetCumulativeEventCounts(),
 		},
 
 		DocsComparedPerSecond: history.RatePer(
