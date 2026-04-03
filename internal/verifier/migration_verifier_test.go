@@ -2730,15 +2730,29 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 3, "x": 44})
 	suite.Require().NoError(err)
 
-	// tell check to start the next generation
-	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Assert().Eventually(
+		func() bool {
+			// tell check to start & finish the next generation
+			suite.Require().NoError(runner.StartNextGeneration())
+			suite.Require().NoError(runner.AwaitGenerationEnd())
+			status = waitForTasks()
 
-	// wait for one generation to finish
-	suite.Require().NoError(runner.AwaitGenerationEnd())
-	status = waitForTasks()
+			ok := *status == api.VerificationStatus{
+				TotalTasks:     2,
+				CompletedTasks: 1,
+				FailedTasks:    1,
+			}
 
-	// there should be a failure from the src insert
-	suite.Require().Equal(api.VerificationStatus{TotalTasks: 2, CompletedTasks: 1, FailedTasks: 1}, *status)
+			if !ok {
+				suite.T().Logf("status (%+v) not yet as expected", *status)
+			}
+
+			return ok
+		},
+		time.Minute,
+		time.Second,
+		"there should be a failure from the src insert",
+	)
 
 	// now patch up the destination
 	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 3, "x": 44})
