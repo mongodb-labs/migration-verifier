@@ -2925,7 +2925,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 			<-checkDoneChan
 			status = waitForTasks()
 
-			return *status == api.VerificationStatus{TotalTasks: 1, FailedTasks: 1}
+			return *status == api.VerificationStatus{TotalTasks: 2, CompletedTasks: 1, FailedTasks: 1}
 		},
 		time.Minute,
 		time.Second,
@@ -2944,7 +2944,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	status = waitForTasks()
 
 	// There should be no failures now, since they are equivalent at this point in time.
-	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 2, CompletedTasks: 2}, *status)
 
 	suite.T().Log("Finalizing test")
 
