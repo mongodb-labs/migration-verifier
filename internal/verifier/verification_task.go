@@ -81,8 +81,11 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 
 func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 	ctx context.Context,
-	newGeneration int,
 ) error {
+	verifier.assertLocked()
+
+	newGeneration := verifier.generation
+
 	recheckColl := verifier.getRecheckQueueCollection(newGeneration)
 
 	err := recheckColl.FindOne(ctx, bson.D{}).Err()

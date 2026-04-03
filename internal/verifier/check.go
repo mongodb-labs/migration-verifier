@@ -357,13 +357,16 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// Increment the in-memory generation so that the change readers will
 		// mark rechecks for the next generation. For example, if we just
 		// finished generation 2, the change readers need to mark generation 3
-		// on enqueued rechecks. Meanwhile, generaiton 3’s recheck tasks will
+		// on enqueued rechecks. Meanwhile, generation 3’s recheck tasks will
 		// derive from rechecks enqueued during generation 2.
 		verifier.generation++
 		verifier.generationStartTime = time.Now()
 		verifier.srcChangeReader.getEventRecorder().Reset()
 		verifier.dstChangeReader.getEventRecorder().Reset()
 
+		// Because API callers expect no tasks when there are no mismatches and
+		// no change events, we need to avoid creating a recheck task unless
+		// there is actually something to recheck.
 		err = verifier.ensureCreateRecheckTaskIfNeeded(ctx, verifier.generation)
 		if err != nil {
 			return errors.Wrapf(err, "create generation %d’s create-rechecks task", verifier.generation)
