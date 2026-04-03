@@ -79,33 +79,47 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 	return &verificationTask, err
 }
 
-func (verifier *Verifier) ensureCreateRecheckTask(
+func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 	ctx context.Context,
-	generation int,
+	newGeneration int,
 ) error {
-	newTask := tasks.Task{
-		PrimaryKey: bson.NewObjectID(),
-		Generation: generation,
-		Status:     tasks.Added,
-		Type:       tasks.CreateRechecks,
+	recheckColl := verifier.getRecheckQueueCollection(newGeneration)
+
+	err := recheckColl.FindOne(ctx, bson.D{}).Err()
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		verifier.logger.Info().
+			Int("generation", newGeneration).
+			Msg("Recheck queue is empty. Will thus not create recheck-creation task.")
+
+		return nil
+	} else if err != nil {
+		return errors.Wrapf(err, "fetching %#q’s first document", recheckColl.Name())
 	}
+
+	verifier.logger.Info().
+		Int("generation", newGeneration).
+		Msg("Creating recheck-creation task.")
 
 	return retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
-			_, err := verifier.verificationTaskCollection().ReplaceOne(
+			_, err := verifier.verificationTaskCollection().UpdateOne(
 				ctx,
 				bson.D{
-					{"generation", generation},
-					{"type", tasks.CreateRechecks},
+					{"generation", newGeneration},
+					{"type", tasks.ProcessRecheckQueue},
 				},
-				newTask,
-				options.Replace().SetUpsert(true),
+				bson.D{
+					{"$set", bson.D{
+						{"status", tasks.Added},
+					}},
+				},
+				options.UpdateOne().SetUpsert(true),
 			)
 
 			return err
 		},
 		"persisting generation %d’s create-rechecks task",
-		generation,
+		newGeneration,
 	).Run(ctx, verifier.logger)
 }
 

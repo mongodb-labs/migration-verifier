@@ -364,7 +364,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		verifier.srcChangeReader.getEventRecorder().Reset()
 		verifier.dstChangeReader.getEventRecorder().Reset()
 
-		err = verifier.ensureCreateRecheckTask(ctx, verifier.generation)
+		err = verifier.ensureCreateRecheckTaskIfNeeded(ctx, verifier.generation)
 		if err != nil {
 			return errors.Wrapf(err, "create generation %d’s create-rechecks task", verifier.generation)
 		}
@@ -658,7 +658,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			if err != nil {
 				return err
 			}
-		case tasks.CreateRechecks:
+		case tasks.ProcessRecheckQueue:
 			err := verifier.processCreateRechecksTask(ctx)
 			verifier.workerTracker.Unset(workerNum)
 

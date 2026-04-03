@@ -53,7 +53,9 @@ const (
 	// and, in generation 0, inserts verify-documents tasks for _id ranges.
 	VerifyCollection Type = "verifyCollection"
 
-	CreateRechecks Type = "createRechecks"
+	// A processRecheckQueue task converts enqueued rechecks into new
+	// document-recheck tasks.
+	ProcessRecheckQueue Type = "processRecheckQueue"
 
 	// The primary task creates a verifyCollection task for each
 	// namespace.
