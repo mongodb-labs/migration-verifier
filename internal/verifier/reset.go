@@ -117,7 +117,7 @@ func (verifier *Verifier) handleIncompletePrimary(ctx context.Context) (bool, er
 func (verifier *Verifier) resetProcessRecheckQueueTasksIfNeeded(ctx context.Context) error {
 	theTasks, err := verifier.findInProgressTasks(ctx, tasks.ProcessRecheckQueue)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	switch len(theTasks) {
@@ -178,7 +178,7 @@ func (verifier *Verifier) resetProcessRecheckQueueTasksIfNeeded(ctx context.Cont
 func (verifier *Verifier) resetCollectionTasksIfNeeded(ctx context.Context) error {
 	incompleteCollTasks, err := verifier.findInProgressTasks(ctx, tasks.VerifyCollection)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	if len(incompleteCollTasks) > 0 {
