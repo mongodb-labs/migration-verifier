@@ -619,6 +619,11 @@ func (suite *IntegrationTestSuite) TestMismatchTimePersistence() {
 				reportData.Counts,
 			)
 			suite.Assert().Equal(mismatches, reportData.MissingOnDst)
+
+			progress, err := verifier.GetProgress(ctx)
+			suite.Require().NoError(err)
+			suite.Assert().Zero(progress.TotalRechecksDone,
+				"no rechecked documents in gen 0")
 		},
 	)
 
@@ -1191,12 +1196,12 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now add document counts for each namespace.
 
 	task1.Status = tasks.Completed
-	task1.SourceDocumentCount = 1000
-	task1.SourceByteCount = 10_000
+	task1.DocumentsCount = 1000
+	task1.SourceBytesCount = 10_000
 
 	task2.Status = tasks.Completed
-	task2.SourceDocumentCount = 900
-	task2.SourceByteCount = 9_000
+	task2.DocumentsCount = 900
+	task2.SourceBytesCount = 9_000
 
 	err = verifier.UpdateVerificationTask(ctx, task2)
 	suite.Require().NoError(err)
@@ -1211,13 +1216,13 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 		[]NamespaceStats{
 			{
 				Namespace:  task1.QueryFilter.Namespace,
-				TotalDocs:  task1.SourceDocumentCount,
-				TotalBytes: task1.SourceByteCount,
+				TotalDocs:  task1.DocumentsCount,
+				TotalBytes: task1.SourceBytesCount,
 			},
 			{
 				Namespace:  task2.QueryFilter.Namespace,
-				TotalDocs:  task2.SourceDocumentCount,
-				TotalBytes: task2.SourceByteCount,
+				TotalDocs:  task2.DocumentsCount,
+				TotalBytes: task2.SourceBytesCount,
 			},
 		},
 		stats,
@@ -1269,14 +1274,14 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 		[]NamespaceStats{
 			{
 				Namespace:       task1.QueryFilter.Namespace,
-				TotalDocs:       task1.SourceDocumentCount,
-				TotalBytes:      task1.SourceByteCount,
+				TotalDocs:       task1.DocumentsCount,
+				TotalBytes:      task1.SourceBytesCount,
 				PartitionsAdded: 2,
 			},
 			{
 				Namespace:       task2.QueryFilter.Namespace,
-				TotalDocs:       task2.SourceDocumentCount,
-				TotalBytes:      task2.SourceByteCount,
+				TotalDocs:       task2.DocumentsCount,
+				TotalBytes:      task2.SourceBytesCount,
 				PartitionsAdded: 2,
 			},
 		},
@@ -1297,15 +1302,15 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 		[]NamespaceStats{
 			{
 				Namespace:            task1.QueryFilter.Namespace,
-				TotalDocs:            task1.SourceDocumentCount,
-				TotalBytes:           task1.SourceByteCount,
+				TotalDocs:            task1.DocumentsCount,
+				TotalBytes:           task1.SourceBytesCount,
 				PartitionsAdded:      1,
 				PartitionsProcessing: 1,
 			},
 			{
 				Namespace:       task2.QueryFilter.Namespace,
-				TotalDocs:       task2.SourceDocumentCount,
-				TotalBytes:      task2.SourceByteCount,
+				TotalDocs:       task2.DocumentsCount,
+				TotalBytes:      task2.SourceBytesCount,
 				PartitionsAdded: 2,
 			},
 		},
@@ -1316,12 +1321,12 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now set two other tasks to completed/failed.
 
 	task2parts[0].Status = tasks.Completed
-	task2parts[0].SourceDocumentCount = task2.SourceDocumentCount / 2
-	task2parts[0].SourceByteCount = task2.SourceByteCount / 2
+	task2parts[0].FoundSourceDocumentsCount = task2.DocumentsCount / 2
+	task2parts[0].SourceBytesCount = task2.SourceBytesCount / 2
 
 	task2parts[1].Status = tasks.Completed
-	task2parts[1].SourceDocumentCount = task2.SourceDocumentCount / 2
-	task2parts[1].SourceByteCount = task2.SourceByteCount / 2
+	task2parts[1].FoundSourceDocumentsCount = task2.DocumentsCount / 2
+	task2parts[1].SourceBytesCount = task2.SourceBytesCount / 2
 
 	err = verifier.UpdateVerificationTask(ctx, task2parts[0])
 	suite.Require().NoError(err)
@@ -1336,18 +1341,18 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 		[]NamespaceStats{
 			{
 				Namespace:            task1.QueryFilter.Namespace,
-				TotalDocs:            task1.SourceDocumentCount,
-				TotalBytes:           task1.SourceByteCount,
+				TotalDocs:            task1.DocumentsCount,
+				TotalBytes:           task1.SourceBytesCount,
 				PartitionsAdded:      1,
 				PartitionsProcessing: 1,
 			},
 			{
 				Namespace:      task2.QueryFilter.Namespace,
-				TotalDocs:      task2.SourceDocumentCount,
-				TotalBytes:     task2.SourceByteCount,
+				TotalDocs:      task2.DocumentsCount,
+				TotalBytes:     task2.SourceBytesCount,
 				PartitionsDone: 2,
-				DocsCompared:   task2.SourceDocumentCount,
-				BytesCompared:  task2.SourceByteCount,
+				DocsCompared:   task2.DocumentsCount,
+				BytesCompared:  task2.SourceBytesCount,
 			},
 		},
 		stats,
@@ -1437,7 +1442,13 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	suite.Assert().Len(notifier.Messages(), 1)
 
 	var doc bson.M
-	cur, err := verifier.verificationTaskCollection().Find(ctx, bson.M{"generation": 1})
+	cur, err := verifier.verificationTaskCollection().Find(
+		ctx,
+		bson.M{"generation": 1},
+		options.Find().SetSort(bson.M{
+			"query_filter.namespace": 1,
+		}),
+	)
 	verifyTask := func(expectedIds bson.A, expectedNamespace string) {
 		more := cur.Next(ctx)
 		suite.Require().True(more)
@@ -1926,6 +1937,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(err)
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl",
@@ -1948,6 +1960,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(err)
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl",
@@ -1970,6 +1983,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(err)
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.destOnlyColl",
@@ -1994,6 +2008,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(err)
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.viewOnSrc",
@@ -2018,6 +2033,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(err)
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.cappedOnDst",
@@ -2042,6 +2058,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	// Default success case
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl",
@@ -2056,6 +2073,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	// Neither collection exists success case
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testCollDNE",
@@ -2086,6 +2104,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Require().NoError(err)
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl1",
@@ -2119,6 +2138,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Require().NoError(err)
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl2",
@@ -2154,6 +2174,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Require().NoError(err)
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl3",
@@ -2196,6 +2217,7 @@ func (suite *IntegrationTestSuite) TestVerifierCompareIndexes() {
 	suite.Require().Equal("wrong", dstIndexNames[1])
 	task = &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
 		QueryFilter: tasks.QueryFilter{
 			Namespace: "testDb.testColl4",

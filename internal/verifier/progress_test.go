@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/rs/zerolog"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/exp/slices"
 )
@@ -42,6 +43,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0Stats() {
 	suite.Require().NoError(err)
 	suite.Assert().Equal(0, progress.Generation)
 	suite.Assert().True(progress.Gen0Stats.IsNone(), "gen0Stats should be absent during generation 0")
+	suite.Assert().Zero(progress.TotalRechecksDone, "no documents to recheck in generation 0")
 
 	suite.Require().NoError(runner.StartNextGeneration())
 
@@ -63,6 +65,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0Stats() {
 	suite.Assert().EqualValues(numDocs, gen0Stats.TotalDocs, "total docs should match what was inserted")
 	suite.Assert().EqualValues(numDocs, gen0Stats.DocsCompared, "all docs should have been compared")
 	suite.Assert().NotZero(gen0Stats.TotalSrcBytes, "byte count should be non-zero")
+	suite.Assert().Zero(progress.TotalRechecksDone, "no mismatches means zero rechecked documents")
 
 	// A second call must return the same gen0Stats (values are cached, not re-queried).
 	progress2, err := verifier.GetProgress(ctx)
@@ -74,6 +77,8 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0Stats() {
 // in-memory worker counts for the current generation are not added to the
 // cached gen0Stats.
 func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorkerCounts() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
 	ctx := suite.Context()
 	dbName := suite.DBNameForTest()
 
@@ -157,6 +162,68 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorker
 		"gen0Stats.DocsCompared must not include live gen-1 worker counts")
 	suite.Assert().EqualValues(expectedBytes, gen0Stats.SrcBytesCompared,
 		"gen0Stats.SrcBytesCompared must not include live gen-1 worker counts")
+
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	progress, err = verifier.GetProgress(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().EqualValues(1, progress.TotalRechecksDone, "expected recheck")
+}
+
+func (suite *IntegrationTestSuite) TestGetProgress_CountTotalRechecks() {
+	ctx := suite.Context()
+
+	srcColl := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("stuff")
+
+	dstDB := suite.dstMongoClient.Database(srcColl.Database().Name())
+
+	suite.Require().NoError(
+		dstDB.CreateCollection(ctx, srcColl.Name()),
+	)
+
+	docs0 := lo.RepeatBy(
+		50,
+		func(i int) bson.D {
+			return bson.D{{"_id", i}}
+		},
+	)
+
+	_, err := srcColl.InsertMany(ctx, docs0)
+	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	// generation 0:
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	prog, err := verifier.GetProgress(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().EqualValues(0, prog.Generation, "generation")
+	suite.Assert().Zero(prog.TotalRechecksDone, "no rechecks in gen0")
+
+	// generation 1:
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	prog, err = verifier.GetProgress(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().EqualValues(1, prog.Generation, "generation")
+	suite.Assert().EqualValues(len(docs0), prog.TotalRechecksDone, "expected rechecks")
+
+	// generation 2:
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	prog, err = verifier.GetProgress(ctx)
+	suite.Require().NoError(err)
+
+	suite.Assert().EqualValues(2, prog.Generation, "generation")
+	suite.Assert().EqualValues(2*len(docs0), prog.TotalRechecksDone, "expected rechecks")
 }
 
 // TestGetProgress_ChangeEventCountsPersistAcrossRestarts verifies that

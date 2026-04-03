@@ -4,13 +4,18 @@ import (
 	"context"
 	"time"
 
+	"github.com/10gen/migration-verifier/agg/accum"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/history"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/ccoveille/go-safecast/v2"
+	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error) {
@@ -91,6 +96,17 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 		})
 	}
 
+	var totalRechecks types.DocumentCount
+	if generation > 0 {
+		eg.Go(func() error {
+			var err error
+
+			totalRechecks, err = verifier.countAllRechecks(egCtx)
+
+			return err
+		})
+	}
+
 	if err := eg.Wait(); err != nil {
 		return api.Progress{Error: err}, err
 	}
@@ -162,6 +178,8 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 			time.Second,
 		),
 
+		TotalRechecksDone: totalRechecks,
+
 		Status: status,
 	}
 
@@ -190,4 +208,46 @@ func (verifier *Verifier) getPhaseWhileLocked() string {
 	}
 
 	return Check
+}
+
+func (verifier *Verifier) countAllRechecks(ctx context.Context) (types.DocumentCount, error) {
+	metaDB := verifier.verificationDatabase()
+
+	cursor, err := metaDB.Collection(verificationTasksCollection).Aggregate(
+		ctx,
+		mongo.Pipeline{
+			{{"$match", bson.D{
+				{"generation", bson.D{{"$gt", 0}}},
+				{"type", tasks.VerifyDocuments},
+				{"status", bson.D{{"$in", mslices.Of(
+					tasks.Completed,
+					tasks.Failed,
+				)}}},
+			}}},
+			{{"$group", bson.D{
+				{"_id", nil},
+				{"rechecks", accum.Sum{"$documents_count"}},
+			}}},
+		},
+	)
+	if err != nil {
+		return 0, errors.Wrap(err, "counting rechecks")
+	}
+
+	var results []struct {
+		Rechecks int64 `bson:"rechecks"`
+	}
+	if err := cursor.All(ctx, &results); err != nil {
+		return 0, errors.Wrap(err, "reading count of rechecks")
+	}
+
+	switch len(results) {
+	case 0:
+		return 0, nil
+	case 1:
+	default:
+		return 0, errors.Errorf("expected at most one aggregation result, got %d", len(results))
+	}
+
+	return safecast.Convert[types.DocumentCount](results[0].Rechecks)
 }

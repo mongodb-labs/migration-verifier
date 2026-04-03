@@ -31,8 +31,8 @@ const (
 func (verifier *Verifier) insertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
-	generation int) (*tasks.Task, error) {
-
+	generation int,
+) (*tasks.Task, error) {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
 		var ok bool
@@ -134,7 +134,6 @@ func (verifier *Verifier) createDocumentRecheckTask(
 	firstMismatchTime map[int32]bson.DateTime,
 	srcTimestamp option.Option[bson.Timestamp],
 	dstTimestamp option.Option[bson.Timestamp],
-	dataSize types.ByteCount,
 	srcNamespace string,
 ) (*tasks.Task, error) {
 	dstNamespace := srcNamespace
@@ -156,11 +155,10 @@ func (verifier *Verifier) createDocumentRecheckTask(
 			Namespace: srcNamespace,
 			To:        dstNamespace,
 		},
-		SourceDocumentCount: types.DocumentCount(len(ids)),
-		SourceByteCount:     dataSize,
-		FirstMismatchTime:   firstMismatchTime,
-		SrcTimestamp:        srcTimestamp,
-		DstTimestamp:        dstTimestamp,
+		DocumentsCount:    types.DocumentCount(len(ids)),
+		FirstMismatchTime: firstMismatchTime,
+		SrcTimestamp:      srcTimestamp,
+		DstTimestamp:      dstTimestamp,
 	}, nil
 }
 
@@ -188,7 +186,6 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
-
 			err := verifier.verificationTaskCollection().FindOneAndUpdate(
 				ctx,
 				bson.M{
@@ -215,7 +212,6 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 					// We want “verifyCollection” tasks before “verify”(-document) ones.
 					SetSort(bson.M{"type": -1}),
 			).Decode(task)
-
 			if err != nil {
 				task = nil
 				if errors.Is(err, mongo.ErrNoDocuments) {
@@ -240,9 +236,10 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *task
 				bson.M{"_id": task.PrimaryKey},
 				bson.M{
 					"$set": bson.M{
-						"status":                 task.Status,
-						"source_documents_count": task.SourceDocumentCount,
-						"source_bytes_count":     task.SourceByteCount,
+						"status":                       task.Status,
+						"documents_count":              task.DocumentsCount,
+						"found_source_documents_count": task.FoundSourceDocumentsCount,
+						"source_bytes_count":           task.SourceBytesCount,
 					},
 				},
 			)

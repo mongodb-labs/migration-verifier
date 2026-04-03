@@ -13,8 +13,10 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-type Type string
-type Status string
+type (
+	Type   string
+	Status string
+)
 
 const (
 	// --------------------------------------------------
@@ -68,13 +70,23 @@ type Task struct {
 
 	QueryFilter QueryFilter `bson:"query_filter" json:"query_filter"`
 
-	// DocumentCount is set when the verifier is done with the task
-	// (whether we found mismatches or not).
-	SourceDocumentCount types.DocumentCount `bson:"source_documents_count"`
+	// DocumentsCount means different things for different task types:
+	//
+	// Collection tasks: the source collection’s estimated docs count
+	// Document-check tasks: not meaningful/unused
+	// Document-recheck tasks: the number of docs to recheck
+	DocumentsCount types.DocumentCount `bson:"documents_count"`
 
-	// ByteCount is like DocumentCount: set when the verifier is done
-	// with the task.
-	SourceByteCount types.ByteCount `bson:"source_bytes_count"`
+	// FoundSourceDocumentsCount is the number of docs found on the source.
+	// It is set only when the task finishes.
+	FoundSourceDocumentsCount types.DocumentCount `bson:"found_source_documents_count"`
+
+	// SourceBytesCount means different things for different task types:
+	//
+	// Collection tasks: the source collection’s estimated size
+	// Document tasks: the found source documents’ total bytes (set only after
+	//     the task finishes)
+	SourceBytesCount types.ByteCount `bson:"source_bytes_count"`
 
 	// FirstMismatchTime correlates an index in Ids with the time when
 	// this document was first seen to mismatch.
