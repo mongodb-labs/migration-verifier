@@ -16,7 +16,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -238,12 +237,7 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 				bson.M{
 					"$and": []bson.M{
 						{"generation": verifier.generation},
-						{"type": bson.M{
-							"$in": mslices.Of(
-								tasks.VerifyDocuments,
-								tasks.VerifyCollection,
-							),
-						}},
+						{"type": bson.M{"$ne": tasks.Primary}},
 						{"status": tasks.Added},
 					},
 				},

@@ -35,7 +35,7 @@ type NamespaceStats struct {
 const perNsStatsPipelineTemplate = `[
 	{
 		"$match": {
-			"type": { "$ne": "primary" },
+			"type": { "$in": ["{{.VerifyDocsType}}", "{{.VerifyCollType}}"] },
 			"generation": {{.Generation}}
 		}
 	},

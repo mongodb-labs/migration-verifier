@@ -1444,7 +1444,10 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	var doc bson.M
 	cur, err := verifier.verificationTaskCollection().Find(
 		ctx,
-		bson.M{"generation": 1},
+		bson.M{
+			"generation": 1,
+			"type":       tasks.VerifyDocuments,
+		},
 		options.Find().SetSort(bson.M{
 			"query_filter.namespace": 1,
 		}),
