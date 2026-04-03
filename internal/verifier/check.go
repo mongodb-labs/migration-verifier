@@ -367,7 +367,7 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// Because API callers expect no tasks when there are no mismatches and
 		// no change events, we need to avoid creating a recheck task unless
 		// there is actually something to recheck.
-		err = verifier.ensureCreateRecheckTaskIfNeeded(ctx, verifier.generation)
+		err = verifier.ensureCreateRecheckTaskIfNeeded(ctx)
 		if err != nil {
 			return errors.Wrapf(err, "create generation %d’s create-rechecks task", verifier.generation)
 		}
@@ -662,7 +662,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 				return err
 			}
 		case tasks.ProcessRecheckQueue:
-			err := verifier.processCreateRechecksTask(ctx)
+			err := verifier.processCreateRechecksTask(ctx, task)
 			verifier.workerTracker.Unset(workerNum)
 
 			if err != nil {
@@ -676,6 +676,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 
 func (verifier *Verifier) processCreateRechecksTask(
 	ctx context.Context,
+	task tasks.Task,
 ) error {
 	// Generation of recheck tasks can partial-fail. The following will
 	// cause a full redo in that case, which is inefficient but simple.
@@ -695,6 +696,18 @@ func (verifier *Verifier) processCreateRechecksTask(
 		verifier.logger.Warn().
 			Err(err).
 			Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
+	}
+
+	task.Status = tasks.Completed
+
+	err = verifier.UpdateVerificationTask(ctx, &task)
+	if err != nil {
+		return errors.Wrapf(
+			err,
+			"failed to persist task %s's new status (%#q)",
+			task.PrimaryKey,
+			task.Status,
+		)
 	}
 
 	return nil
