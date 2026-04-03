@@ -114,6 +114,9 @@ func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 					{"$set", bson.D{
 						{"status", tasks.Added},
 					}},
+					{"$unset", bson.D{
+						{"begin_time", 1},
+					}},
 				},
 				options.UpdateOne().SetUpsert(true),
 			)
