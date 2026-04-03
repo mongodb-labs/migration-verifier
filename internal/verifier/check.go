@@ -691,13 +691,6 @@ func (verifier *Verifier) processCreateRechecksTask(
 		return err
 	}
 
-	err = verifier.DropCurrentGenRecheckQueue(ctx)
-	if err != nil {
-		verifier.logger.Warn().
-			Err(err).
-			Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
-	}
-
 	task.Status = tasks.Completed
 
 	err = verifier.UpdateVerificationTask(ctx, &task)
@@ -708,6 +701,16 @@ func (verifier *Verifier) processCreateRechecksTask(
 			task.PrimaryKey,
 			task.Status,
 		)
+	}
+
+	// NB: This must happen *after* we persist the task as completed.
+	// Otherwise Verifier could crash then, on restart, neglect to create all
+	// the needed recheck tasks.
+	err = verifier.DropCurrentGenRecheckQueue(ctx)
+	if err != nil {
+		verifier.logger.Warn().
+			Err(err).
+			Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
 	}
 
 	return nil
