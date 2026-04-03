@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
@@ -100,7 +101,7 @@ func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 
 	verifier.logger.Info().
 		Int("generation", newGeneration).
-		Msg("Creating recheck-creation task.")
+		Msg("Creating/resetting recheck-creation task.")
 
 	return retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
@@ -110,13 +111,18 @@ func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 					{"generation", newGeneration},
 					{"type", tasks.ProcessRecheckQueue},
 				},
-				bson.D{
-					{"$set", bson.D{
-						{"status", tasks.Added},
-					}},
-					{"$unset", bson.D{
-						{"begin_time", 1},
-					}},
+				mongo.Pipeline{
+					{{"$set", bson.D{
+						{"status", agg.Cond{
+							If: agg.Or{
+								agg.Eq{"$status", tasks.Processing},
+								agg.Eq{agg.Type{"$status"}, "missing"},
+							},
+							Then: tasks.Added,
+							Else: "$status",
+						}},
+					}}},
+					{{"$unset", "begin_time"}},
 				},
 				options.UpdateOne().SetUpsert(true),
 			)
