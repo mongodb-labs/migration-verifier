@@ -2709,7 +2709,8 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status = waitForTasks()
 	// there should be no failures now, since they are equivalent at this point in time
-	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	// There are 2 tasks because 1 is to generate the rechecks.
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 2, CompletedTasks: 2}, *status)
 
 	// The change event from inserting {_id: 2} on the destination may have
 	// already been captured in the previous generation (if the change reader
@@ -2722,7 +2723,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(err)
 	suite.Require().Zero(status.FailedTasks)
 	if status.TotalTasks > 0 {
-		suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+		suite.Require().Equal(api.VerificationStatus{TotalTasks: 2, CompletedTasks: 2}, *status)
 	}
 
 	// now insert in the source, this should come up next generation
@@ -2737,7 +2738,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	status = waitForTasks()
 
 	// there should be a failure from the src insert
-	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 2, CompletedTasks: 1, FailedTasks: 1}, *status)
 
 	// now patch up the destination
 	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 3, "x": 44})
@@ -2751,7 +2752,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	status = waitForTasks()
 
 	// there should be no failures now, since they are equivalent at this point in time
-	suite.Assert().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	suite.Assert().Equal(api.VerificationStatus{TotalTasks: 2, CompletedTasks: 2}, *status)
 
 	// We could just abandon this verifier, but we might as well shut it down
 	// gracefully. That prevents a spurious error in the log from “drop”
