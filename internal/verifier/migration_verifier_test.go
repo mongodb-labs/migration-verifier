@@ -2906,7 +2906,8 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	status = waitForTasks()
 
 	// There should be no failures, since the inserted document is not in the filter.
-	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	// (NB: There are 2 tasks because 1 is to process the recheck queue.)
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 2, CompletedTasks: 2}, *status)
 
 	// Now insert in the source. This should come up next generation.
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 201, "x": 201, "inFilter": true})
