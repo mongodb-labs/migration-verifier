@@ -2716,7 +2716,8 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	// already been captured in the previous generation (if the change reader
 	// processed it while verifier.generation was still 0, merging it with the
 	// failed-compare recheck). In that case gen 2 has 0 tasks; if it arrived
-	// later, gen 2 has 1 CompletedTask. Either way there must be no failures.
+	// later, gen 2 has 2 CompletedTasks (counting the recheck queue task).
+	// Either way there must be no failures.
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status, err = verifier.GetVerificationStatus(ctx)

@@ -30,6 +30,10 @@ func (suite *IntegrationTestSuite) TestEnsureCreateRecheckTaskIfNeeded() {
 	suite.Run("recheck queue has docs → task created with correct generation and status", func() {
 		verifier := suite.BuildVerifier()
 
+		// All subtests share the same metadata DB, so clear it before
+		// starting to avoid interference from prior subtests.
+		suite.Require().NoError(verifier.verificationTaskCollection().Drop(ctx))
+
 		// Seed the gen-1 recheck queue with one doc (simulates a failed comparison).
 		suite.Require().NoError(
 			verifier.InsertFailedCompareRecheckDocs(
@@ -60,6 +64,10 @@ func (suite *IntegrationTestSuite) TestEnsureCreateRecheckTaskIfNeeded() {
 	suite.Run("idempotent: calling twice does not create a second task", func() {
 		verifier := suite.BuildVerifier()
 
+		// All subtests share the same metadata DB, so clear it before
+		// starting to avoid interference from prior subtests.
+		suite.Require().NoError(verifier.verificationTaskCollection().Drop(ctx))
+
 		suite.Require().NoError(
 			verifier.InsertFailedCompareRecheckDocs(
 				ctx,
@@ -73,7 +81,10 @@ func (suite *IntegrationTestSuite) TestEnsureCreateRecheckTaskIfNeeded() {
 		verifier.mux.Lock()
 		verifier.generation = 1
 		err := verifier.ensureCreateRecheckTaskIfNeeded(ctx)
+		verifier.mux.Unlock()
 		suite.Require().NoError(err)
+
+		verifier.mux.Lock()
 		err = verifier.ensureCreateRecheckTaskIfNeeded(ctx)
 		verifier.mux.Unlock()
 		suite.Require().NoError(err)
@@ -88,6 +99,10 @@ func (suite *IntegrationTestSuite) TestEnsureCreateRecheckTaskIfNeeded() {
 
 	suite.Run("existing processing task is reset to added", func() {
 		verifier := suite.BuildVerifier()
+
+		// All subtests share the same metadata DB, so clear it before
+		// starting to avoid interference from prior subtests.
+		suite.Require().NoError(verifier.verificationTaskCollection().Drop(ctx))
 
 		suite.Require().NoError(
 			verifier.InsertFailedCompareRecheckDocs(
