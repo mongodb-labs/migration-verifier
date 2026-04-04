@@ -140,6 +140,46 @@ func (suite *IntegrationTestSuite) TestEnsureCreateRecheckTaskIfNeeded() {
 	})
 
 	for _, finishedStatus := range []tasks.Status{tasks.Completed, tasks.Failed} {
+		suite.Run("existing "+string(finishedStatus)+" task's begin_time is preserved", func() {
+			verifier := suite.BuildVerifier()
+			suite.Require().NoError(verifier.verificationTaskCollection().Drop(ctx))
+
+			suite.Require().NoError(
+				verifier.InsertFailedCompareRecheckDocs(
+					ctx,
+					"foo.bar",
+					[]bson.RawValue{mbson.ToRawValue("someID")},
+					[]int32{100},
+					[]bson.DateTime{bson.NewDateTimeFromTime(time.Now())},
+				),
+			)
+
+			verifier.mux.Lock()
+			verifier.generation = 1
+
+			beginTime := bson.NewDateTimeFromTime(time.Now().UTC())
+			_, err := verifier.verificationTaskCollection().InsertOne(ctx, bson.M{
+				"_id":        bson.NewObjectID(),
+				"generation": 1,
+				"type":       tasks.ProcessRecheckQueue,
+				"status":     finishedStatus,
+				"begin_time": beginTime,
+			})
+			suite.Require().NoError(err)
+
+			err = verifier.ensureCreateRecheckTaskIfNeeded(ctx)
+			verifier.mux.Unlock()
+			suite.Require().NoError(err)
+
+			var doc bson.M
+			err = verifier.verificationTaskCollection().FindOne(
+				ctx,
+				bson.M{"type": tasks.ProcessRecheckQueue},
+			).Decode(&doc)
+			suite.Require().NoError(err)
+			suite.Assert().Equal(beginTime, doc["begin_time"], "begin_time must not be cleared on a finished task")
+		})
+
 		suite.Run("existing "+string(finishedStatus)+" task is left alone", func() {
 			verifier := suite.BuildVerifier()
 
