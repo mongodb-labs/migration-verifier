@@ -213,6 +213,14 @@ This is sample output:
 }
 ```
 
+#### Compared vs. total
+
+The “compared” and “total” figures (e.g., `docsCompared` and `totalDocs`)
+may never match. This is because the “total” values are read before the
+actual document comparisons. Any documents created or deleted thereafter may
+cause the eventual “compared” value to be less than or greater than the
+initial “total”.
+
 #### Last recheck timestamps
 
 The `srcLastRecheckedTS` and `dstLastRecheckedTS` fields indicate the

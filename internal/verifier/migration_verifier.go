@@ -1845,6 +1845,15 @@ func (verifier *Verifier) PrintVerificationSummary(ctx context.Context, genstatu
 		return
 	}
 
+	verifier.logger.Debug().
+		Str("genstatus", string(genstatus)).
+		Msg("Starting verification summary.")
+	defer func() {
+		verifier.logger.Debug().
+			Str("genstatus", string(genstatus)).
+			Msg("Finished verification summary.")
+	}()
+
 	strBuilder := startReport()
 
 	generation, _ := verifier.getGeneration()

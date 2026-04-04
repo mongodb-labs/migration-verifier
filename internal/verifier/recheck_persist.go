@@ -3,10 +3,12 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -15,6 +17,17 @@ import (
 type eventBatch struct {
 	events      []ParsedEvent
 	resumeToken bson.Raw
+}
+
+func (eb eventBatch) String() string {
+	return fmt.Sprintf(
+		"{events: [%s], token: %s}",
+		strings.Join(
+			mslices.Map1(eb.events, ParsedEvent.String),
+			", ",
+		),
+		eb.resumeToken,
+	)
 }
 
 const (

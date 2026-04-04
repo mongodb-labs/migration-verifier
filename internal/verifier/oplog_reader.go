@@ -183,13 +183,23 @@ func (o *OplogReader) createCursor(
 			// op=n is for no-ops, so we stay up-to-date.
 			agg.Eq{"$op", "n"},
 
-			// op=c is for applyOps, and also to detect forbidden DDL.
+			// op=c is for applyOps & other commands (e.g., most DDL).
 			agg.And{
 				agg.Eq{"$op", "c"},
+
+				// Never consider op=c for the config DB (even an applyOps).
 				agg.Not{helpers.StringHasPrefix{
 					FieldRef: "$ns",
 					Prefix:   "config.",
 				}},
+
+				// Ignore DDL for any excluded namespace (e.g., Verifier
+				// metadata.) We have to special case applyOps, which has
+				// ns=`admin.$cmd`.
+				agg.Or{
+					"$o.applyOps",
+					o.getNotExcludedNSPrefixFilter("$$ROOT"),
+				},
 			},
 		}}},
 	}}}
@@ -684,8 +694,10 @@ func (o *OplogReader) getExcludedNSPrefixes() []string {
 	)
 }
 
-func (o *OplogReader) getNSFilter(docroot string) agg.And {
-	filter := agg.And(lo.Map(
+// Returns a filter that matches any op whose namespace is not excluded.
+// (This doesn’t consider user-specified namespace filters.)
+func (o *OplogReader) getNotExcludedNSPrefixFilter(docroot string) agg.And {
+	return agg.And(lo.Map(
 		o.getExcludedNSPrefixes(),
 		func(prefix string, _ int) any {
 			return agg.Not{helpers.StringHasPrefix{
@@ -694,6 +706,11 @@ func (o *OplogReader) getNSFilter(docroot string) agg.And {
 			}}
 		},
 	))
+}
+
+// Returns a filter that only matches ops for appropriate namespaces.
+func (o *OplogReader) getNSFilter(docroot string) agg.And {
+	filter := o.getNotExcludedNSPrefixFilter(docroot)
 
 	if len(o.namespaces) > 0 {
 		filter = append(
