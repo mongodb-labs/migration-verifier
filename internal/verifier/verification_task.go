@@ -121,8 +121,15 @@ func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 							Then: tasks.Added,
 							Else: "$status",
 						}},
+						{"begin_time", agg.Cond{
+							If: agg.Or{
+								agg.Eq{"$status", tasks.Processing},
+								agg.Eq{agg.Type{"$status"}, "missing"},
+							},
+							Then: "$$REMOVE",
+							Else: "$begin_time",
+						}},
 					}}},
-					{{"$unset", "begin_time"}},
 				},
 				options.UpdateOne().SetUpsert(true),
 			)
