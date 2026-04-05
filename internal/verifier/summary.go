@@ -5,6 +5,7 @@ package verifier
 // number of docs/namespaces/bytes, progress, etc.
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -760,7 +761,12 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) uint64 {
 
 		times, hasTimes := cluster.csReader.getCurrentTimestamps().Get()
 
-		if hasTimes {
+		showLag := hasTimes && cmp.Or(
+			times.Lag() > lagWarnThreshold,
+			verifier.logger.Debug().Enabled(),
+		)
+
+		if showLag {
 			lag := times.Lag()
 
 			logPieces = append(
@@ -778,17 +784,24 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) uint64 {
 
 		saturation := cluster.csReader.getBufferSaturation()
 
-		logPieces = append(
-			logPieces,
-			lo.Ternary(
-				saturation == 0,
-				"buffer is empty",
-				fmt.Sprintf(
-					"buffer %s%% full",
-					reportutils.FmtReal(100*saturation),
-				),
-			),
+		showSaturation := cmp.Or(
+			saturation > saturationWarnThreshold,
+			verifier.logger.Debug().Enabled(),
 		)
+
+		if showSaturation {
+			logPieces = append(
+				logPieces,
+				lo.Ternary(
+					saturation == 0,
+					"buffer is empty",
+					fmt.Sprintf(
+						"buffer %s%% full",
+						reportutils.FmtReal(100*saturation),
+					),
+				),
+			)
+		}
 
 		fmt.Fprintf(
 			builder,
@@ -812,14 +825,14 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) uint64 {
 			eventsDescr,
 		)
 
-		if hasTimes && times.Lag() > lagWarnThreshold {
+		if showLag && times.Lag() > lagWarnThreshold {
 			fmt.Fprint(
 				builder,
 				"    ⚠️ Lag is excessive. Verification may fail. See documentation.\n",
 			)
 		}
 
-		if saturation > saturationWarnThreshold {
+		if showSaturation && saturation > saturationWarnThreshold {
 			fmt.Fprint(
 				builder,
 				"    ⚠️ Buffer almost full. Metadata writes are too slow. See documentation.\n",
