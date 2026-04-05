@@ -419,11 +419,14 @@ func (rc *ChangeReaderCommon) updateTimestamps(sess *mongo.Session, token bson.R
 		}))
 
 		clusterTime, err := util.GetClusterTimeFromSession(sess)
-		rc.logger.Warn().
-			Err(err).
-			Msgf("Failed to read %s’s cluster time. Rechecks may be stale.", rc.readerType)
 
-		rc.lastSeenClusterTime.Store(option.Some(clusterTime))
+		if err != nil {
+			rc.logger.Warn().
+				Err(err).
+				Msgf("Failed to read %s’s cluster time. Rechecks may be stale.", rc.readerType)
+		} else {
+			rc.lastSeenClusterTime.Store(option.Some(clusterTime))
+		}
 	} else {
 		rc.logger.Warn().
 			Err(err).
