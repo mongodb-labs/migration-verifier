@@ -1444,7 +1444,10 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	var doc bson.M
 	cur, err := verifier.verificationTaskCollection().Find(
 		ctx,
-		bson.M{"generation": 1},
+		bson.M{
+			"generation": 1,
+			"type":       tasks.VerifyDocuments,
+		},
 		options.Find().SetSort(bson.M{
 			"query_filter.namespace": 1,
 		}),
@@ -2706,27 +2709,51 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	status = waitForTasks()
 	// there should be no failures now, since they are equivalent at this point in time
-	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	// There are 2 tasks because 1 is to generate the rechecks.
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 2, CompletedTasks: 2}, *status)
 
-	// The next generation should process the recheck task caused by inserting {_id: 2} on the destination.
+	// The change event from inserting {_id: 2} on the destination may have
+	// already been captured in the previous generation (if the change reader
+	// processed it while verifier.generation was still 0, merging it with the
+	// failed-compare recheck). In that case gen 2 has 0 tasks; if it arrived
+	// later, gen 2 has 2 CompletedTasks (counting the recheck queue task).
+	// Either way there must be no failures.
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
-	status = waitForTasks()
-	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	status, err = verifier.GetVerificationStatus(ctx)
+	suite.Require().NoError(err)
+	suite.Require().Zero(status.FailedTasks)
+	if status.TotalTasks > 0 {
+		suite.Require().Equal(api.VerificationStatus{TotalTasks: 2, CompletedTasks: 2}, *status)
+	}
 
 	// now insert in the source, this should come up next generation
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 3, "x": 44})
 	suite.Require().NoError(err)
 
-	// tell check to start the next generation
-	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Assert().Eventually(
+		func() bool {
+			// tell check to start & finish the next generation
+			suite.Require().NoError(runner.StartNextGeneration())
+			suite.Require().NoError(runner.AwaitGenerationEnd())
+			status = waitForTasks()
 
-	// wait for one generation to finish
-	suite.Require().NoError(runner.AwaitGenerationEnd())
-	status = waitForTasks()
+			ok := *status == api.VerificationStatus{
+				TotalTasks:     2,
+				CompletedTasks: 1,
+				FailedTasks:    1,
+			}
 
-	// there should be a failure from the src insert
-	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, FailedTasks: 1}, *status)
+			if !ok {
+				suite.T().Logf("status (%+v) not yet as expected", *status)
+			}
+
+			return ok
+		},
+		time.Minute,
+		time.Second,
+		"there should be a failure from the src insert",
+	)
 
 	// now patch up the destination
 	_, err = dstColl.InsertOne(ctx, bson.M{"_id": 3, "x": 44})
@@ -2740,7 +2767,7 @@ func (suite *IntegrationTestSuite) TestGenerationalRechecking() {
 	status = waitForTasks()
 
 	// there should be no failures now, since they are equivalent at this point in time
-	suite.Assert().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	suite.Assert().Equal(api.VerificationStatus{TotalTasks: 2, CompletedTasks: 2}, *status)
 
 	// We could just abandon this verifier, but we might as well shut it down
 	// gracefully. That prevents a spurious error in the log from “drop”
@@ -2895,7 +2922,8 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	status = waitForTasks()
 
 	// There should be no failures, since the inserted document is not in the filter.
-	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	// (NB: There are 2 tasks because 1 is to process the recheck queue.)
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 2, CompletedTasks: 2}, *status)
 
 	// Now insert in the source. This should come up next generation.
 	_, err = srcColl.InsertOne(ctx, bson.M{"_id": 201, "x": 201, "inFilter": true})
@@ -2912,7 +2940,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 			<-checkDoneChan
 			status = waitForTasks()
 
-			return *status == api.VerificationStatus{TotalTasks: 1, FailedTasks: 1}
+			return *status == api.VerificationStatus{TotalTasks: 2, CompletedTasks: 1, FailedTasks: 1}
 		},
 		time.Minute,
 		time.Second,
@@ -2931,7 +2959,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	status = waitForTasks()
 
 	// There should be no failures now, since they are equivalent at this point in time.
-	suite.Require().Equal(api.VerificationStatus{TotalTasks: 1, CompletedTasks: 1}, *status)
+	suite.Require().Equal(api.VerificationStatus{TotalTasks: 2, CompletedTasks: 2}, *status)
 
 	suite.T().Log("Finalizing test")
 

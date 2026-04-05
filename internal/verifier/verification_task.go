@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -77,6 +77,68 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 	).Run(ctx, verifier.logger)
 
 	return &verificationTask, err
+}
+
+func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
+	ctx context.Context,
+) error {
+	verifier.assertLocked()
+
+	newGeneration := verifier.generation
+
+	recheckColl := verifier.getRecheckQueueCollection(newGeneration)
+
+	err := recheckColl.FindOne(ctx, bson.D{}).Err()
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		verifier.logger.Info().
+			Int("generation", newGeneration).
+			Msg("Recheck queue is empty. Will thus not create recheck-creation task.")
+
+		return nil
+	} else if err != nil {
+		return errors.Wrapf(err, "fetching %#q’s first document", recheckColl.Name())
+	}
+
+	verifier.logger.Info().
+		Int("generation", newGeneration).
+		Msg("Creating/resetting recheck-creation task.")
+
+	return retry.New().WithCallback(
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			_, err := verifier.verificationTaskCollection().UpdateOne(
+				ctx,
+				bson.D{
+					{"generation", newGeneration},
+					{"type", tasks.ProcessRecheckQueue},
+				},
+				mongo.Pipeline{
+					{{"$set", bson.D{
+						{"status", agg.Cond{
+							If: agg.Or{
+								agg.Eq{"$status", tasks.Processing},
+								agg.Eq{agg.Type{"$status"}, "missing"},
+							},
+							Then: tasks.Added,
+							Else: "$status",
+						}},
+						{"begin_time", agg.Cond{
+							If: agg.Or{
+								agg.Eq{"$status", tasks.Processing},
+								agg.Eq{agg.Type{"$status"}, "missing"},
+							},
+							Then: "$$REMOVE",
+							Else: "$begin_time",
+						}},
+					}}},
+				},
+				options.UpdateOne().SetUpsert(true),
+			)
+
+			return err
+		},
+		"persisting generation %d’s create-rechecks task",
+		newGeneration,
+	).Run(ctx, verifier.logger)
 }
 
 func (verifier *Verifier) InsertCollectionVerificationTask(
@@ -191,12 +253,7 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 				bson.M{
 					"$and": []bson.M{
 						{"generation": verifier.generation},
-						{"type": bson.M{
-							"$in": mslices.Of(
-								tasks.VerifyDocuments,
-								tasks.VerifyCollection,
-							),
-						}},
+						{"type": bson.M{"$ne": tasks.Primary}},
 						{"status": tasks.Added},
 					},
 				},
@@ -208,9 +265,7 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 				},
 				options.FindOneAndUpdate().
 					SetReturnDocument(options.After).
-
-					// We want “verifyCollection” tasks before “verify”(-document) ones.
-					SetSort(bson.M{"type": -1}),
+					SetSort(bson.M{"type": 1}),
 			).Decode(task)
 			if err != nil {
 				task = nil

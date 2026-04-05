@@ -326,6 +326,10 @@ func (verifier *Verifier) GenerateRecheckTasks(
 ) error {
 	generation, _ := verifier.getGeneration()
 
+	verifier.logger.Info().
+		Int("generation", generation).
+		Msg("Creating new document-recheck tasks from enqueued rechecks.")
+
 	recheckColl := verifier.getRecheckQueueCollection(generation)
 
 	startTime := time.Now()
