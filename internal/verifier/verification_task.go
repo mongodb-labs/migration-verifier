@@ -265,9 +265,7 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 				},
 				options.FindOneAndUpdate().
 					SetReturnDocument(options.After).
-
-					// We want “verifyCollection” tasks before “verify”(-document) ones.
-					SetSort(bson.M{"type": -1}),
+					SetSort(bson.M{"type": 1}),
 			).Decode(task)
 			if err != nil {
 				task = nil
