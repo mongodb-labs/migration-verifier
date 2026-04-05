@@ -1,8 +1,11 @@
 package verifier
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
@@ -10,6 +13,7 @@ import (
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options" //nolint:staticcheck
 )
 
 func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
@@ -199,5 +203,205 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 		ns1,
 		taskDocs[4].QueryFilter.Namespace,
 	)
+}
 
+// TestResetProcessRecheckQueueDeletesDocTasks verifies that when
+// ResetInProgressTasks finds an in-progress ProcessRecheckQueue task,
+// it deletes all VerifyDocuments tasks for that generation.
+func (suite *IntegrationTestSuite) TestResetProcessRecheckQueueDeletesDocTasks() {
+	ctx := suite.Context()
+
+	dbName := suite.DBNameForTest()
+	ns := dbName + ".coll"
+
+	// Create a document mismatch: source has a doc that destination lacks.
+	srcColl := suite.srcMongoClient.Database(dbName).Collection("coll")
+
+	suite.Require().NoError(
+		suite.dstMongoClient.Database(dbName).CreateCollection(ctx, "coll"),
+	)
+
+	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", 1}, {"x", 42}})
+	suite.Require().NoError(err)
+
+	// Run verifier 1 through gen 0 → doc mismatch detected → rechecks enqueued.
+	v1 := suite.BuildVerifier()
+	v1.SetSrcNamespaces([]string{ns})
+	v1.SetDstNamespaces([]string{ns})
+	v1.SetNamespaceMap()
+
+	v1Ctx, v1Cancel := contextplus.WithCancelCause(ctx)
+	defer v1Cancel(ctx.Err())
+
+	runner := RunVerifierCheck(v1Ctx, suite.T(), v1)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	// Start gen 1: this creates ProcessRecheckQueue + VerifyDocuments recheck
+	// tasks. Let it fully complete so all tasks exist.
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	// Kill verifier 1.
+	v1Cancel(fmt.Errorf("stopping verifier 1"))
+
+	tasksColl := v1.verificationTaskCollection()
+
+	// Confirm gen-1 VerifyDocuments tasks exist.
+	docTaskCount, err := tasksColl.CountDocuments(ctx, bson.M{
+		"generation": 1,
+		"type":       tasks.VerifyDocuments,
+	})
+	suite.Require().NoError(err)
+	suite.Require().NotZero(docTaskCount, "gen-1 doc tasks should exist before reset")
+
+	// Simulate a crash: flip the ProcessRecheckQueue task back to Processing.
+	updated, err := tasksColl.UpdateOne(
+		ctx,
+		bson.M{
+			"generation": 1,
+			"type":       tasks.ProcessRecheckQueue,
+		},
+		bson.M{"$set": bson.M{"status": tasks.Processing}},
+	)
+	suite.Require().NoError(err)
+	suite.Require().EqualValues(1, updated.ModifiedCount, "expect modification")
+
+	// Build verifier 2 and call ResetInProgressTasks directly
+	// (without running a full generation, which would re-process the tasks).
+	v2 := suite.BuildVerifier()
+	v2.generation = 1
+	suite.Require().NoError(v2.ResetInProgressTasks(ctx))
+
+	// The gen-1 VerifyDocuments tasks should have been deleted by the reset.
+	docTaskCount, err = tasksColl.CountDocuments(ctx, bson.M{
+		"generation": 1,
+		"type":       tasks.VerifyDocuments,
+	})
+	suite.Require().NoError(err)
+	suite.Assert().Zero(docTaskCount, "gen-1 doc tasks should be deleted after ProcessRecheckQueue reset")
+
+	// The ProcessRecheckQueue task itself should have been reset to Added.
+	var prqTask tasks.Task
+	err = tasksColl.FindOne(ctx, bson.M{
+		"generation": 1,
+		"type":       tasks.ProcessRecheckQueue,
+	}).Decode(&prqTask)
+	suite.Require().NoError(err)
+	suite.Assert().Equal(tasks.Added, prqTask.Status, "ProcessRecheckQueue should be reset to Added")
+}
+
+// TestResetCollectionTaskGen1PreservesDocRecheckTasks verifies that when
+// ResetInProgressTasks finds an in-progress VerifyCollection task at
+// generation 1+, it does NOT delete VerifyDocuments tasks for that generation.
+// (This is different from gen 0, where the doc tasks are deleted.)
+func (suite *IntegrationTestSuite) TestResetCollectionTaskGen1PreservesDocRecheckTasks() {
+	ctx := suite.Context()
+
+	dbName := suite.DBNameForTest()
+	ns := dbName + ".coll"
+
+	// Create both a document mismatch AND an index mismatch so that gen 1
+	// will have both a VerifyCollection task (from the index mismatch) and
+	// VerifyDocuments recheck tasks (from the doc mismatch).
+	srcColl := suite.srcMongoClient.Database(dbName).Collection("coll")
+
+	suite.Require().NoError(
+		suite.dstMongoClient.Database(dbName).CreateCollection(ctx, "coll"),
+	)
+
+	_, err := srcColl.InsertOne(ctx, bson.D{{"_id", 1}, {"x", 42}})
+	suite.Require().NoError(err)
+
+	// Index on source but not on destination → metadata mismatch.
+	_, err = srcColl.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{"x", 1}},
+		Options: options.Index().SetName("x_1"),
+	})
+	suite.Require().NoError(err)
+
+	// Run verifier 1 through gen 0 → detects both mismatches.
+	v1 := suite.BuildVerifier()
+	v1.SetSrcNamespaces([]string{ns})
+	v1.SetDstNamespaces([]string{ns})
+	v1.SetNamespaceMap()
+
+	v1Ctx, v1Cancel := contextplus.WithCancelCause(ctx)
+	defer v1Cancel(ctx.Err())
+
+	runner := RunVerifierCheck(v1Ctx, suite.T(), v1)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	// Start gen 1: ProcessRecheckQueue creates VerifyDocuments recheck tasks,
+	// and there’s also a VerifyCollection task (from the gen-0 metadata mismatch).
+	// We need to let gen 1 fully complete so all tasks have been created.
+	suite.Require().Eventually(
+		func() bool {
+			suite.Require().NoError(runner.StartNextGeneration())
+			suite.Require().NoError(runner.AwaitGenerationEnd())
+
+			// Wait until the gen-1 VerifyCollection task exists.
+			count, err := v1.verificationTaskCollection().CountDocuments(ctx, bson.M{
+				"generation": 1,
+				"type":       tasks.VerifyCollection,
+			})
+			suite.Require().NoError(err)
+
+			return count > 0
+		},
+		time.Minute,
+		100*time.Millisecond,
+		"gen-1 VerifyCollection task should be created",
+	)
+
+	// Kill verifier 1.
+	v1Cancel(fmt.Errorf("stopping verifier 1"))
+
+	tasksColl := v1.verificationTaskCollection()
+
+	// Confirm gen-1 VerifyDocuments tasks exist.
+	docTaskCount, err := tasksColl.CountDocuments(ctx, bson.M{
+		"generation": 1,
+		"type":       tasks.VerifyDocuments,
+	})
+	suite.Require().NoError(err)
+	suite.Require().NotZero(docTaskCount, "gen-1 doc recheck tasks should exist before reset")
+
+	// Simulate a crash: flip the gen-1 VerifyCollection task to Processing.
+	updated, err := tasksColl.UpdateOne(
+		ctx,
+		bson.M{
+			"generation": 1,
+			"type":       tasks.VerifyCollection,
+		},
+		bson.M{"$set": bson.M{"status": tasks.Processing}},
+	)
+	suite.Require().NoError(err)
+	suite.Require().EqualValues(1, updated.ModifiedCount, "expect modified")
+
+	// Build verifier 2 and call ResetInProgressTasks directly
+	// (without running a full generation, which would re-process the tasks).
+	v2 := suite.BuildVerifier()
+	v2.generation = 1
+	suite.Require().NoError(v2.ResetInProgressTasks(ctx))
+
+	// The gen-1 VerifyDocuments tasks must NOT have been deleted.
+	docTaskCountAfter, err := tasksColl.CountDocuments(ctx, bson.M{
+		"generation": 1,
+		"type":       tasks.VerifyDocuments,
+	})
+	suite.Require().NoError(err)
+	suite.Assert().Equal(
+		docTaskCount,
+		docTaskCountAfter,
+		"gen-1 doc recheck tasks should be preserved when resetting a gen-1 VerifyCollection task",
+	)
+
+	// The VerifyCollection task should have been reset to Added.
+	var collTask tasks.Task
+	err = tasksColl.FindOne(ctx, bson.M{
+		"generation": 1,
+		"type":       tasks.VerifyCollection,
+	}).Decode(&collTask)
+	suite.Require().NoError(err)
+	suite.Assert().Equal(tasks.Added, collTask.Status, "VerifyCollection should be reset to Added")
 }
