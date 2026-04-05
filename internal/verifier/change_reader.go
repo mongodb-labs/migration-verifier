@@ -404,25 +404,7 @@ func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Optio
 	return option.Some(doc.Token), nil
 }
 
-func (rc *ChangeReaderCommon) updateTimestamps(sess *mongo.Session, token bson.Raw) {
-	tokenTS, err := rc.resumeTokenTSExtractor(token)
-	if err == nil {
-		opTime := sess.OperationTime()
-
-		if opTime == nil {
-			panic("session operationTime is nil … did this get called prematurely?")
-		}
-
-		rc.currentTimestamps.Store(option.Some(readerCurrentTimestamps{
-			LastHandled:   tokenTS,
-			LastOperation: *opTime,
-		}))
-	} else {
-		rc.logger.Warn().
-			Err(err).
-			Msgf("Failed to extract timestamp from %s's resume token to compute lag.", rc.readerType)
-	}
-
+func (rc *ChangeReaderCommon) updateLastSeenClusterTime(sess *mongo.Session) {
 	clusterTime, err := util.GetClusterTimeFromSession(sess)
 
 	if err != nil {
@@ -431,6 +413,26 @@ func (rc *ChangeReaderCommon) updateTimestamps(sess *mongo.Session, token bson.R
 			Msgf("Failed to read %s’s cluster time. Rechecks may be stale.", rc.readerType)
 	} else {
 		rc.lastSeenClusterTime.Store(option.Some(clusterTime))
+	}
+}
+
+func (rc *ChangeReaderCommon) updateTimestamps(sess *mongo.Session, token bson.Raw) {
+	opTime := sess.OperationTime()
+
+	if opTime == nil {
+		panic("session operationTime is nil … did this get called prematurely?")
+	}
+
+	tokenTS, err := rc.resumeTokenTSExtractor(token)
+	if err == nil {
+		rc.currentTimestamps.Store(option.Some(readerCurrentTimestamps{
+			LastHandled:   tokenTS,
+			LastOperation: *opTime,
+		}))
+	} else {
+		rc.logger.Warn().
+			Err(err).
+			Msgf("Failed to extract timestamp from %s's resume token to compute lag.", rc.readerType)
 	}
 }
 

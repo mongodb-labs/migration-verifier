@@ -837,6 +837,10 @@ func (suite *IntegrationTestSuite) TestLastSeenClusterTimeAdvancesBeyondLastEven
 	db := suite.srcMongoClient.Database(suite.DBNameForTest())
 	suite.Require().NoError(db.CreateCollection(ctx, "watched"))
 
+	// We’ll need this below. Pre-create it so that oplog-tailing doesn’t
+	// complain about its creation during the verification.
+	suite.Require().NoError(db.CreateCollection(ctx, "unwatched"))
+
 	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{db.Name() + ".watched"})
 	verifier.SetDstNamespaces([]string{db.Name() + ".watched"})
@@ -876,18 +880,10 @@ func (suite *IntegrationTestSuite) TestLastSeenClusterTimeAdvancesBeyondLastEven
 	// session.ClusterTime(). getLastSeenClusterTime() should therefore
 	// eventually reach at least serverTimeAfterUnwatchedWrite, even though no
 	// new watched events were written.
-	//
-	// With the buggy code, getLastSeenClusterTime() was stuck at the last
-	// watched-event time and would never reach serverTimeAfterUnwatchedWrite.
 	suite.Require().Eventually(
 		func() bool {
 			clusterTime, has := verifier.srcChangeReader.getLastSeenClusterTime().Get()
-			if !has || clusterTime.Before(serverTimeAfterUnwatchedWrite) {
-				suite.Require().NoError(verifierRunner.StartNextGeneration())
-				suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
-				return false
-			}
-			return true
+			return has && !clusterTime.Before(serverTimeAfterUnwatchedWrite)
 		},
 		time.Minute,
 		100*time.Millisecond,
