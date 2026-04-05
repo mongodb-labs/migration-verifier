@@ -417,20 +417,20 @@ func (rc *ChangeReaderCommon) updateTimestamps(sess *mongo.Session, token bson.R
 			LastHandled:   tokenTS,
 			LastOperation: *opTime,
 		}))
-
-		clusterTime, err := util.GetClusterTimeFromSession(sess)
-
-		if err != nil {
-			rc.logger.Warn().
-				Err(err).
-				Msgf("Failed to read %s’s cluster time. Rechecks may be stale.", rc.readerType)
-		} else {
-			rc.lastSeenClusterTime.Store(option.Some(clusterTime))
-		}
 	} else {
 		rc.logger.Warn().
 			Err(err).
 			Msgf("Failed to extract timestamp from %s's resume token to compute lag.", rc.readerType)
+	}
+
+	clusterTime, err := util.GetClusterTimeFromSession(sess)
+
+	if err != nil {
+		rc.logger.Warn().
+			Err(err).
+			Msgf("Failed to read %s’s cluster time. Rechecks may be stale.", rc.readerType)
+	} else {
+		rc.lastSeenClusterTime.Store(option.Some(clusterTime))
 	}
 }
 
