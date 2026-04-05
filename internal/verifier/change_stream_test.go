@@ -792,6 +792,105 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 	)
 }
 
+// TestLastSeenClusterTimeSetWithoutWatchedEvents verifies that
+// getLastSeenClusterTime() is populated even when no watched change events
+// have occurred. The buggy code returned lastChangeEventTime, which would be
+// unset (None) here. The fix returns session.ClusterTime(), updated on every
+// batch regardless of whether watched events were seen.
+func (suite *IntegrationTestSuite) TestLastSeenClusterTimeSetWithoutWatchedEvents() {
+	ctx := suite.Context()
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	suite.Require().NoError(db.CreateCollection(ctx, "watched"))
+
+	verifier := suite.BuildVerifier()
+	verifier.SetSrcNamespaces([]string{db.Name() + ".watched"})
+	verifier.SetDstNamespaces([]string{db.Name() + ".watched"})
+	verifier.SetNamespaceMap()
+
+	verifierRunner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+	// Run generations with no watched changes. The change reader will process
+	// heartbeat (empty) batches, updating the session cluster time each time.
+	suite.Require().Eventually(
+		func() bool {
+			suite.Require().NoError(verifierRunner.StartNextGeneration())
+			suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+			return verifier.srcChangeReader.getLastSeenClusterTime().IsSome()
+		},
+		time.Minute,
+		100*time.Millisecond,
+		"getLastSeenClusterTime should be set even without any change events",
+	)
+}
+
+// TestLastSeenClusterTimeAdvancesBeyondLastEvent verifies that
+// getLastSeenClusterTime() advances beyond the last watched event's timestamp
+// as the server progresses.
+//
+// The buggy code returned lastChangeEventTime (stuck at the last watched event's
+// timestamp). After the fix it returns session.ClusterTime(), which advances on
+// every batch — so even when the change reader is "lagged" (no new watched
+// events), getLastSeenClusterTime() still reflects the current server time.
+func (suite *IntegrationTestSuite) TestLastSeenClusterTimeAdvancesBeyondLastEvent() {
+	ctx := suite.Context()
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	suite.Require().NoError(db.CreateCollection(ctx, "watched"))
+
+	// We’ll need this below. Pre-create it so that oplog-tailing doesn’t
+	// complain about its creation during the verification.
+	suite.Require().NoError(db.CreateCollection(ctx, "unwatched"))
+
+	verifier := suite.BuildVerifier()
+	verifier.SetSrcNamespaces([]string{db.Name() + ".watched"})
+	verifier.SetDstNamespaces([]string{db.Name() + ".watched"})
+	verifier.SetNamespaceMap()
+
+	verifierRunner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+	// Insert a watched event to seed lastChangeEventTime.
+	_, err := db.Collection("watched").InsertOne(ctx, bson.D{})
+	suite.Require().NoError(err)
+
+	// Wait for the event to be processed.
+	suite.Require().Eventually(
+		func() bool {
+			suite.Require().NoError(verifierRunner.StartNextGeneration())
+			suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+			return verifier.srcChangeReader.getCurrentTimestamps().IsSome()
+		},
+		time.Minute,
+		100*time.Millisecond,
+	)
+
+	// Write to an unwatched namespace to advance the server clock beyond the
+	// last watched-event time.
+	sess, err := suite.srcMongoClient.StartSession()
+	suite.Require().NoError(err)
+	sctx := mongo.NewSessionContext(ctx, sess)
+	_, err = db.Collection("unwatched").InsertOne(sctx, bson.D{})
+	suite.Require().NoError(err)
+
+	serverTimeAfterUnwatchedWrite, err := util.GetClusterTimeFromSession(sess)
+	suite.Require().NoError(err)
+
+	// The change reader continuously polls. On each idle getMore the server
+	// returns the current cluster time in the response, advancing
+	// session.ClusterTime(). getLastSeenClusterTime() should therefore
+	// eventually reach at least serverTimeAfterUnwatchedWrite, even though no
+	// new watched events were written.
+	suite.Require().Eventually(
+		func() bool {
+			clusterTime, has := verifier.srcChangeReader.getLastSeenClusterTime().Get()
+			return has && !clusterTime.Before(serverTimeAfterUnwatchedWrite)
+		},
+		time.Minute,
+		100*time.Millisecond,
+		"getLastSeenClusterTime should advance to at least the unwatched-write time",
+	)
+}
+
 func (suite *IntegrationTestSuite) TestStartAtTimeNoChanges() {
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
