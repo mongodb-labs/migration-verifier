@@ -369,8 +369,14 @@ func (verifier *Verifier) SetServerPort(port int) {
 	verifier.port = port
 }
 
-func (verifier *Verifier) SetNumWorkers(arg int) {
+func (verifier *Verifier) SetNumWorkers(arg int) error {
+	if arg < 1 {
+		return fmt.Errorf("need >=1 worker (got: %d)", arg)
+	}
+
 	verifier.numWorkers = arg
+
+	return nil
 }
 
 func (verifier *Verifier) SetGenerationPauseDelay(arg time.Duration) {
@@ -675,7 +681,13 @@ REPORTS:
 				// Make the next generation recheck the mismatched/missing docs.
 				eg.Go(
 					func() error {
-						err := verifier.InsertFailedCompareRecheckDocs(egCtx, task.QueryFilter.Namespace, idsToRecheck, dataSizes, firstMismatchTimes)
+						err := verifier.InsertFailedCompareRecheckDocs(
+							egCtx,
+							task,
+							idsToRecheck,
+							dataSizes,
+							firstMismatchTimes,
+						)
 
 						return errors.Wrapf(
 							err,

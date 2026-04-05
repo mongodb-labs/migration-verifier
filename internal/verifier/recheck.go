@@ -14,6 +14,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/option"
@@ -51,7 +52,7 @@ var (
 // InsertFailedCompareRecheckDocs is for inserting RecheckDocs based on failures during Check.
 func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	ctx context.Context,
-	namespace string,
+	task *tasks.Task,
 	documentIDs []bson.RawValue,
 	dataSizes []int32,
 	firstMismatchTimes []bson.DateTime,
@@ -60,7 +61,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		panic("mismatch recheck must have first-mismatch times!")
 	}
 
-	dbName, collName := mmongo.SplitNamespace(namespace)
+	dbName, collName := mmongo.SplitNamespace(task.QueryFilter.Namespace)
 
 	dbNames := make([]string, len(documentIDs))
 	collNames := make([]string, len(documentIDs))
@@ -70,6 +71,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 	}
 
 	verifier.logger.Debug().
+		Any("task", task.PrimaryKey).
 		Int("count", len(documentIDs)).
 		Msg("Persisting rechecks for mismatched or missing documents.")
 
