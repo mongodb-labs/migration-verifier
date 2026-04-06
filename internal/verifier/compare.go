@@ -367,9 +367,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				sctx,
 				coll,
 				verifier.dstClusterInfo,
-				verifier.dstChangeReader.getLastSeenClusterTime().OrElse(
-					verifier.dstChangeReader.getStartTimestamp(),
-				),
+				verifier.dstChangeReader.getReadConcernTimestamp(),
 				&dupeTask,
 				option.None[*readpref.ReadPref](),
 			)
@@ -514,9 +512,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			sctx,
 			verifier.srcClientCollection(task),
 			verifier.srcClusterInfo,
-			verifier.srcChangeReader.getLastSeenClusterTime().OrElse(
-				verifier.srcChangeReader.getStartTimestamp(),
-			),
+			verifier.srcChangeReader.getReadConcernTimestamp(),
 			task,
 			option.IfNotZero(verifier.readPreference),
 		)
@@ -559,9 +555,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			sctx,
 			verifier.dstClientCollection(task),
 			verifier.dstClusterInfo,
-			verifier.dstChangeReader.getLastSeenClusterTime().OrElse(
-				verifier.dstChangeReader.getStartTimestamp(),
-			),
+			verifier.dstChangeReader.getReadConcernTimestamp(),
 			task,
 			option.None[*readpref.ReadPref](),
 		)

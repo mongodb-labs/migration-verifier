@@ -59,6 +59,7 @@ type changeReader interface {
 	getEventRecorder() *EventRecorder
 	getStartTimestamp() bson.Timestamp
 	getLastSeenClusterTime() option.Option[bson.Timestamp]
+	getReadConcernTimestamp() bson.Timestamp
 	getEventsPerSecond() option.Option[float64]
 	getCurrentTimestamps() option.Option[readerCurrentTimestamps]
 	getBufferSaturation() float64
@@ -186,6 +187,14 @@ func (rc *ChangeReaderCommon) getReadChannel() <-chan eventBatch {
 
 func (rc *ChangeReaderCommon) getLastSeenClusterTime() option.Option[bson.Timestamp] {
 	return rc.lastSeenClusterTime.Load()
+}
+
+// getReadConcernTimestamp returns the timestamp to use as `afterClusterTime`
+// in read-concern queries. It prefers the last-seen cluster time (which
+// advances on every server response, even without watched events) and falls
+// back to the reader's start timestamp.
+func (rc *ChangeReaderCommon) getReadConcernTimestamp() bson.Timestamp {
+	return rc.getLastSeenClusterTime().OrElse(rc.getStartTimestamp())
 }
 
 // getBufferSaturation returns the reader’s internal buffer’s saturation level
