@@ -367,7 +367,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				sctx,
 				coll,
 				verifier.dstClusterInfo,
-				verifier.dstChangeReader.getStartTimestamp(),
+				verifier.dstChangeReader.getLastSeenClusterTime().OrElse(
+					verifier.dstChangeReader.getStartTimestamp(),
+				),
 				&dupeTask,
 				option.None[*readpref.ReadPref](),
 			)
