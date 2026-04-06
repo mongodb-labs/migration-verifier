@@ -868,6 +868,7 @@ func (suite *IntegrationTestSuite) TestLastSeenClusterTimeAdvancesBeyondLastEven
 	// last watched-event time.
 	sess, err := suite.srcMongoClient.StartSession()
 	suite.Require().NoError(err)
+	defer sess.EndSession(ctx)
 	sctx := mongo.NewSessionContext(ctx, sess)
 	_, err = db.Collection("unwatched").InsertOne(sctx, bson.D{})
 	suite.Require().NoError(err)
