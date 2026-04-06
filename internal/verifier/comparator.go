@@ -222,8 +222,9 @@ func (c *comparator) recordSrcMetrics(docs []compare.DocWithTS) {
 	c.curHistoryDocCount += types.DocumentCount(len(docs))
 
 	for _, docWithTS := range docs {
-		c.srcByteCount += types.ByteCount(len(docWithTS.Doc))
-		c.curHistoryByteCount += types.ByteCount(len(docWithTS.Doc))
+		docSize := c.verifier.docCompareMethod.DocSize(docWithTS.Doc)
+		c.srcByteCount += docSize
+		c.curHistoryByteCount += docSize
 
 		if c.curHistoryDocCount >= comparisonHistoryThreshold {
 			c.publishHistoryCounts()
