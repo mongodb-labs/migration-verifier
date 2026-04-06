@@ -2,11 +2,16 @@ package verifier
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/internal/comparehashed"
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -71,6 +76,72 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0Stats() {
 	progress2, err := verifier.GetProgress(ctx)
 	suite.Require().NoError(err)
 	suite.Assert().Equal(progress.Gen0Stats, progress2.Gen0Stats, "gen0Stats should be stable across calls")
+}
+
+// TestGetProgress_Gen0StatsHashedReportsActualDocSize verifies that under
+// hashed comparison, the /progress API reports actual document sizes rather
+// than the (much smaller) projected document sizes.
+func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsHashedReportsActualDocSize() {
+	ctx := suite.Context()
+
+	buildInfo, err := util.GetClusterInfo(
+		ctx,
+		logger.NewDefaultLogger(),
+		suite.srcMongoClient,
+	)
+	suite.Require().NoError(err)
+
+	if !comparehashed.CanCompareDocsViaToHashedIndexKey(buildInfo.VersionArray) {
+		suite.T().Skipf("source (%v) can't do hashed comparison", buildInfo.VersionArray)
+	}
+
+	dbName := suite.DBNameForTest()
+
+	const numDocs = 5
+	docs := make([]any, numDocs)
+	for i := range docs {
+		docs[i] = bson.D{{"_id", i}, {"payload", strings.Repeat("x", 1024)}}
+	}
+
+	_, err = suite.srcMongoClient.Database(dbName).Collection("coll").InsertMany(ctx, docs)
+	suite.Require().NoError(err)
+	_, err = suite.dstMongoClient.Database(dbName).Collection("coll").InsertMany(ctx, docs)
+	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+	verifier.SetDocCompareMethod(compare.ToHashedIndexKey)
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	suite.Require().NoError(runner.StartNextGeneration())
+
+	suite.Require().Eventually(
+		func() bool {
+			progress, err := verifier.GetProgress(ctx)
+			suite.Require().NoError(err)
+			return progress.Generation == 1
+		},
+		time.Minute,
+		time.Millisecond,
+	)
+
+	progress, err := verifier.GetProgress(ctx)
+	suite.Require().NoError(err)
+
+	gen0Stats, hasGen0Stats := progress.Gen0Stats.Get()
+	suite.Require().True(hasGen0Stats, "gen0Stats should be present")
+
+	// Each document is >1024 bytes (the payload alone is 1024 bytes).
+	// Under hashed comparison the projected doc is tiny (~100 bytes).
+	// If we were recording projected sizes, the total would be well
+	// under numDocs * 1024.
+	suite.Assert().Greater(
+		gen0Stats.SrcBytesCompared,
+		types.ByteCount(numDocs*1024),
+		"SrcBytesCompared should reflect actual document sizes, not projected sizes",
+	)
 }
 
 // TestGetProgress_Gen0StatsExcludesActiveWorkerCounts verifies that live

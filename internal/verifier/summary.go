@@ -461,9 +461,7 @@ func (verifier *Verifier) printNamespaceStatistics(
 		)
 	}
 
-	showDataTotals := verifier.docCompareMethod.ComparesFullDocuments()
-
-	if showDataTotals {
+	{
 		if totalBytes > 0 {
 			dataUnit := reportutils.FindBestUnit(totalBytes)
 
@@ -493,10 +491,7 @@ func (verifier *Verifier) printNamespaceStatistics(
 
 	table := tablewriter.NewWriter(strBuilder)
 
-	headers := []string{"Src Namespace", "Threads", "Src Docs Compared"}
-	if showDataTotals {
-		headers = append(headers, "Src Data Compared")
-	}
+	headers := []string{"Src Namespace", "Threads", "Src Docs Compared", "Src Data Compared"}
 	table.SetHeader(headers)
 
 	tableHasRows := false
@@ -538,7 +533,7 @@ func (verifier *Verifier) printNamespaceStatistics(
 
 		row = append(row, docsCell)
 
-		if showDataTotals {
+		{
 			var dataCell string
 
 			if result.TotalBytes > 0 {
@@ -627,16 +622,14 @@ func (verifier *Verifier) printEndOfGenerationStatistics(
 		reportutils.FmtReal(docsPerSecond),
 	)
 
-	if verifier.docCompareMethod.ComparesFullDocuments() {
-		fmt.Fprintf(
-			strBuilder,
-			"Total size of those documents: %s %s (%s %s/sec)\n",
-			reportutils.BytesToUnit(comparedBytes, dataUnit),
-			dataUnit,
-			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
-			perSecondDataUnit,
-		)
-	}
+	fmt.Fprintf(
+		strBuilder,
+		"Total size of those documents: %s %s (%s %s/sec)\n",
+		reportutils.BytesToUnit(comparedBytes, dataUnit),
+		dataUnit,
+		reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
+		perSecondDataUnit,
+	)
 
 	strBuilder.WriteString("\n")
 
