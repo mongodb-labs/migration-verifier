@@ -171,7 +171,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	// verifier.SetStartClean(true)
-	verifier.SetNumWorkers(3)
+	suite.Require().NoError(verifier.SetNumWorkers(3))
 	verifier.SetGenerationPauseDelay(0)
 	verifier.SetWorkerSleepDelay(0)
 

@@ -30,7 +30,12 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 	suite.Require().NoError(
 		verifier.InsertFailedCompareRecheckDocs(
 			ctx,
-			"the.namespace",
+			&tasks.Task{
+				PrimaryKey: bson.NewObjectID(),
+				QueryFilter: tasks.QueryFilter{
+					Namespace: "the.namespace",
+				},
+			},
 			[]bson.RawValue{mbson.ToRawValue("theDocID")},
 			[]int32{1234},
 			mslices.Of(
@@ -376,7 +381,7 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	}
 
 	verifier := suite.BuildVerifier()
-	verifier.SetNumWorkers(10)
+	suite.Require().NoError(verifier.SetNumWorkers(10))
 	ctx := suite.Context()
 
 	docsCount := 12_000_000
