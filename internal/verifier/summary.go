@@ -461,32 +461,30 @@ func (verifier *Verifier) printNamespaceStatistics(
 		)
 	}
 
-	{
-		if totalBytes > 0 {
-			dataUnit := reportutils.FindBestUnit(totalBytes)
+	if totalBytes > 0 {
+		dataUnit := reportutils.FindBestUnit(totalBytes)
 
-			fmt.Fprintf(
-				strBuilder,
-				"Total size of those documents: %s of %s %s (%s%%, %s %s/sec)\n",
-				reportutils.BytesToUnit(comparedBytes, dataUnit),
-				reportutils.BytesToUnit(totalBytes, dataUnit),
-				dataUnit,
-				reportutils.FmtPercent(comparedBytes, totalBytes),
-				reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
-				perSecondDataUnit,
-			)
-		} else {
-			dataUnit := reportutils.FindBestUnit(comparedBytes)
+		fmt.Fprintf(
+			strBuilder,
+			"Total size of those documents: %s of %s %s (%s%%, %s %s/sec)\n",
+			reportutils.BytesToUnit(comparedBytes, dataUnit),
+			reportutils.BytesToUnit(totalBytes, dataUnit),
+			dataUnit,
+			reportutils.FmtPercent(comparedBytes, totalBytes),
+			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
+			perSecondDataUnit,
+		)
+	} else {
+		dataUnit := reportutils.FindBestUnit(comparedBytes)
 
-			fmt.Fprintf(
-				strBuilder,
-				"Total size of those documents: %s %s (%s %s/sec)\n",
-				reportutils.BytesToUnit(comparedBytes, dataUnit),
-				dataUnit,
-				reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
-				perSecondDataUnit,
-			)
-		}
+		fmt.Fprintf(
+			strBuilder,
+			"Total size of those documents: %s %s (%s %s/sec)\n",
+			reportutils.BytesToUnit(comparedBytes, dataUnit),
+			dataUnit,
+			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
+			perSecondDataUnit,
+		)
 	}
 
 	table := tablewriter.NewWriter(strBuilder)
