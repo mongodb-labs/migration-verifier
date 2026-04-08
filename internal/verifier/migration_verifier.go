@@ -371,7 +371,7 @@ func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 		},
 	)
 	if err != nil {
-		return errors.Wrapf(err, "creating generation index")
+		return errors.Wrapf(err, "creating verification task indexes")
 	}
 
 	err = createMismatchesCollection(
