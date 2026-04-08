@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/agg"
+	"github.com/10gen/migration-verifier/agg/helpers"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
@@ -116,7 +117,7 @@ func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 						{"status", agg.Cond{
 							If: agg.Or{
 								agg.Eq{"$status", tasks.Processing},
-								agg.Eq{agg.Type{"$status"}, "missing"},
+								agg.Not{helpers.Exists{"$status"}},
 							},
 							Then: tasks.Added,
 							Else: "$status",
@@ -124,7 +125,7 @@ func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 						{"begin_time", agg.Cond{
 							If: agg.Or{
 								agg.Eq{"$status", tasks.Processing},
-								agg.Eq{agg.Type{"$status"}, "missing"},
+								agg.Not{helpers.Exists{"$status"}},
 							},
 							Then: "$$REMOVE",
 							Else: "$begin_time",
