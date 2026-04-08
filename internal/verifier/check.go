@@ -357,35 +357,20 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		// Increment the in-memory generation so that the change readers will
 		// mark rechecks for the next generation. For example, if we just
 		// finished generation 2, the change readers need to mark generation 3
-		// on enqueued rechecks. Meanwhile, generaiton 3’s recheck tasks will
+		// on enqueued rechecks. Meanwhile, generation 3’s recheck tasks will
 		// derive from rechecks enqueued during generation 2.
 		verifier.generation++
 		verifier.generationStartTime = time.Now()
 		verifier.srcChangeReader.getEventRecorder().Reset()
 		verifier.dstChangeReader.getEventRecorder().Reset()
-		verifier.mux.Unlock()
 
-		// Generation of recheck tasks can partial-fail. The following will
-		// cause a full redo in that case, which is inefficient but simple.
-		// Such failures seem unlikely anyhow.
-		err = retry.New().WithCallback(
-			func(ctx context.Context, fi *retry.FuncInfo) error {
-				return verifier.GenerateRecheckTasks(ctx, fi)
-			},
-			"generating recheck tasks",
-		).Run(ctx, verifier.logger)
+		// Because API callers expect no tasks when there are no mismatches and
+		// no change events, we need to avoid creating a recheck task unless
+		// there is actually something to recheck.
+		err = verifier.ensureCreateRecheckTaskIfNeeded(ctx)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "create generation %d’s create-rechecks task", verifier.generation)
 		}
-
-		err = verifier.DropCurrentGenRecheckQueue(ctx)
-		if err != nil {
-			verifier.logger.Warn().
-				Err(err).
-				Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
-		}
-
-		verifier.mux.Lock()
 	}
 }
 
@@ -676,10 +661,59 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			if err != nil {
 				return err
 			}
+		case tasks.ProcessRecheckQueue:
+			err := verifier.processCreateRechecksTask(ctx, task)
+			verifier.workerTracker.Unset(workerNum)
+
+			if err != nil {
+				return err
+			}
 		default:
 			panic("Unknown verification task type: " + task.Type)
 		}
 	}
+}
+
+func (verifier *Verifier) processCreateRechecksTask(
+	ctx context.Context,
+	task tasks.Task,
+) error {
+	// Generation of recheck tasks can partial-fail. The following will
+	// cause a full redo in that case, which is inefficient but simple.
+	// Such failures seem unlikely anyhow.
+	err := retry.New().WithCallback(
+		func(ctx context.Context, fi *retry.FuncInfo) error {
+			return verifier.GenerateRecheckTasks(ctx, fi)
+		},
+		"generating recheck tasks",
+	).Run(ctx, verifier.logger)
+	if err != nil {
+		return err
+	}
+
+	task.Status = tasks.Completed
+
+	err = verifier.UpdateVerificationTask(ctx, &task)
+	if err != nil {
+		return errors.Wrapf(
+			err,
+			"failed to persist task %s's new status (%#q)",
+			task.PrimaryKey,
+			task.Status,
+		)
+	}
+
+	// NB: This must happen *after* we persist the task as completed.
+	// Otherwise Verifier could crash then, on restart, neglect to create all
+	// the needed recheck tasks.
+	err = verifier.DropCurrentGenRecheckQueue(ctx)
+	if err != nil {
+		verifier.logger.Warn().
+			Err(err).
+			Msg("Failed to clear out old recheck docs. (This is probably unimportant.)")
+	}
+
+	return nil
 }
 
 func (v *Verifier) initializeChangeReaders() error {

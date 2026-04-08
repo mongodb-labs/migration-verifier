@@ -44,14 +44,24 @@ const (
 
 	// --------------------------------------------------
 	// Task types:
+	//
+	// NB: The non-primary task types picked by workers should be in
+	// lexicographical order of execution order. For example, we want the
+	// recheck queue tasks to start ASAP, and we want the
+	// collection-metadata tasks to run before the document tasks.
+	// `Primary` is excluded from this ordering requirement.
 	// --------------------------------------------------
 
-	// The “workhorse” task type: verify a partition of documents.
-	VerifyDocuments Type = "verifyDocuments"
+	// A processRecheckQueue task converts enqueued rechecks into new
+	// document-recheck tasks.
+	ProcessRecheckQueue Type = "processRecheckQueue"
 
 	// A verifyCollection task verifies collection metadata
 	// and, in generation 0, inserts verify-documents tasks for _id ranges.
 	VerifyCollection Type = "verifyCollection"
+
+	// The “workhorse” task type: verify a partition of documents.
+	VerifyDocuments Type = "verifyDocuments"
 
 	// The primary task creates a verifyCollection task for each
 	// namespace.
