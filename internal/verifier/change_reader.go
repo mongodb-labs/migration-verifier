@@ -59,6 +59,7 @@ type changeReader interface {
 	getEventRecorder() *EventRecorder
 	getStartTimestamp() bson.Timestamp
 	getLastSeenClusterTime() option.Option[bson.Timestamp]
+	getReadConcernTimestamp() bson.Timestamp
 	getEventsPerSecond() option.Option[float64]
 	getCurrentTimestamps() option.Option[readerCurrentTimestamps]
 	getBufferSaturation() float64
@@ -91,6 +92,7 @@ type ChangeReaderCommon struct {
 	writesOffTS    *util.Eventual[bson.Timestamp]
 
 	lastChangeEventTime *msync.TypedAtomic[option.Option[bson.Timestamp]]
+	lastSeenClusterTime *msync.TypedAtomic[option.Option[bson.Timestamp]]
 
 	currentTimestamps *msync.TypedAtomic[option.Option[readerCurrentTimestamps]]
 
@@ -117,6 +119,7 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 		writesOffTS:           util.NewEventual[bson.Timestamp](),
 		currentTimestamps:     msync.NewTypedAtomic(option.None[readerCurrentTimestamps]()),
 		lastChangeEventTime:   msync.NewTypedAtomic(option.None[bson.Timestamp]()),
+		lastSeenClusterTime:   msync.NewTypedAtomic(option.None[bson.Timestamp]()),
 		batchSizeHistory:      history.New[int](time.Minute),
 		cumulativeEventCounts: msync.NewDataGuard(api.ChangeEventCounts{}),
 		onDDLEvent: lo.Ternary(
@@ -183,7 +186,15 @@ func (rc *ChangeReaderCommon) getReadChannel() <-chan eventBatch {
 }
 
 func (rc *ChangeReaderCommon) getLastSeenClusterTime() option.Option[bson.Timestamp] {
-	return rc.lastChangeEventTime.Load()
+	return rc.lastSeenClusterTime.Load()
+}
+
+// getReadConcernTimestamp returns the timestamp to use as `afterClusterTime`
+// in read-concern queries. It prefers the last-seen cluster time (which
+// advances on every server response, even without watched events) and falls
+// back to the reader's start timestamp.
+func (rc *ChangeReaderCommon) getReadConcernTimestamp() bson.Timestamp {
+	return rc.getLastSeenClusterTime().OrElse(rc.getStartTimestamp())
 }
 
 // getBufferSaturation returns the reader’s internal buffer’s saturation level
@@ -402,15 +413,27 @@ func (rc *ChangeReaderCommon) loadResumeToken(ctx context.Context) (option.Optio
 	return option.Some(doc.Token), nil
 }
 
+func (rc *ChangeReaderCommon) updateLastSeenClusterTime(sess *mongo.Session) {
+	clusterTime, err := util.GetClusterTimeFromSession(sess)
+
+	if err != nil {
+		rc.logger.Warn().
+			Err(err).
+			Msgf("Failed to read %s’s cluster time. Rechecks may be stale.", rc.readerType)
+	} else {
+		rc.lastSeenClusterTime.Store(option.Some(clusterTime))
+	}
+}
+
 func (rc *ChangeReaderCommon) updateTimestamps(sess *mongo.Session, token bson.Raw) {
+	opTime := sess.OperationTime()
+
+	if opTime == nil {
+		panic("session operationTime is nil … did this get called prematurely?")
+	}
+
 	tokenTS, err := rc.resumeTokenTSExtractor(token)
 	if err == nil {
-		opTime := sess.OperationTime()
-
-		if opTime == nil {
-			panic("session operationTime is nil … did this get called prematurely?")
-		}
-
 		rc.currentTimestamps.Store(option.Some(readerCurrentTimestamps{
 			LastHandled:   tokenTS,
 			LastOperation: *opTime,

@@ -375,8 +375,12 @@ func (o *OplogReader) readAndHandleOneBatch(
 		return errors.Wrap(err, "reading cursor")
 	}
 
+	sess := mongo.SessionFromContext(sctx)
+	o.updateLastSeenClusterTime(sess)
+
 	if len(o.curDocs) == 0 {
-		// If there were no oplog events, then there’s nothing for us to do.
+		// If there were no oplog events--not even a no-op--then there’s
+		// nothing for us to do.
 		return nil
 	}
 
@@ -406,11 +410,12 @@ func (o *OplogReader) readAndHandleOneBatch(
 		return err
 	}
 
-	sess := mongo.SessionFromContext(sctx)
 	// Persist the last processed timestamp; the resume query uses $gt startTS,
 	// so on restart we resume strictly after the events we've already counted.
 	resumeToken := oplog.ResumeToken{latestTS}.MarshalToBSON()
 
+	// NB: In the oplog reader we can’t do this on an empty response because
+	// our “resume token” requires an oplog entry to construct.
 	o.updateTimestamps(sess, resumeToken)
 
 	select {
