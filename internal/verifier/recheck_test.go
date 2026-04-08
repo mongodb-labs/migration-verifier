@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/testutil"
-	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
@@ -31,7 +30,12 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 	suite.Require().NoError(
 		verifier.InsertFailedCompareRecheckDocs(
 			ctx,
-			"the.namespace",
+			&tasks.Task{
+				PrimaryKey: bson.NewObjectID(),
+				QueryFilter: tasks.QueryFilter{
+					Namespace: "the.namespace",
+				},
+			},
 			[]bson.RawValue{mbson.ToRawValue("theDocID")},
 			[]int32{1234},
 			mslices.Of(
@@ -377,7 +381,7 @@ func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	}
 
 	verifier := suite.BuildVerifier()
-	verifier.SetNumWorkers(10)
+	suite.Require().NoError(verifier.SetNumWorkers(10))
 	ctx := suite.Context()
 
 	docsCount := 12_000_000
@@ -461,10 +465,9 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 			Namespace: "testDB.testColl",
 			To:        "testDB.testColl",
 		},
-		SourceDocumentCount: 1,
-		SourceByteCount:     types.ByteCount(overlyLarge),
-		FirstMismatchTime:   map[int32]bson.DateTime{},
-		SrcTimestamp:        option.Some(bson.Timestamp{123, 0}),
+		DocumentsCount:    1,
+		FirstMismatchTime: map[int32]bson.DateTime{},
+		SrcTimestamp:      option.Some(bson.Timestamp{123, 0}),
 	}
 
 	t2 := t1
@@ -554,16 +557,14 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 			Namespace: "testDB.testColl",
 			To:        "testDB.testColl",
 		},
-		SourceDocumentCount: 2,
-		SourceByteCount:     1126400,
-		FirstMismatchTime:   map[int32]bson.DateTime{},
-		SrcTimestamp:        option.Some(bson.Timestamp{123, 1}),
+		DocumentsCount:    2,
+		FirstMismatchTime: map[int32]bson.DateTime{},
+		SrcTimestamp:      option.Some(bson.Timestamp{123, 1}),
 	}
 
 	t2 := t1
 	t2.Ids = mslices.Of(mbson.ToRawValue(id3))
-	t2.SourceDocumentCount = 1
-	t2.SourceByteCount = 1024
+	t2.DocumentsCount = 1
 	t2.SrcTimestamp = option.Some(bson.Timestamp{123, 2})
 
 	suite.ElementsMatch([]tasks.Task{t1, t2}, actualTasks)
@@ -615,10 +616,9 @@ func (suite *IntegrationTestSuite) TestMultipleNamespaces() {
 			Namespace: "testDB1.testColl1",
 			To:        "testDB1.testColl1",
 		},
-		SourceDocumentCount: 3,
-		SourceByteCount:     3000,
-		FirstMismatchTime:   map[int32]bson.DateTime{},
-		SrcTimestamp:        option.Some(bson.Timestamp{123, 2}),
+		DocumentsCount:    3,
+		FirstMismatchTime: map[int32]bson.DateTime{},
+		SrcTimestamp:      option.Some(bson.Timestamp{123, 2}),
 	}
 	t2, t3, t4 := t1, t1, t1
 	t2.QueryFilter.Namespace = "testDB2.testColl1"

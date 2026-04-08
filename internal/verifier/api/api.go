@@ -67,6 +67,8 @@ type ProgressChangeStats struct {
 	EventsPerSecond  option.Option[float64] `bson:"eventsPerSecond"`
 	LagSecs          option.Option[int]     `bson:"lagSecs"`
 	BufferSaturation float64                `bson:"bufferSaturation"`
+
+	EventCounts ChangeEventCounts `bson:"eventCounts"`
 }
 
 type ProgressMismatch struct {
@@ -104,6 +106,8 @@ type Progress struct {
 	SrcBytesComparedPerSecond float64 `bson:"srcBytesComparedPerSecond"`
 
 	LongestDocMismatch option.Option[DocMismatchInfo] `bson:"longestDocMismatch,omitempty"`
+
+	TotalRechecksDone types.DocumentCount `bson:"totalRechecksDone"`
 }
 
 type (

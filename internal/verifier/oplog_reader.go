@@ -92,6 +92,8 @@ func (o *OplogReader) createCursor(
 
 	var startTS bson.Timestamp
 
+	var startMsg string
+
 	if token, has := savedResumeToken.Get(); has {
 		var rt oplog.ResumeToken
 		if err := bson.Unmarshal(token, &rt); err != nil {
@@ -116,8 +118,12 @@ func (o *OplogReader) createCursor(
 		}
 
 		startTS = rt.TS
+		startMsg = "Resuming oplog reader."
 	} else {
-		startOpTime, latestOpTime, err := oplog.GetTailingStartTimes(ctx, o.watcherClient)
+		// NB: We don’t support two-phase transaction commit yet, so we just
+		// start tailing after the latest optime. See REP-7181 for what will be
+		// needed to enable that support.
+		_, latestOpTime, err := oplog.GetTailingStartTimes(ctx, o.watcherClient)
 		if err != nil {
 			return bson.Timestamp{}, errors.Wrapf(err, "getting start optime from %s", o.readerType)
 		}
@@ -138,7 +144,8 @@ func (o *OplogReader) createCursor(
 			return bson.Timestamp{}, errors.Wrapf(err, "persisting DDL-allowance timestamp")
 		}
 
-		startTS = startOpTime.TS
+		startTS = latestOpTime.TS
+		startMsg = "Starting oplog reader."
 
 		err = o.persistResumeToken(ctx, oplog.ResumeToken{startTS}.MarshalToBSON())
 		if err != nil {
@@ -150,7 +157,7 @@ func (o *OplogReader) createCursor(
 		Any("reader", o.getWhichCluster()).
 		Any("startReadTs", startTS).
 		Any("currentOplogTs", allowDDLBeforeTS).
-		Msg("Tailing oplog.")
+		Msg(startMsg)
 
 	sctx := mongo.NewSessionContext(ctx, sess)
 
@@ -164,7 +171,7 @@ func (o *OplogReader) createCursor(
 	}
 
 	oplogFilter := bson.D{{"$and", []any{
-		bson.D{{"ts", bson.D{{"$gte", startTS}}}},
+		bson.D{{"ts", bson.D{{"$gt", startTS}}}},
 
 		bson.D{{"$expr", agg.Or{
 			// plain ops: one write per op
@@ -400,6 +407,8 @@ func (o *OplogReader) readAndHandleOneBatch(
 	}
 
 	sess := mongo.SessionFromContext(sctx)
+	// Persist the last processed timestamp; the resume query uses $gt startTS,
+	// so on restart we resume strictly after the events we've already counted.
 	resumeToken := oplog.ResumeToken{latestTS}.MarshalToBSON()
 
 	o.updateTimestamps(sess, resumeToken)

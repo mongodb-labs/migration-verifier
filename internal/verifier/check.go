@@ -464,7 +464,7 @@ func (verifier *Verifier) startChangeHandling(ctx context.Context) error {
 		if changeReader.isRunning() {
 			verifier.logger.Debug().Msgf("Check: %s already running.", changeReader)
 		} else {
-			verifier.logger.Debug().Msgf("%s not running; starting change reader", changeReader)
+			verifier.logger.Debug().Msgf("%s not running; starting …", changeReader)
 
 			err := changeReader.start(groupCtx, changeReaderGroup)
 			if err != nil {

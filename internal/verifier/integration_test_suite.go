@@ -171,11 +171,12 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	// verifier.SetStartClean(true)
-	verifier.SetNumWorkers(3)
+	suite.Require().NoError(verifier.SetNumWorkers(3))
 	verifier.SetGenerationPauseDelay(0)
 	verifier.SetWorkerSleepDelay(0)
 
 	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
+	verifier.resumeTokenPersistInterval = 10 * time.Millisecond
 
 	docCompareMethod := compare.Default
 	envDocCompareMethod := os.Getenv("MVTEST_DOC_COMPARE_METHOD")

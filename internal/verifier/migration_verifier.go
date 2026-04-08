@@ -114,6 +114,8 @@ type Verifier struct {
 	numWorkers         int
 	failureDisplaySize int64
 
+	indexSpecTolerances []api.IndexSpecTolerance
+
 	srcChangeReaderMethod string
 	dstChangeReaderMethod string
 
@@ -176,6 +178,7 @@ type Verifier struct {
 	recheckDurations *mring.Queue[time.Duration]
 
 	verificationStatusCheckInterval time.Duration
+	resumeTokenPersistInterval      time.Duration
 
 	warnedNoResumableCollectionScan bool
 }
@@ -214,6 +217,7 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		recheckDurations: mring.New[time.Duration](10),
 
 		verificationStatusCheckInterval: 2 * time.Second,
+		resumeTokenPersistInterval:      minResumeTokenPersistInterval,
 		nsMap:                           NewNSMap(),
 
 		changeHandlingErr: util.NewEventual[error](),
@@ -245,6 +249,10 @@ func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
 
 func (verifier *Verifier) SetFailureDisplaySize(size int64) {
 	verifier.failureDisplaySize = size
+}
+
+func (verifier *Verifier) SetIndexSpecTolerances(tolerances []api.IndexSpecTolerance) {
+	verifier.indexSpecTolerances = tolerances
 }
 
 func (verifier *Verifier) WritesOff(ctx context.Context) error {
@@ -340,7 +348,16 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 }
 
 func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
-	model := mongo.IndexModel{Keys: bson.M{"generation": 1}}
+	// This includes additional fields so that the server can quickly tally up
+	// all documents rechecked in a given generation, or across all generations.
+	model := mongo.IndexModel{
+		Keys: bson.D{
+			{"generation", 1},
+			{"type", 1},
+			{"status", 1},
+			{"documents_count", 1},
+		},
+	}
 	_, err := verifier.verificationTaskCollection().Indexes().CreateOne(ctx, model)
 	if err != nil {
 		return errors.Wrapf(err, "creating generation index")
@@ -358,8 +375,14 @@ func (verifier *Verifier) SetServerPort(port int) {
 	verifier.port = port
 }
 
-func (verifier *Verifier) SetNumWorkers(arg int) {
+func (verifier *Verifier) SetNumWorkers(arg int) error {
+	if arg < 1 {
+		return fmt.Errorf("need >=1 worker (got: %d)", arg)
+	}
+
 	verifier.numWorkers = arg
+
+	return nil
 }
 
 func (verifier *Verifier) SetGenerationPauseDelay(arg time.Duration) {
@@ -664,7 +687,13 @@ REPORTS:
 				// Make the next generation recheck the mismatched/missing docs.
 				eg.Go(
 					func() error {
-						err := verifier.InsertFailedCompareRecheckDocs(egCtx, task.QueryFilter.Namespace, idsToRecheck, dataSizes, firstMismatchTimes)
+						err := verifier.InsertFailedCompareRecheckDocs(
+							egCtx,
+							task,
+							idsToRecheck,
+							dataSizes,
+							firstMismatchTimes,
+						)
 
 						return errors.Wrapf(
 							err,
@@ -721,8 +750,8 @@ REPORTS:
 		}
 	}
 
-	task.SourceDocumentCount = docsCount
-	task.SourceByteCount = bytesCount
+	task.FoundSourceDocumentsCount = docsCount
+	task.SourceBytesCount = bytesCount
 
 	err := verifier.UpdateVerificationTask(ctx, task)
 	if err != nil {
@@ -746,8 +775,8 @@ REPORTS:
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
 		Str("namespace", task.QueryFilter.Namespace).
-		Int64("documentCount", int64(task.SourceDocumentCount)).
-		Str("dataSize", reportutils.FmtBytes(task.SourceByteCount)).
+		Int64("srcDocuments", int64(task.FoundSourceDocumentsCount)).
+		Str("srcDataSize", reportutils.FmtBytes(task.SourceBytesCount)).
 		Stringer("timeElapsed", time.Since(start)).
 		Msg("Finished document comparison task.")
 
@@ -1343,6 +1372,13 @@ func (verifier *Verifier) setCollectionSizeInTask(
 	srcColl *mongo.Collection,
 ) (types.ByteCount, types.DocumentCount, bool, error) {
 	lo.Assertf(
+		task.Type == tasks.VerifyCollection,
+		"task %v type should be %#q but is %#q",
+		task.PrimaryKey,
+		tasks.VerifyCollection,
+		task.Type,
+	)
+	lo.Assertf(
 		task.Status == tasks.Processing,
 		"task %v status should be %#q but is %#q",
 		task.PrimaryKey,
@@ -1359,8 +1395,8 @@ func (verifier *Verifier) setCollectionSizeInTask(
 		return 0, 0, false, errors.Wrapf(err, "getting %#q’s size", FullName(srcColl))
 	}
 
-	task.SourceDocumentCount = docsCount
-	task.SourceByteCount = collBytes
+	task.DocumentsCount = docsCount
+	task.SourceBytesCount = collBytes
 
 	// Update the collection task now so that the doc count & byte count
 	// can inform logging.

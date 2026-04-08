@@ -36,7 +36,7 @@ func (verifier *Verifier) RunChangeEventPersistor(
 
 	var lastPersistedTime time.Time
 	persistResumeTokenIfNeeded := func(ctx context.Context, token bson.Raw) {
-		if time.Since(lastPersistedTime) >= minResumeTokenPersistInterval {
+		if time.Since(lastPersistedTime) >= verifier.resumeTokenPersistInterval {
 			persistErr := persistCallback(ctx, token)
 			if persistErr != nil {
 				verifier.logger.Warn().
@@ -179,6 +179,8 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 				changeEvent,
 			)
 		}
+
+		reader.addToEventCounts(changeEvent.OpType)
 	}
 
 	latestTimestampTime := time.Unix(int64(latestTimestamp.T), 0)

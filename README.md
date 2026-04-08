@@ -142,8 +142,14 @@ These represent a logical time in MongoDB’s replication protocol.
     - `eventsPerSecond` (unsigned)
     - `lagSecs` (unsigned)
     - `bufferSaturation` (fraction)
+    - `eventCounts` (totals since the migration’s start)
+      - `insert`
+      - `update`
+      - `replace`
+      - `delete`
   - `dstChangeStats` (same fields as `srcChangeStats`)
   - `srcLastRecheckedTS` (see below)
+  - `totalRechecksDone` (unsigned, total number of times, across all generations, a document has been rechecked)
   - `longestMismatch` (See `/docMismatches` below for format.)
   - `error` (string, optional)
   - `verificationStatus` (tasks for the current generation)
@@ -249,6 +255,7 @@ cutover.
 | `--readPreference <value>`              | Read preference for reading data from clusters. May be 'primary', 'secondary', 'primaryPreferred', 'secondaryPreferred', or 'nearest' (default: "primary")                                  |
 | `--partitionSizeMB <Megabytes>`         | Megabytes to use for a partition.  Change only for debugging. 0 means use partitioner default. (default: 0)                                                                                 |
 | `--logLevel`                               | Set the logging to `info`, `debug`, or `trace` level.                                                                                                                                                                       |
+| `--indexSpecIgnore` | Makes logs ignore index mismatches around the given index-specification fields. Allowed values are: [`expireAfterSeconds`, `unique`] (comma separated) |
 | `--checkOnly`                           | Do not run the webserver or recheck, just run the check (for debugging)                                                                                                                     |
 | `--failureDisplaySize <value>`          | Number of failures to display. Will display all failures if the number doesn’t exceed this limit by 25% (default: 20)                                                                       |
 | `--ignoreReadConcern`                   | Use connection-default read concerns rather than setting majority read concern. This option may degrade consistency, so only enable it if majority read concern (the default) doesn’t work. |

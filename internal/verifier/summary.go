@@ -18,6 +18,7 @@ import (
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
@@ -38,7 +39,7 @@ const (
 // newline.
 
 // Returned booleans indicate:
-//   - whether any mismatches were found
+//   - whether any (non-ignored) mismatches were found
 //   - whether any incomplete tasks were found
 func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context, out io.Writer) (bool, bool, error) {
 	generation, _ := verifier.getGeneration()
@@ -76,7 +77,17 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		)
 	}
 
+	toleratedCount := 0
+
 	for _, f := range mismatches {
+		if len(verifier.indexSpecTolerances) > 0 {
+			apiMM := f.APINSMismatchInfo()
+			if apiMM.Aspect == api.NSMismatchAspectIndex && tolerancesObscureMismatch(verifier.indexSpecTolerances, apiMM) {
+				toleratedCount++
+				continue
+			}
+		}
+
 		table.Append([]string{
 			fmt.Sprintf("%v", f.ID),
 			f.Cluster,
@@ -86,10 +97,18 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		})
 	}
 
-	_, _ = out.Write([]byte("\nCollections/Indexes in failed or retry status:\n"))
-	table.Render()
+	if toleratedCount > 0 {
+		fmt.Fprintf(out, "\nIgnored index mismatches: %d\n", toleratedCount)
+	}
 
-	return true, anyAreIncomplete, nil
+	shownCount := len(mismatches) - toleratedCount
+
+	if shownCount > 0 {
+		_, _ = out.Write([]byte("\nCollections/Indexes in failed or retry status:\n"))
+		table.Render()
+	}
+
+	return shownCount > 0, anyAreIncomplete, nil
 }
 
 func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (option.Option[time.Duration], bool, error) {
@@ -639,13 +658,64 @@ func (verifier *Verifier) printEndOfGenerationStatistics(
 		)
 	}
 
+	strBuilder.WriteString("\n")
+
+	verifier.printCumulativeChangeEventTable(strBuilder)
+
 	return true, nil
 }
 
-func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
+func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
+	srcCounts := verifier.srcChangeReader.GetCumulativeEventCounts()
+	dstCounts := verifier.dstChangeReader.GetCumulativeEventCounts()
+
+	type eventColumn struct {
+		name     string
+		srcCount uint64
+		dstCount uint64
+	}
+
+	allColumns := []eventColumn{
+		{"insert", srcCounts.Insert, dstCounts.Insert},
+		{"update", srcCounts.Update, dstCounts.Update},
+		{"replace", srcCounts.Replace, dstCounts.Replace},
+		{"delete", srcCounts.Delete, dstCounts.Delete},
+	}
+
+	fmt.Fprintf(out, "Cumulative change events seen:\n")
+
+	columns := allColumns
+
+	headers := []string{"Cluster"}
+	for _, col := range columns {
+		headers = append(headers, col.name)
+	}
+
+	table := tablewriter.NewWriter(out)
+	table.SetHeader(headers)
+
+	for _, row := range []struct {
+		name   string
+		getter func(eventColumn) uint64
+	}{
+		{"source", func(c eventColumn) uint64 { return c.srcCount }},
+		{"destination", func(c eventColumn) uint64 { return c.dstCount }},
+	} {
+		cells := []string{row.name}
+		for _, col := range columns {
+			cells = append(cells, reportutils.FmtReal(row.getter(col)))
+		}
+
+		table.Append(cells)
+	}
+
+	table.Render()
+}
+
+func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) uint64 {
 	var eventsTable *tablewriter.Table
 
-	totalEventsForBothClusters := 0
+	totalEventsForBothClusters := uint64(0)
 
 	var lastSrcOpTime, lastDstOpTime bson.Timestamp
 
@@ -670,8 +740,8 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 
 		activeNamespacesCount := len(nsStats)
 
-		totalEvents := 0
-		nsTotals := map[string]int{}
+		totalEvents := uint64(0)
+		nsTotals := map[string]uint64{}
 		for ns, events := range nsStats {
 			nsTotals[ns] = events.Total()
 			totalEvents += nsTotals[ns]
@@ -839,8 +909,7 @@ func (verifier *Verifier) getPerNamespaceWorkerStats() map[string][]WorkerStatus
 }
 
 func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.Time) {
-	table := tablewriter.NewWriter(builder)
-	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed", "Detail"})
+	var tableRows [][]string
 
 	wsmap := verifier.workerTracker.Load()
 
@@ -872,7 +941,8 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 			)
 		}
 
-		table.Append(
+		tableRows = append(
+			tableRows,
 			[]string{
 				reportutils.FmtReal(w),
 				wsmap[w].Namespace,
@@ -884,6 +954,10 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 	}
 
 	fmt.Fprintf(builder, "\nWorker thread details:\n")
+
+	table := tablewriter.NewWriter(builder)
+	table.SetHeader([]string{"Thread #", "Namespace", "Task", "Time Elapsed", "Detail"})
+	table.AppendBulk(tableRows)
 
 	table.Render()
 }
