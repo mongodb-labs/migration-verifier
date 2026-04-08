@@ -2,14 +2,17 @@ package verifier
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/samber/lo"
@@ -505,4 +508,77 @@ func (suite *IntegrationTestSuite) TestSendDocumentMismatches() {
 		},
 		mismatches,
 	)
+}
+
+// TestIndexSpecIgnoreInLogOutput verifies that the --indexSpecIgnore CLI
+// parameter suppresses tolerated index mismatches from the log summary and
+// shows a tally instead.
+func (suite *IntegrationTestSuite) TestIndexSpecIgnoreInLogOutput() {
+	ctx := suite.Context()
+
+	dbName := suite.DBNameForTest()
+	collName := "coll"
+	ns := dbName + "." + collName
+
+	srcColl := suite.srcMongoClient.Database(dbName).Collection(collName)
+	dstColl := suite.dstMongoClient.Database(dbName).Collection(collName)
+
+	suite.Require().NoError(
+		suite.srcMongoClient.Database(dbName).CreateCollection(ctx, collName),
+	)
+	suite.Require().NoError(
+		suite.dstMongoClient.Database(dbName).CreateCollection(ctx, collName),
+	)
+
+	// Create 13 indexes on both sides with TTL mismatches. Each index has
+	// a recognizable name so we can verify it does NOT appear in the log.
+	const numIndexes = 13
+
+	for i := range numIndexes {
+		name := fmt.Sprintf("toleratedIdx_%d", i)
+		field := fmt.Sprintf("field_%d", i)
+
+		_, err := srcColl.Indexes().CreateOne(ctx, mongo.IndexModel{
+			Keys:    bson.D{{field, 1}},
+			Options: options.Index().SetName(name).SetExpireAfterSeconds(100),
+		})
+		suite.Require().NoError(err)
+
+		_, err = dstColl.Indexes().CreateOne(ctx, mongo.IndexModel{
+			Keys:    bson.D{{field, 1}},
+			Options: options.Index().SetName(name).SetExpireAfterSeconds(999),
+		})
+		suite.Require().NoError(err)
+	}
+
+	verifier := suite.BuildVerifier()
+	verifier.SetSrcNamespaces([]string{ns})
+	verifier.SetDstNamespaces([]string{ns})
+	verifier.SetNamespaceMap()
+	verifier.SetIndexSpecTolerances([]api.IndexSpecTolerance{
+		api.IndexSpecIgnoreTTL,
+	})
+
+	// Capture log output.
+	logBuffer := &mstrings.SyncBuilder{}
+	multiOut := io.MultiWriter(logger.DefaultLogWriter, logBuffer)
+	zlog := verifier.logger.Output(multiOut)
+	verifier.logger = logger.NewLogger(&zlog, multiOut)
+	verifier.writer = multiOut
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	output := logBuffer.String()
+
+	// None of the index names should appear in the log.
+	for i := range numIndexes {
+		name := fmt.Sprintf("toleratedIdx_%d", i)
+		suite.Assert().NotContains(output, name,
+			"tolerated index %q should not appear in log output", name)
+	}
+
+	// The tally should show.
+	suite.Assert().Regexp(` 13(?:[^0-9]|$)`, output,
+		"log should contain the tolerated-mismatch count")
 }

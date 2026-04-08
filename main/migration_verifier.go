@@ -15,8 +15,10 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/verifier"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/mongodb-labs/migration-tools/mongotools"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -55,6 +57,7 @@ const (
 	pprofInterval         = "pprofInterval"
 	startFlag             = "start"
 	partitioningScheme    = "partitioningScheme"
+	indexSpecIgnoreFlag   = "indexSpecIgnore"
 )
 
 var logLevelStrs = lo.Map(
@@ -203,6 +206,16 @@ func main() {
 			Name:  failureDisplaySize,
 			Value: verifier.DefaultFailureDisplaySize,
 			Usage: "Number of failures to display. Will display all failures if the number doesn’t exceed this limit by 25%",
+		}),
+		altsrc.NewStringSliceFlag(cli.StringSliceFlag{
+			Name: indexSpecIgnoreFlag,
+			Usage: "Index spec fields to tolerate mismatches on in log output. Valid values: " + strings.Join(
+				mslices.Map1(
+					api.IndexMismatchTolerances(),
+					mstrings.ToString,
+				),
+				", ",
+			),
 		}),
 		altsrc.NewBoolFlag(cli.BoolFlag{
 			Name:  ignoreReadConcernFlag,
@@ -435,14 +448,33 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	v.SetPartitioningScheme(partitions.Scheme(partitioningScheme))
 
 	v.SetFailureDisplaySize(cCtx.Int64(failureDisplaySize))
+
+	if ignoreVals := cCtx.StringSlice(indexSpecIgnoreFlag); len(ignoreVals) > 0 {
+		tolerances := lo.Map(
+			expandCommaSeparators(ignoreVals),
+			func(s string, _ int) api.IndexSpecTolerance {
+				return api.IndexSpecTolerance(s)
+			},
+		)
+
+		invalid := lo.Filter(tolerances, func(t api.IndexSpecTolerance, _ int) bool {
+			return !slices.Contains(api.IndexMismatchTolerances(), t)
+		})
+		if len(invalid) > 0 {
+			return nil, fmt.Errorf("invalid %s value(s): %q; valid values are: %q", indexSpecIgnoreFlag, invalid, api.IndexMismatchTolerances())
+		}
+
+		v.SetIndexSpecTolerances(tolerances)
+	}
+
 	return v, nil
 }
 
 func expandCommaSeparators(in []string) []string {
 	ret := []string{}
 	for _, ns := range in {
-		multiples := strings.Split(ns, ",")
-		for _, sub := range multiples {
+		multiples := strings.SplitSeq(ns, ",")
+		for sub := range multiples {
 			ret = append(ret, strings.Trim(sub, " \t"))
 		}
 	}

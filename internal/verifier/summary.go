@@ -17,6 +17,7 @@ import (
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
@@ -37,7 +38,7 @@ const (
 // newline.
 
 // Returned booleans indicate:
-//   - whether any mismatches were found
+//   - whether any (non-ignored) mismatches were found
 //   - whether any incomplete tasks were found
 func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context, out io.Writer) (bool, bool, error) {
 	generation, _ := verifier.getGeneration()
@@ -75,7 +76,17 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		)
 	}
 
+	toleratedCount := 0
+
 	for _, f := range mismatches {
+		if len(verifier.indexSpecTolerances) > 0 {
+			apiMM := f.APINSMismatchInfo()
+			if apiMM.Aspect == api.NSMismatchAspectIndex && tolerancesObscureMismatch(verifier.indexSpecTolerances, apiMM) {
+				toleratedCount++
+				continue
+			}
+		}
+
 		table.Append([]string{
 			fmt.Sprintf("%v", f.ID),
 			f.Cluster,
@@ -85,10 +96,18 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		})
 	}
 
-	_, _ = out.Write([]byte("\nCollections/Indexes in failed or retry status:\n"))
-	table.Render()
+	if toleratedCount > 0 {
+		fmt.Fprintf(out, "\nIgnored index mismatches: %d\n", toleratedCount)
+	}
 
-	return true, anyAreIncomplete, nil
+	shownCount := len(mismatches) - toleratedCount
+
+	if shownCount > 0 {
+		_, _ = out.Write([]byte("\nCollections/Indexes in failed or retry status:\n"))
+		table.Render()
+	}
+
+	return shownCount > 0, anyAreIncomplete, nil
 }
 
 func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (option.Option[time.Duration], bool, error) {
