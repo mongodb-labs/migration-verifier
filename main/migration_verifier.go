@@ -18,6 +18,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/mongodb-labs/migration-tools/mongotools"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -209,11 +210,9 @@ func main() {
 		altsrc.NewStringSliceFlag(cli.StringSliceFlag{
 			Name: indexSpecIgnoreFlag,
 			Usage: "Index spec fields to tolerate mismatches on in log output. Valid values: " + strings.Join(
-				lo.Map(
+				mslices.Map1(
 					api.IndexMismatchTolerances(),
-					func(t api.IndexSpecTolerance, _ int) string {
-						return string(t)
-					},
+					mstrings.ToString,
 				),
 				", ",
 			),
@@ -474,8 +473,8 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 func expandCommaSeparators(in []string) []string {
 	ret := []string{}
 	for _, ns := range in {
-		multiples := strings.Split(ns, ",")
-		for _, sub := range multiples {
+		multiples := strings.SplitSeq(ns, ",")
+		for sub := range multiples {
 			ret = append(ret, strings.Trim(sub, " \t"))
 		}
 	}
