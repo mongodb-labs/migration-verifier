@@ -348,19 +348,36 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 }
 
 func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
-	// This includes additional fields so that the server can quickly tally up
-	// all documents rechecked in a given generation, or across all generations.
-	model := mongo.IndexModel{
-		Keys: bson.D{
-			{"generation", 1},
-			{"type", 1},
-			{"status", 1},
-			{"documents_count", 1},
+	_, err := verifier.verificationTaskCollection().Indexes().CreateMany(
+		ctx,
+		[]mongo.IndexModel{
+			// This includes additional fields so that the server can quickly tally up
+			// all documents rechecked in a given generation, or across all generations.
+			{
+				Keys: bson.D{
+					{"generation", 1},
+					{"type", 1},
+					{"status", 1},
+					{"documents_count", 1},
+				},
+			},
+
+			// These are here so we can quickly recall last-rechecked
+			// optimes on restart.
+			{
+				Keys: bson.D{
+					{compare.SrcTimestampField, -1},
+				},
+			},
+			{
+				Keys: bson.D{
+					{compare.DstTimestampField, -1},
+				},
+			},
 		},
-	}
-	_, err := verifier.verificationTaskCollection().Indexes().CreateOne(ctx, model)
+	)
 	if err != nil {
-		return errors.Wrapf(err, "creating generation index")
+		return errors.Wrapf(err, "creating verification task indexes")
 	}
 
 	err = createMismatchesCollection(
