@@ -481,42 +481,35 @@ func (verifier *Verifier) printNamespaceStatistics(
 		)
 	}
 
-	showDataTotals := verifier.docCompareMethod.ComparesFullDocuments()
+	if totalBytes > 0 {
+		dataUnit := reportutils.FindBestUnit(totalBytes)
 
-	if showDataTotals {
-		if totalBytes > 0 {
-			dataUnit := reportutils.FindBestUnit(totalBytes)
+		fmt.Fprintf(
+			strBuilder,
+			"Total size of those documents: %s of %s %s (%s%%, %s %s/sec)\n",
+			reportutils.BytesToUnit(comparedBytes, dataUnit),
+			reportutils.BytesToUnit(totalBytes, dataUnit),
+			dataUnit,
+			reportutils.FmtPercent(comparedBytes, totalBytes),
+			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
+			perSecondDataUnit,
+		)
+	} else {
+		dataUnit := reportutils.FindBestUnit(comparedBytes)
 
-			fmt.Fprintf(
-				strBuilder,
-				"Total size of those documents: %s of %s %s (%s%%, %s %s/sec)\n",
-				reportutils.BytesToUnit(comparedBytes, dataUnit),
-				reportutils.BytesToUnit(totalBytes, dataUnit),
-				dataUnit,
-				reportutils.FmtPercent(comparedBytes, totalBytes),
-				reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
-				perSecondDataUnit,
-			)
-		} else {
-			dataUnit := reportutils.FindBestUnit(comparedBytes)
-
-			fmt.Fprintf(
-				strBuilder,
-				"Total size of those documents: %s %s (%s %s/sec)\n",
-				reportutils.BytesToUnit(comparedBytes, dataUnit),
-				dataUnit,
-				reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
-				perSecondDataUnit,
-			)
-		}
+		fmt.Fprintf(
+			strBuilder,
+			"Total size of those documents: %s %s (%s %s/sec)\n",
+			reportutils.BytesToUnit(comparedBytes, dataUnit),
+			dataUnit,
+			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
+			perSecondDataUnit,
+		)
 	}
 
 	table := tablewriter.NewWriter(strBuilder)
 
-	headers := []string{"Src Namespace", "Threads", "Src Docs Compared"}
-	if showDataTotals {
-		headers = append(headers, "Src Data Compared")
-	}
+	headers := []string{"Src Namespace", "Threads", "Src Docs Compared", "Src Data Compared"}
 	table.SetHeader(headers)
 
 	tableHasRows := false
@@ -558,29 +551,27 @@ func (verifier *Verifier) printNamespaceStatistics(
 
 		row = append(row, docsCell)
 
-		if showDataTotals {
-			var dataCell string
+		var dataCell string
 
-			if result.TotalBytes > 0 {
-				dataUnit := reportutils.FindBestUnit(result.TotalBytes)
+		if result.TotalBytes > 0 {
+			dataUnit := reportutils.FindBestUnit(result.TotalBytes)
 
-				dataCell = fmt.Sprintf("%s of %s %s (%s%%)",
-					reportutils.BytesToUnit(bytesCompared, dataUnit),
-					reportutils.BytesToUnit(result.TotalBytes, dataUnit),
-					dataUnit,
-					reportutils.FmtPercent(bytesCompared, result.TotalBytes),
-				)
-			} else {
-				dataUnit := reportutils.FindBestUnit(bytesCompared)
+			dataCell = fmt.Sprintf("%s of %s %s (%s%%)",
+				reportutils.BytesToUnit(bytesCompared, dataUnit),
+				reportutils.BytesToUnit(result.TotalBytes, dataUnit),
+				dataUnit,
+				reportutils.FmtPercent(bytesCompared, result.TotalBytes),
+			)
+		} else {
+			dataUnit := reportutils.FindBestUnit(bytesCompared)
 
-				dataCell = fmt.Sprintf("%s %s",
-					reportutils.BytesToUnit(bytesCompared, dataUnit),
-					dataUnit,
-				)
-			}
-
-			row = append(row, dataCell)
+			dataCell = fmt.Sprintf("%s %s",
+				reportutils.BytesToUnit(bytesCompared, dataUnit),
+				dataUnit,
+			)
 		}
+
+		row = append(row, dataCell)
 
 		table.Append(row)
 	}
@@ -647,16 +638,14 @@ func (verifier *Verifier) printEndOfGenerationStatistics(
 		reportutils.FmtReal(docsPerSecond),
 	)
 
-	if verifier.docCompareMethod.ComparesFullDocuments() {
-		fmt.Fprintf(
-			strBuilder,
-			"Total size of those documents: %s %s (%s %s/sec)\n",
-			reportutils.BytesToUnit(comparedBytes, dataUnit),
-			dataUnit,
-			reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
-			perSecondDataUnit,
-		)
-	}
+	fmt.Fprintf(
+		strBuilder,
+		"Total size of those documents: %s %s (%s %s/sec)\n",
+		reportutils.BytesToUnit(comparedBytes, dataUnit),
+		dataUnit,
+		reportutils.BytesToUnit(bytesPerSecond, perSecondDataUnit),
+		perSecondDataUnit,
+	)
 
 	strBuilder.WriteString("\n")
 

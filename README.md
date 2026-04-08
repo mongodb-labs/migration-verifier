@@ -160,6 +160,10 @@ These represent a logical time in MongoDB’s replication protocol.
     - `completedTasks` (unsigned integer, tasks that found no problems)
     - `metadataMismatchTasks` (unsigned integer, tasks that found a collection metadata mismatch)
 
+NOTE: Byte-total figures always reflect true document size. In hashed-verification mode the
+number of bytes that Verifier compares is generally much smaller; there currently is no
+metric to track that.
+
 This is sample output:
 ```
 {

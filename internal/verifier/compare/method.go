@@ -5,9 +5,11 @@ import (
 	"slices"
 
 	"github.com/10gen/migration-verifier/dockey"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -21,7 +23,8 @@ const (
 	// When comparing documents via hash, we store the document key as an
 	// embedded document. This is the name of the field that stores the
 	// document key.
-	docKeyInHashedCompare = "k"
+	docKeyInHashedCompare  = "k"
+	docSizeInHashedCompare = "s"
 )
 
 var (
@@ -40,6 +43,18 @@ func (dcm Method) ShouldIgnoreFieldOrder() bool {
 
 func (dcm Method) ComparesFullDocuments() bool {
 	return dcm == Binary || dcm == IgnoreOrder
+}
+
+// DocSize returns the original document's BSON size.
+func (dcm Method) DocSize(doc bson.Raw) types.ByteCount {
+	if dcm.ComparesFullDocuments() {
+		return types.ByteCount(len(doc))
+	}
+
+	size, err := doc.LookupErr(docSizeInHashedCompare)
+	lo.Assertf(err == nil, "hashed comparison requires doc size (%v)", err)
+
+	return types.ByteCount(size.AsInt64())
 }
 
 func (dcm Method) ClonedDocIDForComparison(doc bson.Raw) (bson.RawValue, error) {
@@ -134,6 +149,6 @@ func GetHashedIndexKeyProjection(qf tasks.QueryFilter) bson.D {
 				}},
 			}},
 		}},
-		{"s", bson.D{{"$bsonSize", "$$ROOT"}}},
+		{docSizeInHashedCompare, bson.D{{"$bsonSize", "$$ROOT"}}},
 	}
 }
