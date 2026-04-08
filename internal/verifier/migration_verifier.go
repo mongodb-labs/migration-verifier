@@ -114,6 +114,8 @@ type Verifier struct {
 	numWorkers         int
 	failureDisplaySize int64
 
+	indexSpecTolerances []api.IndexSpecTolerance
+
 	srcChangeReaderMethod string
 	dstChangeReaderMethod string
 
@@ -249,6 +251,10 @@ func (verifier *Verifier) SetFailureDisplaySize(size int64) {
 	verifier.failureDisplaySize = size
 }
 
+func (verifier *Verifier) SetIndexSpecTolerances(tolerances []api.IndexSpecTolerance) {
+	verifier.indexSpecTolerances = tolerances
+}
+
 func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	verifier.logger.Debug().
 		Msg("WritesOff called.")
@@ -342,19 +348,36 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 }
 
 func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
-	// This includes additional fields so that the server can quickly tally up
-	// all documents rechecked in a given generation, or across all generations.
-	model := mongo.IndexModel{
-		Keys: bson.D{
-			{"generation", 1},
-			{"type", 1},
-			{"status", 1},
-			{"documents_count", 1},
+	_, err := verifier.verificationTaskCollection().Indexes().CreateMany(
+		ctx,
+		[]mongo.IndexModel{
+			// This includes additional fields so that the server can quickly tally up
+			// all documents rechecked in a given generation, or across all generations.
+			{
+				Keys: bson.D{
+					{"generation", 1},
+					{"type", 1},
+					{"status", 1},
+					{"documents_count", 1},
+				},
+			},
+
+			// These are here so we can quickly recall last-rechecked
+			// optimes on restart.
+			{
+				Keys: bson.D{
+					{compare.SrcTimestampField, -1},
+				},
+			},
+			{
+				Keys: bson.D{
+					{compare.DstTimestampField, -1},
+				},
+			},
 		},
-	}
-	_, err := verifier.verificationTaskCollection().Indexes().CreateOne(ctx, model)
+	)
 	if err != nil {
-		return errors.Wrapf(err, "creating generation index")
+		return errors.Wrapf(err, "creating verification task indexes")
 	}
 
 	err = createMismatchesCollection(
@@ -369,8 +392,14 @@ func (verifier *Verifier) SetServerPort(port int) {
 	verifier.port = port
 }
 
-func (verifier *Verifier) SetNumWorkers(arg int) {
+func (verifier *Verifier) SetNumWorkers(arg int) error {
+	if arg < 1 {
+		return fmt.Errorf("need >=1 worker (got: %d)", arg)
+	}
+
 	verifier.numWorkers = arg
+
+	return nil
 }
 
 func (verifier *Verifier) SetGenerationPauseDelay(arg time.Duration) {
@@ -675,7 +704,13 @@ REPORTS:
 				// Make the next generation recheck the mismatched/missing docs.
 				eg.Go(
 					func() error {
-						err := verifier.InsertFailedCompareRecheckDocs(egCtx, task.QueryFilter.Namespace, idsToRecheck, dataSizes, firstMismatchTimes)
+						err := verifier.InsertFailedCompareRecheckDocs(
+							egCtx,
+							task,
+							idsToRecheck,
+							dataSizes,
+							firstMismatchTimes,
+						)
 
 						return errors.Wrapf(
 							err,

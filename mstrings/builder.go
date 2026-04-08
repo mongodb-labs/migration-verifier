@@ -25,3 +25,8 @@ func (b *SyncBuilder) Write(p []byte) (int, error) {
 
 	return b.builder.Write(p)
 }
+
+// ToString converts a string-like value to a plain string.
+func ToString[T ~string](v T) string {
+	return string(v)
+}
