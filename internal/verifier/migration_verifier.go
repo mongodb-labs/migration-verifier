@@ -114,6 +114,8 @@ type Verifier struct {
 	numWorkers         int
 	failureDisplaySize int64
 
+	indexSpecTolerances []api.IndexSpecTolerance
+
 	srcChangeReaderMethod string
 	dstChangeReaderMethod string
 
@@ -247,6 +249,10 @@ func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
 
 func (verifier *Verifier) SetFailureDisplaySize(size int64) {
 	verifier.failureDisplaySize = size
+}
+
+func (verifier *Verifier) SetIndexSpecTolerances(tolerances []api.IndexSpecTolerance) {
+	verifier.indexSpecTolerances = tolerances
 }
 
 func (verifier *Verifier) WritesOff(ctx context.Context) error {

@@ -75,7 +75,17 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		)
 	}
 
+	toleratedCount := 0
+
 	for _, f := range mismatches {
+		if len(verifier.indexSpecTolerances) > 0 {
+			apiMM := f.APINSMismatchInfo()
+			if tolerancesObscureMismatch(verifier.indexSpecTolerances, apiMM) {
+				toleratedCount++
+				continue
+			}
+		}
+
 		table.Append([]string{
 			fmt.Sprintf("%v", f.ID),
 			f.Cluster,
@@ -85,10 +95,18 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 		})
 	}
 
-	_, _ = out.Write([]byte("\nCollections/Indexes in failed or retry status:\n"))
-	table.Render()
+	if toleratedCount > 0 {
+		fmt.Fprintf(out, "\nIgnored index mismatches: %d\n", toleratedCount)
+	}
 
-	return true, anyAreIncomplete, nil
+	shownCount := len(mismatches) - toleratedCount
+
+	if shownCount > 0 {
+		_, _ = out.Write([]byte("\nCollections/Indexes in failed or retry status:\n"))
+		table.Render()
+	}
+
+	return shownCount > 0, anyAreIncomplete, nil
 }
 
 func (verifier *Verifier) reportDocumentMismatches(ctx context.Context, strBuilder *strings.Builder) (option.Option[time.Duration], bool, error) {
