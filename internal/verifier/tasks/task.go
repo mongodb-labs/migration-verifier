@@ -45,9 +45,11 @@ const (
 	// --------------------------------------------------
 	// Task types:
 	//
-	// NB: These should be in lexicographical order of execution order.
-	// For example, we want the recheck queue tasks to start ASAP, and
-	// we want the collection-metadata tasks to run before the document tasks.
+	// NB: The non-primary task types picked by workers should be in
+	// lexicographical order of execution order. For example, we want the
+	// recheck queue tasks to start ASAP, and we want the
+	// collection-metadata tasks to run before the document tasks.
+	// `Primary` is excluded from this ordering requirement.
 	// --------------------------------------------------
 
 	// A processRecheckQueue task converts enqueued rechecks into new
