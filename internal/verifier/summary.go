@@ -17,6 +17,7 @@ import (
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/option"
@@ -80,7 +81,7 @@ func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context
 	for _, f := range mismatches {
 		if len(verifier.indexSpecTolerances) > 0 {
 			apiMM := f.APINSMismatchInfo()
-			if tolerancesObscureMismatch(verifier.indexSpecTolerances, apiMM) {
+			if apiMM.Aspect == api.NSMismatchAspectIndex && tolerancesObscureMismatch(verifier.indexSpecTolerances, apiMM) {
 				toleratedCount++
 				continue
 			}
