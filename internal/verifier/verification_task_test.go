@@ -229,3 +229,57 @@ func (suite *IntegrationTestSuite) TestEnsureCreateRecheckTaskIfNeeded() {
 		})
 	}
 }
+
+// TestTaskPickupOrder verifies that FindNextVerifyTaskAndUpdate picks up
+// processRecheckQueue before verifyCollection before verifyDocuments.
+// This ordering is critical: processRecheckQueue creates the verifyDocuments
+// tasks, so it must run first. verifyCollection re-checks metadata, and its
+// results may inform interpretation of document mismatches, so it runs before
+// verifyDocuments.
+func (suite *IntegrationTestSuite) TestTaskPickupOrder() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+	verifier.generation = 1
+
+	tasksColl := verifier.verificationTaskCollection()
+
+	// Insert one task of each type, all Added at generation 1.
+	for _, taskType := range []tasks.Type{
+		// Insert in reverse order to ensure the sort, not insertion order,
+		// determines pickup.
+		tasks.VerifyDocuments,
+		tasks.VerifyCollection,
+		tasks.ProcessRecheckQueue,
+	} {
+		_, err := tasksColl.InsertOne(ctx, tasks.Task{
+			PrimaryKey: bson.NewObjectID(),
+			Generation: 1,
+			Status:     tasks.Added,
+			Type:       taskType,
+			QueryFilter: tasks.QueryFilter{
+				Namespace: "db.coll",
+				To:        "db.coll",
+			},
+		})
+		suite.Require().NoError(err)
+	}
+
+	for _, expectedType := range []tasks.Type{
+		tasks.ProcessRecheckQueue,
+		tasks.VerifyCollection,
+		tasks.VerifyDocuments,
+	} {
+		taskOpt, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
+		suite.Require().NoError(err)
+
+		task, has := taskOpt.Get()
+		suite.Require().True(has, "should find a task")
+		suite.Assert().Equal(expectedType, task.Type)
+	}
+
+	// No more tasks should remain.
+	taskOpt, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
+	suite.Require().NoError(err)
+	suite.Assert().True(taskOpt.IsNone(), "all tasks should be picked up")
+}
