@@ -698,8 +698,8 @@ func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
 		name   string
 		getter func(eventColumn) uint64
 	}{
-		{"source", func(c eventColumn) uint64 { return c.srcCount }},
-		{"destination", func(c eventColumn) uint64 { return c.dstCount }},
+		{"Source", func(c eventColumn) uint64 { return c.srcCount }},
+		{"Destination", func(c eventColumn) uint64 { return c.dstCount }},
 	} {
 		cells := []string{row.name}
 		for _, col := range columns {
