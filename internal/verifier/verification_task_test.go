@@ -38,7 +38,12 @@ func (suite *IntegrationTestSuite) TestEnsureCreateRecheckTaskIfNeeded() {
 		suite.Require().NoError(
 			verifier.InsertFailedCompareRecheckDocs(
 				ctx,
-				"foo.bar",
+				&tasks.Task{
+					PrimaryKey: bson.NewObjectID(),
+					QueryFilter: tasks.QueryFilter{
+						Namespace: "foo.bar",
+					},
+				},
 				[]bson.RawValue{mbson.ToRawValue("someID")},
 				[]int32{100},
 				[]bson.DateTime{bson.NewDateTimeFromTime(time.Now())},
@@ -71,7 +76,12 @@ func (suite *IntegrationTestSuite) TestEnsureCreateRecheckTaskIfNeeded() {
 		suite.Require().NoError(
 			verifier.InsertFailedCompareRecheckDocs(
 				ctx,
-				"foo.bar",
+				&tasks.Task{
+					PrimaryKey: bson.NewObjectID(),
+					QueryFilter: tasks.QueryFilter{
+						Namespace: "foo.bar",
+					},
+				},
 				[]bson.RawValue{mbson.ToRawValue("someID")},
 				[]int32{100},
 				[]bson.DateTime{bson.NewDateTimeFromTime(time.Now())},
@@ -107,7 +117,12 @@ func (suite *IntegrationTestSuite) TestEnsureCreateRecheckTaskIfNeeded() {
 		suite.Require().NoError(
 			verifier.InsertFailedCompareRecheckDocs(
 				ctx,
-				"foo.bar",
+				&tasks.Task{
+					PrimaryKey: bson.NewObjectID(),
+					QueryFilter: tasks.QueryFilter{
+						Namespace: "foo.bar",
+					},
+				},
 				[]bson.RawValue{mbson.ToRawValue("someID")},
 				[]int32{100},
 				[]bson.DateTime{bson.NewDateTimeFromTime(time.Now())},
@@ -147,7 +162,12 @@ func (suite *IntegrationTestSuite) TestEnsureCreateRecheckTaskIfNeeded() {
 			suite.Require().NoError(
 				verifier.InsertFailedCompareRecheckDocs(
 					ctx,
-					"foo.bar",
+					&tasks.Task{
+						PrimaryKey: bson.NewObjectID(),
+						QueryFilter: tasks.QueryFilter{
+							Namespace: "foo.bar",
+						},
+					},
 					[]bson.RawValue{mbson.ToRawValue("someID")},
 					[]int32{100},
 					[]bson.DateTime{bson.NewDateTimeFromTime(time.Now())},
@@ -190,7 +210,12 @@ func (suite *IntegrationTestSuite) TestEnsureCreateRecheckTaskIfNeeded() {
 			suite.Require().NoError(
 				verifier.InsertFailedCompareRecheckDocs(
 					ctx,
-					"foo.bar",
+					&tasks.Task{
+						PrimaryKey: bson.NewObjectID(),
+						QueryFilter: tasks.QueryFilter{
+							Namespace: "foo.bar",
+						},
+					},
 					[]bson.RawValue{mbson.ToRawValue("someID")},
 					[]int32{100},
 					[]bson.DateTime{bson.NewDateTimeFromTime(time.Now())},
