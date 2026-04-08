@@ -531,29 +531,27 @@ func (verifier *Verifier) printNamespaceStatistics(
 
 		row = append(row, docsCell)
 
-		{
-			var dataCell string
+		var dataCell string
 
-			if result.TotalBytes > 0 {
-				dataUnit := reportutils.FindBestUnit(result.TotalBytes)
+		if result.TotalBytes > 0 {
+			dataUnit := reportutils.FindBestUnit(result.TotalBytes)
 
-				dataCell = fmt.Sprintf("%s of %s %s (%s%%)",
-					reportutils.BytesToUnit(bytesCompared, dataUnit),
-					reportutils.BytesToUnit(result.TotalBytes, dataUnit),
-					dataUnit,
-					reportutils.FmtPercent(bytesCompared, result.TotalBytes),
-				)
-			} else {
-				dataUnit := reportutils.FindBestUnit(bytesCompared)
+			dataCell = fmt.Sprintf("%s of %s %s (%s%%)",
+				reportutils.BytesToUnit(bytesCompared, dataUnit),
+				reportutils.BytesToUnit(result.TotalBytes, dataUnit),
+				dataUnit,
+				reportutils.FmtPercent(bytesCompared, result.TotalBytes),
+			)
+		} else {
+			dataUnit := reportutils.FindBestUnit(bytesCompared)
 
-				dataCell = fmt.Sprintf("%s %s",
-					reportutils.BytesToUnit(bytesCompared, dataUnit),
-					dataUnit,
-				)
-			}
-
-			row = append(row, dataCell)
+			dataCell = fmt.Sprintf("%s %s",
+				reportutils.BytesToUnit(bytesCompared, dataUnit),
+				dataUnit,
+			)
 		}
+
+		row = append(row, dataCell)
 
 		table.Append(row)
 	}
