@@ -5,6 +5,7 @@ package verifier
 // number of docs/namespaces/bytes, progress, etc.
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -668,53 +669,45 @@ func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
 	srcCounts := verifier.srcChangeReader.GetCumulativeEventCounts()
 	dstCounts := verifier.dstChangeReader.GetCumulativeEventCounts()
 
-	rows := [][]string{}
+	type eventColumn struct {
+		name     string
+		srcCount uint64
+		dstCount uint64
+	}
 
-	// Hide all-zero rows based on underlying numeric counts:
-	if srcCounts.Insert != 0 || dstCounts.Insert != 0 {
-		rows = append(rows, []string{
-			"insert",
-			reportutils.FmtReal(srcCounts.Insert),
-			reportutils.FmtReal(dstCounts.Insert),
-		})
-	}
-	if srcCounts.Update != 0 || dstCounts.Update != 0 {
-		rows = append(rows, []string{
-			"update",
-			reportutils.FmtReal(srcCounts.Update),
-			reportutils.FmtReal(dstCounts.Update),
-		})
-	}
-	if srcCounts.Replace != 0 || dstCounts.Replace != 0 {
-		rows = append(rows, []string{
-			"replace",
-			reportutils.FmtReal(srcCounts.Replace),
-			reportutils.FmtReal(dstCounts.Replace),
-		})
-	}
-	if srcCounts.Delete != 0 || dstCounts.Delete != 0 {
-		rows = append(rows, []string{
-			"delete",
-			reportutils.FmtReal(srcCounts.Delete),
-			reportutils.FmtReal(dstCounts.Delete),
-		})
-	}
-	if len(rows) == 0 {
-		fmt.Fprintf(out, "No change events seen during verification.\n")
-		return
+	allColumns := []eventColumn{
+		{"insert", srcCounts.Insert, dstCounts.Insert},
+		{"update", srcCounts.Update, dstCounts.Update},
+		{"replace", srcCounts.Replace, dstCounts.Replace},
+		{"delete", srcCounts.Delete, dstCounts.Delete},
 	}
 
 	fmt.Fprintf(out, "Cumulative change events seen:\n")
 
+	columns := allColumns
+
+	headers := []string{"Cluster"}
+	for _, col := range columns {
+		headers = append(headers, col.name)
+	}
+
 	table := tablewriter.NewWriter(out)
+	table.SetHeader(headers)
 
-	table.SetHeader([]string{
-		"Event",
-		"Source",
-		"Destination",
-	})
+	for _, row := range []struct {
+		name   string
+		getter func(eventColumn) uint64
+	}{
+		{"Source", func(c eventColumn) uint64 { return c.srcCount }},
+		{"Destination", func(c eventColumn) uint64 { return c.dstCount }},
+	} {
+		cells := []string{row.name}
+		for _, col := range columns {
+			cells = append(cells, reportutils.FmtReal(row.getter(col)))
+		}
 
-	table.AppendBulk(rows)
+		table.Append(cells)
+	}
 
 	table.Render()
 }
@@ -778,8 +771,14 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) uint64 {
 		}
 
 		times, hasTimes := cluster.csReader.getCurrentTimestamps().Get()
+		lagIsHigh := hasTimes && times.Lag() > lagWarnThreshold
 
-		if hasTimes {
+		saturation := cluster.csReader.getBufferSaturation()
+		saturationIsHigh := saturation > saturationWarnThreshold
+
+		loggingDebug := verifier.logger.Debug().Enabled()
+
+		if cmp.Or(lagIsHigh, loggingDebug) {
 			lag := times.Lag()
 
 			logPieces = append(
@@ -795,19 +794,19 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) uint64 {
 			)
 		}
 
-		saturation := cluster.csReader.getBufferSaturation()
-
-		logPieces = append(
-			logPieces,
-			lo.Ternary(
-				saturation == 0,
-				"buffer is empty",
-				fmt.Sprintf(
-					"buffer %s%% full",
-					reportutils.FmtReal(100*saturation),
+		if cmp.Or(saturationIsHigh, loggingDebug) {
+			logPieces = append(
+				logPieces,
+				lo.Ternary(
+					saturation == 0,
+					"buffer is empty",
+					fmt.Sprintf(
+						"buffer %s%% full",
+						reportutils.FmtReal(100*saturation),
+					),
 				),
-			),
-		)
+			)
+		}
 
 		fmt.Fprintf(
 			builder,
@@ -831,14 +830,14 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) uint64 {
 			eventsDescr,
 		)
 
-		if hasTimes && times.Lag() > lagWarnThreshold {
+		if lagIsHigh {
 			fmt.Fprint(
 				builder,
 				"    ⚠️ Lag is excessive. Verification may fail. See documentation.\n",
 			)
 		}
 
-		if saturation > saturationWarnThreshold {
+		if saturationIsHigh {
 			fmt.Fprint(
 				builder,
 				"    ⚠️ Buffer almost full. Metadata writes are too slow. See documentation.\n",
