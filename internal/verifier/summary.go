@@ -701,13 +701,14 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 		}
 
 		times, hasTimes := cluster.csReader.getCurrentTimestamps().Get()
+		lagIsHigh := hasTimes && times.Lag() > lagWarnThreshold
 
-		showLag := hasTimes && cmp.Or(
-			times.Lag() > lagWarnThreshold,
-			verifier.logger.Debug().Enabled(),
-		)
+		saturation := cluster.csReader.getBufferSaturation()
+		saturationIsHigh := saturation > saturationWarnThreshold
 
-		if showLag {
+		loggingDebug := verifier.logger.Debug().Enabled()
+
+		if cmp.Or(lagIsHigh, loggingDebug) {
 			lag := times.Lag()
 
 			logPieces = append(
@@ -723,14 +724,7 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			)
 		}
 
-		saturation := cluster.csReader.getBufferSaturation()
-
-		showSaturation := cmp.Or(
-			saturation > saturationWarnThreshold,
-			verifier.logger.Debug().Enabled(),
-		)
-
-		if showSaturation {
+		if cmp.Or(saturationIsHigh, loggingDebug) {
 			logPieces = append(
 				logPieces,
 				lo.Ternary(
@@ -766,14 +760,14 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int {
 			eventsDescr,
 		)
 
-		if showLag && times.Lag() > lagWarnThreshold {
+		if lagIsHigh {
 			fmt.Fprint(
 				builder,
 				"    ⚠️ Lag is excessive. Verification may fail. See documentation.\n",
 			)
 		}
 
-		if showSaturation && saturation > saturationWarnThreshold {
+		if saturationIsHigh {
 			fmt.Fprint(
 				builder,
 				"    ⚠️ Buffer almost full. Metadata writes are too slow. See documentation.\n",
