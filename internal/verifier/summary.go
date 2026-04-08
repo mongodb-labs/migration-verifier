@@ -38,7 +38,7 @@ const (
 // newline.
 
 // Returned booleans indicate:
-//   - whether any mismatches were found
+//   - whether any (non-ignored) mismatches were found
 //   - whether any incomplete tasks were found
 func (verifier *Verifier) reportCollectionMetadataMismatches(ctx context.Context, out io.Writer) (bool, bool, error) {
 	generation, _ := verifier.getGeneration()
