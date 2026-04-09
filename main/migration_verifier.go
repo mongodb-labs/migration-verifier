@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	_ "net/http/pprof"
 	"os"
@@ -20,11 +21,13 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/mongodb-labs/migration-tools/mongotools"
+	"github.com/mongodb-labs/migration-tools/sysinfo"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
 	"github.com/samber/lo"
+	slogzerolog "github.com/samber/slog-zerolog/v2"
 	"github.com/urfave/cli"
 	"github.com/urfave/cli/altsrc"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -336,6 +339,14 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		Str("buildTime", buildvar.BuildTime).
 		Int("processID", os.Getpid()).
 		Msg("migration-verifier started.")
+
+	sysinfo.LogSystemInfo(
+		slog.New(
+			slogzerolog.Option{
+				Logger: logger.Logger,
+			}.NewZerologHandler(),
+		),
+	)
 
 	logConfig(cCtx, logger)
 
