@@ -341,6 +341,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		Msg("migration-verifier started.")
 
 	sysinfo.LogSystemInfo(
+		ctx,
 		slog.New(
 			slogzerolog.Option{
 				Logger: logger.Logger,
