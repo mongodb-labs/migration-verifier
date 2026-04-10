@@ -59,8 +59,8 @@ func (suite *UnitTestSuite) TestIsConnectionErrorWithWrappedTopologyError() {
 }
 
 func (suite *UnitTestSuite) TestWrappedServerErrorWithTransientLabel() {
-	// This test verifies the fix for the CI bug where wrapped ServerError
-	// with transient labels (like "Interrupted") weren't being detected as retryable.
+	// This test verifies that wrapped ServerError with transient labels
+	// (like "Interrupted") are detected as transient.
 
 	// Create a ServerError with the transient "NetworkError" label
 	baseErr := mongo.CommandError{
@@ -71,9 +71,7 @@ func (suite *UnitTestSuite) TestWrappedServerErrorWithTransientLabel() {
 	// Unwrapped error - should be transient
 	suite.True(IsTransientError(baseErr), "unwrapped ServerError with NetworkError label should be transient")
 
-	// Wrapped error - should ALSO be transient after fix
-	// This is the bug from CI: the error chain was:
-	// wrappedErr -> "failed to find sharding info..." -> baseErr
+	// Wrapped error - should ALSO be transient
 	wrappedErr := errors.Wrap(baseErr, "failed to find sharding info for staging.watermelon")
 	suite.True(IsTransientError(wrappedErr), "wrapped ServerError with transient label should still be detected as transient")
 }
