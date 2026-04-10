@@ -108,7 +108,7 @@ func isRetryablePoolError(err error) bool {
 
 func hasFailedToSatisfyReadPreferenceError(err error) bool {
 	srvErr, ok := stderrors.AsType[mongo.ServerError](err)
-	return ok && srvErr.HasErrorCode(133)
+	return ok && srvErr != nil && srvErr.HasErrorCode(133)
 }
 
 func isServerSelectionError(err error) bool {
@@ -407,7 +407,7 @@ func GetErrorCode(err error) int {
 // error message.
 func HasServerErrorMessage(err error, message string) bool {
 	srvErr, ok := stderrors.AsType[mongo.ServerError](err)
-	return ok && srvErr.HasErrorMessage(message)
+	return ok && srvErr != nil && srvErr.HasErrorMessage(message)
 }
 
 // GetActualCollectionFromCollectionUUIDMismatchError returns the value of the `actualCollection`
