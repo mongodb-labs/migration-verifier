@@ -133,8 +133,8 @@ func (suite *UnitTestSuite) TestIsNetworkErrorExactMessageMatching() {
 }
 
 func (suite *UnitTestSuite) TestErrorChainHasMessageWithMultipleWrappedErrors() {
-	// Test behavior with fmt.Errorf("%w: %w") which creates errors with multiple wrapped errors.
-	// This exposes a limitation of the current errorChainHasMessage implementation.
+	// Verify errorChainHasMessage supports fmt.Errorf("%w: %w"), which creates
+	// errors with multiple wrapped errors via Unwrap() []error.
 
 	suite.Run("single wrapped error chain", func() {
 		baseErr := errors.New("no reachable servers")
