@@ -838,7 +838,7 @@ func (verifier *Verifier) getShardKeyFields(
 	coll := verifier.srcClient.Database(namespaceAndUUID.DBName).
 		Collection(namespaceAndUUID.CollName)
 
-	shardKeyOpt, err := GetShardKey(ctx, verifier.logger, coll)
+	shardKeyOpt, err := util.GetShardKey(ctx, coll)
 	if err != nil {
 		return nil, errors.Wrapf(
 			err,

@@ -91,7 +91,7 @@ func IsFailedToParseError(err error) bool {
 
 // IsContextCanceledError returns true if this is a Context Canceled error.
 func IsContextCanceledError(err error) bool {
-	return strings.Contains(err.Error(), context.Canceled.Error())
+	return errors.Is(err, context.Canceled)
 }
 
 func isRetryablePoolError(err error) bool {
@@ -386,8 +386,6 @@ func HasServerErrorMessage(err error, message string) bool {
 // In case (2) the collection doesn't exist, so there will be no `actualCollection` field.
 // We return an empty collection name here.
 func GetActualCollectionFromCollectionUUIDMismatchError(logger *logger.Logger, err error) (string, error) {
-	// Get the root error.
-	err = errors.Cause(err)
 	// XXX - commented out for now because we cannot call util functions from
 	// this package (error) since util calls error.
 	// Invariant(logger, IsCollectionUUIDMismatchError(err), "GetActualCollectionFromCollectionUUIDMismatchError must be called with a UUIDMismatchError, received %s", err)

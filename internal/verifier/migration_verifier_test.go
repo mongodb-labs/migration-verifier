@@ -275,7 +275,7 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 		)
 
 		require.NoError(
-			DisableBalancing(ctx, coll),
+			util.DisableBalancing(ctx, coll),
 			"should disable %#q’s balancing on %s",
 			FullName(coll),
 			clientLabel,
