@@ -95,21 +95,28 @@ func IsContextCanceledError(err error) bool {
 }
 
 func isRetryablePoolError(err error) bool {
-	rerr, ok := err.(driver.RetryablePoolError)
+	// NB: driver.RetryablePoolError isn’t actually an error.
+	type retryablePoolError interface {
+		driver.RetryablePoolError
+		error
+	}
+
+	rerr, ok := lo.ErrorsAs[retryablePoolError](err)
 	return ok && rerr.Retryable()
 }
 
-func isFailedToSatisfyReadPreferenceError(err error) bool {
-	return GetErrorCode(err) == 133
+func hasFailedToSatisfyReadPreferenceError(err error) bool {
+	srvErr, ok := lo.ErrorsAs[mongo.ServerError](err)
+	return ok && srvErr.HasErrorCode(133)
 }
 
 func isServerSelectionError(err error) bool {
-	_, ok := err.(topology.ServerSelectionError)
+	_, ok := lo.ErrorsAs[topology.ServerSelectionError](err)
 	return ok
 }
 
 func isConnectionError(err error) bool {
-	if connErr, ok := err.(topology.ConnectionError); ok {
+	if connErr, ok := lo.ErrorsAs[topology.ConnectionError](err); ok {
 		// Network errors are usually wrapped inside ConnectionError instead of being at top-level.
 		return isNetworkError(connErr.Wrapped)
 	}
@@ -130,7 +137,7 @@ func IsTransientError(err error) bool {
 	}
 
 	// All w:majority write concern errors are retryable.
-	if _, ok := err.(*mongo.WriteConcernError); ok {
+	if _, ok := lo.ErrorsAs[*mongo.WriteConcernError](err); ok {
 		return true
 	}
 
@@ -160,7 +167,7 @@ func IsTransientError(err error) bool {
 		return true
 	}
 
-	if isFailedToSatisfyReadPreferenceError(err) {
+	if hasFailedToSatisfyReadPreferenceError(err) {
 		return true
 	}
 
@@ -170,19 +177,19 @@ func IsTransientError(err error) bool {
 // isNetworkError returns true if this is a NetworkError.
 func isNetworkError(err error) bool {
 	// Connection errors from syscalls, connection reset by peer, etc.
-	if _, ok := err.(net.Error); ok {
+	if _, ok := lo.ErrorsAs[net.Error](err); ok {
 		return true
 	}
 
 	// XXX - some of these, especially the specific strings, may not be relevant, as they come
 	// from old packages like the mgo driver. But we're not sure if they may surface from other
 	// sources as well.
-	if err == io.EOF || err.Error() == "no reachable servers" || err.Error() == "Closed explicitly" {
+	if errors.Is(err, io.EOF) || err.Error() == "no reachable servers" || err.Error() == "Closed explicitly" {
 		return true
 	}
 
 	// XXX - similarly, this comes from spacemonkeygo/openssl.
-	if err == io.ErrUnexpectedEOF || err.Error() == "connection closed" {
+	if errors.Is(err, io.ErrUnexpectedEOF) || err.Error() == "connection closed" {
 		return true
 	}
 
@@ -283,7 +290,7 @@ var transientErrorLabels = [3]string{
 // hasTransientErrorLabel returns true if the error is a mongo.ServerError with a label
 // indicating a transient error.
 func hasTransientErrorLabel(err error) bool {
-	if err, ok := err.(mongo.ServerError); ok {
+	if err, ok := lo.ErrorsAs[mongo.ServerError](err); ok {
 		for _, l := range transientErrorLabels {
 			if err.HasErrorLabel(l) {
 				return true
@@ -361,12 +368,8 @@ func GetErrorCode(err error) int {
 // HasServerErrorMessage returns true if the error is a mongo ServerError and contains the specified
 // error message.
 func HasServerErrorMessage(err error, message string) bool {
-	cause := errors.Cause(err)
-	serverErr, isServerErr := cause.(mongo.ServerError)
-	if !isServerErr || serverErr == nil {
-		return false
-	}
-	return serverErr.HasErrorMessage(message)
+	srvErr, ok := lo.ErrorsAs[mongo.ServerError](err)
+	return ok && srvErr.HasErrorMessage(message)
 }
 
 // GetActualCollectionFromCollectionUUIDMismatchError returns the value of the `actualCollection`
@@ -387,7 +390,7 @@ func GetActualCollectionFromCollectionUUIDMismatchError(logger *logger.Logger, e
 	err = errors.Cause(err)
 	// XXX - commented out for now because we cannot call util functions from
 	// this package (error) since util calls error.
-	//Invariant(logger, IsCollectionUUIDMismatchError(err), "GetActualCollectionFromCollectionUUIDMismatchError must be called with a UUIDMismatchError, received %s", err)
+	// Invariant(logger, IsCollectionUUIDMismatchError(err), "GetActualCollectionFromCollectionUUIDMismatchError must be called with a UUIDMismatchError, received %s", err)
 
 	actualCollection, lookupErr := getErrorRaw(err).LookupErr("actualCollection")
 
@@ -405,53 +408,59 @@ func GetActualCollectionFromCollectionUUIDMismatchError(logger *logger.Logger, e
 }
 
 func getErrorRaw(err error) bson.Raw {
-	switch e := err.(type) {
 	// A normal command error.
-	case mongo.CommandError:
+	if e, ok := lo.ErrorsAs[mongo.CommandError](err); ok {
 		return e.Raw
+	}
 
 	// A driver error.
-	case driver.Error:
+	if e, ok := lo.ErrorsAs[driver.Error](err); ok {
 		return bson.Raw(e.Raw)
+	}
 
 	// A write concern error.
-	case mongo.WriteConcernError:
+	if e, ok := lo.ErrorsAs[mongo.WriteConcernError](err); ok {
 		return e.Raw
+	}
 
 	// A single write error.
-	case mongo.WriteError:
+	if e, ok := lo.ErrorsAs[mongo.WriteError](err); ok {
 		return e.Raw
+	}
 
-	// Errors with 1 or more above writer errors.
+	// Errors with 1 or more write errors.
 	// We return the first write error's Raw error.
-	case driver.WriteCommandError:
+	if e, ok := lo.ErrorsAs[driver.WriteCommandError](err); ok {
 		for _, we := range e.WriteErrors {
 			return getErrorRaw(we)
 		}
 		return nil
-	case mongo.WriteException:
+	}
+
+	if e, ok := lo.ErrorsAs[mongo.WriteException](err); ok {
 		for _, we := range e.WriteErrors {
 			return getErrorRaw(we)
 		}
 		return nil
+	}
 
 	// A bulk write error, consisting
 	// of a single write error.
-	case mongo.BulkWriteError:
+	if e, ok := lo.ErrorsAs[mongo.BulkWriteError](err); ok {
 		return e.Raw
+	}
 
 	// An error with 1 or more bulk write errors.
 	// We return the first bulk write error's Raw error.
-	case mongo.BulkWriteException:
+	if e, ok := lo.ErrorsAs[mongo.BulkWriteException](err); ok {
 		for _, we := range e.WriteErrors {
 			return getErrorRaw(we)
 		}
 		return nil
-
-	// No other error types have Raw errors.
-	default:
-		return nil
 	}
+
+	// No other known error types have Raw errors.
+	return nil
 }
 
 // IsStaleClusterTimeError returns true if this is a StaleClusterTimeError.
