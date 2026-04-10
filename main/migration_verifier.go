@@ -405,15 +405,15 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		return nil, err
 	}
 
-	partitionSizeMB := cCtx.Uint64(partitionSizeMB)
+	partitionSizeMBVal := cCtx.Uint64(partitionSizeMB)
 
-	if partitionSizeMB != 0 {
-		if partitionSizeMB > math.MaxInt64 {
+	if partitionSizeMBVal != 0 {
+		if partitionSizeMBVal > math.MaxInt64 {
 			return nil, fmt.Errorf("%q may not exceed %d", partitionSizeMB, math.MaxInt64)
 		}
 	}
 
-	v.SetPartitionSizeMB(uint32(cmp.Or(partitionSizeMB, partitions.DefaultPartitionMiB)))
+	v.SetPartitionSizeMB(uint32(cmp.Or(partitionSizeMBVal, partitions.DefaultPartitionMiB)))
 
 	v.SetStartClean(cCtx.Bool(startClean))
 
