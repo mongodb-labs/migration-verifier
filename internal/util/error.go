@@ -407,7 +407,7 @@ func GetErrorCode(err error) int {
 // error message.
 func HasServerErrorMessage(err error, message string) bool {
 	srvErr, ok := stderrors.AsType[mongo.ServerError](err)
-	return ok && srvErr.HasErrorMessage(message)
+	return ok && srvErr != nil && srvErr.HasErrorMessage(message)
 }
 
 // GetActualCollectionFromCollectionUUIDMismatchError returns the value of the `actualCollection`
