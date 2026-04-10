@@ -2,7 +2,6 @@ package retry
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
@@ -71,6 +71,20 @@ func (suite *UnitTestSuite) TestRetryer() {
 		err = retryer.WithCallback(f2, "f2").Run(suite.Context(), logger)
 		suite.NoError(err)
 		suite.Equal(2, attemptNumber)
+
+		// Verify wrapped transient errors are also retried
+		attemptNumber = -1
+		f3 := func(_ context.Context, ri *FuncInfo) error {
+			attemptNumber = ri.GetAttemptNumber()
+			if attemptNumber < 2 {
+				return errors.Wrap(someNetworkError, "wrapped network error")
+			}
+			return nil
+		}
+
+		err = retryer.WithCallback(f3, "f3").Run(suite.Context(), logger)
+		suite.NoError(err, "wrapped transient error should be retried")
+		suite.Equal(2, attemptNumber)
 	})
 }
 
@@ -86,6 +100,13 @@ func (suite *UnitTestSuite) TestRetryerDurationLimitIsZero() {
 	err := retryer.WithCallback(f, "f").Run(suite.Context(), suite.Logger())
 	suite.Assert().ErrorIs(err, someNetworkError)
 	suite.Assert().Equal(0, attemptNumber)
+
+	// Verify wrapped error is detected correctly
+	f2 := func(_ context.Context, ri *FuncInfo) error {
+		return errors.Wrap(someNetworkError, "wrapped")
+	}
+	err = retryer.WithCallback(f2, "f2").Run(suite.Context(), suite.Logger())
+	suite.Assert().ErrorIs(err, someNetworkError, "wrapped error should be detected")
 }
 
 func (suite *UnitTestSuite) TestRetryerDurationReset() {
@@ -203,6 +224,19 @@ func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
 		suite.NoError(err)
 		suite.Equal(1, attemptNumber)
+
+		// Verify wrapped custom error code is also retried
+		attemptNumber = 0
+		fWrapped := func(_ context.Context, ri *FuncInfo) error {
+			attemptNumber = ri.GetAttemptNumber()
+			if attemptNumber == 0 {
+				return errors.Wrap(customError, "wrapped custom error")
+			}
+			return nil
+		}
+		err = retryer.WithCallback(fWrapped, "fWrapped").Run(suite.Context(), logger)
+		suite.NoError(err, "wrapped custom error code should be retried")
+		suite.Equal(1, attemptNumber)
 	})
 
 	suite.Run("with multiple additional error codes", func() {
@@ -219,6 +253,77 @@ func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
 		suite.Equal(42, util.GetErrorCode(err))
 		suite.Equal(0, attemptNumber)
+	})
+}
+
+func (suite *UnitTestSuite) TestRetryerWrappedTransientError() {
+	retryer := New()
+	logger := suite.Logger()
+
+	suite.Run("wrapped transient error should be retried", func() {
+		attemptNumber := -1
+		f := func(_ context.Context, ri *FuncInfo) error {
+			attemptNumber = ri.GetAttemptNumber()
+			if attemptNumber < 2 {
+				// Wrap the transient error to verify unwrapping works
+				return errors.Wrap(someNetworkError, "failed to fetch data")
+			}
+			return nil
+		}
+
+		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
+		suite.NoError(err, "wrapped transient error should eventually succeed after retries")
+		suite.Equal(2, attemptNumber, "should have retried wrapped transient error")
+	})
+
+	suite.Run("deeply wrapped transient error should be retried", func() {
+		attemptNumber := -1
+		f := func(_ context.Context, ri *FuncInfo) error {
+			attemptNumber = ri.GetAttemptNumber()
+			if attemptNumber < 2 {
+				// Wrap the error multiple times to test deep unwrapping
+				var err error = someNetworkError
+				err = errors.Wrap(err, "step 1")
+				err = errors.Wrap(err, "step 2")
+				err = errors.Wrap(err, "step 3")
+				return err
+			}
+			return nil
+		}
+
+		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
+		suite.NoError(err, "deeply wrapped transient error should eventually succeed")
+		suite.Equal(2, attemptNumber, "should have retried deeply wrapped transient error")
+	})
+
+	suite.Run("wrapped non-transient error should not be retried", func() {
+		attemptNumber := -1
+		f := func(_ context.Context, ri *FuncInfo) error {
+			attemptNumber = ri.GetAttemptNumber()
+			return errors.Wrap(errBad, "context for fatal error")
+		}
+
+		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
+		suite.ErrorIs(err, errBad, "wrapped non-transient error should not be retried")
+		suite.Equal(0, attemptNumber, "should not retry non-transient error")
+	})
+
+	suite.Run("wrapped transient then non-transient should retry then fail", func() {
+		attemptNumber := -1
+		f := func(_ context.Context, ri *FuncInfo) error {
+			attemptNumber = ri.GetAttemptNumber()
+			if attemptNumber == 0 {
+				return errors.Wrap(someNetworkError, "transient failure")
+			}
+			if attemptNumber == 1 {
+				return errors.Wrap(errBad, "fatal failure")
+			}
+			return nil
+		}
+
+		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
+		suite.ErrorIs(err, errBad, "should fail on non-transient error")
+		suite.Equal(1, attemptNumber, "should have retried once then failed on non-transient")
 	})
 }
 
@@ -290,6 +395,29 @@ func (suite *UnitTestSuite) TestMulti_Transient() {
 			},
 		)
 	}
+
+	// Verify wrapped transient errors are also retried in multi-callback scenario
+	suite.Run("wrapped transient errors in multi-callback", func() {
+		cb2Attempts := 0
+		err := New().WithCallback(
+			func(ctx context.Context, _ *FuncInfo) error {
+				return nil
+			},
+			"succeeds",
+		).WithCallback(
+			func(_ context.Context, _ *FuncInfo) error {
+				cb2Attempts++
+				if cb2Attempts == 1 {
+					return errors.Wrap(someNetworkError, "wrapped transient in multi")
+				}
+				return nil
+			},
+			"fails then succeeds with wrapped error",
+		).Run(ctx, logger)
+
+		suite.Assert().NoError(err)
+		suite.Assert().Equal(2, cb2Attempts, "wrapped transient should cause retry")
+	})
 }
 
 // TestMulti_LongRunningSuccess verifies that a long-running
