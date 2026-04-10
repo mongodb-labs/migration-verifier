@@ -108,7 +108,7 @@ func isRetryablePoolError(err error) bool {
 
 func hasFailedToSatisfyReadPreferenceError(err error) bool {
 	srvErr, ok := stderrors.AsType[mongo.ServerError](err)
-	return ok && srvErr.HasErrorCode(133)
+	return ok && srvErr != nil && srvErr.HasErrorCode(133)
 }
 
 func isServerSelectionError(err error) bool {
