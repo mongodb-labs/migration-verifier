@@ -174,14 +174,14 @@ func IsTransientError(err error) bool {
 }
 
 // errorChainHasMessage checks if any error in the chain has the exact message.
-// It handles both single wrapped errors and multiple wrapped errors (Go 1.20+).
+// It handles both single wrapped errors and errors that wrap multiple errors (Go 1.20+).
 func errorChainHasMessage(err error, message string) bool {
 	for err != nil {
 		if err.Error() == message {
 			return true
 		}
 
-		// Handle multiple wrapped errors (fmt.Errorf("%w: %w") returns []error)
+		// Handle errors that implement Unwrap() []error, such as fmt.Errorf("%w: %w", ...).
 		if unwrappedSlice, ok := err.(interface{ Unwrap() []error }); ok {
 			for _, unwrapped := range unwrappedSlice.Unwrap() {
 				if errorChainHasMessage(unwrapped, message) {
