@@ -2,6 +2,7 @@ package util
 
 import (
 	"context"
+	stderrors "errors"
 	"io"
 	"net"
 	"strings"
@@ -101,22 +102,22 @@ func isRetryablePoolError(err error) bool {
 		error
 	}
 
-	rerr, ok := lo.ErrorsAs[retryablePoolError](err)
+	rerr, ok := stderrors.AsType[retryablePoolError](err)
 	return ok && rerr.Retryable()
 }
 
 func hasFailedToSatisfyReadPreferenceError(err error) bool {
-	srvErr, ok := lo.ErrorsAs[mongo.ServerError](err)
+	srvErr, ok := stderrors.AsType[mongo.ServerError](err)
 	return ok && srvErr.HasErrorCode(133)
 }
 
 func isServerSelectionError(err error) bool {
-	_, ok := lo.ErrorsAs[topology.ServerSelectionError](err)
+	_, ok := stderrors.AsType[topology.ServerSelectionError](err)
 	return ok
 }
 
 func isConnectionError(err error) bool {
-	if connErr, ok := lo.ErrorsAs[topology.ConnectionError](err); ok {
+	if connErr, ok := stderrors.AsType[topology.ConnectionError](err); ok {
 		// Network errors are usually wrapped inside ConnectionError instead of being at top-level.
 		return isNetworkError(connErr.Wrapped)
 	}
@@ -137,7 +138,7 @@ func IsTransientError(err error) bool {
 	}
 
 	// All w:majority write concern errors are retryable.
-	if _, ok := lo.ErrorsAs[*mongo.WriteConcernError](err); ok {
+	if _, ok := stderrors.AsType[*mongo.WriteConcernError](err); ok {
 		return true
 	}
 
@@ -177,7 +178,7 @@ func IsTransientError(err error) bool {
 // isNetworkError returns true if this is a NetworkError.
 func isNetworkError(err error) bool {
 	// Connection errors from syscalls, connection reset by peer, etc.
-	if _, ok := lo.ErrorsAs[net.Error](err); ok {
+	if _, ok := stderrors.AsType[net.Error](err); ok {
 		return true
 	}
 
@@ -290,7 +291,7 @@ var transientErrorLabels = [3]string{
 // hasTransientErrorLabel returns true if the error is a mongo.ServerError with a label
 // indicating a transient error.
 func hasTransientErrorLabel(err error) bool {
-	if err, ok := lo.ErrorsAs[mongo.ServerError](err); ok {
+	if err, ok := stderrors.AsType[mongo.ServerError](err); ok {
 		for _, l := range transientErrorLabels {
 			if err.HasErrorLabel(l) {
 				return true
@@ -368,7 +369,7 @@ func GetErrorCode(err error) int {
 // HasServerErrorMessage returns true if the error is a mongo ServerError and contains the specified
 // error message.
 func HasServerErrorMessage(err error, message string) bool {
-	srvErr, ok := lo.ErrorsAs[mongo.ServerError](err)
+	srvErr, ok := stderrors.AsType[mongo.ServerError](err)
 	return ok && srvErr.HasErrorMessage(message)
 }
 
@@ -407,35 +408,35 @@ func GetActualCollectionFromCollectionUUIDMismatchError(logger *logger.Logger, e
 
 func getErrorRaw(err error) bson.Raw {
 	// A normal command error.
-	if e, ok := lo.ErrorsAs[mongo.CommandError](err); ok {
+	if e, ok := stderrors.AsType[mongo.CommandError](err); ok {
 		return e.Raw
 	}
 
 	// A driver error.
-	if e, ok := lo.ErrorsAs[driver.Error](err); ok {
+	if e, ok := stderrors.AsType[driver.Error](err); ok {
 		return bson.Raw(e.Raw)
 	}
 
 	// A write concern error.
-	if e, ok := lo.ErrorsAs[mongo.WriteConcernError](err); ok {
+	if e, ok := stderrors.AsType[mongo.WriteConcernError](err); ok {
 		return e.Raw
 	}
 
 	// A single write error.
-	if e, ok := lo.ErrorsAs[mongo.WriteError](err); ok {
+	if e, ok := stderrors.AsType[mongo.WriteError](err); ok {
 		return e.Raw
 	}
 
 	// Errors with 1 or more write errors.
 	// We return the first write error's Raw error.
-	if e, ok := lo.ErrorsAs[driver.WriteCommandError](err); ok {
+	if e, ok := stderrors.AsType[driver.WriteCommandError](err); ok {
 		for _, we := range e.WriteErrors {
 			return getErrorRaw(we)
 		}
 		return nil
 	}
 
-	if e, ok := lo.ErrorsAs[mongo.WriteException](err); ok {
+	if e, ok := stderrors.AsType[mongo.WriteException](err); ok {
 		for _, we := range e.WriteErrors {
 			return getErrorRaw(we)
 		}
@@ -444,13 +445,13 @@ func getErrorRaw(err error) bson.Raw {
 
 	// A bulk write error, consisting
 	// of a single write error.
-	if e, ok := lo.ErrorsAs[mongo.BulkWriteError](err); ok {
+	if e, ok := stderrors.AsType[mongo.BulkWriteError](err); ok {
 		return e.Raw
 	}
 
 	// An error with 1 or more bulk write errors.
 	// We return the first bulk write error's Raw error.
-	if e, ok := lo.ErrorsAs[mongo.BulkWriteException](err); ok {
+	if e, ok := stderrors.AsType[mongo.BulkWriteException](err); ok {
 		for _, we := range e.WriteErrors {
 			return getErrorRaw(we)
 		}
