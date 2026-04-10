@@ -43,18 +43,17 @@ func (suite *UnitTestSuite) TestIsTransientError() {
 	}
 }
 
-func (suite *UnitTestSuite) TestDirectCallToIsConnectionErrorWithWrappedTopologyError() {
-	// This test exposes a bug: isConnectionError uses direct type assertion
-	// which doesn't work with wrapped topology.ConnectionError.
+func (suite *UnitTestSuite) TestIsConnectionErrorWithWrappedTopologyError() {
+	// Regression test: isConnectionError should detect topology.ConnectionError
+	// values both directly and through wrapping.
 	baseErr := topology.ConnectionError{
 		Wrapped: io.EOF,
 	}
 
-	// Direct (unwrapped) error - this works
+	// Direct (unwrapped) error should be detected.
 	suite.True(isConnectionError(baseErr), "direct ConnectionError should be detected")
 
-	// Wrapped error - this fails because isConnectionError uses direct type
-	// assertion instead of stderrors.AsType
+	// Wrapped error should also be detected when the error chain is inspected.
 	wrappedErr := errors.Wrap(baseErr, "connection issue")
 	suite.True(isConnectionError(wrappedErr), "wrapped ConnectionError should be detected even when wrapped")
 }
