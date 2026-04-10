@@ -127,8 +127,6 @@ func isConnectionError(err error) bool {
 
 // IsTransientError returns true if this is an error that is reconnectable and can be retried.
 func IsTransientError(err error) bool {
-	// Find the root cause.
-	err = errors.Cause(err)
 	if err == nil {
 		return false
 	}
@@ -316,14 +314,18 @@ func IsCommandNotSupportedOnViewError(err error) bool {
 //
 // CAUTION: Server errors can contain multiple errors, and inspecting just
 // the top-level error code often doesn’t achieve proper error handling.
-// Instead consider mongo.ServerError.HasErrorCode().
+// Instead consider mongo.ServerError’s ErrorCodes() and HasErrorCode()
+// methods.
 func GetErrorCode(err error) int {
-	switch e := errors.Cause(err).(type) {
-	case mongo.CommandError:
+	if e, ok := stderrors.AsType[mongo.CommandError](err); ok {
 		return int(e.Code)
-	case driver.Error:
+	}
+
+	if e, ok := stderrors.AsType[driver.Error](err); ok {
 		return int(e.Code)
-	case driver.WriteCommandError:
+	}
+
+	if e, ok := stderrors.AsType[driver.WriteCommandError](err); ok {
 		for _, we := range e.WriteErrors {
 			return int(we.Code)
 		}
@@ -331,20 +333,30 @@ func GetErrorCode(err error) int {
 			return int(e.WriteConcernError.Code)
 		}
 		return 0
-	case driver.QueryFailureError:
-		codeVal, err := e.Response.LookupErr("code")
-		if err == nil {
+	}
+
+	if e, ok := stderrors.AsType[driver.QueryFailureError](err); ok {
+		codeVal, lookupErr := e.Response.LookupErr("code")
+		if lookupErr == nil {
 			code, _ := codeVal.Int32OK()
 			return int(code)
 		}
-		return 0 // this shouldn't happen
-	case mongo.WriteError:
+		return 0
+	}
+
+	if e, ok := stderrors.AsType[mongo.WriteError](err); ok {
 		return e.Code
-	case mongo.BulkWriteError:
+	}
+
+	if e, ok := stderrors.AsType[mongo.BulkWriteError](err); ok {
 		return e.Code
-	case mongo.WriteConcernError:
+	}
+
+	if e, ok := stderrors.AsType[mongo.WriteConcernError](err); ok {
 		return e.Code
-	case mongo.WriteException:
+	}
+
+	if e, ok := stderrors.AsType[mongo.WriteException](err); ok {
 		for _, we := range e.WriteErrors {
 			return GetErrorCode(we)
 		}
@@ -352,8 +364,9 @@ func GetErrorCode(err error) int {
 			return e.WriteConcernError.Code
 		}
 		return 0
-	case mongo.BulkWriteException:
-		// Return the first error code.
+	}
+
+	if e, ok := stderrors.AsType[mongo.BulkWriteException](err); ok {
 		for _, ecase := range e.WriteErrors {
 			return GetErrorCode(ecase)
 		}
@@ -361,9 +374,9 @@ func GetErrorCode(err error) int {
 			return e.WriteConcernError.Code
 		}
 		return 0
-	default:
-		return 0
 	}
+
+	return 0
 }
 
 // HasServerErrorMessage returns true if the error is a mongo ServerError and contains the specified
