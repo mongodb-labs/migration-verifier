@@ -2,6 +2,7 @@ package util
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/pkg/errors"
@@ -128,5 +129,43 @@ func (suite *UnitTestSuite) TestIsNetworkErrorExactMessageMatching() {
 		baseErr := errors.New("there are no reachable servers")
 		wrappedErr := errors.Wrap(baseErr, "failed to connect")
 		suite.False(isNetworkError(wrappedErr), "wrapped substring should not be network error")
+	})
+}
+
+func (suite *UnitTestSuite) TestErrorChainHasMessageWithMultipleWrappedErrors() {
+	// Test behavior with fmt.Errorf("%w: %w") which creates errors with multiple wrapped errors.
+	// This exposes a limitation of the current errorChainHasMessage implementation.
+
+	suite.Run("single wrapped error chain", func() {
+		baseErr := errors.New("no reachable servers")
+		wrapped := fmt.Errorf("connection failed: %w", baseErr)
+		suite.True(errorChainHasMessage(wrapped, "no reachable servers"))
+	})
+
+	suite.Run("multiple wrapped errors - message in first position", func() {
+		err1 := errors.New("no reachable servers")
+		err2 := errors.New("timeout")
+		// This creates an error with multiple wrapped errors
+		combined := fmt.Errorf("%w: %w", err1, err2)
+		suite.True(errorChainHasMessage(combined, "no reachable servers"),
+			"should find 'no reachable servers' in multiple wrapped errors")
+	})
+
+	suite.Run("multiple wrapped errors - message in second position", func() {
+		err1 := errors.New("connection lost")
+		err2 := errors.New("no reachable servers")
+		// This creates an error with multiple wrapped errors
+		combined := fmt.Errorf("%w: %w", err1, err2)
+		suite.True(errorChainHasMessage(combined, "no reachable servers"),
+			"should find 'no reachable servers' even when it's not the first wrapped error")
+	})
+
+	suite.Run("deeply nested multiple wrapped errors", func() {
+		err1 := errors.New("no reachable servers")
+		err2 := errors.New("timeout")
+		combined := fmt.Errorf("%w: %w", err1, err2)
+		wrapped := fmt.Errorf("failed to connect: %w", combined)
+		suite.True(errorChainHasMessage(wrapped, "no reachable servers"),
+			"should find message in deeply nested multiple wrapped errors")
 	})
 }
