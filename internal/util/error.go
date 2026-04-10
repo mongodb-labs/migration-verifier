@@ -2,7 +2,6 @@ package util
 
 import (
 	"context"
-	stderrors "errors"
 	"io"
 	"net"
 	"strings"
@@ -92,32 +91,25 @@ func IsFailedToParseError(err error) bool {
 
 // IsContextCanceledError returns true if this is a Context Canceled error.
 func IsContextCanceledError(err error) bool {
-	return errors.Is(err, context.Canceled)
+	return strings.Contains(err.Error(), context.Canceled.Error())
 }
 
 func isRetryablePoolError(err error) bool {
-	// NB: driver.RetryablePoolError isn’t actually an error.
-	type retryablePoolError interface {
-		driver.RetryablePoolError
-		error
-	}
-
-	rerr, ok := stderrors.AsType[retryablePoolError](err)
+	rerr, ok := err.(driver.RetryablePoolError)
 	return ok && rerr.Retryable()
 }
 
-func hasFailedToSatisfyReadPreferenceError(err error) bool {
-	srvErr, ok := stderrors.AsType[mongo.ServerError](err)
-	return ok && srvErr.HasErrorCode(133)
+func isFailedToSatisfyReadPreferenceError(err error) bool {
+	return GetErrorCode(err) == 133
 }
 
 func isServerSelectionError(err error) bool {
-	_, ok := stderrors.AsType[topology.ServerSelectionError](err)
+	_, ok := err.(topology.ServerSelectionError)
 	return ok
 }
 
 func isConnectionError(err error) bool {
-	if connErr, ok := stderrors.AsType[topology.ConnectionError](err); ok {
+	if connErr, ok := err.(topology.ConnectionError); ok {
 		// Network errors are usually wrapped inside ConnectionError instead of being at top-level.
 		return isNetworkError(connErr.Wrapped)
 	}
@@ -127,6 +119,8 @@ func isConnectionError(err error) bool {
 
 // IsTransientError returns true if this is an error that is reconnectable and can be retried.
 func IsTransientError(err error) bool {
+	// Find the root cause.
+	err = errors.Cause(err)
 	if err == nil {
 		return false
 	}
@@ -136,7 +130,7 @@ func IsTransientError(err error) bool {
 	}
 
 	// All w:majority write concern errors are retryable.
-	if _, ok := stderrors.AsType[*mongo.WriteConcernError](err); ok {
+	if _, ok := err.(*mongo.WriteConcernError); ok {
 		return true
 	}
 
@@ -166,7 +160,7 @@ func IsTransientError(err error) bool {
 		return true
 	}
 
-	if hasFailedToSatisfyReadPreferenceError(err) {
+	if isFailedToSatisfyReadPreferenceError(err) {
 		return true
 	}
 
@@ -176,19 +170,19 @@ func IsTransientError(err error) bool {
 // isNetworkError returns true if this is a NetworkError.
 func isNetworkError(err error) bool {
 	// Connection errors from syscalls, connection reset by peer, etc.
-	if _, ok := stderrors.AsType[net.Error](err); ok {
+	if _, ok := err.(net.Error); ok {
 		return true
 	}
 
 	// XXX - some of these, especially the specific strings, may not be relevant, as they come
 	// from old packages like the mgo driver. But we're not sure if they may surface from other
 	// sources as well.
-	if errors.Is(err, io.EOF) || err.Error() == "no reachable servers" || err.Error() == "Closed explicitly" {
+	if err == io.EOF || err.Error() == "no reachable servers" || err.Error() == "Closed explicitly" {
 		return true
 	}
 
 	// XXX - similarly, this comes from spacemonkeygo/openssl.
-	if errors.Is(err, io.ErrUnexpectedEOF) || err.Error() == "connection closed" {
+	if err == io.ErrUnexpectedEOF || err.Error() == "connection closed" {
 		return true
 	}
 
@@ -289,7 +283,7 @@ var transientErrorLabels = [3]string{
 // hasTransientErrorLabel returns true if the error is a mongo.ServerError with a label
 // indicating a transient error.
 func hasTransientErrorLabel(err error) bool {
-	if err, ok := stderrors.AsType[mongo.ServerError](err); ok {
+	if err, ok := err.(mongo.ServerError); ok {
 		for _, l := range transientErrorLabels {
 			if err.HasErrorLabel(l) {
 				return true
@@ -314,18 +308,14 @@ func IsCommandNotSupportedOnViewError(err error) bool {
 //
 // CAUTION: Server errors can contain multiple errors, and inspecting just
 // the top-level error code often doesn’t achieve proper error handling.
-// Instead consider mongo.ServerError’s ErrorCodes() and HasErrorCode()
-// methods.
+// Instead consider mongo.ServerError.HasErrorCode().
 func GetErrorCode(err error) int {
-	if e, ok := stderrors.AsType[mongo.CommandError](err); ok {
+	switch e := errors.Cause(err).(type) {
+	case mongo.CommandError:
 		return int(e.Code)
-	}
-
-	if e, ok := stderrors.AsType[driver.Error](err); ok {
+	case driver.Error:
 		return int(e.Code)
-	}
-
-	if e, ok := stderrors.AsType[driver.WriteCommandError](err); ok {
+	case driver.WriteCommandError:
 		for _, we := range e.WriteErrors {
 			return int(we.Code)
 		}
@@ -333,30 +323,20 @@ func GetErrorCode(err error) int {
 			return int(e.WriteConcernError.Code)
 		}
 		return 0
-	}
-
-	if e, ok := stderrors.AsType[driver.QueryFailureError](err); ok {
-		codeVal, lookupErr := e.Response.LookupErr("code")
-		if lookupErr == nil {
+	case driver.QueryFailureError:
+		codeVal, err := e.Response.LookupErr("code")
+		if err == nil {
 			code, _ := codeVal.Int32OK()
 			return int(code)
 		}
-		return 0
-	}
-
-	if e, ok := stderrors.AsType[mongo.WriteError](err); ok {
+		return 0 // this shouldn't happen
+	case mongo.WriteError:
 		return e.Code
-	}
-
-	if e, ok := stderrors.AsType[mongo.BulkWriteError](err); ok {
+	case mongo.BulkWriteError:
 		return e.Code
-	}
-
-	if e, ok := stderrors.AsType[mongo.WriteConcernError](err); ok {
+	case mongo.WriteConcernError:
 		return e.Code
-	}
-
-	if e, ok := stderrors.AsType[mongo.WriteException](err); ok {
+	case mongo.WriteException:
 		for _, we := range e.WriteErrors {
 			return GetErrorCode(we)
 		}
@@ -364,9 +344,8 @@ func GetErrorCode(err error) int {
 			return e.WriteConcernError.Code
 		}
 		return 0
-	}
-
-	if e, ok := stderrors.AsType[mongo.BulkWriteException](err); ok {
+	case mongo.BulkWriteException:
+		// Return the first error code.
 		for _, ecase := range e.WriteErrors {
 			return GetErrorCode(ecase)
 		}
@@ -374,16 +353,20 @@ func GetErrorCode(err error) int {
 			return e.WriteConcernError.Code
 		}
 		return 0
+	default:
+		return 0
 	}
-
-	return 0
 }
 
 // HasServerErrorMessage returns true if the error is a mongo ServerError and contains the specified
 // error message.
 func HasServerErrorMessage(err error, message string) bool {
-	srvErr, ok := stderrors.AsType[mongo.ServerError](err)
-	return ok && srvErr.HasErrorMessage(message)
+	cause := errors.Cause(err)
+	serverErr, isServerErr := cause.(mongo.ServerError)
+	if !isServerErr || serverErr == nil {
+		return false
+	}
+	return serverErr.HasErrorMessage(message)
 }
 
 // GetActualCollectionFromCollectionUUIDMismatchError returns the value of the `actualCollection`
@@ -400,9 +383,11 @@ func HasServerErrorMessage(err error, message string) bool {
 // In case (2) the collection doesn't exist, so there will be no `actualCollection` field.
 // We return an empty collection name here.
 func GetActualCollectionFromCollectionUUIDMismatchError(logger *logger.Logger, err error) (string, error) {
+	// Get the root error.
+	err = errors.Cause(err)
 	// XXX - commented out for now because we cannot call util functions from
 	// this package (error) since util calls error.
-	// Invariant(logger, IsCollectionUUIDMismatchError(err), "GetActualCollectionFromCollectionUUIDMismatchError must be called with a UUIDMismatchError, received %s", err)
+	//Invariant(logger, IsCollectionUUIDMismatchError(err), "GetActualCollectionFromCollectionUUIDMismatchError must be called with a UUIDMismatchError, received %s", err)
 
 	actualCollection, lookupErr := getErrorRaw(err).LookupErr("actualCollection")
 
@@ -420,59 +405,53 @@ func GetActualCollectionFromCollectionUUIDMismatchError(logger *logger.Logger, e
 }
 
 func getErrorRaw(err error) bson.Raw {
+	switch e := err.(type) {
 	// A normal command error.
-	if e, ok := stderrors.AsType[mongo.CommandError](err); ok {
+	case mongo.CommandError:
 		return e.Raw
-	}
 
 	// A driver error.
-	if e, ok := stderrors.AsType[driver.Error](err); ok {
+	case driver.Error:
 		return bson.Raw(e.Raw)
-	}
 
 	// A write concern error.
-	if e, ok := stderrors.AsType[mongo.WriteConcernError](err); ok {
+	case mongo.WriteConcernError:
 		return e.Raw
-	}
 
 	// A single write error.
-	if e, ok := stderrors.AsType[mongo.WriteError](err); ok {
+	case mongo.WriteError:
 		return e.Raw
-	}
 
-	// Errors with 1 or more write errors.
+	// Errors with 1 or more above writer errors.
 	// We return the first write error's Raw error.
-	if e, ok := stderrors.AsType[driver.WriteCommandError](err); ok {
+	case driver.WriteCommandError:
 		for _, we := range e.WriteErrors {
 			return getErrorRaw(we)
 		}
 		return nil
-	}
-
-	if e, ok := stderrors.AsType[mongo.WriteException](err); ok {
+	case mongo.WriteException:
 		for _, we := range e.WriteErrors {
 			return getErrorRaw(we)
 		}
 		return nil
-	}
 
 	// A bulk write error, consisting
 	// of a single write error.
-	if e, ok := stderrors.AsType[mongo.BulkWriteError](err); ok {
+	case mongo.BulkWriteError:
 		return e.Raw
-	}
 
 	// An error with 1 or more bulk write errors.
 	// We return the first bulk write error's Raw error.
-	if e, ok := stderrors.AsType[mongo.BulkWriteException](err); ok {
+	case mongo.BulkWriteException:
 		for _, we := range e.WriteErrors {
 			return getErrorRaw(we)
 		}
 		return nil
-	}
 
-	// No other known error types have Raw errors.
-	return nil
+	// No other error types have Raw errors.
+	default:
+		return nil
+	}
 }
 
 // IsStaleClusterTimeError returns true if this is a StaleClusterTimeError.
