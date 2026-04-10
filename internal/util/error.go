@@ -173,6 +173,17 @@ func IsTransientError(err error) bool {
 	return false
 }
 
+// errorChainHasMessage checks if any error in the chain has the exact message.
+func errorChainHasMessage(err error, message string) bool {
+	for err != nil {
+		if err.Error() == message {
+			return true
+		}
+		err = stderrors.Unwrap(err)
+	}
+	return false
+}
+
 // isNetworkError returns true if this is a NetworkError.
 func isNetworkError(err error) bool {
 	// Connection errors from syscalls, connection reset by peer, etc.
@@ -183,12 +194,12 @@ func isNetworkError(err error) bool {
 	// XXX - some of these, especially the specific strings, may not be relevant, as they come
 	// from old packages like the mgo driver. But we're not sure if they may surface from other
 	// sources as well.
-	if errors.Is(err, io.EOF) || err.Error() == "no reachable servers" || err.Error() == "Closed explicitly" {
+	if errors.Is(err, io.EOF) || errorChainHasMessage(err, "no reachable servers") || errorChainHasMessage(err, "Closed explicitly") {
 		return true
 	}
 
 	// XXX - similarly, this comes from spacemonkeygo/openssl.
-	if errors.Is(err, io.ErrUnexpectedEOF) || err.Error() == "connection closed" {
+	if errors.Is(err, io.ErrUnexpectedEOF) || errorChainHasMessage(err, "connection closed") {
 		return true
 	}
 

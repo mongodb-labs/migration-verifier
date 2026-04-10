@@ -77,3 +77,56 @@ func (suite *UnitTestSuite) TestWrappedServerErrorWithTransientLabel() {
 	wrappedErr := errors.Wrap(baseErr, "failed to find sharding info for staging.watermelon")
 	suite.True(IsTransientError(wrappedErr), "wrapped ServerError with transient label should still be detected as transient")
 }
+
+func (suite *UnitTestSuite) TestErrorChainHasMessageExactness() {
+	// Verify errorChainHasMessage uses exact equality, not substring matching.
+	// This ensures "there are no reachable servers" does NOT match "no reachable servers"
+
+	suite.Run("exact message match", func() {
+		err := errors.New("no reachable servers")
+		suite.True(errorChainHasMessage(err, "no reachable servers"))
+	})
+
+	suite.Run("substring should not match", func() {
+		err := errors.New("there are no reachable servers")
+		suite.False(errorChainHasMessage(err, "no reachable servers"), "substring should not match")
+	})
+
+	suite.Run("message in wrapped chain", func() {
+		baseErr := errors.New("no reachable servers")
+		wrappedErr := errors.Wrap(baseErr, "connection failed")
+		suite.True(errorChainHasMessage(wrappedErr, "no reachable servers"), "exact match in wrapped chain should work")
+	})
+
+	suite.Run("substring in wrapped chain should not match", func() {
+		baseErr := errors.New("there are no reachable servers")
+		wrappedErr := errors.Wrap(baseErr, "connection failed")
+		suite.False(errorChainHasMessage(wrappedErr, "no reachable servers"), "substring in wrapped chain should not match")
+	})
+}
+
+func (suite *UnitTestSuite) TestIsNetworkErrorExactMessageMatching() {
+	// Verify isNetworkError uses exact message matching for "no reachable servers"
+
+	suite.Run("exact message is network error", func() {
+		err := errors.New("no reachable servers")
+		suite.True(isNetworkError(err), "exact 'no reachable servers' message should be network error")
+	})
+
+	suite.Run("substring is NOT network error", func() {
+		err := errors.New("there are no reachable servers")
+		suite.False(isNetworkError(err), "substring match should not be treated as network error")
+	})
+
+	suite.Run("wrapped exact message is network error", func() {
+		baseErr := errors.New("no reachable servers")
+		wrappedErr := errors.Wrap(baseErr, "failed to connect")
+		suite.True(isNetworkError(wrappedErr), "wrapped exact message should be network error")
+	})
+
+	suite.Run("wrapped substring is NOT network error", func() {
+		baseErr := errors.New("there are no reachable servers")
+		wrappedErr := errors.Wrap(baseErr, "failed to connect")
+		suite.False(isNetworkError(wrappedErr), "wrapped substring should not be network error")
+	})
+}
