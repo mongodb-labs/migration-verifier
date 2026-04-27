@@ -21,6 +21,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/webserver"
+	"github.com/10gen/migration-verifier/option"
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
@@ -163,6 +164,7 @@ func (server *WebServer) setupRouter() *gin.Engine {
 			v1.POST("/check", server.operationalAPILockMiddleware(), server.checkEndPoint)
 			v1.POST("/writesOff", server.operationalAPILockMiddleware(), server.writesOffEndpoint)
 			v1.GET("/progress", server.progressEndpoint)
+			v1.GET("/summary", server.summaryEndpoint)
 			v1.GET("/docMismatches", server.docMismatchesEndpoint)
 			v1.GET("/nsMismatches", server.nsMismatchesEndpoint)
 		}
@@ -277,6 +279,37 @@ func (server *WebServer) progressEndpoint(c *gin.Context) {
 		)
 	}
 
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Data(http.StatusOK, "application/json", payload)
+}
+
+// summaryEndpoint implements the gin handler for the summary endpoint.
+func (server *WebServer) summaryEndpoint(c *gin.Context) {
+	const minDurationSecsKey = "minDurationSecs"
+
+	var minDurationSecs option.Option[float64]
+	if val := c.Query(minDurationSecsKey); val != "" {
+		secs, err := strconv.ParseFloat(val, 64)
+		if err != nil || secs < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("invalid %#q: must be a non-negative number", minDurationSecsKey),
+			})
+			return
+		}
+		minDurationSecs = option.Some(secs)
+	}
+
+	summary, err := server.Mapi.GetSummary(c.Request.Context(), minDurationSecs)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
+		return
+	}
+
+	payload, err := bson.MarshalExtJSON(summary, false, false)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
 		return

@@ -5,22 +5,22 @@ import "github.com/rs/zerolog"
 // ChangeEventCounts tallies cumulative change events seen by a change reader,
 // across all generations, since the verifier first started.
 type ChangeEventCounts struct {
-	Insert  uint64
-	Update  uint64
-	Replace uint64
-	Delete  uint64
+	Insert  int64
+	Update  int64
+	Replace int64
+	Delete  int64
 }
 
 var _ zerolog.LogObjectMarshaler = ChangeEventCounts{}
 
-func (cec ChangeEventCounts) Total() uint64 {
+func (cec ChangeEventCounts) Total() int64 {
 	return cec.Insert + cec.Update + cec.Replace + cec.Delete
 }
 
 func (cec ChangeEventCounts) MarshalZerologObject(e *zerolog.Event) {
 	e.
-		Uint64("insert", cec.Insert).
-		Uint64("update", cec.Update).
-		Uint64("replace", cec.Replace).
-		Uint64("delete", cec.Delete)
+		Int64("insert", cec.Insert).
+		Int64("update", cec.Update).
+		Int64("replace", cec.Replace).
+		Int64("delete", cec.Delete)
 }

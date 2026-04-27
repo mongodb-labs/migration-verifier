@@ -50,6 +50,13 @@ func (verifier *MockVerifier) GetProgress(ctx context.Context) (api.Progress, er
 	return api.Progress{}, nil
 }
 
+func (verifier *MockVerifier) GetSummary(
+	ctx context.Context,
+	minDurationSecs option.Option[float64],
+) (api.SummaryResponse, error) {
+	return api.SummaryResponse{}, nil
+}
+
 func (verifier *MockVerifier) SendDocumentMismatches(
 	ctx context.Context,
 	minDurationSecs uint32,

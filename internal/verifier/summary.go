@@ -660,8 +660,8 @@ func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
 
 	type eventColumn struct {
 		name     string
-		srcCount uint64
-		dstCount uint64
+		srcCount int64
+		dstCount int64
 	}
 
 	allColumns := []eventColumn{
@@ -685,10 +685,10 @@ func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
 
 	for _, row := range []struct {
 		name   string
-		getter func(eventColumn) uint64
+		getter func(eventColumn) int64
 	}{
-		{"Source", func(c eventColumn) uint64 { return c.srcCount }},
-		{"Destination", func(c eventColumn) uint64 { return c.dstCount }},
+		{"Source", func(c eventColumn) int64 { return c.srcCount }},
+		{"Destination", func(c eventColumn) int64 { return c.dstCount }},
 	} {
 		cells := []string{row.name}
 		for _, col := range columns {
@@ -701,10 +701,10 @@ func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
 	table.Render()
 }
 
-func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) uint64 {
+func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int64 {
 	var eventsTable *tablewriter.Table
 
-	totalEventsForBothClusters := uint64(0)
+	totalEventsForBothClusters := int64(0)
 
 	var lastSrcOpTime, lastDstOpTime bson.Timestamp
 
@@ -729,8 +729,8 @@ func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) uint64 {
 
 		activeNamespacesCount := len(nsStats)
 
-		totalEvents := uint64(0)
-		nsTotals := map[string]uint64{}
+		totalEvents := int64(0)
+		nsTotals := map[string]int64{}
 		for ns, events := range nsStats {
 			nsTotals[ns] = events.Total()
 			totalEvents += nsTotals[ns]

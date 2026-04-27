@@ -15,6 +15,7 @@ type MigrationVerifierAPI interface {
 	WritesOff(ctx context.Context) error
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
+	GetSummary(ctx context.Context, minDurationSecs option.Option[float64]) (SummaryResponse, error)
 	SendDocumentMismatches(context.Context, uint32, chan<- DocMismatchInfo) error
 	SendNamespaceMismatches(
 		context.Context,
@@ -143,6 +144,39 @@ type NSMismatchInfo struct {
 	Aspect    NSMismatchAspect
 	Component option.Option[string] `bson:",omitempty"`
 	Detail    option.Option[string] `bson:",omitempty"`
+}
+
+// GenerationStats summarizes a generation's comparison stats for the
+// /summary endpoint response.
+type GenerationStats struct {
+	DocsCompared     int `bson:"docsCompared"`
+	TotalDocs        int `bson:"totalDocs"`
+	SrcBytesCompared int `bson:"srcBytesCompared"`
+	TotalSrcBytes    int `bson:"totalSrcBytes"`
+	TotalNamespaces  int `bson:"totalNamespaces"`
+}
+
+// DocMismatchSummary tallies document mismatches for the /summary endpoint.
+type DocMismatchSummary struct {
+	Total       int            `bson:"total"`
+	ByType      map[string]int `bson:"byType"`
+	ByNamespace map[string]int `bson:"byNamespace"`
+}
+
+// SummaryResponse is the schema returned from the /summary endpoint.
+type SummaryResponse struct {
+	// EstCheckSecsRemaining is null when no ETA can be determined (the
+	// verifier is not in the Check phase, or it has not measured a rate
+	// yet). When the check is complete, it is Some(0).
+	EstCheckSecsRemaining option.Option[float64]         `bson:"estCheckSecsRemaining"`
+	RecentRecheckSecs     []float64                      `bson:"recentRecheckSecs,omitempty"`
+	CheckStats            option.Option[GenerationStats] `bson:"checkStats,omitempty"`
+	NSMismatches          []NSMismatchInfo               `bson:"nsMismatches"`
+	DocMismatches         DocMismatchSummary             `bson:"docMismatches"`
+	TotalRechecks         int64                          `bson:"totalRechecksDone"`
+	SrcChangeEvents       ChangeEventCounts              `bson:"srcChangeEvents"`
+	DstChangeEvents       ChangeEventCounts              `bson:"dstChangeEvents"`
+	Notes                 []string                       `bson:"notes,omitempty"`
 }
 
 // Response is the schema for Operational API response
