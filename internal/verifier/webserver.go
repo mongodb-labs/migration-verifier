@@ -21,7 +21,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/webserver"
-	"github.com/10gen/migration-verifier/option"
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
@@ -35,6 +34,8 @@ import (
 
 // RequestInProgressErrorDescription is the error description for RequestInProgressError
 const RequestInProgressErrorDescription = "Another request is currently in progress"
+
+const minDurationSecsKey = "minDurationSecs"
 
 // WebServer represents the HTTP server
 type WebServer struct {
@@ -150,6 +151,7 @@ func (server *WebServer) setupRouter() *gin.Engine {
 	router.Use(server.RequestAndResponseLogger(
 		"/api/v1/docMismatches",
 		"/api/v1/nsMismatches",
+		"/api/v1/summary",
 	), gin.Recovery())
 
 	router.Use(func(c *gin.Context) {
@@ -289,21 +291,14 @@ func (server *WebServer) progressEndpoint(c *gin.Context) {
 
 // summaryEndpoint implements the gin handler for the summary endpoint.
 func (server *WebServer) summaryEndpoint(c *gin.Context) {
-	const minDurationSecsKey = "minDurationSecs"
-
-	var minDurationSecs option.Option[float64]
-	if val := c.Query(minDurationSecsKey); val != "" {
-		secs, err := strconv.ParseFloat(val, 64)
-		if err != nil || secs < 0 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": fmt.Sprintf("invalid %#q: must be a non-negative number", minDurationSecsKey),
-			})
-			return
-		}
-		minDurationSecs = option.Some(secs)
+	minDurationSecs, err := parseMinDurationSecs(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
 	}
 
-	summary, err := server.Mapi.GetSummary(c.Request.Context(), minDurationSecs)
+	summary, err := server.Mapi.GetSummary(c.Request.Context(), safecast.MustConvert[uint32](minDurationSecs))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
 		return
@@ -318,19 +313,27 @@ func (server *WebServer) summaryEndpoint(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json", payload)
 }
 
-func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
-	const minDurationSecsKey = "minDurationSecs"
+func parseMinDurationSecs(c *gin.Context) (uint64, error) {
+	val := c.Query(minDurationSecsKey)
 
-	var minDurationSecs uint64
-	if val := c.Query(minDurationSecsKey); val != "" {
-		var err error
-		minDurationSecs, err = strconv.ParseUint(val, 10, 32)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": fmt.Sprintf("invalid %#q", minDurationSecsKey),
-			})
-			return
-		}
+	if val == "" {
+		return 0, nil
+	}
+
+	minDurationSecs, err := strconv.ParseUint(val, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %#q: %w", minDurationSecsKey, err)
+	}
+
+	return minDurationSecs, nil
+}
+
+func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
+	minDurationSecs, err := parseMinDurationSecs(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
 	}
 
 	serveMismatches(

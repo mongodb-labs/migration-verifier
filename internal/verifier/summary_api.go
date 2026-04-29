@@ -15,7 +15,7 @@ import (
 // minDurationSecs filters document mismatches by minimum mismatch duration.
 func (verifier *Verifier) GetSummary(
 	ctx context.Context,
-	minDurationSecs option.Option[float64],
+	minDurationSecs option.Option[uint64],
 ) (api.SummaryResponse, error) {
 	var progress api.Progress
 	var nsMismatches []api.NSMismatchInfo

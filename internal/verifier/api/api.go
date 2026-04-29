@@ -15,7 +15,7 @@ type MigrationVerifierAPI interface {
 	WritesOff(ctx context.Context) error
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
-	GetSummary(ctx context.Context, minDurationSecs option.Option[float64]) (SummaryResponse, error)
+	GetSummary(ctx context.Context, minDurationSecs option.Option[uint64]) (SummaryResponse, error)
 	SendDocumentMismatches(context.Context, uint32, chan<- DocMismatchInfo) error
 	SendNamespaceMismatches(
 		context.Context,
