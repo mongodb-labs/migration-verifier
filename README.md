@@ -233,6 +233,113 @@ monitor the replicator & correlate its last-replicated optime with
 `srcLastRecheckedTS`. This will tell you when it’s safe to proceed with
 cutover.
 
+### `/summary` API Response
+
+The `/summary` endpoint returns a compact, aggregated digest of the
+verifier’s state. It is intended for periodic, low-volume polling
+(e.g., a status display) and rolls the per-mismatch detail returned by
+`/docMismatches` and `/nsMismatches` into counts.
+
+```
+curl http://127.0.0.1:27020/api/v1/summary
+```
+
+The response has the following fields:
+
+- `estCheckSecsRemaining` (number or null): estimated seconds until the
+  initial check (generation 0) finishes, computed from the current
+  source bytes-per-second rate. Null when the verifier is not in the
+  `check` phase or has not yet measured a rate; `0` once the check
+  is complete.
+- `recentRecheckSecs` (array of numbers, optional): durations of recent
+  recheck generations. (Same as `/progress`.)
+- `checkStats` (object, optional): final doc/byte counts from the
+  initial check. During generation 0 it reports the in-progress
+  stats; afterwards it reports the cached final gen-0 stats. Absent
+  before any data is available.
+  - `docsCompared` (unsigned)
+  - `totalDocs` (unsigned)
+  - `srcBytesCompared` (unsigned)
+  - `totalSrcBytes` (unsigned)
+  - `totalNamespaces` (unsigned)
+- `nsMismatches` (array): namespace-level mismatches in the same
+  format as the `/nsMismatches` documents. (See
+  [Namespaces](#namespaces) below.)
+- `docMismatches` (object): document-mismatch tallies. The per-document
+  detail is available via `/docMismatches`.
+  - `total` (unsigned): total tracked document mismatches.
+  - `byType` (object): counts keyed by mismatch type (`missingOnDst`,
+    `extraOnDst`, `content`).
+  - `byNamespace` (object): counts keyed by namespace.
+- `totalRechecksDone` (unsigned): same as in `/progress`.
+- `srcChangeEvents` (object): cumulative change-event counts on the
+  source since the verifier started.
+  - `insert`
+  - `update`
+  - `replace`
+  - `delete`
+- `dstChangeEvents` (object): same shape as `srcChangeEvents`, for the
+  destination.
+- `notes` (array of strings, optional): human-readable notes describing
+  caveats applied to this response (e.g., that document mismatches
+  were filtered by `minDurationSecs`).
+
+This is sample output:
+```
+{
+  "estCheckSecsRemaining": null,
+  "recentRecheckSecs": [
+    20.3,
+    10.254,
+    23.2
+  ],
+  "checkStats": {
+    "docsCompared": 2040204,
+    "totalDocs": 2040204,
+    "srcBytesCompared": 1073741824,
+    "totalSrcBytes": 1073741824,
+    "totalNamespaces": 12
+  },
+  "nsMismatches": [],
+  "docMismatches": {
+    "total": 2,
+    "byType": {
+      "content": 1,
+      "missingOnDst": 1
+    },
+    "byNamespace": {
+      "test.coll": 2
+    }
+  },
+  "totalRechecksDone": 4823,
+  "srcChangeEvents": {
+    "insert": 1000,
+    "update": 250,
+    "replace": 0,
+    "delete": 5
+  },
+  "dstChangeEvents": {
+    "insert": 1000,
+    "update": 250,
+    "replace": 0,
+    "delete": 5
+  }
+}
+```
+
+#### Limiting Document Mismatch Counts
+
+As with `/docMismatches`, you can pass a `minDurationSecs` parameter to
+restrict the document mismatches counted in `docMismatches` to those
+seen for at least that many seconds:
+
+```
+curl 'http://127.0.0.1:27020/api/v1/summary?minDurationSecs=60'
+```
+
+This filter only affects `docMismatches`; namespace mismatches are
+unaffected. When set, a corresponding entry is added to `notes`.
+
 # CLI Options
 
 | Flag                                    | Description                                                                                                                                                                                 |
