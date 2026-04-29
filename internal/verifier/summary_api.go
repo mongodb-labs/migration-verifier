@@ -15,7 +15,7 @@ import (
 // minDurationSecs filters document mismatches by minimum mismatch duration.
 func (verifier *Verifier) GetSummary(
 	ctx context.Context,
-	minDurationSecs option.Option[uint64],
+	minDurationSecs uint32,
 ) (api.SummaryResponse, error) {
 	var progress api.Progress
 	var nsMismatches []api.NSMismatchInfo
@@ -107,10 +107,10 @@ func genStatsToAPI(g api.ProgressGenerationStats) api.GenerationStats {
 	}
 }
 
-func buildNotes(minDurationSecs option.Option[float64]) []string {
+func buildNotes(minDurationSecs uint32) []string {
 	var notes []string
-	if secs, ok := minDurationSecs.Get(); ok {
-		notes = append(notes, fmt.Sprintf("Filtering document mismatches by minimum duration (%f seconds)", secs))
+	if minDurationSecs > 0 {
+		notes = append(notes, fmt.Sprintf("Filtering document mismatches by minimum duration (%d seconds)", minDurationSecs))
 	}
 	return notes
 }
@@ -138,13 +138,8 @@ func collectNSMismatches(ctx context.Context, verifier *Verifier) ([]api.NSMisma
 func collectDocMismatches(
 	ctx context.Context,
 	verifier *Verifier,
-	minDurationSecs option.Option[float64],
+	minSecs uint32,
 ) (api.DocMismatchSummary, error) {
-	var minSecs uint32
-	if secs, ok := minDurationSecs.Get(); ok {
-		minSecs = uint32(secs)
-	}
-
 	out := make(chan api.DocMismatchInfo)
 
 	eg, egCtx := contextplus.ErrGroup(ctx)

@@ -52,7 +52,7 @@ func (verifier *MockVerifier) GetProgress(ctx context.Context) (api.Progress, er
 
 func (verifier *MockVerifier) GetSummary(
 	ctx context.Context,
-	minDurationSecs option.Option[float64],
+	minDurationSecs uint32,
 ) (api.SummaryResponse, error) {
 	return api.SummaryResponse{}, nil
 }

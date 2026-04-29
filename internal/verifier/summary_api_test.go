@@ -163,13 +163,13 @@ func TestBuildCheckStats(t *testing.T) {
 // or it isn't (yields nil).
 func TestBuildNotes(t *testing.T) {
 	t.Run("no minDurationSecs returns nil", func(t *testing.T) {
-		assert.Nil(t, buildNotes(option.None[float64]()))
+		assert.Nil(t, buildNotes(0))
 	})
 
 	t.Run("minDurationSecs returns one descriptive note", func(t *testing.T) {
-		notes := buildNotes(option.Some(2.5))
+		notes := buildNotes(2)
 		assert.Len(t, notes, 1)
-		assert.Contains(t, notes[0], "2.5", "note should mention the filter value")
+		assert.Contains(t, notes[0], "2", "note should mention the filter value")
 		assert.Contains(t, notes[0], "minimum duration")
 	})
 }
@@ -200,7 +200,7 @@ func (suite *IntegrationTestSuite) TestGetSummary_CheckStatsAcrossGenerations() 
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
 	// During gen 0 CheckStats should reflect the just-completed comparison.
-	summary, err := verifier.GetSummary(ctx, option.None[float64]())
+	summary, err := verifier.GetSummary(ctx, 0)
 	suite.Require().NoError(err)
 
 	gen0Stats, has := summary.CheckStats.Get()
@@ -218,7 +218,7 @@ func (suite *IntegrationTestSuite) TestGetSummary_CheckStatsAcrossGenerations() 
 		return p.Generation == 1
 	}, time.Minute, time.Millisecond, "should reach generation 1")
 
-	summary, err = verifier.GetSummary(ctx, option.None[float64]())
+	summary, err = verifier.GetSummary(ctx, 0)
 	suite.Require().NoError(err)
 
 	gen1View, has := summary.CheckStats.Get()
@@ -253,7 +253,7 @@ func (suite *IntegrationTestSuite) TestGetSummary_DocMismatches() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	summary, err := verifier.GetSummary(ctx, option.None[float64]())
+	summary, err := verifier.GetSummary(ctx, 0)
 	suite.Require().NoError(err)
 
 	suite.Assert().Equal(3, summary.DocMismatches.Total)
@@ -286,7 +286,7 @@ func (suite *IntegrationTestSuite) TestGetSummary_EmptyMismatchesAreNonNilSlice(
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	summary, err := verifier.GetSummary(ctx, option.None[float64]())
+	summary, err := verifier.GetSummary(ctx, 0)
 	suite.Require().NoError(err)
 
 	suite.Assert().NotNil(summary.NSMismatches, "NSMismatches must be a non-nil slice even when empty")
@@ -320,7 +320,7 @@ func (suite *IntegrationTestSuite) TestGetSummary_TotalRechecksAndChangeEvents()
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	summary, err := verifier.GetSummary(ctx, option.None[float64]())
+	summary, err := verifier.GetSummary(ctx, 0)
 	suite.Require().NoError(err)
 	suite.Assert().EqualValues(0, summary.TotalRechecks, "no rechecks in gen 0")
 
@@ -330,7 +330,7 @@ func (suite *IntegrationTestSuite) TestGetSummary_TotalRechecksAndChangeEvents()
 	progress, err := verifier.GetProgress(ctx)
 	suite.Require().NoError(err)
 
-	summary, err = verifier.GetSummary(ctx, option.None[float64]())
+	summary, err = verifier.GetSummary(ctx, 0)
 	suite.Require().NoError(err)
 
 	suite.Assert().EqualValues(progress.TotalRechecksDone, summary.TotalRechecks,
@@ -361,11 +361,11 @@ func (suite *IntegrationTestSuite) TestGetSummary_NotesReflectMinDurationFilter(
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	summary, err := verifier.GetSummary(ctx, option.None[float64]())
+	summary, err := verifier.GetSummary(ctx, 0)
 	suite.Require().NoError(err)
 	suite.Assert().Empty(summary.Notes, "no notes when no filter is applied")
 
-	summary, err = verifier.GetSummary(ctx, option.Some(1.5))
+	summary, err = verifier.GetSummary(ctx, 1)
 	suite.Require().NoError(err)
 	suite.Require().Len(summary.Notes, 1)
 	suite.Assert().Contains(summary.Notes[0], "minimum duration")

@@ -298,7 +298,7 @@ func (server *WebServer) summaryEndpoint(c *gin.Context) {
 		})
 	}
 
-	summary, err := server.Mapi.GetSummary(c.Request.Context(), safecast.MustConvert[uint32](minDurationSecs))
+	summary, err := server.Mapi.GetSummary(c.Request.Context(), minDurationSecs)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"error": err.Error()})
 		return
@@ -313,7 +313,7 @@ func (server *WebServer) summaryEndpoint(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json", payload)
 }
 
-func parseMinDurationSecs(c *gin.Context) (uint64, error) {
+func parseMinDurationSecs(c *gin.Context) (uint32, error) {
 	val := c.Query(minDurationSecsKey)
 
 	if val == "" {
@@ -325,7 +325,7 @@ func parseMinDurationSecs(c *gin.Context) (uint64, error) {
 		return 0, fmt.Errorf("invalid %#q: %w", minDurationSecsKey, err)
 	}
 
-	return minDurationSecs, nil
+	return safecast.MustConvert[uint32](minDurationSecs), nil
 }
 
 func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
