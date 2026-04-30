@@ -256,15 +256,15 @@ func (suite *IntegrationTestSuite) TestGetSummary_DocMismatches() {
 	summary, err := verifier.GetSummary(ctx, 0)
 	suite.Require().NoError(err)
 
-	suite.Assert().Equal(3, summary.DocMismatches.Total)
+	suite.Assert().EqualValues(3, summary.DocMismatches.Total)
 
 	ns := dbName + ".stuff"
-	suite.Assert().Equal(3, summary.DocMismatches.ByNamespace[ns],
+	suite.Assert().EqualValues(3, summary.DocMismatches.ByNamespace[ns],
 		"all three mismatches should be in this namespace")
 
-	suite.Assert().Equal(1, summary.DocMismatches.ByType[string(api.MismatchMissing)])
-	suite.Assert().Equal(1, summary.DocMismatches.ByType[string(api.MismatchExtra)])
-	suite.Assert().Equal(1, summary.DocMismatches.ByType[string(api.MismatchContent)])
+	suite.Assert().EqualValues(1, summary.DocMismatches.ByType[string(api.MismatchMissing)])
+	suite.Assert().EqualValues(1, summary.DocMismatches.ByType[string(api.MismatchExtra)])
+	suite.Assert().EqualValues(1, summary.DocMismatches.ByType[string(api.MismatchContent)])
 }
 
 // TestGetSummary_EmptyMismatchesAreNonNilSlice guards against the API field
