@@ -266,8 +266,8 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	// The anonymous function here makes it easier to ensure
 	// that we unlock the mutex.
 	err = func() error {
-		verifier.lock()
-		defer verifier.unlock()
+		verifier.mux.Lock()
+		defer verifier.mux.Unlock()
 
 		if verifier.writesOff {
 			return errors.New("writesOff already set")
@@ -326,9 +326,9 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 }
 
 func (verifier *Verifier) WritesOn(ctx context.Context) {
-	verifier.lock()
+	verifier.mux.Lock()
 	verifier.writesOff = false
-	verifier.unlock()
+	verifier.mux.Unlock()
 }
 
 func (verifier *Verifier) GetLogger() *logger.Logger {
