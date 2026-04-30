@@ -49,8 +49,9 @@ func ClusterHasCurrentOpIdleCursors(va [2]int) bool {
 var ClusterHasChangeStreamStartAfter = ClusterHasCurrentOpIdleCursors
 
 const (
-	TopologySharded ClusterTopology = "sharded"
-	TopologyReplset ClusterTopology = "replset"
+	TopologySharded    ClusterTopology = "sharded"
+	TopologyReplset    ClusterTopology = "replset"
+	TopologyStandalone ClusterTopology = "standalone"
 )
 
 func CmpMinorVersions(a, b [2]int) int {
@@ -86,7 +87,16 @@ func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, er
 		return "", errors.Wrapf(err, "failed to check for %#q in hello response (%v)", "msg", raw)
 	}
 
-	return lo.Ternary(hasMsg, TopologySharded, TopologyReplset), nil
+	if hasMsg {
+		return TopologySharded, nil
+	}
+
+	hasMe, err := mbson.RawContains(raw, "me")
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to check for %#q in hello response (%v)", "me", raw)
+	}
+
+	return lo.Ternary(hasMe, TopologyReplset, TopologyStandalone), nil
 }
 
 // GetHelloRaw returns the result of a `hello` (or, if needed,
@@ -118,8 +128,11 @@ func GetHelloRaw(
 	raw, err := resp.Raw()
 
 	// Proactively check for the problem that
-	// https://jira.mongodb.org/browse/SERVER-52654 fixed:
-	if err == nil {
+	// https://jira.mongodb.org/browse/SERVER-52654 fixed.
+	//
+	// We check for “me” to avoid failing if the cluster is a standalone,
+	// in which case the hello response legitimately lacks an operationTime.
+	if err == nil && !raw.Lookup("me").IsZero() {
 		const opTimeName = "operationTime"
 		_, err := raw.LookupErr(opTimeName)
 		if err != nil {

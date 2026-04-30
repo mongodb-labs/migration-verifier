@@ -19,6 +19,7 @@ import (
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/option"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -104,10 +105,10 @@ func (verifier *Verifier) insertRecheckDocs(
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
 
-	generation, _ := verifier.getGenerationWhileLocked()
+	recheckInGeneration, _ := verifier.getGenerationWhileLocked()
 
 	// We enqueue for the generation after the current one.
-	generation++
+	recheckInGeneration++
 
 	eg, groupCtx := contextplus.ErrGroup(ctx)
 
@@ -115,7 +116,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	// its connection pool’s size. To avoid that, we limit our concurrency.
 	eg.SetLimit(100)
 
-	genCollection := verifier.getRecheckQueueCollection(generation)
+	genCollection := verifier.getRecheckQueueCollection(recheckInGeneration)
 
 	start := time.Now()
 	insertThreads := 0
@@ -220,9 +221,9 @@ func (verifier *Verifier) insertRecheckDocs(
 	if err := eg.Wait(); err != nil {
 		return errors.Wrapf(
 			err,
-			"persisting %d recheck(s) for generation %d",
+			"persisting %d recheck(s) to be rechecked in generation %d",
 			len(documentIDs),
-			generation,
+			recheckInGeneration,
 		)
 	}
 
@@ -235,7 +236,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	}
 
 	verifier.logger.Trace().
-		Int("generation", generation).
+		Int("recheckInGeneration", recheckInGeneration).
 		Int("count", len(documentIDs)).
 		Msg("Persisted rechecks.")
 
@@ -354,11 +355,51 @@ func (verifier *Verifier) GenerateRecheckTasks(
 	firstMismatchTime := map[int32]bson.DateTime{}
 	var latestSrcTimestamp, latestDstTimestamp bson.Timestamp
 
+	var findCtx context.Context
+
+	if verifier.metaClusterInfo.Topology == util.TopologyStandalone {
+		// Standalone mongod is always causally consistent as long
+		// as writes are acknowledged, so we don’t need a cluster time here.
+		findCtx = ctx
+	} else {
+		sess, err := recheckColl.Database().Client().StartSession(
+			options.Session().SetCausalConsistency(true),
+		)
+		if err != nil {
+			return errors.Wrap(err, "starting session for generating recheck tasks")
+		}
+		defer sess.EndSession(ctx)
+
+		findCtx = mongo.NewSessionContext(ctx, sess)
+
+		// Do this to bootstrap the causally-consistent session. This way we
+		// guarantee that all previously-written, majority-committed writes will
+		// be visible in the session, and thus that we see all rechecks enqueued
+		// up to this point.
+		_, err = GetNewClusterTime(
+			findCtx,
+			verifier.logger,
+			recheckColl.Database().Client(),
+		)
+		if err != nil {
+			return errors.Wrap(err, "bootstrapping causally-consistent session for generating recheck tasks")
+		}
+
+		lo.Assert(
+			sess.OperationTime() != nil,
+			"session operation time must be non-nil",
+		)
+		lo.Assert(
+			sess.ClusterTime() != nil,
+			"session cluster time must be non-nil",
+		)
+	}
+
 	// The sort here is important because the recheck _id is an embedded
 	// document that includes the namespace. Thus, all rechecks for a given
 	// namespace will be consecutive in this query’s result.
 	cursor, err := recheckColl.Find(
-		ctx,
+		findCtx,
 		bson.D{},
 		options.Find().
 			SetSort(bson.D{{"_id", 1}}).
@@ -369,7 +410,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 	if err != nil {
 		return err
 	}
-	defer cursor.Close(ctx)
+	defer cursor.Close(findCtx)
 
 	var (
 		curTasks      []bson.Raw
@@ -453,7 +494,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 
 	// We group these here using a sort rather than using aggregate because aggregate is
 	// subject to a 16MB limit on group size.
-	for cursor.Next(ctx) {
+	for cursor.Next(findCtx) {
 		var doc recheck.Doc
 		err = (&doc).UnmarshalFromBSON(cursor.Current)
 		if err != nil {

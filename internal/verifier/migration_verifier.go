@@ -111,6 +111,7 @@ type Verifier struct {
 	dstClient          *mongo.Client
 	srcClusterInfo     *util.ClusterInfo
 	dstClusterInfo     *util.ClusterInfo
+	metaClusterInfo    *util.ClusterInfo
 	numWorkers         int
 	failureDisplaySize int64
 
@@ -265,8 +266,8 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 	// The anonymous function here makes it easier to ensure
 	// that we unlock the mutex.
 	err = func() error {
-		verifier.mux.Lock()
-		defer verifier.mux.Unlock()
+		verifier.lock()
+		defer verifier.unlock()
 
 		if verifier.writesOff {
 			return errors.New("writesOff already set")
@@ -325,9 +326,9 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 }
 
 func (verifier *Verifier) WritesOn(ctx context.Context) {
-	verifier.mux.Lock()
+	verifier.lock()
 	verifier.writesOff = false
-	verifier.mux.Unlock()
+	verifier.unlock()
 }
 
 func (verifier *Verifier) GetLogger() *logger.Logger {
@@ -342,9 +343,18 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 		return err
 	}
 
-	verifier.metaURI = uri
+	verifier.logger.Info().
+		Msg("Reading metadata’s cluster info.")
 
-	return err
+	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.metaClient)
+	if err != nil {
+		return errors.Wrap(err, "read metadata cluster info")
+	}
+
+	verifier.metaURI = uri
+	verifier.metaClusterInfo = &clusterInfo
+
+	return nil
 }
 
 func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
