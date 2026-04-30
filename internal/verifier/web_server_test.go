@@ -413,8 +413,8 @@ func (suite *WebServerTestSuite) TestSummaryEndPoint_Success() {
 		},
 		DocMismatches: api.DocMismatchSummary{
 			Total:       3,
-			ByType:      map[string]int{"content": 2, "missingOnDst": 1},
-			ByNamespace: map[string]int{"db.coll": 3},
+			ByType:      map[string]int64{"content": 2, "missingOnDst": 1},
+			ByNamespace: map[string]int64{"db.coll": 3},
 		},
 		TotalRechecks: 99,
 		SrcChangeEvents: api.ChangeEventCounts{

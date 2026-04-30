@@ -148,9 +148,9 @@ type NSMismatchInfo struct {
 
 // DocMismatchSummary tallies document mismatches for the /summary endpoint.
 type DocMismatchSummary struct {
-	Total       int            `bson:"total"`
-	ByType      map[string]int `bson:"byType"`
-	ByNamespace map[string]int `bson:"byNamespace"`
+	Total       int64            `bson:"total"`
+	ByType      map[string]int64 `bson:"byType"`
+	ByNamespace map[string]int64 `bson:"byNamespace"`
 }
 
 // SummaryResponse is the schema returned from the /summary endpoint.

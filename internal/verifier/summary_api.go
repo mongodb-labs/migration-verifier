@@ -138,8 +138,8 @@ func collectDocMismatches(
 	})
 
 	summary := api.DocMismatchSummary{
-		ByType:      map[string]int{},
-		ByNamespace: map[string]int{},
+		ByType:      map[string]int64{},
+		ByNamespace: map[string]int64{},
 	}
 
 	for m := range out {
