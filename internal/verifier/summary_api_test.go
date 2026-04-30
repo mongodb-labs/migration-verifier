@@ -205,9 +205,9 @@ func (suite *IntegrationTestSuite) TestGetSummary_CheckStatsAcrossGenerations() 
 
 	gen0Stats, has := summary.CheckStats.Get()
 	suite.Require().True(has, "CheckStats should be present during generation 0")
-	suite.Assert().Equal(numDocs, gen0Stats.TotalDocs)
-	suite.Assert().Equal(numDocs, gen0Stats.DocsCompared)
-	suite.Assert().Equal(1, gen0Stats.TotalNamespaces)
+	suite.Assert().EqualValues(numDocs, gen0Stats.TotalDocs)
+	suite.Assert().EqualValues(numDocs, gen0Stats.DocsCompared)
+	suite.Assert().EqualValues(1, gen0Stats.TotalNamespaces)
 	suite.Assert().NotZero(gen0Stats.TotalSrcBytes)
 
 	// Move to gen 1; CheckStats must still be the gen-0 numbers (cached).
