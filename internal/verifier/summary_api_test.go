@@ -130,11 +130,11 @@ func TestBuildCheckStats(t *testing.T) {
 		})
 		stats, has := got.Get()
 		assert.True(t, has, "CheckStats should be present in generation 0")
-		assert.Equal(t, 10, stats.DocsCompared)
-		assert.Equal(t, 10, stats.TotalDocs)
-		assert.Equal(t, 1024, stats.SrcBytesCompared)
-		assert.Equal(t, 1024, stats.TotalSrcBytes)
-		assert.Equal(t, 1, stats.TotalNamespaces)
+		assert.EqualValues(t, 10, stats.DocsCompared)
+		assert.EqualValues(t, 10, stats.TotalDocs)
+		assert.EqualValues(t, 1024, stats.SrcBytesCompared)
+		assert.EqualValues(t, 1024, stats.TotalSrcBytes)
+		assert.EqualValues(t, 1, stats.TotalNamespaces)
 	})
 
 	t.Run("generation 1+ with cached Gen0Stats returns cached values", func(t *testing.T) {
@@ -145,8 +145,8 @@ func TestBuildCheckStats(t *testing.T) {
 		})
 		stats, has := got.Get()
 		assert.True(t, has, "CheckStats should reflect cached Gen0Stats")
-		assert.Equal(t, 10, stats.DocsCompared, "should be gen0 cache, not live gen1 stats")
-		assert.Equal(t, 1024, stats.SrcBytesCompared, "should be gen0 cache, not live gen1 stats")
+		assert.EqualValues(t, 10, stats.DocsCompared, "should be gen0 cache, not live gen1 stats")
+		assert.EqualValues(t, 1024, stats.SrcBytesCompared, "should be gen0 cache, not live gen1 stats")
 	})
 
 	t.Run("generation 1+ without cache returns None", func(t *testing.T) {
