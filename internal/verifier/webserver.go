@@ -296,6 +296,7 @@ func (server *WebServer) summaryEndpoint(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
 		})
+		return
 	}
 
 	summary, err := server.Mapi.GetSummary(c.Request.Context(), minDurationSecs)
@@ -334,6 +335,7 @@ func (server *WebServer) docMismatchesEndpoint(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
 		})
+		return
 	}
 
 	serveMismatches(

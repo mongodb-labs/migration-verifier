@@ -29,6 +29,7 @@ type WebServerTestSuite struct {
 
 type MockVerifier struct {
 	filter                  bson.D
+	getSummary              func(context.Context, uint32) (api.SummaryResponse, error)
 	sendDocumentMismatches  func(context.Context, uint32, chan<- api.DocMismatchInfo) error
 	sendNamespaceMismatches func(
 		context.Context,
@@ -54,7 +55,11 @@ func (verifier *MockVerifier) GetSummary(
 	ctx context.Context,
 	minDurationSecs uint32,
 ) (api.SummaryResponse, error) {
-	return api.SummaryResponse{}, nil
+	if verifier.getSummary == nil {
+		return api.SummaryResponse{}, nil
+	}
+
+	return verifier.getSummary(ctx, minDurationSecs)
 }
 
 func (verifier *MockVerifier) SendDocumentMismatches(
@@ -389,6 +394,132 @@ func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_ValidTolerance() {
 		[]api.IndexSpecTolerance{api.IndexSpecIgnoreTTL, api.IndexSpecIgnoreUnique},
 		receivedTolerances,
 	)
+}
+
+func (suite *WebServerTestSuite) TestSummaryEndPoint_Success() {
+	defer func() {
+		suite.mockVerifier.getSummary = nil
+	}()
+
+	want := api.SummaryResponse{
+		EstCheckSecsRemaining: option.Some(12.5),
+		RecentRecheckSecs:     []float64{1.5, 2.5},
+		NSMismatches: []api.NSMismatchInfo{
+			{
+				Type:      api.MismatchMissing,
+				Namespace: "db.coll",
+				Aspect:    api.NSMismatchAspectExist,
+			},
+		},
+		DocMismatches: api.DocMismatchSummary{
+			Total:       3,
+			ByType:      map[string]int{"content": 2, "missingOnDst": 1},
+			ByNamespace: map[string]int{"db.coll": 3},
+		},
+		TotalRechecks: 99,
+		SrcChangeEvents: api.ChangeEventCounts{
+			Insert: 10, Update: 5, Replace: 1, Delete: 2,
+		},
+		Notes: []string{"sample note"},
+	}
+
+	suite.mockVerifier.getSummary = func(
+		_ context.Context, _ uint32,
+	) (api.SummaryResponse, error) {
+		return want, nil
+	}
+
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest("GET", "/api/v1/summary", nil)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(200, w.Code)
+
+	var resp map[string]any
+	suite.Require().NoError(json.NewDecoder(w.Body).Decode(&resp))
+
+	suite.Assert().EqualValues(12.5, resp["estCheckSecsRemaining"])
+	suite.Assert().EqualValues(99, resp["totalRechecksDone"])
+
+	suite.Require().IsType(map[string]any{}, resp["docMismatches"])
+	docMM := resp["docMismatches"].(map[string]any)
+	suite.Assert().EqualValues(3, docMM["total"])
+
+	suite.Require().IsType(map[string]any{}, resp["srcChangeEvents"])
+	srcCE := resp["srcChangeEvents"].(map[string]any)
+	suite.Assert().EqualValues(10, srcCE["insert"])
+
+	suite.Require().IsType([]any{}, resp["nsMismatches"])
+	suite.Assert().Len(resp["nsMismatches"], 1)
+
+	suite.Assert().Equal([]any{"sample note"}, resp["notes"])
+}
+
+func (suite *WebServerTestSuite) TestSummaryEndPoint_InvalidMinDurationSecs() {
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest("GET", "/api/v1/summary?minDurationSecs=bogus", nil)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(http.StatusBadRequest, w.Code)
+	suite.Assert().Contains(w.Body.String(), "minDurationSecs")
+	suite.Assert().Contains(w.Body.String(), "error")
+}
+
+func (suite *WebServerTestSuite) TestSummaryEndPoint_MinDurationSecsForwarded() {
+	defer func() {
+		suite.mockVerifier.getSummary = nil
+	}()
+
+	var receivedMinDur uint32
+	suite.mockVerifier.getSummary = func(
+		_ context.Context, minDur uint32,
+	) (api.SummaryResponse, error) {
+		receivedMinDur = minDur
+		return api.SummaryResponse{}, nil
+	}
+
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest("GET", "/api/v1/summary?minDurationSecs=42", nil)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(200, w.Code)
+	suite.Assert().EqualValues(42, receivedMinDur, "handler should pass minDurationSecs through")
+}
+
+func (suite *WebServerTestSuite) TestSummaryEndPoint_ImmediateError() {
+	defer func() {
+		suite.mockVerifier.getSummary = nil
+	}()
+
+	suite.mockVerifier.getSummary = func(
+		_ context.Context, _ uint32,
+	) (api.SummaryResponse, error) {
+		return api.SummaryResponse{}, fmt.Errorf("sudden error")
+	}
+
+	router := suite.webServer.setupRouter()
+
+	w := httptest.NewRecorder()
+	w.Body = bytes.NewBuffer(nil)
+	req, err := http.NewRequest("GET", "/api/v1/summary", nil)
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(200, w.Code)
+	suite.Assert().Contains(w.Body.String(), "error")
+	suite.Assert().Contains(w.Body.String(), "sudden error")
 }
 
 // findSentResponseLogEntry scans newline-delimited JSON log output and returns
