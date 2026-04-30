@@ -74,11 +74,13 @@ func computeCheckETASeconds(p api.Progress) option.Option[float64] {
 		return option.None[float64]()
 	}
 
-	bytesPending := int64(p.GenerationStats.TotalSrcBytes) - int64(p.GenerationStats.SrcBytesCompared)
-	if bytesPending <= 0 {
+	totalBytes := p.GenerationStats.TotalSrcBytes
+	comparedBytes := p.GenerationStats.SrcBytesCompared
+	if comparedBytes >= totalBytes {
 		return option.Some[float64](0)
 	}
 
+	bytesPending := totalBytes - comparedBytes
 	return option.Some(float64(bytesPending) / p.SrcBytesComparedPerSecond)
 }
 
