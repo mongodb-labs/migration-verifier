@@ -25,7 +25,7 @@ func TestComputeCheckETASeconds(t *testing.T) {
 			prog: api.Progress{
 				Phase:                     Recheck,
 				SrcBytesComparedPerSecond: 1024,
-				GenerationStats: api.ProgressGenerationStats{
+				GenerationStats: api.GenerationStats{
 					TotalSrcBytes:    2048,
 					SrcBytesCompared: 0,
 				},
@@ -37,7 +37,7 @@ func TestComputeCheckETASeconds(t *testing.T) {
 			prog: api.Progress{
 				Phase:                     Idle,
 				SrcBytesComparedPerSecond: 1024,
-				GenerationStats: api.ProgressGenerationStats{
+				GenerationStats: api.GenerationStats{
 					TotalSrcBytes: 2048,
 				},
 			},
@@ -48,7 +48,7 @@ func TestComputeCheckETASeconds(t *testing.T) {
 			prog: api.Progress{
 				Phase:                     Check,
 				SrcBytesComparedPerSecond: 0,
-				GenerationStats: api.ProgressGenerationStats{
+				GenerationStats: api.GenerationStats{
 					TotalSrcBytes: 2048,
 				},
 			},
@@ -59,7 +59,7 @@ func TestComputeCheckETASeconds(t *testing.T) {
 			prog: api.Progress{
 				Phase:                     Check,
 				SrcBytesComparedPerSecond: 1024,
-				GenerationStats: api.ProgressGenerationStats{
+				GenerationStats: api.GenerationStats{
 					TotalSrcBytes:    2048,
 					SrcBytesCompared: 2048,
 				},
@@ -71,7 +71,7 @@ func TestComputeCheckETASeconds(t *testing.T) {
 			prog: api.Progress{
 				Phase:                     Check,
 				SrcBytesComparedPerSecond: 1024,
-				GenerationStats: api.ProgressGenerationStats{
+				GenerationStats: api.GenerationStats{
 					TotalSrcBytes:    1000,
 					SrcBytesCompared: 1500,
 				},
@@ -83,7 +83,7 @@ func TestComputeCheckETASeconds(t *testing.T) {
 			prog: api.Progress{
 				Phase:                     Check,
 				SrcBytesComparedPerSecond: 512,
-				GenerationStats: api.ProgressGenerationStats{
+				GenerationStats: api.GenerationStats{
 					TotalSrcBytes:    2048,
 					SrcBytesCompared: 1024,
 				},
@@ -110,7 +110,7 @@ func TestComputeCheckETASeconds(t *testing.T) {
 // GenerationStats is returned, and that for later generations the cached
 // Gen0Stats is returned (or None when the cache is absent).
 func TestBuildCheckStats(t *testing.T) {
-	gen0 := api.ProgressGenerationStats{
+	gen0 := api.GenerationStats{
 		DocsCompared:     10,
 		TotalDocs:        10,
 		SrcBytesCompared: 1024,
@@ -118,7 +118,7 @@ func TestBuildCheckStats(t *testing.T) {
 		TotalNamespaces:  1,
 	}
 
-	gen1Live := api.ProgressGenerationStats{
+	gen1Live := api.GenerationStats{
 		DocsCompared: 5,
 		TotalDocs:    5,
 	}
@@ -153,7 +153,7 @@ func TestBuildCheckStats(t *testing.T) {
 		got := buildCheckStats(api.Progress{
 			Generation:      1,
 			GenerationStats: gen1Live,
-			Gen0Stats:       option.None[api.ProgressGenerationStats](),
+			Gen0Stats:       option.None[api.GenerationStats](),
 		})
 		assert.True(t, got.IsNone(), "CheckStats should be absent when there is no cached Gen0Stats")
 	})

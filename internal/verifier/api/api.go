@@ -54,7 +54,7 @@ type VerificationStatus struct {
 	MetadataMismatchTasks int `bson:"metadataMismatchTasks"`
 }
 
-type ProgressGenerationStats struct {
+type GenerationStats struct {
 	DocsCompared types.DocumentCount `bson:"docsCompared"`
 	TotalDocs    types.DocumentCount `bson:"totalDocs"`
 
@@ -84,13 +84,13 @@ type ProgressMismatch struct {
 type Progress struct {
 	Phase string `bson:"phase"`
 
-	Generation      int                     `bson:"generation"`
-	GenerationStats ProgressGenerationStats `bson:"generationStats"`
+	Generation      int             `bson:"generation"`
+	GenerationStats GenerationStats `bson:"generationStats"`
 
 	// Gen0Stats holds the final doc/byte counts from generation 0 (the initial
 	// check). It is absent during generation 0 itself and is populated on the
 	// first /progress call after generation 0 completes.
-	Gen0Stats option.Option[ProgressGenerationStats] `bson:"gen0Stats,omitempty"`
+	Gen0Stats option.Option[GenerationStats] `bson:"gen0Stats,omitempty"`
 
 	RecentRecheckSecs []float64 `bson:"recentRecheckSecs,omitempty"`
 
@@ -144,16 +144,6 @@ type NSMismatchInfo struct {
 	Aspect    NSMismatchAspect
 	Component option.Option[string] `bson:",omitempty"`
 	Detail    option.Option[string] `bson:",omitempty"`
-}
-
-// GenerationStats summarizes a generation's comparison stats for the
-// /summary endpoint response.
-type GenerationStats struct {
-	DocsCompared     int `bson:"docsCompared"`
-	TotalDocs        int `bson:"totalDocs"`
-	SrcBytesCompared int `bson:"srcBytesCompared"`
-	TotalSrcBytes    int `bson:"totalSrcBytes"`
-	TotalNamespaces  int `bson:"totalNamespaces"`
 }
 
 // DocMismatchSummary tallies document mismatches for the /summary endpoint.

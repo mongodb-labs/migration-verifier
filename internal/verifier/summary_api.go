@@ -87,24 +87,14 @@ func computeCheckETASeconds(p api.Progress) option.Option[float64] {
 // the cached final gen-0 stats.
 func buildCheckStats(p api.Progress) option.Option[api.GenerationStats] {
 	if p.Generation == 0 {
-		return option.Some(genStatsToAPI(p.GenerationStats))
+		return option.Some(p.GenerationStats)
 	}
 
 	if g0, has := p.Gen0Stats.Get(); has {
-		return option.Some(genStatsToAPI(g0))
+		return option.Some(g0)
 	}
 
 	return option.None[api.GenerationStats]()
-}
-
-func genStatsToAPI(g api.ProgressGenerationStats) api.GenerationStats {
-	return api.GenerationStats{
-		DocsCompared:     safecast.MustConvert[int](uint64(g.DocsCompared)),
-		TotalDocs:        safecast.MustConvert[int](uint64(g.TotalDocs)),
-		SrcBytesCompared: safecast.MustConvert[int](uint64(g.SrcBytesCompared)),
-		TotalSrcBytes:    safecast.MustConvert[int](uint64(g.TotalSrcBytes)),
-		TotalNamespaces:  safecast.MustConvert[int](uint64(g.TotalNamespaces)),
-	}
 }
 
 func buildNotes(minDurationSecs uint32) []string {

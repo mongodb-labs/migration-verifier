@@ -84,7 +84,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 			if err != nil {
 				return err
 			}
-			computed := api.ProgressGenerationStats{
+			computed := api.GenerationStats{
 				DocsCompared:     s.comparedDocs,
 				TotalDocs:        s.totalDocs,
 				SrcBytesCompared: s.comparedBytes,
@@ -130,7 +130,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 			time.Duration.Seconds,
 		),
 
-		GenerationStats: api.ProgressGenerationStats{
+		GenerationStats: api.GenerationStats{
 			DocsCompared:     compareStats.comparedDocs,
 			TotalDocs:        compareStats.totalDocs,
 			SrcBytesCompared: compareStats.comparedBytes,
