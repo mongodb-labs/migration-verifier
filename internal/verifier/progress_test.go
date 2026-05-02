@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"golang.org/x/exp/slices"
 )
 
 // TestGetProgress_Gen0Stats verifies that gen0Stats is absent while generation

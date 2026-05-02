@@ -1,8 +1,9 @@
 package verifier
 
 import (
+	"slices"
+
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"golang.org/x/exp/slices"
 )
 
 // This appends a given RawValue to a given buffer.
