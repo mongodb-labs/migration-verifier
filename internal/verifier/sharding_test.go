@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/samber/lo"
+	"github.com/samber/lo/it"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
@@ -68,15 +69,15 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 						ctx,
 						bson.D{
 							{"createIndexes", collName},
-							{"indexes", lo.Map(
-								slices.Collect(maps.Keys(indexMap)),
-								func(idxName string, _ int) bson.D {
+							{"indexes", slices.Collect(it.Map(
+								maps.Keys(indexMap),
+								func(idxName string) bson.D {
 									return bson.D{
 										{"name", idxName},
 										{"key", indexMap[idxName]},
 									}
 								},
-							)},
+							))},
 						},
 					).Err(),
 				)
@@ -182,12 +183,12 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 
 	verifier := suite.BuildVerifier()
 
-	namespaces := lo.Map(
-		slices.Collect(maps.Keys(allIndexes)),
-		func(collName string, _ int) string {
+	namespaces := slices.Collect(it.Map(
+		maps.Keys(allIndexes),
+		func(collName string) string {
 			return dbname + "." + collName
 		},
-	)
+	))
 	verifier.SetSrcNamespaces(namespaces)
 	verifier.SetDstNamespaces(namespaces)
 	verifier.SetNamespaceMap()
