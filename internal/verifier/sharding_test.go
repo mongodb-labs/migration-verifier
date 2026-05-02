@@ -2,6 +2,8 @@ package verifier
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -10,7 +12,6 @@ import (
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"golang.org/x/exp/maps"
 )
 
 func (suite *IntegrationTestSuite) TestShardingMismatch() {
@@ -62,14 +63,13 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 			)
 
 			if len(indexMap) > 0 {
-
 				suite.Require().NoError(
 					client.Database(dbname).RunCommand(
 						ctx,
 						bson.D{
 							{"createIndexes", collName},
 							{"indexes", lo.Map(
-								maps.Keys(indexMap),
+								slices.Collect(maps.Keys(indexMap)),
 								func(idxName string, _ int) bson.D {
 									return bson.D{
 										{"name", idxName},
@@ -183,7 +183,7 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 	verifier := suite.BuildVerifier()
 
 	namespaces := lo.Map(
-		maps.Keys(allIndexes),
+		slices.Collect(maps.Keys(allIndexes)),
 		func(collName string, _ int) string {
 			return dbname + "." + collName
 		},
