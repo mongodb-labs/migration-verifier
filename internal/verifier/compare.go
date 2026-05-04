@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
@@ -28,7 +29,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
-	"golang.org/x/exp/slices"
 )
 
 const (

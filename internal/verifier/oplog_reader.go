@@ -14,6 +14,7 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/10gen/migration-verifier/agg"
@@ -34,7 +35,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
-	"golang.org/x/exp/slices"
 )
 
 const (

@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
@@ -15,7 +16,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"golang.org/x/exp/slices"
 )
 
 const (

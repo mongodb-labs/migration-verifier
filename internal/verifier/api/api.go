@@ -15,6 +15,7 @@ type MigrationVerifierAPI interface {
 	WritesOff(ctx context.Context) error
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)
+	GetSummary(ctx context.Context, minDurationSecs uint32) (SummaryResponse, error)
 	SendDocumentMismatches(context.Context, uint32, chan<- DocMismatchInfo) error
 	SendNamespaceMismatches(
 		context.Context,
@@ -53,7 +54,7 @@ type VerificationStatus struct {
 	MetadataMismatchTasks int `bson:"metadataMismatchTasks"`
 }
 
-type ProgressGenerationStats struct {
+type GenerationStats struct {
 	DocsCompared types.DocumentCount `bson:"docsCompared"`
 	TotalDocs    types.DocumentCount `bson:"totalDocs"`
 
@@ -83,13 +84,13 @@ type ProgressMismatch struct {
 type Progress struct {
 	Phase string `bson:"phase"`
 
-	Generation      int                     `bson:"generation"`
-	GenerationStats ProgressGenerationStats `bson:"generationStats"`
+	Generation      int             `bson:"generation"`
+	GenerationStats GenerationStats `bson:"generationStats"`
 
 	// Gen0Stats holds the final doc/byte counts from generation 0 (the initial
 	// check). It is absent during generation 0 itself and is populated on the
 	// first /progress call after generation 0 completes.
-	Gen0Stats option.Option[ProgressGenerationStats] `bson:"gen0Stats,omitempty"`
+	Gen0Stats option.Option[GenerationStats] `bson:"gen0Stats,omitempty"`
 
 	RecentRecheckSecs []float64 `bson:"recentRecheckSecs,omitempty"`
 
@@ -143,6 +144,29 @@ type NSMismatchInfo struct {
 	Aspect    NSMismatchAspect
 	Component option.Option[string] `bson:",omitempty"`
 	Detail    option.Option[string] `bson:",omitempty"`
+}
+
+// DocMismatchSummary tallies document mismatches for the /summary endpoint.
+type DocMismatchSummary struct {
+	Total       int64            `bson:"total"`
+	ByType      map[string]int64 `bson:"byType"`
+	ByNamespace map[string]int64 `bson:"byNamespace"`
+}
+
+// SummaryResponse is the schema returned from the /summary endpoint.
+type SummaryResponse struct {
+	// EstCheckSecsRemaining is null when no ETA can be determined (the
+	// verifier is not in the Check phase, or it has not measured a rate
+	// yet). When the check is complete, it is Some(0).
+	EstCheckSecsRemaining option.Option[float64]         `bson:"estCheckSecsRemaining"`
+	RecentRecheckSecs     []float64                      `bson:"recentRecheckSecs,omitempty"`
+	CheckStats            option.Option[GenerationStats] `bson:"checkStats,omitempty"`
+	NSMismatches          []NSMismatchInfo               `bson:"nsMismatches"`
+	DocMismatches         DocMismatchSummary             `bson:"docMismatches"`
+	TotalRechecks         int64                          `bson:"totalRechecksDone"`
+	SrcChangeEvents       ChangeEventCounts              `bson:"srcChangeEvents"`
+	DstChangeEvents       ChangeEventCounts              `bson:"dstChangeEvents"`
+	Notes                 []string                       `bson:"notes,omitempty"`
 }
 
 // Response is the schema for Operational API response

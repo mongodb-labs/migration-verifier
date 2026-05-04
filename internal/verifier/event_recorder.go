@@ -1,10 +1,11 @@
 package verifier
 
 import (
+	"maps"
+
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/pkg/errors"
-	"golang.org/x/exp/maps"
 )
 
 type eventRecorderMap = map[string]api.ChangeEventCounts

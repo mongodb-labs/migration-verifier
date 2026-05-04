@@ -2,7 +2,7 @@ version: "2"
 linters:
   enable:
     - forbidigo
-    - gomodguard
+    - gomodguard_v2
     - govet
     - gocritic
   disable:

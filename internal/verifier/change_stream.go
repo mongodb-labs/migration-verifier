@@ -3,6 +3,7 @@ package verifier
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/keystring"
@@ -18,7 +19,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"golang.org/x/exp/slices"
 )
 
 var supportedEventOpTypes = mapset.NewSet(

@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"golang.org/x/exp/slices"
 )
 
 // TestGetProgress_Gen0Stats verifies that gen0Stats is absent while generation
@@ -377,7 +377,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_ChangeEventCountsPersistAcros
 	metaDB := verifier1.metaClient.Database(verifier1.metaDBName)
 	changeReaderColl := metaDB.Collection(changeReaderCollectionName)
 
-	waitForPersistedCounts := func(wantSrc, wantDst uint64) {
+	waitForPersistedCounts := func(wantSrc, wantDst int64) {
 		suite.T().Helper()
 		suite.Require().Eventually(func() bool {
 			var srcDoc, dstDoc resumeTokenDoc

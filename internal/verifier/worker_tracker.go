@@ -1,12 +1,12 @@
 package verifier
 
 import (
+	"maps"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/msync"
-	"golang.org/x/exp/maps"
 )
 
 // WorkerTracker holds certain data points about each worker thread

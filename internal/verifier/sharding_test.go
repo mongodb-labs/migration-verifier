@@ -2,15 +2,17 @@ package verifier
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/samber/lo"
+	"github.com/samber/lo/it"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"golang.org/x/exp/maps"
 )
 
 func (suite *IntegrationTestSuite) TestShardingMismatch() {
@@ -62,21 +64,20 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 			)
 
 			if len(indexMap) > 0 {
-
 				suite.Require().NoError(
 					client.Database(dbname).RunCommand(
 						ctx,
 						bson.D{
 							{"createIndexes", collName},
-							{"indexes", lo.Map(
+							{"indexes", slices.Collect(it.Map(
 								maps.Keys(indexMap),
-								func(idxName string, _ int) bson.D {
+								func(idxName string) bson.D {
 									return bson.D{
 										{"name", idxName},
 										{"key", indexMap[idxName]},
 									}
 								},
-							)},
+							))},
 						},
 					).Err(),
 				)
@@ -182,12 +183,12 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 
 	verifier := suite.BuildVerifier()
 
-	namespaces := lo.Map(
+	namespaces := slices.Collect(it.Map(
 		maps.Keys(allIndexes),
-		func(collName string, _ int) string {
+		func(collName string) string {
 			return dbname + "." + collName
 		},
-	)
+	))
 	verifier.SetSrcNamespaces(namespaces)
 	verifier.SetDstNamespaces(namespaces)
 	verifier.SetNamespaceMap()

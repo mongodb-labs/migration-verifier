@@ -1,6 +1,8 @@
 package verifier
 
 import (
+	"slices"
+
 	"github.com/10gen/migration-verifier/dockey"
 	"github.com/10gen/migration-verifier/dockey/test"
 	"github.com/samber/lo"
@@ -8,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"golang.org/x/exp/slices"
 )
 
 func (suite *IntegrationTestSuite) TestExtractTrueDocKeyAgg() {
