@@ -183,11 +183,14 @@ jobs:
 
       - name: Build migration-verifier & start clusters
         run: |-
+            metaArgs="$(perl -e'print rand > 0.5 ? q<--replicaset --nodes 1> : q<--single>')"
+            echo "Metadata mlaunch args: $metaArgs"
+
             {
                 echo ./build.sh
                 echo mlaunch init --binarypath $(cat .srcpath) --port 27020 --dir src --replicaset ${{ (matrix.topology == 'sharded') && '--sharded 2' || '' }}
                 echo mlaunch init --binarypath $(cat .dstpath) --port 27030 --dir dst --replicaset ${{ (matrix.topology == 'sharded' || matrix.topology == 'replset-to-sharded') && '--sharded 2' || '' }}
-                echo mlaunch init --binarypath $(cat .metapath) --port 27040 --dir meta --single
+                echo mlaunch init --binarypath $(cat .metapath) --port 27040 --dir meta $metaArgs
             } | parallel
 
       - name: Set Source FCV

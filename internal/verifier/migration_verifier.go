@@ -111,6 +111,7 @@ type Verifier struct {
 	dstClient          *mongo.Client
 	srcClusterInfo     *util.ClusterInfo
 	dstClusterInfo     *util.ClusterInfo
+	metaClusterInfo    *util.ClusterInfo
 	numWorkers         int
 	failureDisplaySize int64
 
@@ -342,9 +343,18 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 		return err
 	}
 
-	verifier.metaURI = uri
+	verifier.logger.Info().
+		Msg("Reading metadata’s cluster info.")
 
-	return err
+	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.metaClient)
+	if err != nil {
+		return errors.Wrap(err, "read metadata cluster info")
+	}
+
+	verifier.metaURI = uri
+	verifier.metaClusterInfo = &clusterInfo
+
+	return nil
 }
 
 func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
