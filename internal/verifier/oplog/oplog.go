@@ -7,6 +7,7 @@ import (
 
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -51,7 +52,7 @@ func (*Op) UnmarshalBSON([]byte) error {
 // bson.Unmarshal function. When verifier reads a v4.4+ server, this function
 // is called for every oplog entry, so that efficiency is material.
 func (o *Op) UnmarshalFromBSON(in []byte) error {
-	for el, err := range mbson.RawElements(bson.Raw(in)) {
+	for el, err := range bsontools.RawElements(bson.Raw(in)) {
 		if err != nil {
 			return errors.Wrap(err, "iterating BSON document")
 		}

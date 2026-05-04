@@ -6,6 +6,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -36,7 +37,7 @@ func (pe *ParsedEvent) UnmarshalBSON(in []byte) error {
 // UnmarshalFromBSON unmarshals from BSON without the overhead of
 // bson.Unmarshal.
 func (pe *ParsedEvent) UnmarshalFromBSON(in []byte) error {
-	for el, err := range mbson.RawElements(in) {
+	for el, err := range bsontools.RawElements(in) {
 		if err != nil {
 			return errors.Wrapf(err, "parsing elements")
 		}

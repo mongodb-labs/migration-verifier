@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -59,7 +60,7 @@ func (ns *Namespace) FullName() string {
 // avoid reflection, which can substantially impede performance in “hot”
 // code paths like this.
 func (ns *Namespace) UnmarshalFromBSON(in []byte) error {
-	for el, err := range mbson.RawElements(in) {
+	for el, err := range bsontools.RawElements(in) {
 		if err != nil {
 			return errors.Wrap(err, "iterating BSON fields")
 		}
