@@ -5,7 +5,7 @@ import (
 	"slices"
 )
 
-var nilable = []reflect.Kind{
+var nilableKinds = []reflect.Kind{
 	reflect.Chan,
 	reflect.Func,
 	reflect.Interface,
@@ -14,13 +14,22 @@ var nilable = []reflect.Kind{
 	reflect.Slice,
 }
 
-func isNil(val any) bool {
-	if val == nil {
-		return true
-	}
+// This is generic to avoid boxing.
+func isNil[T any](val T) bool {
+	if slices.Contains(nilableKinds, reflect.TypeFor[T]().Kind()) {
+		// Just because T is a nilable kind doesn’t mean that the dynamic type
+		// is nilable. For example, any(4) will cause TypeFor() to
+		// return interface, which is nilable, even though the dynamic type
+		// (int) is not.
+		rVal := reflect.ValueOf(val)
 
-	if slices.Contains(nilable, reflect.TypeOf(val).Kind()) {
-		return reflect.ValueOf(val).IsNil()
+		// reflect.ValueOf(any(nil)) returns an invalid Value,
+		// so we have to check for that first.
+		if !rVal.IsValid() {
+			return true
+		}
+
+		return slices.Contains(nilableKinds, rVal.Kind()) && rVal.IsNil()
 	}
 
 	return false
