@@ -8,14 +8,12 @@ import (
 
 // UnmarshalToD mimics bson.Unmarshal to a bson.D.
 func UnmarshalToD[D ~[]byte](raw D) (bson.D, error) {
-	elsCount := 0
-
-	for _, err := range RawElements(raw) {
-		if err != nil {
-			return nil, fmt.Errorf("parsing BSON: %w", err)
-		}
-
-		elsCount++
+	// First we count the document’s # of elements. Unfortunately this entails
+	// a full iteration of the document (before the “main” one below), but
+	// this way we avoid re-allocating the bson.D every time we add an element.
+	elsCount, err := CountRawElements(raw)
+	if err != nil {
+		return nil, fmt.Errorf("counting elements: %w", err)
 	}
 
 	d := make(bson.D, 0, elsCount)
@@ -49,16 +47,11 @@ func UnmarshalToD[D ~[]byte](raw D) (bson.D, error) {
 	return d, nil
 }
 
-// UnmarshalArray is like UnmarshalRaw but for an array.
+// UnmarshalArray is like UnmarshalToD but for an array.
 func UnmarshalArray(raw bson.RawArray) (bson.A, error) {
-	elsCount := 0
-
-	for _, err := range RawElements(bson.Raw(raw)) {
-		if err != nil {
-			return nil, fmt.Errorf("parsing BSON: %w", err)
-		}
-
-		elsCount++
+	elsCount, err := CountRawElements(raw)
+	if err != nil {
+		return nil, fmt.Errorf("counting array elements: %w", err)
 	}
 
 	a := make(bson.A, 0, elsCount)

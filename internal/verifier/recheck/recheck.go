@@ -6,6 +6,7 @@ import (
 
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -79,7 +80,7 @@ func (pk *PrimaryKey) UnmarshalBSON(in []byte) error {
 }
 
 func (pk *PrimaryKey) UnmarshalFromBSON(in []byte) error {
-	for el, err := range mbson.RawElements(bson.Raw(in)) {
+	for el, err := range bsontools.RawElements(bson.Raw(in)) {
 		if err != nil {
 			return errors.Wrap(err, "iterating BSON doc fields")
 		}
@@ -159,7 +160,7 @@ func (mt MismatchHistory) MarshalToBSON() []byte {
 }
 
 func (mt *MismatchHistory) UnmarshalFromBSON(in []byte) error {
-	for el, err := range mbson.RawElements(bson.Raw(in)) {
+	for el, err := range bsontools.RawElements(bson.Raw(in)) {
 		if err != nil {
 			return errors.Wrap(err, "iterating BSON doc fields")
 		}
@@ -265,7 +266,7 @@ func (rd *Doc) UnmarshalBSON(in []byte) error {
 }
 
 func (rd *Doc) UnmarshalFromBSON(in []byte) error {
-	for el, err := range mbson.RawElements(bson.Raw(in)) {
+	for el, err := range bsontools.RawElements(bson.Raw(in)) {
 		if err != nil {
 			return errors.Wrap(err, "iterating BSON doc fields")
 		}
