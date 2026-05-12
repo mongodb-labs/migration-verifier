@@ -53,6 +53,7 @@ func (verifier *Verifier) findLatestPartitionUpperBound(
 
 func (verifier *Verifier) createPartitionTasksWithSampleRate(
 	ctx context.Context,
+	workerNum int,
 	task *tasks.Task,
 	shardFields []string,
 ) (int, error) {
@@ -72,6 +73,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 
 			partitionsCount, err = verifier.createPartitionTasksWithSampleRateRetryable(
 				ctx,
+				workerNum,
 				fi,
 				task,
 				shardFields,
@@ -88,6 +90,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 
 func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	ctx context.Context,
+	workerNum int,
 	fi *retry.FuncInfo,
 	task *tasks.Task,
 	shardFields []string,
@@ -186,6 +189,11 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		partitionsCount++
 
 		fi.NoteSuccess("inserted partition #%d", partitionsCount)
+
+		verifier.workerTracker.SetNamespaceTaskPartitionsCount(
+			workerNum,
+			partitionsCount,
+		)
 
 		return nil
 	}

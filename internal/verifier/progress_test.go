@@ -218,7 +218,7 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsExcludesActiveWorker
 		QueryFilter: tasks.QueryFilter{Namespace: dbName + ".coll"},
 	}
 	verifier.workerTracker.Set(fakeSlot, fakeTask)
-	verifier.workerTracker.SetSrcCounts(fakeSlot, fakeWorkerDocs, fakeWorkerBytes)
+	verifier.workerTracker.SetDocTaskSrcCounts(fakeSlot, fakeWorkerDocs, fakeWorkerBytes)
 	defer verifier.workerTracker.Unset(fakeSlot)
 
 	progress, err := verifier.GetProgress(ctx)
