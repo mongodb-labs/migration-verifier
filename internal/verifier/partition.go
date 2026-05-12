@@ -110,6 +110,8 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		return 0, err
 	}
 
+	fi.NoteSuccess("found latest partition’s upper bound (if applicable)")
+
 	if lowerBound, has := lowerBoundOpt.Get(); has {
 		verifier.logger.Info().
 			Any("resumeFrom", lowerBound).
@@ -152,6 +154,8 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	if err != nil {
 		return 0, errors.Wrapf(err, "getting %#q’s size", srcNs)
 	}
+
+	fi.NoteSuccess("read collection size & document count")
 
 	dstNs := FullName(verifier.dstClientCollection(task))
 
@@ -200,9 +204,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 	idealNumPartitions := util.DivideToF64(collBytes, idealPartitionBytes)
 
-	docsPerPartition := util.DivideToF64(docsCount, idealNumPartitions)
-
-	sampleRate := util.DivideToF64(1, docsPerPartition)
+	sampleRate := util.DivideToF64(idealNumPartitions, docsCount)
 
 	if sampleRate > 0 && sampleRate < 1 {
 		pipeline = append(
@@ -226,10 +228,14 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		return 0, errors.Wrapf(err, "opening %#q’s sampling cursor", srcNs)
 	}
 
+	fi.NoteSuccess("opened partitioning cursor")
+
 	defer cursor.Close(ctx)
 	cursor.SetBatchSize(1)
 
 	for cursor.Next(ctx) {
+		fi.NoteSuccess("received partition boundary")
+
 		upperBound, err := cursor.Current.LookupErr("_id")
 		if err != nil {
 			return 0, errors.Wrapf(err, "fetching %#q from %#q’s sampling cursor", "_id", srcNs)
@@ -237,7 +243,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 		err = createAndInsertPartition(lowerBound, upperBound)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("create and insert partition: %w", err)
 		}
 
 		lowerBound = upperBound

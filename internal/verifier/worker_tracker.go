@@ -104,7 +104,12 @@ func (wt *WorkerTracker) SetDocTaskSrcCounts(workerNum int, docs types.DocumentC
 func (wt *WorkerTracker) SetNamespaceTaskPartitionsCount(workerNum int, partitions int) {
 	wt.guard.Store(func(m WorkerStatusMap) WorkerStatusMap {
 		status := m[workerNum]
-		new(status.TaskStatus.(NamespaceTaskStatus)).PartitionsCount = partitions
+		nsTaskStatus, ok := status.TaskStatus.(NamespaceTaskStatus)
+		if !ok {
+			panic(fmt.Sprintf("attempting to set namespace partitions count on %T", status.TaskStatus))
+		}
+		nsTaskStatus.PartitionsCount = partitions
+		status.TaskStatus = nsTaskStatus
 		m[workerNum] = status
 
 		return m
