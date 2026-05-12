@@ -149,11 +149,20 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 				time.Sleep(verifier.verificationStatusCheckInterval)
 			} else {
+				verifier.logger.Info().
+					Int("generation", generation).
+					Int("totalTasks", verificationStatus.TotalTasks).
+					Msg("All tasks for generation finished.")
+
 				finishedAllTasks = true
 
 				// Stop the thread that prints in-progress notifications.
 				canceler(errors.Errorf("generation %d finished", generation))
 				<-inProgressDone
+
+				verifier.logger.Debug().
+					Int("generation", generation).
+					Msg("Preparing generation-end summary.")
 
 				verifier.PrintVerificationSummary(ctxIn, GenerationComplete)
 
