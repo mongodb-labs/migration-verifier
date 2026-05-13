@@ -485,3 +485,64 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_NewCollectionWithDocs() {
 		"should resolve all mismatches once destination matches source",
 	)
 }
+
+// TestDDLChangeEvents_LastRecheckedTimestampUpdated verifies that after a DDL
+// change event triggers a VerifyCollection recheck and that task is processed,
+// srcLastRecheckedTS is updated to the DDL event's optime, while
+// dstLastRecheckedTS stays zero (no dst DDL event occurred).
+func (suite *IntegrationTestSuite) TestDDLChangeEvents_LastRecheckedTimestampUpdated() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
+	ctx := suite.Context()
+	dbName := suite.DBNameForTest()
+
+	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
+		suite.Require().NoError(client.Database(dbName).CreateCollection(ctx, "mycoll"))
+	}
+
+	verifier := suite.BuildVerifier()
+	verifier.SetSrcNamespaces([]string{dbName + ".mycoll"})
+	verifier.SetDstNamespaces([]string{dbName + ".mycoll"})
+	verifier.SetNamespaceMap()
+
+	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+	// Create an index on the source only — triggers a DDL change event.
+	_, err := suite.srcMongoClient.Database(dbName).Collection("mycoll").Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys: bson.D{{"x", 1}},
+		},
+	)
+	suite.Require().NoError(err, "should create src index")
+
+	// Run generations until srcLastRecheckedTS becomes non-zero, confirming
+	// that the DDL VerifyCollection task propagated the event optime through
+	// work() → NoteCompareOfOptime.
+	suite.Assert().Eventually(
+		func() bool {
+			var srcTS bson.Timestamp
+			verifier.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
+				srcTS = t
+			})
+			if !srcTS.IsZero() {
+				return true
+			}
+
+			suite.Require().NoError(verifierRunner.StartNextGeneration())
+			suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+			return false
+		},
+		time.Minute,
+		time.Second,
+		"srcLastRecheckedTS should be non-zero after DDL recheck is processed",
+	)
+
+	// No dst DDL event occurred, so dstLastRecheckedTS must remain zero.
+	var dstTS bson.Timestamp
+	verifier.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
+		dstTS = t
+	})
+	suite.Assert().True(dstTS.IsZero(), "dstLastRecheckedTS should remain zero when only src has a DDL event")
+}

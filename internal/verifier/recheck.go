@@ -498,6 +498,8 @@ func (verifier *Verifier) GenerateRecheckTasks(
 
 	var lastIDRaw bson.RawValue
 
+	// A map of all collection-level tasks to create, along with their
+	// first mismatch times.
 	collFirstMismatchTime := map[string]bson.DateTime{}
 
 	// We group these here using a sort rather than using aggregate because aggregate is
@@ -544,6 +546,8 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			if doc.ChangeOpTime.IsSome() {
 				collFirstMismatchTime[nsStr] = 0
 			}
+
+			continue
 		}
 
 		// We persist rechecks if any of these happen:
