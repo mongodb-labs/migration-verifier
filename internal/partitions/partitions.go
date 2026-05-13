@@ -133,6 +133,31 @@ func PartitionCollectionWithSize(
 	partitionSize types.ByteCount,
 	globalFilter bson.D,
 ) ([]*Partition, error) {
+	return PartitionCollectionWithOptions(
+		ctx,
+		uuidEntry,
+		srcClient,
+		subLogger,
+		partitionSize,
+		globalFilter,
+		false,
+	)
+}
+
+// PartitionCollectionWithOptions is like PartitionCollectionWithSize but
+// accepts a disableSampling flag. When true (used for CosmosDB sources),
+// the $sample + $bucketAuto mid-bound aggregation is skipped, producing a
+// single MinKey→MaxKey partition per collection. Throughput on large
+// collections suffers; correctness does not.
+func PartitionCollectionWithOptions(
+	ctx context.Context,
+	uuidEntry *uuidutil.NamespaceAndUUID,
+	srcClient *mongo.Client,
+	subLogger *logger.Logger,
+	partitionSize types.ByteCount,
+	globalFilter bson.D,
+	disableSampling bool,
+) ([]*Partition, error) {
 	lo.Assertf(
 		partitionSize > 0,
 		"partition size (%v) must be positive",
@@ -146,6 +171,7 @@ func PartitionCollectionWithSize(
 		partitionSize,
 		subLogger,
 		globalFilter,
+		disableSampling,
 	)
 
 	// Handle timeout errors by partitioning without filtering.
@@ -162,6 +188,7 @@ func PartitionCollectionWithSize(
 			partitionSize,
 			subLogger,
 			nil,
+			disableSampling,
 		)
 	}
 
@@ -179,6 +206,7 @@ func partitionCollectionWithParameters(
 	partitionBytes types.ByteCount,
 	subLogger *logger.Logger,
 	globalFilter bson.D,
+	disableSampling bool,
 ) ([]*Partition, error) {
 	subLogger.Debug().
 		Str("namespace", uuidEntry.DBName+"."+uuidEntry.CollName).
@@ -229,35 +257,45 @@ func partitionCollectionWithParameters(
 		collDropped   bool
 		prevSampleErr error
 	)
-	err = retry.New().
-		WithErrorCodes(util.SampleTooManyDuplicatesErrCode).
-		WithCallback(func(ctx context.Context, info *retry.FuncInfo) error {
-			if info.GetAttemptNumber() > 0 && mmongo.ErrorHasCode(prevSampleErr, util.SampleTooManyDuplicatesErrCode) {
-				subLogger.Debug().
-					Err(prevSampleErr).
-					Int("prevNumPartitions", numPartitions).
-					Int("newNumPartitions", numPartitions).
-					Msg("Retrying with decreased number of partitions. This will hopefully make $sample succeed.")
+	if disableSampling {
+		// CosmosDB and similar non-MongoDB sources can’t run the $sample +
+		// $bucketAuto mid-bound aggregation reliably. Fall back to a single
+		// MinKey→MaxKey partition; worker-side chunking still parallelizes
+		// across collections.
+		subLogger.Info().
+			Str("namespace", uuidEntry.DBName+"."+uuidEntry.CollName).
+			Msg("Sampling disabled for this source; using a single _id-range partition for the collection.")
+	} else {
+		err = retry.New().
+			WithErrorCodes(util.SampleTooManyDuplicatesErrCode).
+			WithCallback(func(ctx context.Context, info *retry.FuncInfo) error {
+				if info.GetAttemptNumber() > 0 && mmongo.ErrorHasCode(prevSampleErr, util.SampleTooManyDuplicatesErrCode) {
+					subLogger.Debug().
+						Err(prevSampleErr).
+						Int("prevNumPartitions", numPartitions).
+						Int("newNumPartitions", numPartitions).
+						Msg("Retrying with decreased number of partitions. This will hopefully make $sample succeed.")
 
-				numPartitions = numPartitions / 10
-			}
-			midIDBounds, collDropped, err = getMidIDBounds(
-				ctx,
-				subLogger,
-				srcDB,
-				uuidEntry.CollName,
-				collDocCount,
-				numPartitions,
-				sampleMinNumDocs,
-				sampleRate,
-				globalFilter,
-			)
-			prevSampleErr = err
-			return err
-		}, "sampling documents to get partition mid bounds").Run(ctx, subLogger)
+					numPartitions = numPartitions / 10
+				}
+				midIDBounds, collDropped, err = getMidIDBounds(
+					ctx,
+					subLogger,
+					srcDB,
+					uuidEntry.CollName,
+					collDocCount,
+					numPartitions,
+					sampleMinNumDocs,
+					sampleRate,
+					globalFilter,
+				)
+				prevSampleErr = err
+				return err
+			}, "sampling documents to get partition mid bounds").Run(ctx, subLogger)
 
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 	if collDropped {
 		// Skip this collection.
@@ -367,6 +405,25 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 	// NamespaceNotFoundError can happen if the database does not exist.
 	if util.IsNamespaceNotFoundError(err) {
 		return 0, 0, false, nil
+	}
+
+	// CosmosDB's Mongo API doesn't implement the $collStats aggregation
+	// stage (errors with UnrecognizedCommand/40324). Fall back to an
+	// estimated doc count + a heuristic size; the partition logic produces
+	// a single _id partition for CosmosDB anyway, so this is informational.
+	if err != nil && mmongo.ErrorHasCode(err, util.UnrecognizedPipelineStageErrCode) {
+		logger.Warn().
+			Err(err).
+			Str("namespace", util.FullName(srcColl)).
+			Msg("Source rejected $collStats; falling back to estimatedDocumentCount.")
+		count, countErr := srcColl.EstimatedDocumentCount(ctx)
+		if countErr != nil {
+			return 0, 0, false, errors.Wrapf(countErr, "estimating doc count for %s.%s", srcDB.Name(), collName)
+		}
+		// Assume an average user-doc size matching the rest of the verifier's
+		// default. This is only used for partition sizing and progress logs.
+		const fallbackAvgDocSize = 1024
+		return types.ByteCount(count) * fallbackAvgDocSize, types.DocumentCount(count), false, nil
 	}
 
 	if err != nil {

@@ -7,11 +7,17 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
+// ErrSessionHasNoClusterTime is returned by GetClusterTimeFromSession when the
+// underlying session never received a cluster time from the server. Callers
+// that have a sensible fallback (e.g. wall-clock for CosmosDB) should handle
+// this rather than treating it as fatal.
+var ErrSessionHasNoClusterTime = errors.New("session has no cluster time")
+
 func GetClusterTimeFromSession(sess *mongo.Session) (bson.Timestamp, error) {
 	clusterTimeRaw := sess.ClusterTime()
 
 	if clusterTimeRaw == nil {
-		panic("found empty session cluster time but need nonempty")
+		return bson.Timestamp{}, ErrSessionHasNoClusterTime
 	}
 
 	ctrv, err := clusterTimeRaw.LookupErr("$clusterTime", "clusterTime")

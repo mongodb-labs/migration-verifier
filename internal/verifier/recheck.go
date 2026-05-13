@@ -382,17 +382,31 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			recheckColl.Database().Client(),
 		)
 		if err != nil {
-			return errors.Wrap(err, "bootstrapping causally-consistent session for generating recheck tasks")
+			// appendOplogNote requires the "clusterManager" role. Some shared
+			// clusters (e.g. multi-tenant Atlas projects) don't grant it.
+			// Fall back to the (uncommitted-write-visible) majority read
+			// concern path; we won't have a strict causal-consistency
+			// guarantee for the queue read, but the worst case is that some
+			// rechecks from the most recent few moments slip into the next
+			// generation, which the next pass will pick up.
+			if mmongo.ErrorHasCode(err, int(13) /* Unauthorized */) {
+				verifier.logger.Warn().
+					Err(err).
+					Msg("Lacking permission for appendOplogNote on the metadata cluster; recheck-queue reads will not be causally bootstrapped. Any rechecks enqueued in the last few ms may roll into the next generation.")
+				findCtx = ctx
+			} else {
+				return errors.Wrap(err, "bootstrapping causally-consistent session for generating recheck tasks")
+			}
+		} else {
+			lo.Assert(
+				sess.OperationTime() != nil,
+				"session operation time must be non-nil",
+			)
+			lo.Assert(
+				sess.ClusterTime() != nil,
+				"session cluster time must be non-nil",
+			)
 		}
-
-		lo.Assert(
-			sess.OperationTime() != nil,
-			"session operation time must be non-nil",
-		)
-		lo.Assert(
-			sess.ClusterTime() != nil,
-			"session cluster time must be non-nil",
-		)
 	}
 
 	// The sort here is important because the recheck _id is an embedded

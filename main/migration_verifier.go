@@ -34,33 +34,38 @@ import (
 )
 
 const (
-	srcURI                = "srcURI"
-	dstURI                = "dstURI"
-	metaURI               = "metaURI"
-	numWorkers            = "numWorkers"
-	generationPauseDelay  = "generationPauseDelay"
-	workerSleepDelay      = "workerSleepDelay"
-	serverPort            = "serverPort"
-	logPath               = "logPath"
-	srcNamespace          = "srcNamespace"
-	dstNamespace          = "dstNamespace"
-	srcChangeReader       = "srcChangeReader"
-	dstChangeReader       = "dstChangeReader"
-	metaDBName            = "metaDBName"
-	docCompareMethod      = "docCompareMethod"
-	verifyAll             = "verifyAll"
-	startClean            = "clean"
-	readPreference        = "readPreference"
-	partitionSizeMB       = "partitionSizeMB"
-	checkOnly             = "checkOnly"
-	logLevelFlag          = "logLevel"
-	failureDisplaySize    = "failureDisplaySize"
-	ignoreReadConcernFlag = "ignoreReadConcern"
-	configFileFlag        = "configFile"
-	pprofInterval         = "pprofInterval"
-	startFlag             = "start"
-	partitioningScheme    = "partitioningScheme"
-	indexSpecIgnoreFlag   = "indexSpecIgnore"
+	srcURI                                = "srcURI"
+	dstURI                                = "dstURI"
+	metaURI                               = "metaURI"
+	numWorkers                            = "numWorkers"
+	generationPauseDelay                  = "generationPauseDelay"
+	workerSleepDelay                      = "workerSleepDelay"
+	serverPort                            = "serverPort"
+	logPath                               = "logPath"
+	srcNamespace                          = "srcNamespace"
+	dstNamespace                          = "dstNamespace"
+	srcChangeReader                       = "srcChangeReader"
+	dstChangeReader                       = "dstChangeReader"
+	metaDBName                            = "metaDBName"
+	docCompareMethod                      = "docCompareMethod"
+	verifyAll                             = "verifyAll"
+	startClean                            = "clean"
+	readPreference                        = "readPreference"
+	partitionSizeMB                       = "partitionSizeMB"
+	checkOnly                             = "checkOnly"
+	logLevelFlag                          = "logLevel"
+	failureDisplaySize                    = "failureDisplaySize"
+	ignoreReadConcernFlag                 = "ignoreReadConcern"
+	configFileFlag                        = "configFile"
+	pprofInterval                         = "pprofInterval"
+	startFlag                             = "start"
+	partitioningScheme                    = "partitioningScheme"
+	indexSpecIgnoreFlag                   = "indexSpecIgnore"
+	srcTypeFlag                           = "srcType"
+	cosmosDeleteSweepIntervalFlag         = "cosmosDeleteSweepInterval"
+	skipIndexVerificationFlag             = "skipIndexVerification"
+	skipShardingVerificationFlag          = "skipShardingVerification"
+	skipCollectionOptionsVerificationFlag = "skipCollectionOptionsVerification"
 )
 
 var logLevelStrs = lo.Map(
@@ -225,6 +230,30 @@ func main() {
 			Usage: "Use connection-default read concerns rather than setting majority read concern. This option may degrade consistency, so only enable it if majority read concern (the default) doesn’t work.",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  srcTypeFlag,
+			Value: string(verifier.SrcTypeMongoDB),
+			Usage: "The kind of source database. One of: " + strings.Join(verifier.SrcTypes, ", ") +
+				". Use 'cosmosdb' for Azure CosmosDB's MongoDB-compatible API (wire ≥ 4.2 or vCore); " +
+				"this disables MongoDB-internal operators on the source and enables a periodic delete sweep " +
+				"(CosmosDB change streams don’t emit delete events).",
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  cosmosDeleteSweepIntervalFlag,
+			Usage: "How often to scan for source-side deletes when srcType=cosmosdb (e.g. \"10m\"). 0 disables. Default: 10m.",
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
+			Name:  skipIndexVerificationFlag,
+			Usage: "Skip index verification. Auto-enabled when srcType=cosmosdb.",
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
+			Name:  skipShardingVerificationFlag,
+			Usage: "Skip sharding verification. Auto-enabled when srcType=cosmosdb.",
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
+			Name:  skipCollectionOptionsVerificationFlag,
+			Usage: "Skip comparison of collection-level options (capped, validator, etc.). Auto-enabled when srcType=cosmosdb.",
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  pprofInterval,
 			Usage: "Interval to periodically collect pprof profiles (e.g. --pprofInterval=\"5m\")",
 		}),
@@ -317,6 +346,14 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		verifierSettings.ReadConcernSetting = verifier.ReadConcernIgnore
 	}
 
+	srcTypeVal := cCtx.String(srcTypeFlag)
+	if srcTypeVal != "" {
+		if !slices.Contains(verifier.SrcTypes, srcTypeVal) {
+			return nil, errors.Errorf("invalid %#q (%s); valid values are: %#q", srcTypeFlag, srcTypeVal, verifier.SrcTypes)
+		}
+		verifierSettings.SrcType = verifier.SrcType(srcTypeVal)
+	}
+
 	missingStringArgs := lo.Filter(
 		mslices.Of(srcURI, dstURI),
 		func(setting string, _ int) bool {
@@ -331,6 +368,29 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	logPath := cCtx.String(logPath)
 
 	v := verifier.NewVerifier(verifierSettings, logPath)
+
+	// Parse the CosmosDB-specific flags early so validation errors surface
+	// before we try to connect to a (possibly fake) source URI.
+	if sweepStr := cCtx.String(cosmosDeleteSweepIntervalFlag); sweepStr != "" {
+		d, err := time.ParseDuration(sweepStr)
+		if err != nil {
+			return nil, errors.Wrapf(err, "parsing %#q", cosmosDeleteSweepIntervalFlag)
+		}
+		if d < 0 {
+			return nil, errors.Errorf("%#q must be non-negative (got %s)", cosmosDeleteSweepIntervalFlag, d)
+		}
+		v.SetCosmosDeleteSweepInterval(d)
+	}
+
+	if cCtx.IsSet(skipIndexVerificationFlag) {
+		v.SetSkipIndexVerification(cCtx.Bool(skipIndexVerificationFlag))
+	}
+	if cCtx.IsSet(skipShardingVerificationFlag) {
+		v.SetSkipShardingVerification(cCtx.Bool(skipShardingVerificationFlag))
+	}
+	if cCtx.IsSet(skipCollectionOptionsVerificationFlag) {
+		v.SetSkipCollectionOptionsVerification(cCtx.Bool(skipCollectionOptionsVerificationFlag))
+	}
 
 	logger := v.GetLogger()
 

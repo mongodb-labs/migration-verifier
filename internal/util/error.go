@@ -25,11 +25,12 @@ import (
 // `ErrorCode` newtype, but that requires a more invasive change to everything
 // that uses error codes.
 const (
-	LockFailedErrCode              = 107
-	SampleTooManyDuplicatesErrCode = 28799
-	CursorKilledErrCode            = 237
-	DuplicateKeyErrCode            = 11000
-	KeyNotFoundErrCode             = 211
+	LockFailedErrCode                  = 107
+	SampleTooManyDuplicatesErrCode     = 28799
+	CursorKilledErrCode                = 237
+	DuplicateKeyErrCode                = 11000
+	KeyNotFoundErrCode                 = 211
+	UnrecognizedPipelineStageErrCode   = 40324
 )
 
 //

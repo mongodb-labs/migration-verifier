@@ -80,6 +80,31 @@ To set a port, use `--serverPort <port number>`. The default is 27020. Note that
 
 If you give 0 as the port, a random ephemeral port will be chosen. The log will show the chosen port, and you may also query the OS to learn it (e.g., `lsof -a -iTCP -sTCP:LISTEN -p <pid>`).
 
+## Source: Azure CosmosDB (MongoDB-compatible API)
+
+The verifier can read from Azure CosmosDB's MongoDB-compatible API as the source, with the destination still a real MongoDB cluster. Pass `--srcType cosmosdb`:
+
+```
+./migration_verifier \
+    --srcURI mongodb://your.cosmosdb.cluster \
+    --dstURI mongodb://your.destination.cluster \
+    --srcType cosmosdb \
+    --verifyAll \
+    --start
+```
+
+Requirements & caveats:
+
+- **Wire version ≥ 4.2** (RU-based) or any vCore tier — older RU tiers lack change-stream support.
+- **Deletes are detected on a delay.** CosmosDB change streams don't emit delete events, so deletions are reconciled by a periodic sweep that diffs destination `_id`s against the source. Tune with `--cosmosDeleteSweepInterval` (default `10m`; set to `0` to disable).
+- **Skipped metadata checks.** Index, sharding, and collection-options verification are auto-disabled (CosmosDB's metadata doesn't translate cleanly). Override with `--skipIndexVerification=false`, `--skipShardingVerification=false`, `--skipCollectionOptionsVerification=false` if you want to see the mismatches anyway.
+- **No hashed comparison.** `$toHashedIndexKey` isn't available on CosmosDB; the verifier falls back to full-document comparison.
+- **Single partition per collection.** `$sample`/`$bucketAuto` aren't reliable on CosmosDB, so each collection is scanned by one worker. Verification is still parallel across collections.
+- **Natural-order partitioning is rejected.** `--partitioningScheme natural` won't be used when the source is CosmosDB regardless of how it's configured.
+- **Source read concern.** The verifier does not force majority read concern on the source connection (CosmosDB tiers use their own consistency model). The destination and metadata cluster still use majority.
+
+The metadata cluster (`--metaURI`) must still be a real MongoDB replica set or standalone — the verifier writes state there that requires causal-consistency semantics CosmosDB doesn't fully provide.
+
 ## Using a configuration file
 
 To load configuration options from a YAML configuration file, use the `--configFile` parameter.

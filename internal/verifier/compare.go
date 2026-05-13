@@ -643,7 +643,15 @@ func iterateCursorToChannel(
 
 		clusterTime, err := util.GetClusterTimeFromSession(sess)
 		if err != nil {
-			return 0, errors.Wrap(err, "reading cluster time from session")
+			// CosmosDB sessions don't emit a cluster time. Synthesize a
+			// wall-clock timestamp so per-doc ordering still has a stable
+			// value (the verifier uses this only for last-rechecked-optime
+			// tracking, not for correctness).
+			if errors.Is(err, util.ErrSessionHasNoClusterTime) {
+				clusterTime = bson.Timestamp{T: uint32(time.Now().Unix()), I: 0}
+			} else {
+				return 0, errors.Wrap(err, "reading cluster time from session")
+			}
 		}
 
 		needFlush := cmp.Or(

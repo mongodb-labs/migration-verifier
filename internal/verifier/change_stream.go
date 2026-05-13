@@ -44,10 +44,21 @@ func (uee UnknownEventError) Error() string {
 
 type ChangeStreamReader struct {
 	changeStream *mongo.ChangeStream
+
+	// cosmosStreams is populated when reading from a CosmosDB source.
+	// CosmosDB change streams are per-collection only, so we hold one stream
+	// per namespace and round-robin through them on iteration.
+	cosmosStreams    []*mongo.ChangeStream
+	cosmosNamespaces []string
+
 	ChangeReaderCommon
 }
 
 var _ changeReader = &ChangeStreamReader{}
+
+func (csr *ChangeStreamReader) isCosmos() bool {
+	return csr.clusterInfo.IsCosmosDB()
+}
 
 func (v *Verifier) newChangeStreamReader(
 	namespaces []string,
@@ -64,7 +75,14 @@ func (v *Verifier) newChangeStreamReader(
 	common.logger = v.logger
 	common.metaDB = v.metaClient.Database(v.metaDBName)
 
-	common.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
+	if clusterInfo.IsCosmosDB() {
+		// CosmosDB resume tokens are opaque base64-JSON, not MongoDB keystrings.
+		// Synthesize a wall-clock timestamp instead; all timestamp comparisons
+		// in the writes-off path then operate consistently in wall-clock space.
+		common.resumeTokenTSExtractor = synthesizeWallClockTimestamp
+	} else {
+		common.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
+	}
 
 	csr := &ChangeStreamReader{ChangeReaderCommon: common}
 
@@ -72,6 +90,13 @@ func (v *Verifier) newChangeStreamReader(
 	csr.iterateCb = csr.iterateChangeStream
 
 	return csr
+}
+
+// synthesizeWallClockTimestamp produces a bson.Timestamp from current wall
+// time. Used as the resume-token timestamp extractor for CosmosDB sources,
+// where genuine cluster times aren’t available in events or resume tokens.
+func synthesizeWallClockTimestamp(_ bson.Raw) (bson.Timestamp, error) {
+	return bson.Timestamp{T: uint32(time.Now().Unix()), I: 0}, nil
 }
 
 // GetChangeStreamFilter returns an aggregation pipeline that filters
@@ -261,6 +286,10 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	ri retry.SuccessNotifier,
 	sess *mongo.Session,
 ) error {
+	if csr.isCosmos() {
+		return csr.iterateCosmosChangeStreams(ctx, ri)
+	}
+
 	sctx := mongo.NewSessionContext(ctx, sess)
 
 	cs := csr.changeStream
@@ -350,11 +379,18 @@ func (csr *ChangeStreamReader) createChangeStream(
 	ctx context.Context,
 	sess *mongo.Session,
 ) (bson.Timestamp, error) {
+	if csr.isCosmos() {
+		return csr.createCosmosChangeStreams(ctx)
+	}
+
 	pipeline := csr.GetChangeStreamFilter()
 	opts := options.ChangeStream().
 		SetMaxAwaitTime(maxChangeStreamAwaitTime)
 
-	if csr.clusterInfo.VersionArray[0] >= 6 {
+	// showSystemEvents/showExpandedEvents are MongoDB 6.0+ features the
+	// CosmosDB Mongo API does not implement; setting them causes the change
+	// stream to error.
+	if csr.clusterInfo.VersionArray[0] >= 6 && !csr.clusterInfo.IsCosmosDB() {
 		opts = opts.SetCustomPipeline(
 			bson.M{
 				"showSystemEvents":   true,
@@ -457,6 +493,356 @@ func (csr *ChangeStreamReader) createChangeStream(
 
 func (csr *ChangeStreamReader) String() string {
 	return fmt.Sprintf("%s change stream reader", csr.readerType)
+}
+
+// CosmosDB change stream support.
+//
+// Constraints discovered empirically against Azure CosmosDB's Mongo API (≥ v4.2):
+//   - Change streams are per-collection only — cluster-wide and DB-wide
+//     Watch() calls fail with `Expected type string but found int`.
+//   - `fullDocument: "updateLookup"` is required.
+//   - The pipeline must be exactly:
+//       1. $match (with an operationType filter that constrains to the set
+//          {insert, update, replace} — deletes aren't emitted anyway)
+//       2. $project (whitelist of _id, fullDocument, ns, documentKey)
+//       3. (optional) further stages, including $addFields
+//   - $bsonSize is NOT a supported aggregation operator.
+//   - The change event omits operationType (filtered by $project) and
+//     clusterTime. We synthesize both client-side after decoding so the
+//     downstream persistor doesn't have to know about CosmosDB.
+//   - Resume tokens are opaque base64-JSON (not MongoDB keystrings), so the
+//     timestamp extractor is swapped for a wall-clock synthesizer at
+//     reader-construction time (see newChangeStreamReader).
+
+const cosmosResumeTokenDocPrefix = "cosmosResumeToken:"
+
+func cosmosResumeTokenDocID(clusterType whichCluster, namespace string) string {
+	return cosmosResumeTokenDocPrefix + string(clusterType) + ":" + namespace
+}
+
+// getCosmosChangeStreamPipeline returns the pipeline CosmosDB requires.
+// CosmosDB rejects every other shape we've tested.
+func getCosmosChangeStreamPipeline() mongo.Pipeline {
+	return mongo.Pipeline{
+		{{"$match", bson.D{
+			{"operationType", bson.D{{"$in", bson.A{"insert", "update", "replace"}}}},
+		}}},
+		{{"$project", bson.D{
+			{"_id", 1},
+			{"fullDocument", 1},
+			{"ns", 1},
+			{"documentKey", 1},
+		}}},
+		// operationType is dropped by the $project (CosmosDB only allows the
+		// four whitelisted fields). Re-inject a placeholder so the verifier's
+		// existing event handler doesn't reject events as DDL. We use
+		// "insert" because for recheck purposes all three op types are
+		// treated identically (re-fetch the _id from both clusters).
+		{{"$addFields", bson.D{
+			{"_docID", "$documentKey._id"},
+			{"operationType", "insert"},
+		}}},
+	}
+}
+
+func (csr *ChangeStreamReader) createCosmosChangeStreams(ctx context.Context) (bson.Timestamp, error) {
+	if len(csr.namespaces) == 0 {
+		return bson.Timestamp{}, errors.New("CosmosDB source requires explicit namespaces — cluster-wide change streams aren't supported. Set --srcNamespace/--dstNamespace, or ensure --verifyAll has populated the list.")
+	}
+
+	pipeline := getCosmosChangeStreamPipeline()
+	csr.cosmosStreams = make([]*mongo.ChangeStream, 0, len(csr.namespaces))
+	csr.cosmosNamespaces = make([]string, 0, len(csr.namespaces))
+
+	for _, ns := range csr.namespaces {
+		dbName, collName := mmongo.SplitNamespace(ns)
+		coll := csr.watcherClient.Database(dbName).Collection(collName)
+
+		opts := options.ChangeStream().
+			SetMaxAwaitTime(maxChangeStreamAwaitTime).
+			SetFullDocument(options.UpdateLookup)
+
+		// Resume from a previously persisted per-namespace token if available.
+		// CosmosDB only supports resumeAfter (not startAfter).
+		if savedTokenOpt, err := csr.loadCosmosResumeToken(ctx, ns); err != nil {
+			return bson.Timestamp{}, errors.Wrapf(err, "loading persisted resume token for %#q", ns)
+		} else if savedToken, has := savedTokenOpt.Get(); has {
+			csr.logger.Info().
+				Str("namespace", ns).
+				Msg("Resuming CosmosDB change stream from persisted token.")
+			opts = opts.SetResumeAfter(savedToken)
+		} else {
+			csr.logger.Info().
+				Str("namespace", ns).
+				Msg("Starting CosmosDB change stream from current cluster state.")
+		}
+
+		stream, err := coll.Watch(ctx, pipeline, opts)
+		if err != nil {
+			// Common case for src/dst-asymmetric namespaces (e.g. migration
+			// metadata collections that exist on dst only). Skip and continue.
+			if util.IsNamespaceNotFoundError(err) {
+				csr.logger.Warn().
+					Str("namespace", ns).
+					Msg("Skipping CosmosDB change stream: collection does not exist on source.")
+				continue
+			}
+			return bson.Timestamp{}, errors.Wrapf(err, "opening CosmosDB change stream for %#q", ns)
+		}
+
+		// Persist the initial token immediately so we have something to resume
+		// from if the verifier restarts before we read any events.
+		if token := stream.ResumeToken(); len(token) > 0 {
+			if err := csr.persistCosmosResumeToken(ctx, ns, token); err != nil {
+				stream.Close(ctx)
+				return bson.Timestamp{}, errors.Wrapf(err, "persisting initial resume token for %#q", ns)
+			}
+		}
+
+		csr.cosmosStreams = append(csr.cosmosStreams, stream)
+		csr.cosmosNamespaces = append(csr.cosmosNamespaces, ns)
+	}
+
+	// Synthetic start TS in wall-clock space (consistent with the synthetic
+	// writes-off TS produced by getSourceWritesOffTimestamp).
+	return bson.Timestamp{T: uint32(time.Now().Unix()), I: 0}, nil
+}
+
+func (csr *ChangeStreamReader) iterateCosmosChangeStreams(
+	ctx context.Context,
+	ri retry.SuccessNotifier,
+) error {
+	defer func() {
+		for _, cs := range csr.cosmosStreams {
+			cs.Close(ctx)
+		}
+	}()
+
+	lastTokenPersist := time.Now()
+
+cosmosLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			return util.WrapCtxErrWithCause(ctx)
+
+		case <-csr.writesOffTS.Ready():
+			// We have no event-level timestamps on CosmosDB; once writesOff
+			// is signaled, drain any remaining buffered events on every
+			// stream, then declare done. The user is expected to stop writes
+			// before calling writesOff.
+			writesOffTs := csr.writesOffTS.Get()
+			csr.logger.Debug().
+				Any("writesOffTimestamp", writesOffTs).
+				Msgf("%s received writesOff; draining CosmosDB streams.", csr)
+
+			drainDeadline := time.Now().Add(2 * maxChangeStreamAwaitTime)
+			for time.Now().Before(drainDeadline) {
+				gotAny := false
+				for i, cs := range csr.cosmosStreams {
+					hadEvents, err := csr.readCosmosBatch(ctx, ri, cs, csr.cosmosNamespaces[i])
+					if err != nil {
+						return errors.Wrap(err, "draining CosmosDB stream after writes-off")
+					}
+					if hadEvents {
+						gotAny = true
+					}
+				}
+				if !gotAny {
+					break
+				}
+			}
+
+			csr.running = false
+			now := bson.Timestamp{T: uint32(time.Now().Unix()), I: 0}
+			csr.startAtTS = &now
+			break cosmosLoop
+
+		default:
+			gotAny := false
+			for i, cs := range csr.cosmosStreams {
+				select {
+				case <-ctx.Done():
+					return util.WrapCtxErrWithCause(ctx)
+				default:
+				}
+				hadEvents, err := csr.readCosmosBatch(ctx, ri, cs, csr.cosmosNamespaces[i])
+				if err != nil {
+					return err
+				}
+				if hadEvents {
+					gotAny = true
+				}
+			}
+
+			// Persist resume tokens at most once per resumeTokenPersistInterval.
+			// We do this synchronously here (rather than going through the
+			// eventBatchChan) because each CosmosDB stream has its own token.
+			if time.Since(lastTokenPersist) >= minResumeTokenPersistInterval {
+				for i, cs := range csr.cosmosStreams {
+					if token := cs.ResumeToken(); len(token) > 0 {
+						if err := csr.persistCosmosResumeToken(ctx, csr.cosmosNamespaces[i], token); err != nil {
+							csr.logger.Warn().
+								Err(err).
+								Str("namespace", csr.cosmosNamespaces[i]).
+								Msg("Failed to persist CosmosDB resume token.")
+						}
+					}
+				}
+				lastTokenPersist = time.Now()
+			}
+
+			// If nothing arrived this round, briefly back off so we don't
+			// spin-wait. The change-stream TryNext already has a short
+			// maxAwaitTime, but with N streams that's N * maxAwait per round.
+			if !gotAny {
+				select {
+				case <-ctx.Done():
+					return util.WrapCtxErrWithCause(ctx)
+				case <-time.After(100 * time.Millisecond):
+				}
+			}
+		}
+	}
+
+	infoLog := csr.logger.Info()
+	if ts, has := csr.lastChangeEventTime.Load().Get(); has {
+		infoLog = infoLog.Any("lastEventTime", ts)
+	} else {
+		infoLog = infoLog.Str("lastEventTime", "none")
+	}
+	infoLog.Stringer("reader", csr).Msg("CosmosDB change stream reader is done.")
+	return nil
+}
+
+// readCosmosBatch reads a single getMore-style batch from one CosmosDB stream
+// and forwards events through the standard event batch channel. Returns true
+// if any events were read.
+func (csr *ChangeStreamReader) readCosmosBatch(
+	ctx context.Context,
+	ri retry.SuccessNotifier,
+	cs *mongo.ChangeStream,
+	namespace string,
+) (bool, error) {
+	eventsRead := 0
+	var changeEvents []ParsedEvent
+	var batchTotalBytes int
+
+	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
+		gotEvent := cs.TryNext(ctx)
+		if cs.Err() != nil {
+			return false, errors.Wrapf(cs.Err(), "CosmosDB change stream iteration failed (%s)", namespace)
+		}
+		if !gotEvent {
+			break
+		}
+
+		if changeEvents == nil {
+			batchSize := cs.RemainingBatchLength() + 1
+			ri.NoteSuccess("received a batch of %d CosmosDB change event(s) on %s", batchSize, namespace)
+			changeEvents = make([]ParsedEvent, batchSize)
+		}
+
+		batchTotalBytes += len(cs.Current)
+
+		if err := (&changeEvents[eventsRead]).UnmarshalFromBSON(cs.Current); err != nil {
+			return false, errors.Wrapf(err, "decoding CosmosDB change event")
+		}
+
+		// CosmosDB events lack operationType (dropped by required $project)
+		// and clusterTime. Re-inject synthetic values so the downstream
+		// persistor doesn't reject them.
+		if changeEvents[eventsRead].OpType == "" {
+			changeEvents[eventsRead].OpType = "insert"
+		}
+		if changeEvents[eventsRead].ClusterTime == nil {
+			ts := bson.Timestamp{T: uint32(time.Now().Unix()), I: 0}
+			changeEvents[eventsRead].ClusterTime = &ts
+		}
+
+		if changeEvents[eventsRead].Ns == nil {
+			return false, errors.Errorf("CosmosDB change event lacks ns: %s", cs.Current)
+		}
+
+		// Track wall-clock as the "last seen" so writes-off draining can
+		// compare timestamps consistently.
+		eventTime := changeEvents[eventsRead].ClusterTime
+		if csr.lastChangeEventTime.Load().OrZero().Before(*eventTime) {
+			csr.lastChangeEventTime.Store(option.Some(*eventTime))
+		}
+
+		eventsRead++
+	}
+
+	if changeEvents == nil {
+		return false, nil
+	}
+	// Trim in case some events were dropped (none currently are for cosmos).
+	changeEvents = changeEvents[:eventsRead]
+
+	select {
+	case <-ctx.Done():
+		return false, util.WrapCtxErrWithCause(ctx)
+	case csr.eventBatchChan <- eventBatch{
+		events: changeEvents,
+		// For CosmosDB, resume tokens are per-stream and we persist them
+		// directly out-of-band. The persistor's resume-token persistence path
+		// would only ever see the last stream's token, so we explicitly omit
+		// it here.
+		resumeToken: nil,
+	}:
+	}
+
+	ri.NoteSuccess("sent %d-event CosmosDB batch (%s) to handler", len(changeEvents), namespace)
+	return true, nil
+}
+
+func (csr *ChangeStreamReader) persistCosmosResumeToken(
+	ctx context.Context,
+	namespace string,
+	token bson.Raw,
+) error {
+	if len(token) == 0 {
+		return nil
+	}
+	docID := cosmosResumeTokenDocID(csr.getWhichCluster(), namespace)
+	coll := csr.metaDB.Collection(changeReaderCollectionName)
+	_, err := coll.ReplaceOne(
+		ctx,
+		bson.D{{"_id", docID}},
+		bson.D{
+			{"_id", docID},
+			{"token", token},
+			{"namespace", namespace},
+			{"cluster", string(csr.getWhichCluster())},
+		},
+		options.Replace().SetUpsert(true),
+	)
+	return err
+}
+
+func (csr *ChangeStreamReader) loadCosmosResumeToken(
+	ctx context.Context,
+	namespace string,
+) (option.Option[bson.Raw], error) {
+	docID := cosmosResumeTokenDocID(csr.getWhichCluster(), namespace)
+	raw, err := csr.metaDB.Collection(changeReaderCollectionName).
+		FindOne(ctx, bson.D{{"_id", docID}}).Raw()
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return option.None[bson.Raw](), nil
+		}
+		return option.None[bson.Raw](), err
+	}
+	tokenRV, lookupErr := raw.LookupErr("token")
+	if lookupErr != nil {
+		return option.None[bson.Raw](), errors.Wrapf(lookupErr, "decoding stored CosmosDB resume token for %#q", namespace)
+	}
+	tokenDoc, ok := tokenRV.DocumentOK()
+	if !ok {
+		return option.None[bson.Raw](), errors.Errorf("stored CosmosDB resume token for %#q is not a document", namespace)
+	}
+	return option.Some(bson.Raw(tokenDoc)), nil
 }
 
 func extractTSFromChangeStreamResumeToken(resumeToken bson.Raw) (bson.Timestamp, error) {

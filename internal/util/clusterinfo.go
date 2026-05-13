@@ -19,9 +19,32 @@ import (
 
 type ClusterTopology string
 
+// ClusterFlavor distinguishes real MongoDB from MongoDB-API-compatible
+// services like Azure CosmosDB. It is set by callers (the verifier looks
+// at its srcType setting) rather than auto-detected, because CosmosDB
+// servers don’t reliably advertise themselves through the wire protocol.
+type ClusterFlavor string
+
+const (
+	// ClusterFlavorMongoDB means a real MongoDB cluster.
+	ClusterFlavorMongoDB ClusterFlavor = "mongodb"
+
+	// ClusterFlavorCosmosDB means Azure CosmosDB’s MongoDB-compatible API.
+	ClusterFlavorCosmosDB ClusterFlavor = "cosmosdb"
+)
+
 type ClusterInfo struct {
 	VersionArray []int
 	Topology     ClusterTopology
+
+	// Flavor distinguishes MongoDB vs MongoDB-compatible-API services like
+	// CosmosDB. Empty is treated equivalent to MongoDB.
+	Flavor ClusterFlavor
+}
+
+// IsCosmosDB reports whether this cluster is CosmosDB’s MongoDB-compatible API.
+func (ci ClusterInfo) IsCosmosDB() bool {
+	return ci.Flavor == ClusterFlavorCosmosDB
 }
 
 // ClusterHasBSONSize indicates whether a cluster with the given
@@ -59,12 +82,36 @@ func CmpMinorVersions(a, b [2]int) int {
 }
 
 func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Client) (ClusterInfo, error) {
-	va, err := mmongo.GetVersionArray(ctx, client)
-	if err != nil {
-		return ClusterInfo{}, errors.Wrap(err, "failed to fetch version array")
+	return GetClusterInfoForFlavor(ctx, logger, client, ClusterFlavorMongoDB)
+}
+
+// GetClusterInfoForFlavor is like GetClusterInfo but lets the caller declare
+// the cluster’s flavor. For non-MongoDB flavors (e.g. CosmosDB) it relaxes
+// the checks that are specific to real MongoDB.
+func GetClusterInfoForFlavor(
+	ctx context.Context,
+	logger *logger.Logger,
+	client *mongo.Client,
+	flavor ClusterFlavor,
+) (ClusterInfo, error) {
+	if flavor == "" {
+		flavor = ClusterFlavorMongoDB
 	}
 
-	topology, err := getTopology(ctx, client)
+	va, err := mmongo.GetVersionArray(ctx, client)
+	if err != nil {
+		if flavor == ClusterFlavorCosmosDB {
+			// CosmosDB’s buildInfo isn’t guaranteed to have a versionArray.
+			// Treat as a high modern version so feature gates aimed at real
+			// MongoDB don’t flag this as ancient.
+			logger.Warn().Err(err).Msg("CosmosDB source has no versionArray in buildInfo response; assuming a recent-ish version.")
+			va = [3]int{8, 0, 0}
+		} else {
+			return ClusterInfo{}, errors.Wrap(err, "failed to fetch version array")
+		}
+	}
+
+	topology, err := getTopology(ctx, client, flavor)
 	if err != nil {
 		return ClusterInfo{}, errors.Wrapf(err, "failed to learn topology")
 	}
@@ -72,12 +119,13 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 	return ClusterInfo{
 		VersionArray: va[:],
 		Topology:     topology,
+		Flavor:       flavor,
 	}, nil
 }
 
-func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, error) {
+func getTopology(ctx context.Context, client *mongo.Client, flavor ClusterFlavor) (ClusterTopology, error) {
 	// The topology won’t vary amongst the nodes.
-	raw, err := GetHelloRaw(ctx, client, option.None[*readpref.ReadPref]())
+	raw, err := getHelloRawForFlavor(ctx, client, option.None[*readpref.ReadPref](), flavor)
 	if err != nil {
 		return "", errors.Wrapf(err, "failed learn topology")
 	}
@@ -106,6 +154,15 @@ func GetHelloRaw(
 	client *mongo.Client,
 	readPref option.Option[*readpref.ReadPref],
 ) (bson.Raw, error) {
+	return getHelloRawForFlavor(ctx, client, readPref, ClusterFlavorMongoDB)
+}
+
+func getHelloRawForFlavor(
+	ctx context.Context,
+	client *mongo.Client,
+	readPref option.Option[*readpref.ReadPref],
+	flavor ClusterFlavor,
+) (bson.Raw, error) {
 	opts := options.RunCmd()
 	if rp, has := readPref.Get(); has {
 		opts = opts.SetReadPreference(rp)
@@ -127,12 +184,10 @@ func GetHelloRaw(
 
 	raw, err := resp.Raw()
 
-	// Proactively check for the problem that
-	// https://jira.mongodb.org/browse/SERVER-52654 fixed.
-	//
-	// We check for “me” to avoid failing if the cluster is a standalone,
-	// in which case the hello response legitimately lacks an operationTime.
-	if err == nil && !raw.Lookup("me").IsZero() {
+	// The operationTime presence check defends against a specific MongoDB
+	// election bug (SERVER-52654). CosmosDB’s hello response may legitimately
+	// omit operationTime, so skip the check for non-MongoDB flavors.
+	if err == nil && flavor != ClusterFlavorCosmosDB && !raw.Lookup("me").IsZero() {
 		const opTimeName = "operationTime"
 		_, err := raw.LookupErr(opTimeName)
 		if err != nil {

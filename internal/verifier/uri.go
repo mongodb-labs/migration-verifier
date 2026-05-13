@@ -12,7 +12,7 @@ import (
 )
 
 func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri).SetReadPreference(
+	opts := verifier.getClientOptsForSrc(uri).SetReadPreference(
 		verifier.readPreference,
 	)
 	var err error
@@ -26,12 +26,29 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 	verifier.logger.Info().
 		Msg("Reading source’s cluster info.")
 
-	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.srcClient)
+	flavor := util.ClusterFlavorMongoDB
+	if verifier.IsSrcCosmosDB() {
+		flavor = util.ClusterFlavorCosmosDB
+	}
+
+	clusterInfo, err := util.GetClusterInfoForFlavor(ctx, verifier.logger, verifier.srcClient, flavor)
 	if err != nil {
 		return errors.Wrap(err, "failed to read source cluster info")
 	}
 
 	verifier.srcClusterInfo = &clusterInfo
+
+	if clusterInfo.IsCosmosDB() {
+		// Skip MongoDB-specific version checks, mongos refresh, and the
+		// pre-v5 SRV restriction: none translate to CosmosDB.
+		if verifier.docCompareMethod == compare.ToHashedIndexKey {
+			return errors.Errorf("document comparison mode %#q is not supported with srcType=cosmosdb", compare.ToHashedIndexKey)
+		}
+		verifier.logger.Warn().
+			Dur("deleteSweepInterval", verifier.cosmosDeleteSweepInterval).
+			Msg("Source is CosmosDB: change streams don’t emit delete events, so deletes are reconciled by periodically diffing destination _ids against the source. Index, sharding, and collection-options verification are also skipped by default.")
+		return nil
+	}
 
 	if clusterInfo.VersionArray[0] < 5 && clusterInfo.Topology == util.TopologySharded {
 		err := RefreshSrcMongosInstances(
@@ -71,6 +88,11 @@ func (verifier *Verifier) maybeSuggestHashedComparisonOptimization() {
 
 	if verifier.docCompareMethod != compare.Default {
 		// User already gave a non-default comparison method.
+		return
+	}
+
+	if verifier.IsSrcCosmosDB() {
+		// $toHashedIndexKey isn’t available in CosmosDB.
 		return
 	}
 

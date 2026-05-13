@@ -248,5 +248,9 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 }
 
 func (v *Verifier) srcHasSampleRate() bool {
+	// $sampleRate isn’t supported in CosmosDB’s MongoDB-compatible API.
+	if v.IsSrcCosmosDB() {
+		return false
+	}
 	return mmongo.VersionAtLeast(v.srcClusterInfo.VersionArray, 4, 4)
 }

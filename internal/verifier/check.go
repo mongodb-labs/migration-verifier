@@ -221,6 +221,16 @@ func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testCh
 		}
 	}
 
+	// CosmosDB change streams must be opened per-collection, so we need the
+	// namespace list before initializing change readers. (For MongoDB,
+	// cluster-wide change streams handle empty namespace lists fine.)
+	if verifier.verifyAll && verifier.IsSrcCosmosDB() && len(verifier.srcNamespaces) == 0 {
+		if err := verifier.setupAllNamespaceList(ctx); err != nil {
+			verifier.mux.Unlock()
+			return errors.Wrap(err, "listing namespaces for cosmosdb source")
+		}
+	}
+
 	// Now that we’ve initialized verifier.generation we can
 	// start the change readers.
 	err = verifier.initializeChangeReaders()
@@ -460,6 +470,10 @@ func (verifier *Verifier) startChangeHandling(ctx context.Context) error {
 			})
 		}
 	}
+
+	// CosmosDB change streams don't emit delete events, so a periodic sweep
+	// reconciles deletions by diffing destination _ids against the source.
+	verifier.startCosmosDeleteReconciler(groupCtx, changeReaderGroup)
 
 	changeHandlingErr := verifier.changeHandlingErr
 

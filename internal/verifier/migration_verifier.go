@@ -53,6 +53,28 @@ import (
 // concern.
 type ReadConcernSetting string
 
+// SrcType describes the kind of database the source is. The destination
+// and metadata clusters are always real MongoDB; only the source may
+// differ. This is needed because non-MongoDB sources (e.g. Azure
+// CosmosDB’s MongoDB-compatible API) lack features the verifier relies
+// on, like resumable natural scans, $toHashedIndexKey, $sample/$bucketAuto
+// partitioning, appendOplogNote-based cluster time, and (for CosmosDB
+// specifically) delete events in change streams.
+type SrcType string
+
+const (
+	// SrcTypeMongoDB is the default: a real MongoDB cluster.
+	SrcTypeMongoDB SrcType = "mongodb"
+
+	// SrcTypeCosmosDB is Azure CosmosDB exposed via its MongoDB-compatible
+	// API (RU-based wire ≥ 4.2 or vCore). It disables MongoDB-internal
+	// operators on the source side and enables a periodic delete sweep
+	// because CosmosDB change streams do not emit delete events.
+	SrcTypeCosmosDB SrcType = "cosmosdb"
+)
+
+var SrcTypes = []string{string(SrcTypeMongoDB), string(SrcTypeCosmosDB)}
+
 const (
 	// TODO: add comments for each of these so the warnings will stop :)
 	Failed            = "Failed"
@@ -73,6 +95,10 @@ const (
 	// which is important for deployments where majority read concern
 	// is unworkable.
 	ReadConcernIgnore ReadConcernSetting = "ignore"
+
+	// DefaultCosmosDeleteSweepInterval is the default cadence for the
+	// periodic deletion-reconciliation sweep when the source is CosmosDB.
+	DefaultCosmosDeleteSweepInterval = 10 * time.Minute
 
 	DefaultFailureDisplaySize = 20
 
@@ -165,6 +191,22 @@ type Verifier struct {
 
 	readConcernSetting ReadConcernSetting
 
+	// srcType identifies the kind of source database. Defaults to MongoDB.
+	// When set to CosmosDB, the verifier disables MongoDB-internal features
+	// on the source side and enables a periodic delete-reconciliation sweep.
+	srcType SrcType
+
+	// cosmosDeleteSweepInterval is how often the delete reconciler runs
+	// when srcType is CosmosDB. Zero disables it.
+	cosmosDeleteSweepInterval time.Duration
+
+	// skipIndexVerification, skipShardingVerification, and
+	// skipCollectionOptionsVerification disable the corresponding metadata
+	// checks. They are auto-enabled when srcType is CosmosDB.
+	skipIndexVerification             bool
+	skipShardingVerification          bool
+	skipCollectionOptionsVerification bool
+
 	// A user-defined $match-compatible document-level query filter.
 	// The filter is applied to all namespaces in both initial checking and iterative checking.
 	// The verifier only checks documents within the filter.
@@ -189,6 +231,7 @@ var _ api.MigrationVerifierAPI = &Verifier{}
 // VerifierSettings is NewVerifier’s argument.
 type VerifierSettings struct {
 	ReadConcernSetting
+	SrcType SrcType
 }
 
 // NewVerifier creates a new Verifier
@@ -196,6 +239,26 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 	readConcern := settings.ReadConcernSetting
 	if readConcern == "" {
 		readConcern = ReadConcernMajority
+	}
+
+	srcType := settings.SrcType
+	if srcType == "" {
+		srcType = SrcTypeMongoDB
+	}
+
+	// For CosmosDB sources we must not enforce MongoDB-only metadata checks.
+	// Force these on by default so callers don’t have to remember; they can
+	// still be turned back off explicitly via the corresponding setters.
+	// (Read concern on the source connection is handled in getClientOptsForSrc.)
+	cosmosSweepInterval := time.Duration(0)
+	skipIndexes := false
+	skipSharding := false
+	skipCollOpts := false
+	if srcType == SrcTypeCosmosDB {
+		cosmosSweepInterval = DefaultCosmosDeleteSweepInterval
+		skipIndexes = true
+		skipSharding = true
+		skipCollOpts = true
 	}
 
 	logger, logWriter := getLoggerAndWriter(logPath)
@@ -209,7 +272,12 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		partitionSizeInBytes: 400 * 1024 * 1024,
 		failureDisplaySize:   DefaultFailureDisplaySize,
 
-		readConcernSetting: readConcern,
+		readConcernSetting:                readConcern,
+		srcType:                           srcType,
+		cosmosDeleteSweepInterval:         cosmosSweepInterval,
+		skipIndexVerification:             skipIndexes,
+		skipShardingVerification:          skipSharding,
+		skipCollectionOptionsVerification: skipCollOpts,
 
 		workerTracker:        NewWorkerTracker(NumWorkers),
 		docsComparedHistory:  history.New[types.DocumentCount](time.Minute),
@@ -233,6 +301,33 @@ func (verifier *Verifier) ConfigureReadConcern(setting ReadConcernSetting) {
 	verifier.readConcernSetting = setting
 }
 
+// IsSrcCosmosDB returns true if the source is configured as CosmosDB.
+func (verifier *Verifier) IsSrcCosmosDB() bool {
+	return verifier.srcType == SrcTypeCosmosDB
+}
+
+// SetCosmosDeleteSweepInterval overrides the periodic delete-reconciliation
+// cadence (only relevant when srcType is CosmosDB). Zero disables the sweep.
+func (verifier *Verifier) SetCosmosDeleteSweepInterval(d time.Duration) {
+	verifier.cosmosDeleteSweepInterval = d
+}
+
+// SetSkipIndexVerification turns off index verification for the run.
+func (verifier *Verifier) SetSkipIndexVerification(skip bool) {
+	verifier.skipIndexVerification = skip
+}
+
+// SetSkipShardingVerification turns off sharding verification for the run.
+func (verifier *Verifier) SetSkipShardingVerification(skip bool) {
+	verifier.skipShardingVerification = skip
+}
+
+// SetSkipCollectionOptionsVerification turns off the comparison of
+// collection-level options (capped, validator, etc.) for the run.
+func (verifier *Verifier) SetSkipCollectionOptionsVerification(skip bool) {
+	verifier.skipCollectionOptionsVerification = skip
+}
+
 func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
 	appName := buildvar.GetClientAppName()
 	opts := &options.ClientOptions{
@@ -246,6 +341,34 @@ func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
 	})
 
 	return opts
+}
+
+// getSourceWritesOffTimestamp returns a "writes off" timestamp for the source.
+// For real MongoDB it uses appendOplogNote to fetch a fresh cluster time.
+// CosmosDB doesn't support appendOplogNote, so we synthesize a future-ish
+// timestamp instead; the source change stream will end as soon as it catches
+// up to that timestamp.
+func (verifier *Verifier) getSourceWritesOffTimestamp(ctx context.Context) (bson.Timestamp, error) {
+	if verifier.IsSrcCosmosDB() {
+		return bson.Timestamp{T: uint32(time.Now().Unix()) + 60, I: 0}, nil
+	}
+	return GetNewClusterTime(ctx, verifier.logger, verifier.srcClient)
+}
+
+// getClientOptsForSrc returns connection options for the source cluster.
+// For CosmosDB sources it skips majority read concern (CosmosDB tiers have
+// their own consistency levels that don’t map cleanly to majority).
+func (verifier *Verifier) getClientOptsForSrc(uri string) *options.ClientOptions {
+	if verifier.IsSrcCosmosDB() {
+		appName := buildvar.GetClientAppName()
+		opts := &options.ClientOptions{
+			AppName: &appName,
+		}
+		opts.ApplyURI(uri)
+		opts.SetWriteConcern(writeconcern.Majority())
+		return opts
+	}
+	return verifier.getClientOpts(uri)
 }
 
 func (verifier *Verifier) SetFailureDisplaySize(size int64) {
@@ -276,11 +399,7 @@ func (verifier *Verifier) WritesOff(ctx context.Context) error {
 
 		verifier.logger.Debug().Msg("Signaling that writes are done.")
 
-		srcFinalTs, err = GetNewClusterTime(
-			ctx,
-			verifier.logger,
-			verifier.srcClient,
-		)
+		srcFinalTs, err = verifier.getSourceWritesOffTimestamp(ctx)
 		if err != nil {
 			return errors.Wrapf(err, "failed to fetch source's cluster time")
 		}
@@ -450,6 +569,10 @@ func (verifier *Verifier) SetPartitioningScheme(method partitions.Scheme) {
 }
 
 func (verifier *Verifier) SetSrcChangeReaderMethod(method string) error {
+	if verifier.IsSrcCosmosDB() && method != ChangeReaderOptChangeStream {
+		return errors.Errorf("source change reader %#q is not supported with srcType=cosmosdb (only %#q is)", method, ChangeReaderOptChangeStream)
+	}
+
 	err := validateChangeReaderOpt(method, *verifier.srcClusterInfo)
 	if err != nil {
 		return errors.Wrap(err, "setting source change reader method")
@@ -897,13 +1020,14 @@ func (verifier *Verifier) partitionAndInspectNamespace(
 		return nil, err
 	}
 
-	partitionList, err := partitions.PartitionCollectionWithSize(
+	partitionList, err := partitions.PartitionCollectionWithOptions(
 		ctx,
 		namespaceAndUUID,
 		verifier.srcClient,
 		verifier.logger,
 		verifier.partitionSizeInBytes,
 		verifier.globalFilter,
+		verifier.IsSrcCosmosDB(),
 	)
 	if err != nil {
 		return nil, err
@@ -977,43 +1101,45 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		// If the types differ, the rest is not important.
 	}
 	var results []compare.Result
-	if srcSpec.Info.ReadOnly != dstSpec.Info.ReadOnly {
-		results = append(results, compare.Result{
-			NameSpace: dstNs,
-			Cluster:   constants.ClusterTarget,
-			Field:     "readOnly",
-			Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec.Info.ReadOnly, dstSpec.Info.ReadOnly),
-		})
-	}
-	if !bytes.Equal(srcSpec.Options, dstSpec.Options) {
-		mismatchDetails, err := BsonUnorderedCompareRawDocumentWithDetails(srcSpec.Options, dstSpec.Options)
-		if err != nil {
-			return nil, false, errors.Wrapf(
-				err,
-				"failed to compare namespace %#q's specifications",
-				srcNs,
-			)
-		}
-
-		resultID := mbson.ToRawValue("spec")
-
-		if mismatchDetails == nil {
+	if !verifier.skipCollectionOptionsVerification {
+		if srcSpec.Info.ReadOnly != dstSpec.Info.ReadOnly {
 			results = append(results, compare.Result{
 				NameSpace: dstNs,
 				Cluster:   constants.ClusterTarget,
-				ID:        resultID,
-				Field:     "options (field order only)",
-				Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec.Options, dstSpec.Options),
+				Field:     "readOnly",
+				Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec.Info.ReadOnly, dstSpec.Info.ReadOnly),
 			})
-		} else {
-			results = append(results, mismatchResultsToVerificationResults(
-				mismatchDetails,
-				srcSpec.Options,
-				dstSpec.Options,
-				srcNs,
-				resultID,
-				"options.",
-			)...)
+		}
+		if !bytes.Equal(srcSpec.Options, dstSpec.Options) {
+			mismatchDetails, err := BsonUnorderedCompareRawDocumentWithDetails(srcSpec.Options, dstSpec.Options)
+			if err != nil {
+				return nil, false, errors.Wrapf(
+					err,
+					"failed to compare namespace %#q's specifications",
+					srcNs,
+				)
+			}
+
+			resultID := mbson.ToRawValue("spec")
+
+			if mismatchDetails == nil {
+				results = append(results, compare.Result{
+					NameSpace: dstNs,
+					Cluster:   constants.ClusterTarget,
+					ID:        resultID,
+					Field:     "options (field order only)",
+					Details:   Mismatch + fmt.Sprintf(": src: %v, dst: %v", srcSpec.Options, dstSpec.Options),
+				})
+			} else {
+				results = append(results, mismatchResultsToVerificationResults(
+					mismatchDetails,
+					srcSpec.Options,
+					dstSpec.Options,
+					srcNs,
+					resultID,
+					"options.",
+				)...)
+			}
 		}
 	}
 
@@ -1031,8 +1157,12 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		return nil, false, fmt.Errorf("unrecognized collection type (spec: %+v)", srcSpec)
 	}
 
-	// Do not compare data between capped and uncapped collections because the partitioning is different.
-	canCompareData = canCompareData && srcSpec.Options.Lookup("capped").Equal(dstSpec.Options.Lookup("capped"))
+	// Do not compare data between capped and uncapped collections because the
+	// partitioning is different. Skip this gate when we're not verifying
+	// collection options at all (e.g. CosmosDB source).
+	if !verifier.skipCollectionOptionsVerification {
+		canCompareData = canCompareData && srcSpec.Options.Lookup("capped").Equal(dstSpec.Options.Lookup("capped"))
+	}
 
 	return results, canCompareData, nil
 }
@@ -1309,64 +1439,70 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		return nil
 	}
 
-	indexProblems, err := verifier.verifyIndexes(ctx, srcColl, dstColl, srcSpec.IDIndex, dstSpec.IDIndex)
-	if err != nil {
-		return errors.Wrapf(
-			err,
-			"failed to compare namespace %#q's indexes",
-			srcNs,
-		)
+	var indexProblems []compare.Result
+	if !verifier.skipIndexVerification {
+		indexProblems, err = verifier.verifyIndexes(ctx, srcColl, dstColl, srcSpec.IDIndex, dstSpec.IDIndex)
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"failed to compare namespace %#q's indexes",
+				srcNs,
+			)
+		}
+		if indexProblems != nil {
+			if specificationProblems == nil {
+				// don't insert a failed collection unless we did not insert one above
+				err = insertFailedCollection()
+				if err != nil {
+					return err
+				}
+			}
+
+			err := recordMismatches(
+				ctx,
+				verifier.verificationDatabase(),
+				task,
+				indexProblems,
+			)
+			if err != nil {
+				return errors.Wrapf(err, "recording %#q index discrepancies", srcNs)
+			}
+
+			task.Status = tasks.MetadataMismatch
+		}
 	}
-	if indexProblems != nil {
-		if specificationProblems == nil {
+
+	var shardingProblems []compare.Result
+	if !verifier.skipShardingVerification {
+		shardingProblems, err = verifier.verifyShardingIfNeeded(ctx, srcColl, dstColl)
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"failed to compare namespace %#q's sharding",
+				srcNs,
+			)
+		}
+		if len(shardingProblems) > 0 {
 			// don't insert a failed collection unless we did not insert one above
-			err = insertFailedCollection()
-			if err != nil {
-				return err
+			if len(specificationProblems)+len(indexProblems) == 0 {
+				err = insertFailedCollection()
+				if err != nil {
+					return err
+				}
 			}
-		}
 
-		err := recordMismatches(
-			ctx,
-			verifier.verificationDatabase(),
-			task,
-			indexProblems,
-		)
-		if err != nil {
-			return errors.Wrapf(err, "recording %#q index discrepancies", srcNs)
-		}
-
-		task.Status = tasks.MetadataMismatch
-	}
-
-	shardingProblems, err := verifier.verifyShardingIfNeeded(ctx, srcColl, dstColl)
-	if err != nil {
-		return errors.Wrapf(
-			err,
-			"failed to compare namespace %#q's sharding",
-			srcNs,
-		)
-	}
-	if len(shardingProblems) > 0 {
-		// don't insert a failed collection unless we did not insert one above
-		if len(specificationProblems)+len(indexProblems) == 0 {
-			err = insertFailedCollection()
+			err := recordMismatches(
+				ctx,
+				verifier.verificationDatabase(),
+				task,
+				shardingProblems,
+			)
 			if err != nil {
-				return err
+				return errors.Wrapf(err, "recording %#q sharding discrepancies", srcNs)
 			}
-		}
 
-		err := recordMismatches(
-			ctx,
-			verifier.verificationDatabase(),
-			task,
-			shardingProblems,
-		)
-		if err != nil {
-			return errors.Wrapf(err, "recording %#q sharding discrepancies", srcNs)
+			task.Status = tasks.MetadataMismatch
 		}
-
-		task.Status = tasks.MetadataMismatch
 	}
 
 	// We’ve confirmed that the collection metadata (including indices)
@@ -1517,6 +1653,12 @@ func (verifier *Verifier) partitionCollection(
 	// in roughly sequential order on disk.
 	schemeToUse := verifier.partitioningScheme
 	if strings.HasPrefix(srcColl.Name(), timeseries.BucketPrefix) {
+		schemeToUse = partitions.SchemeID
+	}
+	// CosmosDB has no addressable storage order, no $recordId, and no
+	// resumable natural scans. Force _id partitioning regardless of the
+	// configured scheme.
+	if verifier.IsSrcCosmosDB() {
 		schemeToUse = partitions.SchemeID
 	}
 
