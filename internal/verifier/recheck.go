@@ -498,6 +498,8 @@ func (verifier *Verifier) GenerateRecheckTasks(
 
 	var lastIDRaw bson.RawValue
 
+	collFirstMismatchTime := map[string]bson.DateTime{}
+
 	// We group these here using a sort rather than using aggregate because aggregate is
 	// subject to a 16MB limit on group size.
 	for cursor.Next(findCtx) {
@@ -507,28 +509,42 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			return err
 		}
 
+		if optime, has := doc.ChangeOpTime.Get(); has {
+			// A recheck should either be for a change/write or a mismatch.
+			// Never both.
+			if doc.FirstMismatchTime.IsSome() {
+				panic("should not see change optime with a first-mismatch time")
+			}
+
+			if doc.FromDst {
+				latestDstTimestamp = newerTimestamp(latestDstTimestamp, optime)
+			} else {
+				latestSrcTimestamp = newerTimestamp(latestSrcTimestamp, optime)
+			}
+		}
+
 		idRaw, isDocEvent := doc.PrimaryKey.DocumentID.Get()
 
-		/*
-			if !isDocEvent {
-				nsStr := doc.PrimaryKey.SrcDatabaseName + "." + doc.PrimaryKey.SrcCollectionName
+		if !isDocEvent {
+			nsStr := doc.PrimaryKey.SrcDatabaseName + "." + doc.PrimaryKey.SrcCollectionName
 
-				_, err := verifier.InsertCollectionVerificationTask(
-					ctx,
-					nsStr,
-					option.None[bson.DateTime](),
-				)
-				if err != nil {
-					return errors.Wrapf(
-						err,
-						"inserting collection-level verification task for collection %#q",
-						nsStr,
-					)
+			if firstMT, has := doc.FirstMismatchTime.Get(); has {
+				oldFirstMT, nsSeen := collFirstMismatchTime[nsStr]
+
+				// Multiple mismatches for the same namespace means the last
+				// generation checked that namespace multiple times. That
+				// shouldn’t happen, but there’s no reason to complain if it
+				// does, so we should tolerate it just in case. To do so we
+				// take the earliest, most conservative mismatch time.
+				if !nsSeen || firstMT < oldFirstMT {
+					collFirstMismatchTime[nsStr] = firstMT
 				}
-
-				totalCollTasks++
 			}
-		*/
+
+			if doc.ChangeOpTime.IsSome() {
+				collFirstMismatchTime[nsStr] = 0
+			}
+		}
 
 		// We persist rechecks if any of these happen:
 		// - the namespace has changed
@@ -573,19 +589,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			metadataIndex -= 1
 		}
 
-		if optime, has := doc.ChangeOpTime.Get(); has {
-			// A recheck should either be for a change/write or a mismatch.
-			// Never both.
-			if doc.FirstMismatchTime.IsSome() {
-				panic("should not see change optime with a first-mismatch time")
-			}
-
-			if doc.FromDst {
-				latestDstTimestamp = newerTimestamp(latestDstTimestamp, optime)
-			} else {
-				latestSrcTimestamp = newerTimestamp(latestSrcTimestamp, optime)
-			}
-
+		if doc.ChangeOpTime.IsSome() {
 			delete(firstMismatchTime, int32(metadataIndex))
 		} else if fmt, has := doc.FirstMismatchTime.Get(); has {
 			if !isSameDoc {
@@ -625,6 +629,23 @@ func (verifier *Verifier) GenerateRecheckTasks(
 	err = eg.Wait()
 	if err != nil {
 		return errors.Wrapf(err, "persisting document recheck tasks")
+	}
+
+	for nsStr, firstMT := range collFirstMismatchTime {
+		_, err := verifier.InsertCollectionVerificationTask(
+			ctx,
+			nsStr,
+			option.IfNotZero(firstMT),
+		)
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"inserting collection-level verification task for collection %#q",
+				nsStr,
+			)
+		}
+
+		totalCollTasks++
 	}
 
 	if totalDocs > 0 {
