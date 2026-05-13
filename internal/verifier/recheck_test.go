@@ -65,7 +65,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 
 	event := ParsedEvent{
 		OpType: "insert",
-		DocID:  mbson.ToRawValue("theDocID"),
+		DocID:  option.Some(mbson.ToRawValue("theDocID")),
 		Ns: &Namespace{
 			DB:   "the",
 			Coll: "namespace",
@@ -276,7 +276,7 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 				ctx,
 				mslices.Of(dbName),
 				mslices.Of(collName),
-				mslices.Of(docID),
+				mslices.Of(option.Some(docID)),
 				mslices.Of(int32(123)),
 				mslices.Of(bson.NewDateTimeFromTime(time.Now())),
 				option.None[whichCluster](),
@@ -318,7 +318,7 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 						ctx,
 						mslices.Of(dbName),
 						mslices.Of(collName),
-						mslices.Of(docID),
+						mslices.Of(option.Some(docID)),
 						mslices.Of(int32(123)),
 						mslices.Of(mismatchTime),
 						option.None[whichCluster](),
@@ -336,7 +336,7 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 							ctx,
 							mslices.Of(dbName, dbName, dbName),
 							mslices.Of(collName, collName, collName),
-							mslices.Of(docID, docID, docID),
+							mslices.Of(option.Some(docID), option.Some(docID), option.Some(docID)),
 							mslices.Of(int32(123), int32(123), int32(123)),
 							nil,
 							option.Some(cluster),
@@ -700,7 +700,12 @@ func insertRecheckDocs(
 		ctx,
 		dbNames,
 		collNames,
-		rawIDs,
+		lo.Map(
+			rawIDs,
+			func(id bson.RawValue, _ int) option.Option[bson.RawValue] {
+				return option.Some(id)
+			},
+		),
 		dataSizes,
 		nil,
 		option.None[whichCluster](),

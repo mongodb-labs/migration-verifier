@@ -80,7 +80,12 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		ctx,
 		dbNames,
 		collNames,
-		documentIDs,
+		lo.Map(
+			documentIDs,
+			func(docID bson.RawValue, _ int) option.Option[bson.RawValue] {
+				return option.Some(docID)
+			},
+		),
 		dataSizes,
 		firstMismatchTimes,
 		option.None[whichCluster](),
@@ -92,7 +97,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
 	dbNames []string,
 	collNames []string,
-	documentIDs []bson.RawValue,
+	documentIDOpts []option.Option[bson.RawValue],
 	dataSizes []int32,
 	firstMismatchTimes []bson.DateTime,
 	changeOrigin option.Option[whichCluster],
@@ -190,7 +195,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			PrimaryKey: recheck.PrimaryKey{
 				SrcDatabaseName:   dbName,
 				SrcCollectionName: collNames[i],
-				DocumentID:        option.Some(documentIDs[i]),
+				DocumentID:        documentIDOpts[i],
 				Rand:              rand.Int32(),
 			},
 			DataSize:          dataSizes[i],
@@ -222,14 +227,14 @@ func (verifier *Verifier) insertRecheckDocs(
 		return errors.Wrapf(
 			err,
 			"persisting %d recheck(s) to be rechecked in generation %d",
-			len(documentIDs),
+			len(documentIDOpts),
 			recheckInGeneration,
 		)
 	}
 
 	if time.Since(start) > time.Second {
 		verifier.logger.Warn().
-			Int("count", len(documentIDs)).
+			Int("count", len(documentIDOpts)).
 			Int("insertThreads", insertThreads).
 			Stringer("totalTime", time.Since(start)).
 			Msg("Slow recheck persistence.")
@@ -237,7 +242,7 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	verifier.logger.Trace().
 		Int("recheckInGeneration", recheckInGeneration).
-		Int("count", len(documentIDs)).
+		Int("count", len(documentIDOpts)).
 		Msg("Persisted rechecks.")
 
 	return nil
