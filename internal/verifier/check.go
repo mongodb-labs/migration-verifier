@@ -544,6 +544,8 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 			ctx,
 			src,
 			option.None[bson.DateTime](),
+			option.None[bson.Timestamp](),
+			option.None[bson.Timestamp](),
 		)
 		if err != nil {
 			return errors.Wrapf(
@@ -675,6 +677,14 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			}
 		default:
 			panic("Unknown verification task type: " + task.Type)
+		}
+
+		if ts, has := task.SrcTimestamp.Get(); has {
+			verifier.NoteCompareOfOptime(src, ts)
+		}
+
+		if ts, has := task.DstTimestamp.Get(); has {
+			verifier.NoteCompareOfOptime(dst, ts)
 		}
 	}
 }

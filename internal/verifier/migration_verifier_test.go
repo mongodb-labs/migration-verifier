@@ -1179,6 +1179,8 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 		ctx,
 		"mydb.coll2",
 		option.None[bson.DateTime](),
+		option.None[bson.Timestamp](),
+		option.None[bson.Timestamp](),
 	)
 	suite.Require().NoError(err)
 
@@ -1186,6 +1188,8 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 		ctx,
 		"mydb.coll1",
 		option.None[bson.DateTime](),
+		option.None[bson.Timestamp](),
+		option.None[bson.Timestamp](),
 	)
 	suite.Require().NoError(err)
 

@@ -30,6 +30,8 @@ func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
 		ctx,
 		"foo.bar",
 		option.None[bson.DateTime](),
+		option.None[bson.Timestamp](),
+		option.None[bson.Timestamp](),
 	)
 	suite.Require().NoError(err)
 
@@ -65,6 +67,8 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 		ctx,
 		ns1,
 		option.None[bson.DateTime](),
+		option.None[bson.Timestamp](),
+		option.None[bson.Timestamp](),
 	)
 	suite.Require().NoError(err)
 
