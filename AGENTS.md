@@ -1,3 +1,5 @@
+# Tests
+
 Use testify to write all test assertions. When testing errors, prefer
 ErrorIs() and ErrorAs() tests; only check ErrorContains() as a last
 resort. Such tests should assume strings will be reworded in the future.
@@ -29,6 +31,8 @@ Instead, say something like:
 // This ensures proper handling of wrapped errors.
 ```
 
+# General coding practices
+
 When writing string literals that contain double quotes (especially in test
 assertions), use backticks instead of regular quotes to avoid needing
 backslash escaping. For example, use `` `user="alice"` `` instead of
@@ -38,3 +42,5 @@ When creating interface implementations, write out a compile-time check like:
 ```
 var _ interfaceName = implementation{}
 ```
+
+Use `mslices.Of()` where useful to avoid cluttering the code with types.
