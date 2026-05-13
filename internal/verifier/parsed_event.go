@@ -37,6 +37,8 @@ func (pe *ParsedEvent) UnmarshalBSON(in []byte) error {
 // UnmarshalFromBSON unmarshals from BSON without the overhead of
 // bson.Unmarshal.
 func (pe *ParsedEvent) UnmarshalFromBSON(in []byte) error {
+	fmt.Printf("----- unmarshaling: %+v\n\n", bson.Raw(in))
+
 	for el, err := range bsontools.RawElements(in) {
 		if err != nil {
 			return errors.Wrapf(err, "parsing elements")
@@ -110,6 +112,8 @@ func (pe *ParsedEvent) UnmarshalFromBSON(in []byte) error {
 			// Ignore unrecognized fields.
 		}
 	}
+
+	fmt.Printf("----- unmarshaled: %+v\n\n", pe)
 
 	return nil
 }

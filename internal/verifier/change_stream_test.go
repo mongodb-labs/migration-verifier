@@ -709,7 +709,7 @@ func (suite *IntegrationTestSuite) fetchPendingVerifierRechecks(ctx context.Cont
 	return recheckDocs
 }
 
-func (suite *IntegrationTestSuite) TestChangeStreamDDLError() {
+func (suite *IntegrationTestSuite) TestChangeStreamDropError() {
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
 	ctx := suite.Context()
@@ -1329,6 +1329,63 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 		logBuffer.String(),
 		"barbar_1",
 		"createIndexes event should be recorded in log",
+	)
+}
+
+func (suite *IntegrationTestSuite) TestDDLChangeEvents() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
+	ctx := suite.Context()
+
+	dbName := suite.DBNameForTest()
+
+	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
+		db := client.Database(dbName)
+		coll := db.Collection("mycoll")
+		suite.Require().NoError(db.CreateCollection(ctx, coll.Name()))
+	}
+
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+	//verifier.SetSrcNamespaces([]string{dbName + ".mycoll"})
+	//verifier.SetDstNamespaces([]string{dbName + ".mycoll"})
+	verifier.SetNamespaceMap()
+
+	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+	suite.T().Logf("----------- created verifier and ran initial check")
+
+	indexName, err := suite.srcMongoClient.Database(dbName).Collection("mycoll").Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys: bson.D{
+				{"foo", 1},
+				{"barbar", 1},
+			},
+		},
+	)
+	suite.Require().NoError(err, "should create index")
+
+	suite.T().Logf("----------- created index: %s", indexName)
+
+	suite.Assert().Eventually(
+		func() bool {
+			status, err := verifier.GetVerificationStatus(ctx)
+			suite.Require().NoError(err)
+
+			if status.FailedTasks > 0 {
+				return true
+			}
+
+			suite.Require().NoError(verifierRunner.StartNextGeneration())
+			suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+			return false
+		},
+		time.Minute,
+		time.Second,
+		"the verifier should process the createIndexes event and not get stuck",
 	)
 }
 

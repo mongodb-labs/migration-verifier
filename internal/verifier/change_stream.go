@@ -13,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	mapset "github.com/deckarep/golang-set/v2"
+	clone "github.com/huandu/go-clone/generic"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -25,6 +26,17 @@ var supportedEventOpTypes = mapset.NewSet(
 	"update",
 	"replace",
 	"delete",
+
+	/*
+		// DDL events:
+		"create",
+		"modify",
+		"createIndexes",
+		"dropIndexes",
+		"shardCollection",
+		"reshardCollection",
+		"refineCollectionShardKey",
+	*/
 )
 
 const (
@@ -116,6 +128,13 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 		pipeline,
 		bson.D{
 			{"$addFields", bson.D{
+				/*
+					{"_docID", agg.Cond{
+						If:   helpers.Exists{"$documentKey"},
+						Then: "$documentKey._id",
+						Else: "$$REMOVE",
+					}},
+				*/
 				{"_docID", "$documentKey._id"},
 
 				{"updateDescription", "$$REMOVE"},
@@ -193,26 +212,24 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			Int("batchBytes", batchTotalBytes).
 			Msg("Received a change event.")
 
-			/*
-				opType := changeEvents[eventsRead].OpType
-				if !supportedEventOpTypes.Contains(opType) {
-					// We expect certain DDL events on the destination as part of
-					// a migration. For example, mongosync enables indexes’ uniqueness
-					// constraints and sets capped collection sizes, and sometimes
-					// indexes are created after initial sync.
+		opType := changeEvents[eventsRead].OpType
+		if !supportedEventOpTypes.Contains(opType) {
+			// We expect certain DDL events on the destination as part of
+			// a migration. For example, mongosync enables indexes’ uniqueness
+			// constraints and sets capped collection sizes, and sometimes
+			// indexes are created after initial sync.
 
-					if csr.onDDLEvent == onDDLEventAllow {
-						csr.logIgnoredDDL(cs.Current)
+			if csr.onDDLEvent == onDDLEventAllow {
+				csr.logIgnoredDDL(cs.Current)
 
-						// Discard this event, then keep reading.
-						changeEvents = changeEvents[:len(changeEvents)-1]
+				// Discard this event, then keep reading.
+				changeEvents = changeEvents[:len(changeEvents)-1]
 
-						continue
-					} else {
-						return UnknownEventError{Event: clone.Clone(cs.Current)}
-					}
-				}
-			*/
+				continue
+			} else {
+				return UnknownEventError{Event: clone.Clone(cs.Current)}
+			}
+		}
 
 		// This shouldn’t happen, but just in case:
 		if changeEvents[eventsRead].Ns == nil {
@@ -398,6 +415,12 @@ func (csr *ChangeStreamReader) createChangeStream(
 	}
 
 	sctx := mongo.NewSessionContext(ctx, sess)
+
+	csr.logger.Debug().
+		Stringer("changeStreamReader", csr).
+		Any("pipeline", pipeline).
+		Any("options", opts).
+		Msg("Opening change stream.")
 
 	changeStream, err := csr.watcherClient.Watch(sctx, pipeline, opts)
 	if err != nil {

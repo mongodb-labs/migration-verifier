@@ -12,6 +12,10 @@ import (
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
+var (
+	docIDBSONHeader = bsoncore.AppendHeader(nil, 0, "docID")
+)
+
 // PrimaryKey stores the implicit type of recheck to perform
 // Currently, we only handle document mismatches/change stream updates,
 // so SrcDatabaseName, SrcCollectionName, and DocumentID must always be specified.
@@ -52,22 +56,21 @@ func (pk PrimaryKey) MarshalToBSON() []byte {
 	// This is a very “hot” path, so we want to minimize allocations.
 	variableSize := len(pk.SrcDatabaseName) + len(pk.SrcCollectionName)
 
-	if pk.DocumentID.IsSome() {
-		variableSize += len(bsoncore.AppendHeader(nil, 0, "docID"))
+	docID, hasDocID := pk.DocumentID.Get()
+	if hasDocID {
+		variableSize += len(docIDBSONHeader) + len(docID.Value)
 	}
 
 	// This document’s nonvariable parts:
-	expectedLen := 42 + variableSize
+	expectedLen := 35 + variableSize
 
 	doc := make(bson.Raw, 4, expectedLen)
 
 	doc = bsoncore.AppendStringElement(doc, "db", pk.SrcDatabaseName)
 	doc = bsoncore.AppendStringElement(doc, "coll", pk.SrcCollectionName)
-	if docID, has := pk.DocumentID.Get(); has {
-		doc = bsoncore.AppendValueElement(doc, "docID", bsoncore.Value{
-			Type: bsoncore.Type(docID.Type),
-			Data: docID.Value,
-		})
+	if hasDocID {
+		doc = append(doc, docIDBSONHeader...)
+		doc = append(doc, docID.Value...)
 	}
 	doc = bsoncore.AppendInt32Element(doc, "rand", pk.Rand)
 

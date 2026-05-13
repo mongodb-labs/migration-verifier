@@ -11,6 +11,14 @@ type ChangeEventCounts struct {
 	Update  int64
 	Replace int64
 	Delete  int64
+
+	Create                   int64
+	Modify                   int64
+	CreateIndexes            int64
+	DropIndexes              int64
+	ShardCollection          int64
+	ReshardCollection        int64
+	RefineCollectionShardKey int64
 }
 
 var _ zerolog.LogObjectMarshaler = ChangeEventCounts{}
