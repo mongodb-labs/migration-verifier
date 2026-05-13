@@ -69,8 +69,10 @@ func (pk PrimaryKey) MarshalToBSON() []byte {
 	doc = bsoncore.AppendStringElement(doc, "db", pk.SrcDatabaseName)
 	doc = bsoncore.AppendStringElement(doc, "coll", pk.SrcCollectionName)
 	if hasDocID {
-		doc = append(doc, docIDBSONHeader...)
-		doc = append(doc, docID.Value...)
+		doc = bsoncore.AppendValueElement(doc, "docID", bsoncore.Value{
+			Type: bsoncore.Type(docID.Type),
+			Data: docID.Value,
+		})
 	}
 	doc = bsoncore.AppendInt32Element(doc, "rand", pk.Rand)
 

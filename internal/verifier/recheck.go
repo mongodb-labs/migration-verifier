@@ -335,8 +335,8 @@ func (verifier *Verifier) GenerateRecheckTasks(
 	generation, _ := verifier.getGeneration()
 
 	verifier.logger.Info().
-		Int("generation", generation).
-		Msg("Creating new document-recheck tasks from enqueued rechecks.")
+		Int("priorGeneration", generation-1).
+		Msg("Creating new tasks from rechecks enqueued in prior generation.")
 
 	recheckColl := verifier.getRecheckQueueCollection(generation)
 
