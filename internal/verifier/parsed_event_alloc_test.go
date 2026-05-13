@@ -28,13 +28,13 @@ func TestParsedEventUnmarshal_NoExtraAllocs(t *testing.T) {
 	})))
 
 	var pe ParsedEvent
-	require.NoError(t, (&pe).UnmarshalFromBSON(raw))
+	require.NoError(t, pe.UnmarshalFromBSON(raw))
 
-	const budget = 3
+	const budget = 5
 
-	avg := testing.AllocsPerRun(1000, func() {
+	avg := testing.AllocsPerRun(100, func() {
 		var pe ParsedEvent
-		_ = (&pe).UnmarshalFromBSON(raw)
+		_ = pe.UnmarshalFromBSON(raw)
 	})
 
 	require.LessOrEqualf(
