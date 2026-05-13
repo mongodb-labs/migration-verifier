@@ -1332,7 +1332,11 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 	)
 }
 
-func (suite *IntegrationTestSuite) TestDDLChangeEvents() {
+func (suite *IntegrationTestSuite) TestDDLChangeEvents_Shard() {
+	if suite.GetTopology(suite.srcMongoClient) != util.TopologySharded {
+		suite.T().Skip("need sharded source")
+	}
+
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
 	ctx := suite.Context()
@@ -1347,34 +1351,28 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents() {
 
 	verifier := suite.BuildVerifier()
 	verifier.SetVerifyAll(true)
-	//verifier.SetSrcNamespaces([]string{dbName + ".mycoll"})
-	//verifier.SetDstNamespaces([]string{dbName + ".mycoll"})
 	verifier.SetNamespaceMap()
 
 	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
 	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
 
-	suite.T().Logf("----------- created verifier and ran initial check")
-
-	indexName, err := suite.srcMongoClient.Database(dbName).Collection("mycoll").Indexes().CreateOne(
-		ctx,
-		mongo.IndexModel{
-			Keys: bson.D{
-				{"foo", 1},
-				{"barbar", 1},
+	suite.Require().NoError(
+		suite.srcMongoClient.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"shardCollection", dbName + ".mycoll"},
+				{"key", bson.D{{"foo", 1}}},
 			},
-		},
+		).Err(),
+		"should shard collection",
 	)
-	suite.Require().NoError(err, "should create index")
-
-	suite.T().Logf("----------- created index: %s", indexName)
 
 	suite.Assert().Eventually(
 		func() bool {
 			status, err := verifier.GetVerificationStatus(ctx)
 			suite.Require().NoError(err)
 
-			if status.FailedTasks > 0 {
+			if status.MetadataMismatchTasks > 0 {
 				return true
 			}
 
@@ -1385,7 +1383,196 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents() {
 		},
 		time.Minute,
 		time.Second,
-		"the verifier should process the createIndexes event and not get stuck",
+		"should see a metadata mismatch",
+	)
+
+	suite.Require().NoError(
+		suite.dstMongoClient.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"shardCollection", dbName + ".mycoll"},
+				{"key", bson.D{{"foo", 1}}},
+			},
+		).Err(),
+		"should shard collection on dst",
+	)
+
+	suite.Assert().Eventually(
+		func() bool {
+			status, err := verifier.GetVerificationStatus(ctx)
+			suite.Require().NoError(err)
+
+			if status.MetadataMismatchTasks > 0 {
+				return true
+			}
+
+			suite.Require().NoError(verifierRunner.StartNextGeneration())
+			suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+			return false
+		},
+		time.Minute,
+		time.Second,
+		"should see metadata matches after dst shardCollection",
+	)
+}
+
+func (suite *IntegrationTestSuite) TestDDLChangeEvents_ShardKeyMismatch() {
+	if suite.GetTopology(suite.srcMongoClient) != util.TopologySharded {
+		suite.T().Skip("need sharded source")
+	}
+
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
+	ctx := suite.Context()
+
+	dbName := suite.DBNameForTest()
+
+	verifier := suite.BuildVerifier()
+	verifier.SetSrcNamespaces([]string{dbName + ".mycoll"})
+	verifier.SetDstNamespaces([]string{dbName + ".mycoll"})
+	verifier.SetNamespaceMap()
+
+	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
+		_, err := client.Database(dbName).Collection("mycoll").Indexes().CreateMany(
+			ctx,
+			[]mongo.IndexModel{
+				{
+					Keys: bson.D{{"foo", 1}},
+				},
+				{
+					Keys: bson.D{{"foo", 1}, {"bar", 1}},
+				},
+			},
+		)
+		suite.Require().NoError(err, "should create indexes on %v", client)
+	}
+
+	suite.Require().NoError(
+		suite.srcMongoClient.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"shardCollection", dbName + ".mycoll"},
+				{"key", bson.D{{"foo", 1}}},
+			},
+		).Err(),
+		"should shard source ",
+	)
+
+	suite.Require().NoError(
+		suite.dstMongoClient.Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"shardCollection", dbName + ".mycoll"},
+				{"key", bson.D{{"foo", 1}, {"bar", 1}}},
+			},
+		).Err(),
+		"should shard destination with different shard key",
+	)
+
+	suite.Assert().Eventually(
+		func() bool {
+			status, err := verifier.GetVerificationStatus(ctx)
+			suite.Require().NoError(err)
+
+			if status.MetadataMismatchTasks > 0 {
+				return true
+			}
+
+			suite.Require().NoError(verifierRunner.StartNextGeneration())
+			suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+			return false
+		},
+		time.Minute,
+		time.Second,
+		"should see a metadata mismatch",
+	)
+}
+
+func (suite *IntegrationTestSuite) TestDDLChangeEvents_Index() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
+	ctx := suite.Context()
+
+	dbName := suite.DBNameForTest()
+
+	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
+		db := client.Database(dbName)
+		coll := db.Collection("mycoll")
+		suite.Require().NoError(db.CreateCollection(ctx, coll.Name()))
+	}
+
+	verifier := suite.BuildVerifier()
+	verifier.SetSrcNamespaces([]string{dbName + ".mycoll"})
+	verifier.SetDstNamespaces([]string{dbName + ".mycoll"})
+	verifier.SetNamespaceMap()
+
+	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
+	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+	indexKey := bson.D{
+		{"foo", 1},
+		{"barbar", 1},
+	}
+
+	indexName, err := suite.srcMongoClient.Database(dbName).Collection("mycoll").Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys: indexKey,
+		},
+	)
+	suite.Require().NoError(err, "should create src index")
+
+	suite.T().Logf("created index: %s", indexName)
+
+	suite.Assert().Eventually(
+		func() bool {
+			status, err := verifier.GetVerificationStatus(ctx)
+			suite.Require().NoError(err)
+
+			if status.MetadataMismatchTasks > 0 {
+				return true
+			}
+
+			suite.Require().NoError(verifierRunner.StartNextGeneration())
+			suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+			return false
+		},
+		time.Minute,
+		time.Second,
+		"should see a metadata mismatch",
+	)
+
+	_, err = suite.dstMongoClient.Database(dbName).Collection("mycoll").Indexes().CreateOne(
+		ctx,
+		mongo.IndexModel{
+			Keys: indexKey,
+		},
+	)
+	suite.Require().NoError(err, "should create dst index")
+
+	suite.Assert().Eventually(
+		func() bool {
+			status, err := verifier.GetVerificationStatus(ctx)
+			suite.Require().NoError(err)
+
+			if status.MetadataMismatchTasks > 0 {
+				return true
+			}
+
+			suite.Require().NoError(verifierRunner.StartNextGeneration())
+			suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+			return false
+		},
+		time.Minute,
+		time.Second,
+		"should see metadata matches after dst index creation",
 	)
 }
 
