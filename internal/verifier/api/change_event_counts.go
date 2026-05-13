@@ -1,6 +1,10 @@
 package api
 
-import "github.com/rs/zerolog"
+import (
+	"github.com/10gen/migration-verifier/mslices"
+	"github.com/rs/zerolog"
+	"github.com/samber/lo"
+)
 
 // ChangeEventCounts tallies cumulative change events seen by a change reader,
 // across all generations, since the verifier first started.
@@ -21,10 +25,22 @@ type ChangeEventCounts struct {
 	RefineCollectionShardKey int64
 }
 
+func (cec ChangeEventCounts) CountDDL() int64 {
+	return lo.Sum(mslices.Of(
+		cec.Create,
+		cec.Modify,
+		cec.CreateIndexes,
+		cec.DropIndexes,
+		cec.ShardCollection,
+		cec.ReshardCollection,
+		cec.RefineCollectionShardKey,
+	))
+}
+
 var _ zerolog.LogObjectMarshaler = ChangeEventCounts{}
 
 func (cec ChangeEventCounts) Total() int64 {
-	return cec.Insert + cec.Update + cec.Replace + cec.Delete
+	return cec.Insert + cec.Update + cec.Replace + cec.Delete + cec.CountDDL()
 }
 
 func (cec ChangeEventCounts) MarshalZerologObject(e *zerolog.Event) {
@@ -32,5 +48,6 @@ func (cec ChangeEventCounts) MarshalZerologObject(e *zerolog.Event) {
 		Int64("insert", cec.Insert).
 		Int64("update", cec.Update).
 		Int64("replace", cec.Replace).
-		Int64("delete", cec.Delete)
+		Int64("delete", cec.Delete).
+		Int64("DDL", cec.CountDDL())
 }
