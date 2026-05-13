@@ -509,20 +509,26 @@ func (verifier *Verifier) GenerateRecheckTasks(
 
 		idRaw, isDocEvent := doc.PrimaryKey.DocumentID.Get()
 
-		if !isDocEvent {
-			nsStr := doc.PrimaryKey.SrcDatabaseName + "." + doc.PrimaryKey.SrcCollectionName
+		/*
+			if !isDocEvent {
+				nsStr := doc.PrimaryKey.SrcDatabaseName + "." + doc.PrimaryKey.SrcCollectionName
 
-			_, err := verifier.InsertCollectionVerificationTask(ctx, nsStr)
-			if err != nil {
-				return errors.Wrapf(
-					err,
-					"inserting collection-level verification task for collection %#q",
+				_, err := verifier.InsertCollectionVerificationTask(
+					ctx,
 					nsStr,
+					option.None[bson.DateTime](),
 				)
-			}
+				if err != nil {
+					return errors.Wrapf(
+						err,
+						"inserting collection-level verification task for collection %#q",
+						nsStr,
+					)
+				}
 
-			totalCollTasks++
-		}
+				totalCollTasks++
+			}
+		*/
 
 		// We persist rechecks if any of these happen:
 		// - the namespace has changed

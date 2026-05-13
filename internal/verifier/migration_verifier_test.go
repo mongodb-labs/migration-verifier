@@ -1175,10 +1175,18 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now add 2 namespaces. Add them “out of order” to test
 	// that we sort the returned array by Namespace.
 
-	task2, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll2")
+	task2, err := verifier.InsertCollectionVerificationTask(
+		ctx,
+		"mydb.coll2",
+		option.None[bson.DateTime](),
+	)
 	suite.Require().NoError(err)
 
-	task1, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll1")
+	task1, err := verifier.InsertCollectionVerificationTask(
+		ctx,
+		"mydb.coll1",
+		option.None[bson.DateTime](),
+	)
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
