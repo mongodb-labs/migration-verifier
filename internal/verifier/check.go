@@ -718,6 +718,10 @@ func (verifier *Verifier) processCreateRechecksTask(
 		)
 	}
 
+	// At this point another worker thread may cancel the generation’s context,
+	// which will cause the drop command below to fail spuriously. It’s not
+	// really worth fixing.
+
 	// NB: This must happen *after* we persist the task as completed.
 	// Otherwise Verifier could crash then, on restart, neglect to create all
 	// the needed recheck tasks.
