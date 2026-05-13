@@ -102,6 +102,10 @@ func (verifier *Verifier) insertRecheckDocs(
 		panic("Expect either mismatch times or optimes, not both/neither.")
 	}
 
+	if len(changeOpTimes) > 0 && changeOrigin.IsNone() {
+		panic("change origin must be specified if optimes are specified")
+	}
+
 	verifier.mux.RLock()
 	defer verifier.mux.RUnlock()
 
@@ -503,17 +507,24 @@ func (verifier *Verifier) GenerateRecheckTasks(
 
 		idRaw := doc.PrimaryKey.DocumentID
 
+		isSameNamespace := doc.PrimaryKey.SrcDatabaseName == prevDBName &&
+			doc.PrimaryKey.SrcCollectionName == prevCollName
+
+		// If we’ve already seen this ID, then we don’t re-add it. We may,
+		// though, still want to incorporate the duplicate into the task’s
+		// document metadata.
+		isSameDoc := isSameNamespace && idRaw.Equal(lastIDRaw)
+
 		// We persist rechecks if any of these happen:
 		// - the namespace has changed
 		// - we’ve reached the per-task recheck maximum
 		// - the buffered document IDs’ size exceeds the per-task maximum
 		// - the buffered documents exceed the partition size
 		//
-		if doc.PrimaryKey.SrcDatabaseName != prevDBName ||
-			doc.PrimaryKey.SrcCollectionName != prevCollName ||
+		if !isSameDoc && (!isSameNamespace ||
 			len(idAccum) > maxRecheckIDs ||
 			types.ByteCount(idsSizer.Len()) >= maxRecheckIDsBytes ||
-			dataSizeAccum >= verifier.partitionSizeInBytes {
+			dataSizeAccum >= verifier.partitionSizeInBytes) {
 
 			err := persistBufferedRechecks()
 			if err != nil {
@@ -534,10 +545,6 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		// This is the index for storing info about the doc in metadata.
 		metadataIndex := int32(len(idAccum))
 
-		// If we’ve already seen this ID, then we don’t re-add it. We may,
-		// though, still want to incorporate the duplicate into the task’s
-		// document metadata.
-		isSameDoc := idRaw.Equal(lastIDRaw)
 		if isSameDoc {
 			// We’re not going to add this ID to the idAccum slice because it’s
 			// already in that slice. But we still may need to record metadata

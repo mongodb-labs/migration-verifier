@@ -375,6 +375,56 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 	)
 }
 
+func (suite *IntegrationTestSuite) TestDupeRechecksStraddleBatch() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+	suite.Require().NoError(verifier.SetNumWorkers(10))
+
+	docsCount := maxRecheckIDs - 1
+
+	suite.T().Logf("Inserting %d rechecks …", docsCount)
+
+	dbName := suite.DBNameForTest()
+
+	ids := lo.Range(docsCount)
+	err := insertRecheckDocs(
+		ctx,
+		verifier,
+		dbName,
+		"testColl",
+		lo.ToAnySlice(ids),
+		lo.RepeatBy(docsCount, func(_ int) int32 { return 1 }),
+	)
+	suite.Require().NoError(err)
+
+	// Add a recheck for the source:
+	err = verifier.insertRecheckDocs(
+		ctx,
+		mslices.Of(dbName),
+		mslices.Of("testColl"),
+		mslices.Of(mbson.ToRawValue("foo")),
+		mslices.Of(int32(1)),
+		nil,
+		option.Some(src),
+		mslices.Of(bson.Timestamp{123, 456}),
+	)
+	suite.Require().NoError(err)
+
+	// Another for the destination:
+	err = verifier.insertRecheckDocs(
+		ctx,
+		mslices.Of(dbName),
+		mslices.Of("testColl"),
+		mslices.Of(mbson.ToRawValue("foo")),
+		mslices.Of(int32(1)),
+		nil,
+		option.Some(dst),
+		mslices.Of(bson.Timestamp{234, 345}),
+	)
+	suite.Require().NoError(err)
+}
+
 func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	if len(os.Getenv("CI")) > 0 {
 		suite.T().Skip("Skipping this test in CI. (It causes GitHub Action to self-terminate.)")
