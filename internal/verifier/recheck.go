@@ -522,7 +522,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		// - the buffered documents exceed the partition size
 		//
 		if !isSameDoc && (!isSameNamespace ||
-			len(idAccum) > maxRecheckIDs ||
+			len(idAccum) >= maxRecheckIDs ||
 			types.ByteCount(idsSizer.Len()) >= maxRecheckIDsBytes ||
 			dataSizeAccum >= verifier.partitionSizeInBytes) {
 
