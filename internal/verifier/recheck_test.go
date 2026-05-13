@@ -423,6 +423,20 @@ func (suite *IntegrationTestSuite) TestDupeRechecksStraddleBatch() {
 		mslices.Of(bson.Timestamp{234, 345}),
 	)
 	suite.Require().NoError(err)
+
+	verifier.generation++
+
+	err = verifier.GenerateRecheckTasks(ctx, &testutil.MockSuccessNotifier{})
+	suite.Require().NoError(err)
+
+	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
+	cursor, err := taskColl.Find(ctx, bson.D{})
+	suite.Require().NoError(err)
+	var foundTasks []tasks.Task
+	err = cursor.All(ctx, &foundTasks)
+	suite.Require().NoError(err)
+
+	suite.Assert().Len(foundTasks, 1, "only 1 task should exist")
 }
 
 func (suite *IntegrationTestSuite) TestManyManyRechecks() {
@@ -753,7 +767,7 @@ func insertRecheckDocs(
 		rawIDs,
 		dataSizes,
 		nil,
-		option.None[whichCluster](),
+		option.Some(src),
 		lo.RepeatBy(
 			len(dbNames),
 			func(index int) bson.Timestamp {
