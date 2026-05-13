@@ -6,8 +6,8 @@ import (
 
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
-	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/ccoveille/go-safecast/v2"
+	"github.com/mongodb-labs/migration-tools/option"
 )
 
 // GetSummary returns a SummaryResponse summarizing the verifier's current
