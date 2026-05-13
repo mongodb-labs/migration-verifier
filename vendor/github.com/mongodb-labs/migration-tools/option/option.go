@@ -164,3 +164,15 @@ func (o Option[T]) IsNone() bool {
 func (o Option[T]) IsSome() bool {
 	return o.isSet
 }
+
+// Map transforms `opt` by applying the given function to its internal value,
+// if it exists. If `opt` is empty, this returns empty.
+func Map[T, V any](opt Option[T], f func(T) V) Option[V] {
+	var ret Option[V]
+
+	if t, has := opt.Get(); has {
+		ret = Some(f(t))
+	}
+
+	return ret
+}
