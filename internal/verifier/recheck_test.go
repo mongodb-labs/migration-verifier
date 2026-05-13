@@ -381,7 +381,7 @@ func (suite *IntegrationTestSuite) TestDupeRechecksStraddleBatch() {
 	verifier := suite.BuildVerifier()
 	suite.Require().NoError(verifier.SetNumWorkers(10))
 
-	docsCount := maxRecheckIDs - 1
+	docsCount := maxRecheckIDs
 
 	suite.T().Logf("Inserting %d rechecks …", docsCount)
 
