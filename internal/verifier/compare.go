@@ -21,7 +21,7 @@ import (
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"github.com/samber/mo"

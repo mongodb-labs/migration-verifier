@@ -16,7 +16,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"

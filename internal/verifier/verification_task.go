@@ -18,7 +18,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"

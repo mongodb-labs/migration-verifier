@@ -12,7 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
 	"github.com/pkg/errors"

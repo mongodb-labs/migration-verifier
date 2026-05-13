@@ -13,7 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"

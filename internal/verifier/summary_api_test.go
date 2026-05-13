@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/verifier/api"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )

@@ -13,7 +13,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/suite"

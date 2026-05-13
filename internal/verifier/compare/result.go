@@ -8,7 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"

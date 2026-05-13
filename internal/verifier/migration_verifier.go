@@ -32,7 +32,7 @@ import (
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mring"
 	"github.com/10gen/migration-verifier/msync"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/10gen/migration-verifier/timeseries"
 	"github.com/dustin/go-humanize"
 	"github.com/mongodb-labs/migration-tools/bsontools"

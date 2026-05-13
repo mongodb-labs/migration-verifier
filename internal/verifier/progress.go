@@ -11,7 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -145,25 +145,23 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 
 		SrcChangeStats: api.ProgressChangeStats{
 			EventsPerSecond: verifier.srcChangeReader.getEventsPerSecond(),
-			LagSecs: option.Map(
-				srcLag,
-				chain(
-					time.Duration.Seconds,
-					safecast.MustConvert[int, float64],
-				),
-			),
+			LagSecs: func() option.Option[int] {
+				if d, ok := srcLag.Get(); ok {
+					return option.Some(chain(time.Duration.Seconds, safecast.MustConvert[int, float64])(d))
+				}
+				return option.None[int]()
+			}(),
 			BufferSaturation: verifier.srcChangeReader.getBufferSaturation(),
 			EventCounts:      verifier.srcChangeReader.GetCumulativeEventCounts(),
 		},
 		DstChangeStats: api.ProgressChangeStats{
 			EventsPerSecond: verifier.dstChangeReader.getEventsPerSecond(),
-			LagSecs: option.Map(
-				dstLag,
-				chain(
-					time.Duration.Seconds,
-					safecast.MustConvert[int, float64],
-				),
-			),
+			LagSecs: func() option.Option[int] {
+				if d, ok := dstLag.Get(); ok {
+					return option.Some(chain(time.Duration.Seconds, safecast.MustConvert[int, float64])(d))
+				}
+				return option.None[int]()
+			}(),
 			BufferSaturation: verifier.dstChangeReader.getBufferSaturation(),
 			EventCounts:      verifier.dstChangeReader.GetCumulativeEventCounts(),
 		},

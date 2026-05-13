@@ -3,7 +3,7 @@ package verifier
 import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )

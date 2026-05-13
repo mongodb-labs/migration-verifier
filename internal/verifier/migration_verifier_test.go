@@ -33,7 +33,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/cespare/permute/v2"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
