@@ -239,6 +239,39 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_Index() {
 			status, err := verifier.GetVerificationStatus(ctx)
 			suite.Require().NoError(err)
 
+			if status.MetadataMismatchTasks == 0 {
+				return true
+			}
+
+			suite.Require().NoError(verifierRunner.StartNextGeneration())
+			suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+			return false
+		},
+		time.Minute,
+		time.Second,
+		"should see no metadata mismatches after dst index creation",
+	)
+
+	suite.Require().NoError(
+		suite.srcMongoClient.Database(dbName).RunCommand(
+			ctx,
+			bson.D{
+				{"collMod", "mycoll"},
+				{"index", bson.D{
+					{"name", indexName},
+					{"hidden", true},
+				}},
+			},
+		).Err(),
+		"should hide index on source",
+	)
+
+	suite.Assert().Eventually(
+		func() bool {
+			status, err := verifier.GetVerificationStatus(ctx)
+			suite.Require().NoError(err)
+
 			if status.MetadataMismatchTasks > 0 {
 				return true
 			}
@@ -250,6 +283,39 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_Index() {
 		},
 		time.Minute,
 		time.Second,
-		"should see metadata matches after dst index creation",
+		"should see a metadata mismatch after hiding source index",
+	)
+
+	suite.Require().NoError(
+		suite.dstMongoClient.Database(dbName).RunCommand(
+			ctx,
+			bson.D{
+				{"collMod", "mycoll"},
+				{"index", bson.D{
+					{"name", indexName},
+					{"hidden", true},
+				}},
+			},
+		).Err(),
+		"should hide index on destination",
+	)
+
+	suite.Assert().Eventually(
+		func() bool {
+			status, err := verifier.GetVerificationStatus(ctx)
+			suite.Require().NoError(err)
+
+			if status.MetadataMismatchTasks == 0 {
+				return true
+			}
+
+			suite.Require().NoError(verifierRunner.StartNextGeneration())
+			suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
+
+			return false
+		},
+		time.Minute,
+		time.Second,
+		"should see no metadata mismatches after hiding dst index",
 	)
 }
