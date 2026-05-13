@@ -436,7 +436,7 @@ func (suite *IntegrationTestSuite) TestDupeRechecksStraddleBatch() {
 	err = cursor.All(ctx, &foundTasks)
 	suite.Require().NoError(err)
 
-	suite.Assert().Len(foundTasks, 1, "only 1 task should exist")
+	suite.Assert().EqualValues(1, len(foundTasks), "1 task should exist")
 }
 
 func (suite *IntegrationTestSuite) TestManyManyRechecks() {
