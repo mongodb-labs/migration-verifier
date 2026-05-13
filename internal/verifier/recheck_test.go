@@ -54,7 +54,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 				PrimaryKey: recheck.PrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
-					DocumentID:        mbson.ToRawValue("theDocID"),
+					DocumentID:        option.Some(mbson.ToRawValue("theDocID")),
 				},
 				FirstMismatchTime: recheckDocs[0].FirstMismatchTime,
 			},
@@ -91,7 +91,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 				PrimaryKey: recheck.PrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
-					DocumentID:        mbson.ToRawValue("theDocID"),
+					DocumentID:        option.Some(mbson.ToRawValue("theDocID")),
 				},
 				FirstMismatchTime: recheckDocs[0].FirstMismatchTime,
 			},
@@ -426,15 +426,15 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 		PrimaryKey: recheck.PrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        mbson.ToRawValue(id1),
+			DocumentID:        option.Some(mbson.ToRawValue(id1)),
 		},
 		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
+	d2.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id2))
 	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 	d3 := d1
-	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
+	d3.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id3))
 	d3.ChangeOpTime = option.Some(bson.Timestamp{123, 2})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
@@ -514,15 +514,15 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 		PrimaryKey: recheck.PrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        mbson.ToRawValue(id1),
+			DocumentID:        option.Some(mbson.ToRawValue(id1)),
 		},
 		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
+	d2.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id2))
 	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 	d3 := d1
-	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
+	d3.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id3))
 	d3.ChangeOpTime = option.Some(bson.Timestamp{123, 2})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
@@ -645,12 +645,12 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 		PrimaryKey: recheck.PrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        mbson.ToRawValue(id1),
+			DocumentID:        option.Some(mbson.ToRawValue(id1)),
 		},
 		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
+	d2.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id2))
 	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)

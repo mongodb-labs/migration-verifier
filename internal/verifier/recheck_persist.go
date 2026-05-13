@@ -102,7 +102,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 	dbNames := make([]string, 0, len(batch.events))
 	collNames := make([]string, 0, len(batch.events))
-	docIDs := make([]bson.RawValue, 0, len(batch.events))
+	docIDs := make([]option.Option[bson.RawValue], 0, len(batch.events))
 	dataSizes := make([]int32, 0, len(batch.events))
 	opTimes := make([]bson.Timestamp, 0, len(batch.events))
 

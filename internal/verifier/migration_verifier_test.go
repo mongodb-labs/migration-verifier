@@ -33,9 +33,9 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
-	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/cespare/permute/v2"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -2398,7 +2398,8 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	recheckDocIDs := lo.Map(
 		rechecks,
 		func(r recheck.Doc, _ int) int {
-			num, err := mbson.CastRawValue[int32](r.PrimaryKey.DocumentID)
+			docID := r.PrimaryKey.DocumentID.MustGet()
+			num, err := mbson.CastRawValue[int32](docID)
 			suite.Require().NoError(err)
 			return int(num)
 		},

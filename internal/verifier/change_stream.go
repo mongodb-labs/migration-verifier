@@ -13,7 +13,10 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	mapset "github.com/deckarep/golang-set/v2"
+<<<<<<< HEAD
 	clone "github.com/huandu/go-clone/generic"
+=======
+>>>>>>> 1cf561d0 (support ddl)
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -194,24 +197,26 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			Int("batchBytes", batchTotalBytes).
 			Msg("Received a change event.")
 
-		opType := changeEvents[eventsRead].OpType
-		if !supportedEventOpTypes.Contains(opType) {
-			// We expect certain DDL events on the destination as part of
-			// a migration. For example, mongosync enables indexes’ uniqueness
-			// constraints and sets capped collection sizes, and sometimes
-			// indexes are created after initial sync.
+			/*
+				opType := changeEvents[eventsRead].OpType
+				if !supportedEventOpTypes.Contains(opType) {
+					// We expect certain DDL events on the destination as part of
+					// a migration. For example, mongosync enables indexes’ uniqueness
+					// constraints and sets capped collection sizes, and sometimes
+					// indexes are created after initial sync.
 
-			if csr.onDDLEvent == onDDLEventAllow {
-				csr.logIgnoredDDL(cs.Current)
+					if csr.onDDLEvent == onDDLEventAllow {
+						csr.logIgnoredDDL(cs.Current)
 
-				// Discard this event, then keep reading.
-				changeEvents = changeEvents[:len(changeEvents)-1]
+						// Discard this event, then keep reading.
+						changeEvents = changeEvents[:len(changeEvents)-1]
 
-				continue
-			} else {
-				return UnknownEventError{Event: clone.Clone(cs.Current)}
-			}
-		}
+						continue
+					} else {
+						return UnknownEventError{Event: clone.Clone(cs.Current)}
+					}
+				}
+			*/
 
 		// This shouldn’t happen, but just in case:
 		if changeEvents[eventsRead].Ns == nil {

@@ -190,7 +190,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			PrimaryKey: recheck.PrimaryKey{
 				SrcDatabaseName:   dbName,
 				SrcCollectionName: collNames[i],
-				DocumentID:        documentIDs[i],
+				DocumentID:        option.Some(documentIDs[i]),
 				Rand:              rand.Int32(),
 			},
 			DataSize:          dataSizes[i],
@@ -413,10 +413,11 @@ func (verifier *Verifier) GenerateRecheckTasks(
 	defer cursor.Close(findCtx)
 
 	var (
-		curTasks      []bson.Raw
-		curTasksBytes int
-		totalTasks    int
-		totalInserts  int
+		curTasks            []bson.Raw
+		curTasksBytes       int
+		totalCollTasks      int
+		totalDocTasks       int
+		totalDocTaskInserts int
 	)
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
@@ -434,7 +435,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			},
 		)
 
-		totalInserts++
+		totalDocTaskInserts++
 	}
 
 	persistBufferedRechecks := func() error {
@@ -459,7 +460,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 				namespace,
 			)
 		}
-		totalTasks++
+		totalDocTasks++
 
 		taskRaw, err := bson.Marshal(task)
 		if err != nil {
@@ -501,7 +502,22 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			return err
 		}
 
-		idRaw := doc.PrimaryKey.DocumentID
+		idRaw, isDocEvent := doc.PrimaryKey.DocumentID.Get()
+
+		if !isDocEvent {
+			nsStr := doc.PrimaryKey.SrcDatabaseName + "." + doc.PrimaryKey.SrcCollectionName
+
+			_, err := verifier.InsertCollectionVerificationTask(ctx, nsStr)
+			if err != nil {
+				return errors.Wrapf(
+					err,
+					"inserting collection-level verification task for collection %#q",
+					nsStr,
+				)
+			}
+
+			totalCollTasks++
+		}
 
 		// We persist rechecks if any of these happen:
 		// - the namespace has changed
@@ -575,7 +591,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		idsSizer.Add(idRaw)
 		dataSizeAccum += types.ByteCount(doc.DataSize)
 
-		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
+		idAccum = append(idAccum, idRaw)
 
 		totalRecheckData += types.ByteCount(doc.DataSize)
 		totalDocs++
@@ -604,8 +620,9 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		verifier.logger.Info().
 			Int("generation", generation).
 			Int64("totalDocs", int64(totalDocs)).
-			Int("tasks", totalTasks).
-			Int("insertRequests", totalInserts).
+			Int("newCollTasks", totalCollTasks).
+			Int("newDocTasks", totalDocTasks).
+			Int("docTaskInsertRequests", totalDocTaskInserts).
 			Str("totalData", reportutils.FmtBytes(totalRecheckData)).
 			Stringer("timeElapsed", time.Since(startTime)).
 			Msg("Scheduled documents for recheck in the new generation.")
