@@ -27,6 +27,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -40,6 +41,13 @@ import (
 const (
 	ChangeReaderOptOplog = "tailOplog"
 )
+
+var ddlCmdNameToOpType = map[string]string{
+	"collMod":       "modify",
+	"create":        "create",
+	"createIndexes": "createIndexes",
+	"dropIndexes":   "dropIndexes",
+}
 
 // OplogReader reads change events via oplog tailing instead of a change stream.
 // This significantly lightens server load and allows verification of heavier
@@ -551,7 +559,36 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 				return nil, bson.Timestamp{}, errors.Wrap(err, "getting first field name of o doc")
 			}
 
-			if string(cmdName) != "applyOps" {
+			ddlOpType, isDDL := ddlCmdNameToOpType[string(cmdName)]
+
+			switch {
+			case isDDL:
+				collName, err := bsontools.RawLookup[string](oDoc, string(cmdName))
+				if err != nil {
+					return nil, bson.Timestamp{}, errors.Wrap(err, "getting createIndexes collection name")
+				}
+
+				nsStr, err := bsontools.RawLookup[string](rawDoc, "ns")
+				if err != nil {
+					return nil, bson.Timestamp{}, errors.Wrap(err, "getting namespace")
+				}
+
+				dbName, _ := mmongo.SplitNamespace(nsStr)
+
+				events = append(
+					events,
+					ParsedEvent{
+						OpType:      ddlOpType,
+						Ns:          NewNamespace(dbName, collName),
+						DocID:       option.None[bson.RawValue](),
+						ClusterTime: new(latestTS),
+					},
+				)
+
+				continue
+			case string(cmdName) == "applyOps":
+				// A transaction, or vectored writes outside a txn.
+			default:
 				if o.onDDLEvent == onDDLEventAllow {
 					o.logIgnoredDDL(rawDoc)
 					continue
@@ -630,7 +667,33 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 				return nil, bson.Timestamp{}, fmt.Errorf("no cmdname in op=c: %+v", op)
 			}
 
-			if cmdName != "applyOps" {
+			ddlOpType, isDDL := ddlCmdNameToOpType[cmdName]
+
+			switch {
+			case isDDL:
+				collName, err := bsontools.RawLookup[string](op.Object, cmdName)
+				if err != nil {
+					return nil, bson.Timestamp{}, errors.Wrap(err, "getting createIndexes collection name")
+				}
+
+				nsStr, err := bsontools.RawLookup[string](rawDoc, "ns")
+				if err != nil {
+					return nil, bson.Timestamp{}, errors.Wrap(err, "getting namespace")
+				}
+
+				dbName, _ := mmongo.SplitNamespace(nsStr)
+
+				events = append(
+					events,
+					ParsedEvent{
+						OpType:      ddlOpType,
+						Ns:          NewNamespace(dbName, collName),
+						DocID:       option.None[bson.RawValue](),
+						ClusterTime: new(latestTS),
+					},
+				)
+			case cmdName == "applyOps":
+			default:
 				if o.onDDLEvent == onDDLEventAllow {
 					o.logIgnoredDDL(rawDoc)
 					continue

@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func (suite *IntegrationTestSuite) TestDDLChangeEvents_Shard() {
@@ -200,13 +201,13 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_Index() {
 
 	indexKey := bson.D{
 		{"foo", 1},
-		{"barbar", 1},
 	}
 
 	indexName, err := suite.srcMongoClient.Database(dbName).Collection("mycoll").Indexes().CreateOne(
 		ctx,
 		mongo.IndexModel{
-			Keys: indexKey,
+			Keys:    indexKey,
+			Options: options.Index().SetExpireAfterSeconds(123),
 		},
 	)
 	suite.Require().NoError(err, "should create src index")
@@ -235,7 +236,8 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_Index() {
 	_, err = suite.dstMongoClient.Database(dbName).Collection("mycoll").Indexes().CreateOne(
 		ctx,
 		mongo.IndexModel{
-			Keys: indexKey,
+			Keys:    indexKey,
+			Options: options.Index().SetExpireAfterSeconds(123),
 		},
 	)
 	suite.Require().NoError(err, "should create dst index")
@@ -266,11 +268,11 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_Index() {
 				{"collMod", "mycoll"},
 				{"index", bson.D{
 					{"name", indexName},
-					{"hidden", true},
+					{"expireAfterSeconds", 234},
 				}},
 			},
 		).Err(),
-		"should hide index on source",
+		"should set index TTL on source",
 	)
 
 	suite.Assert().Eventually(
@@ -299,11 +301,11 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_Index() {
 				{"collMod", "mycoll"},
 				{"index", bson.D{
 					{"name", indexName},
-					{"hidden", true},
+					{"expireAfterSeconds", 234},
 				}},
 			},
 		).Err(),
-		"should hide index on destination",
+		"should set index TTL on destination",
 	)
 
 	suite.Assert().Eventually(

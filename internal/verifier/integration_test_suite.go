@@ -252,6 +252,10 @@ func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {
 }
 
 func (suite *IntegrationTestSuite) SkipUnlessSrcHasDDLEvents() {
+	if os.Getenv("MVTEST_SRC_CHANGE_READER") == ChangeReaderOptOplog {
+		return
+	}
+
 	ctx := suite.Context()
 	buildInfo, err := util.GetClusterInfo(
 		ctx,

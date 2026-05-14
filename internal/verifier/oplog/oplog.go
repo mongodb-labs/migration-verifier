@@ -41,6 +41,8 @@ type Op struct {
 
 	// Ops holds the ops in an `applyOps` oplog entry.
 	Ops []Op `bson:",omitempty"`
+
+	Object bson.Raw `bson:"o"`
 }
 
 func (*Op) UnmarshalBSON([]byte) error {
@@ -96,6 +98,16 @@ func (o *Op) UnmarshalFromBSON(in []byte) error {
 				return errors.Wrapf(err, "parsing %#q value", string(key))
 			}
 			o.DocID.Value = slices.Clone(o.DocID.Value)
+		case "o":
+			var obj bson.Raw
+			err := mbson.UnmarshalElementValue(el, &obj)
+			if err != nil {
+				return errors.Wrapf(err, "parsing %#q", string(key))
+			}
+
+			// We clone the raw bytes to ensure that the Op is self-contained and doesn't
+			// hold references to a larger buffer that might be reused.
+			o.Object = slices.Clone(obj)
 		case "ops":
 			var arr bson.RawArray
 			err := errors.Wrapf(
