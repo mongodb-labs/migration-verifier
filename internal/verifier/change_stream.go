@@ -207,11 +207,12 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			// constraints and sets capped collection sizes, and sometimes
 			// indexes are created after initial sync.
 
+			discardEvent := false
+
 			if csr.onDDLEvent == onDDLEventAllow {
 				csr.logIgnoredDDL(cs.Current)
 
-				// Discard this event, then keep reading.
-				changeEvents = changeEvents[:len(changeEvents)-1]
+				discardEvent = true
 
 				continue
 			}
@@ -222,6 +223,17 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 					Any("event", changeEvents[eventsRead]).
 					Msg("Ignoring custom-allowed DDL change event on source cluster.")
 
+				discardEvent = true
+
+				continue
+			}
+
+			if discardEvent {
+				// We’re discarding, which means the changeEvents slice will
+				// have 1 fewer event than we expected based on the batch size.
+				// To avoid leaving a zero-value event at the end, we trim it.
+				// Since we’re skipping the increment of eventsRead, the next
+				// unmarshaled event will overwrite the one we’re discarding.
 				changeEvents = changeEvents[:len(changeEvents)-1]
 
 				continue
