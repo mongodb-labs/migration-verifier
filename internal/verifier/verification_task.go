@@ -79,7 +79,9 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 			"firstMismatchTime should only be set for metadata mismatches, which shouldn’t have src/dst timestamps",
 		)
 
-		updateFields["$set"].(bson.M)["firstmismatchtime"] = mt
+		updateFields["$set"].(bson.M)["firstmismatchtime"] = map[int32]bson.DateTime{
+			0: mt,
+		}
 		logEvent.Time("firstMismatchTime", mt.Time())
 	} else if origin, has := eventOrigin.Get(); has {
 		ts := eventTimestamp.MustGetf("timestamp for event from %s cluster", origin)
