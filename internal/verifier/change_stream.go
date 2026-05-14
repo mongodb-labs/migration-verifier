@@ -229,8 +229,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			}
 
 			if discardEvent {
-				// We’re discarding, which means the changeEvents slice will
-				// have 1 fewer event than we expected based on the batch size.
+				// Since we’re discarding this event, changeEvents will be 1
+				// element shorter than we expected based on the batch size.
 				// To avoid leaving a zero-value event at the end, we trim it.
 				// Since we’re skipping the increment of eventsRead, the next
 				// unmarshaled event will overwrite the one we’re discarding.
