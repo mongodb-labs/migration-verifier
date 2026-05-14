@@ -154,7 +154,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 		dbNames = append(dbNames, srcDBName)
 		collNames = append(collNames, srcCollName)
-		docIDOpts = append(docIDOpts, changeEvent.DocID)
+		docIDOpts = append(docIDOpts, option.Some(changeEvent.DocID))
 		opTimes = append(opTimes, *changeEvent.ClusterTime)
 
 		var dataSize int32

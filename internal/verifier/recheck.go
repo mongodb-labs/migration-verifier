@@ -18,6 +18,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -88,6 +89,24 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		),
 		dataSizes,
 		firstMismatchTimes,
+		option.None[whichCluster](),
+		nil,
+	)
+}
+
+func (verifier *Verifier) InsertCollectionRecheckDoc(
+	ctx context.Context,
+	dbName string,
+	collName string,
+	firstMismatchTime bson.DateTime,
+) error {
+	return verifier.insertRecheckDocs(
+		ctx,
+		mslices.Of(dbName),
+		mslices.Of(collName),
+		mslices.Of(option.None[bson.RawValue]()),
+		mslices.Of(int32(0)),
+		mslices.Of(firstMismatchTime),
 		option.None[whichCluster](),
 		nil,
 	)

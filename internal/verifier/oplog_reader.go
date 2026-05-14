@@ -512,7 +512,7 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 			ParsedEvent{
 				OpType:      oplogOpToOperationType[opName],
 				Ns:          NewNamespace(mmongo.SplitNamespace(nsStr)),
-				DocID:       option.Some(docID),
+				DocID:       docID,
 				FullDocLen:  docLength,
 				ClusterTime: lo.ToPtr(ts),
 			},
@@ -655,7 +655,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 						return ParsedEvent{
 							OpType:      oplogOpToOperationType[subOp.Op],
 							Ns:          NewNamespace(mmongo.SplitNamespace(subOp.Ns)),
-							DocID:       option.Some(subOp.DocID),
+							DocID:       subOp.DocID,
 							FullDocLen:  option.Some(types.ByteCount(subOp.DocLen)),
 							ClusterTime: &op.TS,
 						}
@@ -668,7 +668,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 				ParsedEvent{
 					OpType:      oplogOpToOperationType[op.Op],
 					Ns:          NewNamespace(mmongo.SplitNamespace(op.Ns)),
-					DocID:       option.Some(op.DocID),
+					DocID:       op.DocID,
 					FullDocLen:  option.Some(types.ByteCount(op.DocLen)),
 					ClusterTime: &op.TS,
 				},

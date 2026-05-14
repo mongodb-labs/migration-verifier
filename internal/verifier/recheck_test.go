@@ -65,7 +65,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 
 	event := ParsedEvent{
 		OpType: "insert",
-		DocID:  option.Some(mbson.ToRawValue("theDocID")),
+		DocID:  mbson.ToRawValue("theDocID"),
 		Ns: &Namespace{
 			DB:   "the",
 			Coll: "namespace",

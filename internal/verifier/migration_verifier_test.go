@@ -1104,7 +1104,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
-				DocID:  option.Some(mbson.ToRawValue("heyhey")),
+				DocID:  mbson.ToRawValue("heyhey"),
 				ClusterTime: &bson.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
@@ -1120,7 +1120,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
-				DocID:  option.Some(mbson.ToRawValue("hoohoo")),
+				DocID:  mbson.ToRawValue("hoohoo"),
 				ClusterTime: &bson.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
@@ -1419,7 +1419,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	suite.Require().NoError(err)
 
 	event := ParsedEvent{
-		DocID:  option.Some(mbson.ToRawValue(int32(55))),
+		DocID:  mbson.ToRawValue(int32(55)),
 		OpType: "delete",
 		Ns: &Namespace{
 			DB:   "foo",
