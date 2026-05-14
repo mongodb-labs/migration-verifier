@@ -1223,7 +1223,6 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		err := verifier.InsertCollectionRecheckTask(
 			ctx,
 			srcNs,
-			option.Some(bson.NewDateTimeFromTime(time.Now())),
 			option.None[whichCluster](),
 			option.None[bson.Timestamp](),
 		)
