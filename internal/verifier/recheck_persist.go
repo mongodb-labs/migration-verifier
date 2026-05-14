@@ -154,13 +154,22 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 		docID, isDocEvent := changeEvent.DocID.Get()
 		if !isDocEvent {
-			verifier.InsertCollectionRecheckTask(
+			err := verifier.InsertCollectionRecheckTask(
 				ctx,
 				srcDBName+"."+srcCollName,
 				option.None[bson.DateTime](),
 				option.Some(eventOrigin),
 				option.Some(*changeEvent.ClusterTime),
 			)
+
+			if err != nil {
+				return errors.Wrapf(
+					err,
+					"insert collection-level recheck task for %s change event (%+v)",
+					eventOrigin,
+					changeEvent,
+				)
+			}
 
 			continue
 		}
