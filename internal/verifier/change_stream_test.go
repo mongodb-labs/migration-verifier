@@ -709,7 +709,7 @@ func (suite *IntegrationTestSuite) fetchPendingVerifierRechecks(ctx context.Cont
 	return recheckDocs
 }
 
-func (suite *IntegrationTestSuite) TestChangeStreamDDLError() {
+func (suite *IntegrationTestSuite) TestChangeStreamDropError() {
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
 	ctx := suite.Context()

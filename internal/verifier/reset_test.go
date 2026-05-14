@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/mongodb-labs/migration-tools/option"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options" //nolint:staticcheck
@@ -25,7 +26,11 @@ func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
 	suite.Require().NoError(err)
 	suite.Require().True(created)
 
-	_, err = verifier.InsertCollectionVerificationTask(ctx, "foo.bar")
+	_, err = verifier.InsertCollectionVerificationTask(
+		ctx,
+		"foo.bar",
+		option.None[bson.DateTime](),
+	)
 	suite.Require().NoError(err)
 
 	err = verifier.ResetInProgressTasks(ctx)
@@ -56,7 +61,11 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	ns2 := "qux.quux"
 
 	// Create a collection-verification task, and set it to processing.
-	collTask, err := verifier.InsertCollectionVerificationTask(ctx, ns1)
+	collTask, err := verifier.InsertCollectionVerificationTask(
+		ctx,
+		ns1,
+		option.None[bson.DateTime](),
+	)
 	suite.Require().NoError(err)
 
 	collTask.Status = tasks.Processing

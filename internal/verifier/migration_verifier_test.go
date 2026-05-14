@@ -1175,10 +1175,18 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now add 2 namespaces. Add them “out of order” to test
 	// that we sort the returned array by Namespace.
 
-	task2, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll2")
+	task2, err := verifier.InsertCollectionVerificationTask(
+		ctx,
+		"mydb.coll2",
+		option.None[bson.DateTime](),
+	)
 	suite.Require().NoError(err)
 
-	task1, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll1")
+	task1, err := verifier.InsertCollectionVerificationTask(
+		ctx,
+		"mydb.coll1",
+		option.None[bson.DateTime](),
+	)
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
@@ -2398,7 +2406,8 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	recheckDocIDs := lo.Map(
 		rechecks,
 		func(r recheck.Doc, _ int) int {
-			num, err := mbson.CastRawValue[int32](r.PrimaryKey.DocumentID)
+			docID := r.PrimaryKey.DocumentID.MustGet()
+			num, err := mbson.CastRawValue[int32](docID)
 			suite.Require().NoError(err)
 			return int(num)
 		},

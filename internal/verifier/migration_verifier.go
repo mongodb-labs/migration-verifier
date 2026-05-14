@@ -790,14 +790,6 @@ REPORTS:
 		)
 	}
 
-	if ts, has := task.SrcTimestamp.Get(); has {
-		verifier.NoteCompareOfOptime(src, ts)
-	}
-
-	if ts, has := task.DstTimestamp.Get(); has {
-		verifier.NoteCompareOfOptime(dst, ts)
-	}
-
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
@@ -1228,7 +1220,18 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	}
 
 	insertFailedCollection := func() error {
-		_, err := verifier.InsertFailedCollectionVerificationTask(ctx, srcNs)
+		firstMismatchTime, alreadyMismatched := task.FirstMismatchTime[0]
+		if !alreadyMismatched {
+			firstMismatchTime = bson.NewDateTimeFromTime(time.Now())
+		}
+
+		err := verifier.InsertCollectionRecheckDoc(
+			ctx,
+			srcColl.Database().Name(),
+			srcColl.Name(),
+			firstMismatchTime,
+		)
+
 		return errors.Wrapf(
 			err,
 			"failed to persist metadata mismatch for collection %#q",

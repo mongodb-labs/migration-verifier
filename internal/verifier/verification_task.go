@@ -33,6 +33,7 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
 	generation int,
+	firstMismatchTime option.Option[bson.DateTime],
 ) (*tasks.Task, error) {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
@@ -52,6 +53,10 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 			Namespace: srcNamespace,
 			To:        dstNamespace,
 		},
+	}
+
+	if mismatchTime, has := firstMismatchTime.Get(); has {
+		verificationTask.FirstMismatchTime = map[int32]bson.DateTime{0: mismatchTime}
 	}
 
 	logEvent := verifier.logger.Debug().
@@ -145,16 +150,24 @@ func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 func (verifier *Verifier) InsertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
+	firstMismatchTime option.Option[bson.DateTime],
 ) (*tasks.Task, error) {
-	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation)
+	return verifier.insertCollectionVerificationTask(
+		ctx,
+		srcNamespace,
+		verifier.generation,
+		firstMismatchTime,
+	)
 }
 
+/*
 func (verifier *Verifier) InsertFailedCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
 ) (*tasks.Task, error) {
 	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation+1)
 }
+*/
 
 func (verifier *Verifier) InsertPartitionVerificationTask(
 	ctx context.Context,
