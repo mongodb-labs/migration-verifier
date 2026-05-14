@@ -357,8 +357,8 @@ func (csr *ChangeStreamReader) createChangeStream(
 	if csr.clusterInfo.VersionArray[0] >= 6 {
 		opts = opts.SetCustomPipeline(
 			bson.M{
-				"showSystemEvents":   true,
-				"showExpandedEvents": true,
+				"showSystemEvents": true,
+				//"showExpandedEvents": true,
 			},
 		)
 	}
