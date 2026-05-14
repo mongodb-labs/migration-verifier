@@ -44,16 +44,37 @@ func (cec ChangeEventCounts) Total() int64 {
 }
 
 func (cec ChangeEventCounts) MarshalZerologObject(e *zerolog.Event) {
-	e.
-		Int64("insert", cec.Insert).
-		Int64("update", cec.Update).
-		Int64("replace", cec.Replace).
-		Int64("delete", cec.Delete).
-		Int64("create", cec.Create).
-		Int64("modify", cec.Modify).
-		Int64("createIndexes", cec.CreateIndexes).
-		Int64("dropIndexes", cec.DropIndexes).
-		Int64("shardCollection", cec.ShardCollection).
-		Int64("reshardCollection", cec.ReshardCollection).
-		Int64("refineCollectionShardKey", cec.RefineCollectionShardKey)
+	if cec.Insert > 0 {
+		e.Int64("insert", cec.Insert)
+	}
+	if cec.Update > 0 {
+		e.Int64("update", cec.Update)
+	}
+	if cec.Replace > 0 {
+		e.Int64("replace", cec.Replace)
+	}
+	if cec.Delete > 0 {
+		e.Int64("delete", cec.Delete)
+	}
+	if cec.Create > 0 {
+		e.Int64("create", cec.Create)
+	}
+	if cec.Modify > 0 {
+		e.Int64("modify", cec.Modify)
+	}
+	if cec.CreateIndexes > 0 {
+		e.Int64("createIndexes", cec.CreateIndexes)
+	}
+	if cec.DropIndexes > 0 {
+		e.Int64("dropIndexes", cec.DropIndexes)
+	}
+	if cec.ShardCollection > 0 {
+		e.Int64("shardCollection", cec.ShardCollection)
+	}
+	if cec.ReshardCollection > 0 {
+		e.Int64("reshardCollection", cec.ReshardCollection)
+	}
+	if cec.RefineCollectionShardKey > 0 {
+		e.Int64("refineCollectionShardKey", cec.RefineCollectionShardKey)
+	}
 }
