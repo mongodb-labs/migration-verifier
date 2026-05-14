@@ -196,6 +196,9 @@ func (verifier *Verifier) InsertCollectionRecheckTask(
 	eventOrigin option.Option[whichCluster],
 	eventTimestamp option.Option[bson.Timestamp],
 ) error {
+	verifier.mux.RLock()
+	defer verifier.mux.RUnlock()
+
 	return verifier.insertCollectionVerificationTask(
 		ctx,
 		srcNamespace,
