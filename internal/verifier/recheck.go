@@ -501,6 +501,8 @@ func (verifier *Verifier) GenerateRecheckTasks(
 	// A map of all collection-level tasks to create, along with their
 	// first mismatch times.
 	collFirstMismatchTime := map[string]bson.DateTime{}
+	collSrcTimestamp := map[string]bson.Timestamp{}
+	collDstTimestamp := map[string]bson.Timestamp{}
 
 	// We group these here using a sort rather than using aggregate because aggregate is
 	// subject to a 16MB limit on group size.
@@ -510,6 +512,8 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		if err != nil {
 			return err
 		}
+
+		idRaw, isDocEvent := doc.PrimaryKey.DocumentID.Get()
 
 		if optime, has := doc.ChangeOpTime.Get(); has {
 			// A recheck should either be for a change/write or a mismatch.
@@ -525,10 +529,8 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			}
 		}
 
-		idRaw, isDocEvent := doc.PrimaryKey.DocumentID.Get()
-
 		if !isDocEvent {
-			nsStr := doc.PrimaryKey.SrcDatabaseName + "." + doc.PrimaryKey.SrcCollectionName
+			nsStr := doc.PrimaryKey.NamespaceString()
 
 			if firstMT, has := doc.FirstMismatchTime.Get(); has {
 				oldFirstMT, nsSeen := collFirstMismatchTime[nsStr]
@@ -543,8 +545,18 @@ func (verifier *Verifier) GenerateRecheckTasks(
 				}
 			}
 
-			if doc.ChangeOpTime.IsSome() {
-				collFirstMismatchTime[nsStr] = 0
+			if optime, has := doc.ChangeOpTime.Get(); has {
+				if doc.FromDst {
+					collDstTimestamp[nsStr] = newerTimestamp(
+						collDstTimestamp[nsStr],
+						optime,
+					)
+				} else {
+					collSrcTimestamp[nsStr] = newerTimestamp(
+						collSrcTimestamp[nsStr],
+						optime,
+					)
+				}
 			}
 
 			continue
@@ -640,8 +652,8 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			ctx,
 			nsStr,
 			option.IfNotZero(firstMT),
-			option.IfNotZero(latestSrcTimestamp),
-			option.IfNotZero(latestDstTimestamp),
+			option.IfNotZero(collSrcTimestamp[nsStr]),
+			option.IfNotZero(collDstTimestamp[nsStr]),
 		)
 		if err != nil {
 			return errors.Wrapf(

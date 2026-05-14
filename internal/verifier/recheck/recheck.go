@@ -128,6 +128,10 @@ func (pk *PrimaryKey) UnmarshalFromBSON(in []byte) error {
 	return nil
 }
 
+func (pk *PrimaryKey) NamespaceString() string {
+	return pk.SrcDatabaseName + "." + pk.SrcCollectionName
+}
+
 // MismatchHistory records historical numbers on a mismatch.
 type MismatchHistory struct {
 	First      bson.DateTime
