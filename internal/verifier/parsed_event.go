@@ -5,8 +5,8 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/mbson"
-	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -106,6 +106,8 @@ func (pe *ParsedEvent) UnmarshalFromBSON(in []byte) error {
 			}
 
 			pe.ClusterTime = &ct
+		default:
+			// Ignore unrecognized fields.
 		}
 	}
 

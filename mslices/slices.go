@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/samber/lo"
 )
 
