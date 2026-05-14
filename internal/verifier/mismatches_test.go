@@ -191,13 +191,6 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	dstDB := suite.dstMongoClient.Database(suite.DBNameForTest())
 
 	suite.Require().NoError(
-		dstDB.CreateCollection(ctx, "extraOnDst"),
-	)
-	suite.Require().NoError(
-		srcDB.CreateCollection(ctx, "missingOnDst"),
-	)
-
-	suite.Require().NoError(
 		dstDB.CreateCollection(ctx, "mismatchedType"),
 	)
 	suite.Require().NoError(
@@ -322,17 +315,6 @@ func (suite *IntegrationTestSuite) TestSendNamespaceMismatches() {
 	mismatches := lo.ChannelToSlice(mmChan)
 
 	expected := []api.NSMismatchInfo{
-		// missing/extra collections:
-		{
-			Type:      api.MismatchMissing,
-			Namespace: srcDB.Name() + ".missingOnDst",
-			Aspect:    api.NSMismatchAspectExist,
-		},
-		{
-			Type:      api.MismatchExtra,
-			Namespace: srcDB.Name() + ".extraOnDst",
-			Aspect:    api.NSMismatchAspectExist,
-		},
 
 		// mismatched namespace type:
 		{

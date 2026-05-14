@@ -994,11 +994,13 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Metadata(
 
 	dbName := suite.DBNameForTest()
 
-	err := verifier.srcClient.Database(dbName).CreateCollection(
-		ctx,
-		"foo",
-	)
-	suite.Require().NoError(err)
+	for _, client := range mslices.Of(verifier.srcClient, verifier.dstClient) {
+		err := client.Database(dbName).CreateCollection(
+			ctx,
+			"foo",
+		)
+		suite.Require().NoError(err)
+	}
 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())

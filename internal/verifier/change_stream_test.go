@@ -723,6 +723,11 @@ func (suite *IntegrationTestSuite) TestChangeStreamDDLError() {
 		db.CreateCollection(ctx, "mycoll"),
 	)
 
+	suite.Require().NoError(
+		suite.dstMongoClient.
+			Database(suite.DBNameForTest()).CreateCollection(ctx, "mycoll"),
+	)
+
 	verifier.SetSrcNamespaces([]string{db.Name() + ".mycoll"})
 	verifier.SetDstNamespaces([]string{db.Name() + ".mycoll"})
 	verifier.SetNamespaceMap()
@@ -751,6 +756,11 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 
 	suite.Require().NoError(
 		db.CreateCollection(ctx, "mycoll"),
+	)
+
+	suite.Require().NoError(
+		suite.dstMongoClient.
+			Database(suite.DBNameForTest()).CreateCollection(ctx, "mycoll"),
 	)
 
 	verifier := suite.BuildVerifier()
@@ -799,12 +809,19 @@ func (suite *IntegrationTestSuite) TestChangeStreamLag() {
 // batch regardless of whether watched events were seen.
 func (suite *IntegrationTestSuite) TestLastSeenClusterTimeSetWithoutWatchedEvents() {
 	ctx := suite.Context()
-	db := suite.srcMongoClient.Database(suite.DBNameForTest())
-	suite.Require().NoError(db.CreateCollection(ctx, "watched"))
+
+	dbName := suite.DBNameForTest()
+
+	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
+		suite.Require().NoError(
+			client.Database(dbName).
+				CreateCollection(ctx, "watched"),
+		)
+	}
 
 	verifier := suite.BuildVerifier()
-	verifier.SetSrcNamespaces([]string{db.Name() + ".watched"})
-	verifier.SetDstNamespaces([]string{db.Name() + ".watched"})
+	verifier.SetSrcNamespaces([]string{dbName + ".watched"})
+	verifier.SetDstNamespaces([]string{dbName + ".watched"})
 	verifier.SetNamespaceMap()
 
 	verifierRunner := RunVerifierCheck(ctx, suite.T(), verifier)
@@ -835,11 +852,18 @@ func (suite *IntegrationTestSuite) TestLastSeenClusterTimeSetWithoutWatchedEvent
 func (suite *IntegrationTestSuite) TestLastSeenClusterTimeAdvancesBeyondLastEvent() {
 	ctx := suite.Context()
 	db := suite.srcMongoClient.Database(suite.DBNameForTest())
-	suite.Require().NoError(db.CreateCollection(ctx, "watched"))
 
-	// We’ll need this below. Pre-create it so that oplog-tailing doesn’t
-	// complain about its creation during the verification.
-	suite.Require().NoError(db.CreateCollection(ctx, "unwatched"))
+	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
+		suite.Require().NoError(
+			client.Database(db.Name()).CreateCollection(ctx, "watched"),
+		)
+
+		// We’ll need this below. Pre-create it so that oplog-tailing doesn’t
+		// complain about its creation during the verification.
+		suite.Require().NoError(
+			client.Database(db.Name()).CreateCollection(ctx, "unwatched"),
+		)
+	}
 
 	verifier := suite.BuildVerifier()
 	verifier.SetSrcNamespaces([]string{db.Name() + ".watched"})
