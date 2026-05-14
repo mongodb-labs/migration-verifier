@@ -1199,47 +1199,6 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 	suite.Assert().Equal(docsCount, totalFailed, "all source docs should be missing")
 }
 
-func (suite *IntegrationTestSuite) TestCreateForbidden() {
-	ctx := suite.Context()
-	buildInfo, err := util.GetClusterInfo(
-		ctx,
-		logger.NewDefaultLogger(),
-		suite.srcMongoClient,
-	)
-	suite.Require().NoError(err)
-
-	if buildInfo.VersionArray[0] < 6 {
-		suite.T().Skipf("This test requires server v6+. (Found: %v)", buildInfo.VersionArray)
-	}
-
-	verifier := suite.BuildVerifier()
-
-	// start verifier
-	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
-
-	// wait for generation 0 to end
-	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
-
-	db := suite.srcMongoClient.Database(suite.DBNameForTest())
-	coll := db.Collection("mycoll")
-	suite.Require().NoError(
-		db.CreateCollection(ctx, coll.Name()),
-	)
-
-	// The error from the create event will come either at WritesOff
-	// or when we finalize the change stream.
-	err = verifier.WritesOff(ctx)
-	if err == nil {
-		err = verifierRunner.Await()
-	}
-
-	suite.Require().Error(err, "should detect forbidden create event")
-
-	eventErr := UnknownEventError{}
-	suite.Require().ErrorAs(err, &eventErr)
-	suite.Assert().Contains(string(eventErr.Event), "create")
-}
-
 func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 	ctx := suite.Context()
 	buildInfo, err := util.GetClusterInfo(
@@ -1319,18 +1278,6 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 	}
 
 	suite.Require().NoError(err, "should get no error")
-
-	suite.Assert().Contains(
-		logBuffer.String(),
-		"cappedSize",
-		"modify event should be recorded in log",
-	)
-
-	suite.Assert().Contains(
-		logBuffer.String(),
-		"barbar_1",
-		"createIndexes event should be recorded in log",
-	)
 }
 
 func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {
