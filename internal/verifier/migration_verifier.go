@@ -36,7 +36,6 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/mongodb-labs/migration-tools/mongotools/index"
-	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -948,25 +947,9 @@ func (verifier *Verifier) partitionAndInspectNamespace(
 // not the collection data can be safely verified.
 func (verifier *Verifier) compareCollectionSpecifications(
 	srcNs, dstNs string,
-	srcSpecOpt, dstSpecOpt option.Option[util.CollectionSpec],
+	srcSpec, dstSpec util.CollectionSpec,
 ) ([]compare.Result, bool, error) {
-	srcSpec, hasSrcSpec := srcSpecOpt.Get()
-	dstSpec, hasDstSpec := dstSpecOpt.Get()
 
-	if !hasSrcSpec {
-		return []compare.Result{{
-			NameSpace: srcNs,
-			Cluster:   constants.ClusterSource,
-			Details:   compare.Missing,
-		}}, false, nil
-	}
-	if !hasDstSpec {
-		return []compare.Result{{
-			NameSpace: dstNs,
-			Cluster:   constants.ClusterTarget,
-			Details:   compare.Missing,
-		}}, false, nil
-	}
 	if srcSpec.Type != dstSpec.Type {
 		return []compare.Result{{
 			NameSpace: srcNs,
@@ -1252,24 +1235,26 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		}
 	}
 
-	if !hasDstSpec {
-		if !hasSrcSpec {
-			verifier.logger.Info().
-				Int("workerNum", workerNum).
-				Str("srcNamespace", srcNs).
-				Str("dstNamespace", dstNs).
-				Msg("Collection not present on either cluster.")
+	if !hasSrcSpec {
+		if hasDstSpec {
 
-			// This counts as success.
-			task.Status = tasks.Completed
-			return nil
+			return fmt.Errorf("collection %#q exists only on destination", dstNs)
 		}
 
-		task.Status = tasks.Failed
-		// Fall through here; comparing the collection specifications will produce the correct
-		// failure output.
+		verifier.logger.Info().
+			Int("workerNum", workerNum).
+			Str("srcNamespace", srcNs).
+			Str("dstNamespace", dstNs).
+			Msg("Collection not present on either cluster.")
+
+		// This counts as success.
+		task.Status = tasks.Completed
+		return nil
+	} else if !hasDstSpec {
+		return fmt.Errorf("collection %#q exists only on source", srcNs)
 	}
-	specificationProblems, verifyData, err := verifier.compareCollectionSpecifications(srcNs, dstNs, srcSpecOpt, dstSpecOpt)
+
+	specificationProblems, verifyData, err := verifier.compareCollectionSpecifications(srcNs, dstNs, srcSpec, dstSpec)
 	if err != nil {
 		return errors.Wrapf(
 			err,
