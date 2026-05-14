@@ -213,8 +213,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 				csr.logIgnoredDDL(cs.Current)
 
 				discardEvent = true
-
-				continue
 			}
 
 			if toleratedSourceDDLOpTypes.Contains(opType) {
@@ -224,8 +222,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 					Msg("Ignoring custom-allowed DDL change event on source cluster.")
 
 				discardEvent = true
-
-				continue
 			}
 
 			if discardEvent {
