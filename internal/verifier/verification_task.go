@@ -42,7 +42,6 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
 	generation int,
-	firstMismatchTime option.Option[bson.DateTime],
 	eventOrigin option.Option[whichCluster],
 	eventTimestamp option.Option[bson.Timestamp],
 ) error {
@@ -67,30 +66,17 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 			Str("dstNamespace", dstNamespace)
 	}
 
-	updateFields := bson.M{
-		"$set": bson.M{
-			"status": tasks.Added,
-		},
-		"$unset": bson.M{},
+	fieldsToSet := bson.M{
+		"status": tasks.Added,
 	}
-	if mt, has := firstMismatchTime.Get(); has {
-		lo.Assert(
-			eventOrigin.IsNone() && eventTimestamp.IsNone(),
-			"firstMismatchTime should only be set for metadata mismatches, which shouldn’t have src/dst timestamps",
-		)
 
-		updateFields["$set"].(bson.M)["firstmismatchtime"] = map[int32]bson.DateTime{
-			0: mt,
-		}
-		logEvent.Time("firstMismatchTime", mt.Time())
-	} else if origin, has := eventOrigin.Get(); has {
+	if origin, has := eventOrigin.Get(); has {
 		ts := eventTimestamp.MustGetf("timestamp for event from %s cluster", origin)
 
 		field, ok := tsSetField[origin]
 		lo.Assertf(ok, "need known event origin but got %#q", origin)
 
-		updateFields["$set"].(bson.M)[field] = ts
-		updateFields["$unset"].(bson.M)["firstmismatchtime"] = 1
+		fieldsToSet[field] = ts
 		logEvent.Any(field, ts)
 	} else if ts, has := eventTimestamp.Get(); has {
 		lo.Assertf(
@@ -114,7 +100,9 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 						{"to", dstNamespace},
 					}},
 				},
-				updateFields,
+				bson.D{
+					{"$set", fieldsToSet},
+				},
 				options.UpdateOne().SetUpsert(true),
 			)
 
@@ -197,7 +185,6 @@ func (verifier *Verifier) InsertCollectionVerificationTask(
 		ctx,
 		srcNamespace,
 		verifier.generation,
-		option.None[bson.DateTime](),
 		option.None[whichCluster](),
 		option.None[bson.Timestamp](),
 	)
@@ -206,7 +193,6 @@ func (verifier *Verifier) InsertCollectionVerificationTask(
 func (verifier *Verifier) InsertCollectionRecheckTask(
 	ctx context.Context,
 	srcNamespace string,
-	firstMismatchTime option.Option[bson.DateTime],
 	eventOrigin option.Option[whichCluster],
 	eventTimestamp option.Option[bson.Timestamp],
 ) error {
@@ -214,7 +200,6 @@ func (verifier *Verifier) InsertCollectionRecheckTask(
 		ctx,
 		srcNamespace,
 		verifier.generation+1,
-		firstMismatchTime,
 		eventOrigin,
 		eventTimestamp,
 	)

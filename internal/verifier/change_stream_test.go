@@ -19,6 +19,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -191,7 +192,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 	suite.Require().Equal("insert", parsed.OpType)
 
 	suite.Require().Equal(
-		mbson.ToRawValue("abc"),
+		option.Some(mbson.ToRawValue("abc")),
 		parsed.DocID,
 		"event should reference expected document",
 	)

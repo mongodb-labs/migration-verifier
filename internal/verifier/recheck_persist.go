@@ -168,7 +168,6 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 			err := verifier.InsertCollectionRecheckTask(
 				ctx,
 				srcDBName+"."+srcCollName,
-				option.None[bson.DateTime](),
 				option.Some(eventOrigin),
 				option.Some(*changeEvent.ClusterTime),
 			)
