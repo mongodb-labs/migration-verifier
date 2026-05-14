@@ -152,6 +152,17 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 			panic(fmt.Sprintf("unknown event origin: %s", eventOrigin))
 		}
 
+		if err := reader.getEventRecorder().AddEvent(&changeEvent); err != nil {
+			return errors.Wrapf(
+				err,
+				"failed to augment stats with %s change event (%+v)",
+				eventOrigin,
+				changeEvent,
+			)
+		}
+
+		reader.addToEventCounts(changeEvent.OpType)
+
 		docID, isDocEvent := changeEvent.DocID.Get()
 		if !isDocEvent {
 			err := verifier.InsertCollectionRecheckTask(
@@ -192,17 +203,6 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 		}
 
 		dataSizes = append(dataSizes, dataSize)
-
-		if err := reader.getEventRecorder().AddEvent(&changeEvent); err != nil {
-			return errors.Wrapf(
-				err,
-				"failed to augment stats with %s change event (%+v)",
-				eventOrigin,
-				changeEvent,
-			)
-		}
-
-		reader.addToEventCounts(changeEvent.OpType)
 	}
 
 	// This can happen if all change events were DDL events.

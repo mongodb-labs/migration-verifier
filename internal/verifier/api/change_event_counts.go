@@ -16,13 +16,13 @@ type ChangeEventCounts struct {
 	Replace int64
 	Delete  int64
 
-	Create                   int64
-	Modify                   int64
-	CreateIndexes            int64
-	DropIndexes              int64
-	ShardCollection          int64
-	ReshardCollection        int64
-	RefineCollectionShardKey int64
+	Create                   int64 `bson:"create"`
+	Modify                   int64 `bson:"modify"`
+	CreateIndexes            int64 `bson:"createIndexes"`
+	DropIndexes              int64 `bson:"dropIndexes"`
+	ShardCollection          int64 `bson:"shardCollection"`
+	ReshardCollection        int64 `bson:"reshardCollection"`
+	RefineCollectionShardKey int64 `bson:"refineCollectionShardKey"`
 }
 
 func (cec ChangeEventCounts) CountDDL() int64 {

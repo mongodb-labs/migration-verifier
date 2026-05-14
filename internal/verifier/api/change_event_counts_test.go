@@ -18,6 +18,14 @@ func TestChangeEventCounts_ExtJSONKeys(t *testing.T) {
 		Update:  2,
 		Replace: 3,
 		Delete:  4,
+
+		Create:                   5,
+		Modify:                   6,
+		CreateIndexes:            7,
+		DropIndexes:              8,
+		ShardCollection:          9,
+		ReshardCollection:        10,
+		RefineCollectionShardKey: 11,
 	}
 
 	payload, err := bson.MarshalExtJSON(counts, true, false)
@@ -31,5 +39,13 @@ func TestChangeEventCounts_ExtJSONKeys(t *testing.T) {
 		"update":  int64(2),
 		"replace": int64(3),
 		"delete":  int64(4),
+
+		"create":                   int64(5),
+		"modify":                   int64(6),
+		"createIndexes":            int64(7),
+		"dropIndexes":              int64(8),
+		"shardCollection":          int64(9),
+		"reshardCollection":        int64(10),
+		"refineCollectionShardKey": int64(11),
 	}, got)
 }
