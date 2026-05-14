@@ -1220,7 +1220,14 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	}
 
 	insertFailedCollection := func() error {
-		_, err := verifier.InsertFailedCollectionVerificationTask(ctx, srcNs)
+		_, err := verifier.InsertCollectionRecheckTask(
+			ctx,
+			srcNs,
+			option.Some(bson.NewDateTimeFromTime(time.Now())),
+			option.None[whichCluster](),
+			option.None[bson.Timestamp](),
+		)
+
 		return errors.Wrapf(
 			err,
 			"failed to persist metadata mismatch for collection %#q",

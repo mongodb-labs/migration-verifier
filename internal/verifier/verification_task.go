@@ -17,9 +17,11 @@ import (
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -29,10 +31,20 @@ const (
 	verificationTasksCollection = "verification_tasks"
 )
 
+var (
+	tsSetField = map[whichCluster]string{
+		src: compare.SrcTimestampField,
+		dst: compare.DstTimestampField,
+	}
+)
+
 func (verifier *Verifier) insertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
 	generation int,
+	firstMismatchTime option.Option[bson.DateTime],
+	eventOrigin option.Option[whichCluster],
+	eventTimestamp option.Option[bson.Timestamp],
 ) (*tasks.Task, error) {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
@@ -55,7 +67,7 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 	}
 
 	logEvent := verifier.logger.Debug().
-		Any("task", verificationTask.PrimaryKey)
+		Int("generation", generation)
 
 	if srcNamespace == dstNamespace {
 		logEvent.
@@ -66,11 +78,53 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 			Str("dstNamespace", dstNamespace)
 	}
 
-	logEvent.Msg("Adding metadata task.")
+	updateFields := bson.M{
+		"$set":   bson.M{},
+		"$unset": bson.M{},
+	}
+	if mt, has := firstMismatchTime.Get(); has {
+		lo.Assert(
+			eventOrigin.IsNone() && eventTimestamp.IsNone(),
+			"firstMismatchTime should only be set for metadata mismatches, which shouldn’t have src/dst timestamps",
+		)
+
+		updateFields["$set"].(bson.M)["firstmismatchtime"] = mt
+		logEvent.Time("firstMismatchTime", mt.Time())
+	} else if origin, has := eventOrigin.Get(); has {
+		ts := eventTimestamp.MustGetf("timestamp for event from %s cluster", origin)
+
+		field, ok := tsSetField[origin]
+		lo.Assertf(ok, "need known event origin but got %#q", origin)
+
+		updateFields["$set"].(bson.M)[field] = ts
+		updateFields["$unset"].(bson.M)["firstmismatchtime"] = 1
+		logEvent.Any(field, ts)
+	} else if ts, has := eventTimestamp.Get(); has {
+		lo.Assertf(
+			false,
+			"eventTimestamp (%v) should not be set without eventOrigin",
+			ts,
+		)
+	}
+
+	logEvent.Msg("Adding/updating metadata task.")
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
-			_, err := verifier.verificationTaskCollection().InsertOne(ctx, verificationTask)
+			_, err := verifier.verificationTaskCollection().UpdateOne(
+				ctx,
+				bson.D{
+					{"generation", generation},
+					{"type", tasks.VerifyCollection},
+					{"query_filter", bson.D{
+						{"namespace", srcNamespace},
+						{"to", dstNamespace},
+					}},
+				},
+				updateFields,
+				options.UpdateOne().SetUpsert(true),
+			)
+
 			return err
 		},
 		"persisting namespace %#q's verification task",
@@ -150,14 +204,27 @@ func (verifier *Verifier) InsertCollectionVerificationTask(
 		ctx,
 		srcNamespace,
 		verifier.generation,
+		option.None[bson.DateTime](),
+		option.None[whichCluster](),
+		option.None[bson.Timestamp](),
 	)
 }
 
-func (verifier *Verifier) InsertFailedCollectionVerificationTask(
+func (verifier *Verifier) InsertCollectionRecheckTask(
 	ctx context.Context,
 	srcNamespace string,
+	firstMismatchTime option.Option[bson.DateTime],
+	eventOrigin option.Option[whichCluster],
+	eventTimestamp option.Option[bson.Timestamp],
 ) (*tasks.Task, error) {
-	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation+1)
+	return verifier.insertCollectionVerificationTask(
+		ctx,
+		srcNamespace,
+		verifier.generation+1,
+		firstMismatchTime,
+		eventOrigin,
+		eventTimestamp,
+	)
 }
 
 func (verifier *Verifier) InsertPartitionVerificationTask(
