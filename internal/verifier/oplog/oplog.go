@@ -42,7 +42,7 @@ type Op struct {
 	// Ops holds the ops in an `applyOps` oplog entry.
 	Ops []Op `bson:",omitempty"`
 
-	Object bson.Raw `bson:"o"`
+	Object bson.Raw `bson:"o,omitempty"`
 }
 
 func (*Op) UnmarshalBSON([]byte) error {
