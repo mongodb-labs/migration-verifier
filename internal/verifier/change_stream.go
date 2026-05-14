@@ -28,6 +28,13 @@ var supportedEventOpTypes = mapset.NewSet(
 	"delete",
 )
 
+var toleratedSourceDDLOpTypes = mapset.NewSet(
+	"create",
+	"createIndexes",
+	"dropIndexes",
+	"modify",
+)
+
 const (
 	maxChangeStreamAwaitTime = time.Second
 
@@ -185,7 +192,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			return errors.Wrapf(err, "failed to decode change event to %T", changeEvents[eventsRead])
 		}
 
-		// This only logs in tests.
 		csr.logger.Trace().
 			Stringer("changeStream", csr).
 			Any("event", changeEvents[eventsRead]).
@@ -208,9 +214,20 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 				changeEvents = changeEvents[:len(changeEvents)-1]
 
 				continue
-			} else {
-				return UnknownEventError{Event: clone.Clone(cs.Current)}
 			}
+
+			if toleratedSourceDDLOpTypes.Contains(opType) {
+				csr.logger.Warn().
+					Stringer("changeStream", csr).
+					Any("event", changeEvents[eventsRead]).
+					Msg("Ignoring custom-allowed DDL change event on source cluster.")
+
+				changeEvents = changeEvents[:len(changeEvents)-1]
+
+				continue
+			}
+
+			return UnknownEventError{Event: clone.Clone(cs.Current)}
 		}
 
 		// This shouldn’t happen, but just in case:
@@ -357,8 +374,8 @@ func (csr *ChangeStreamReader) createChangeStream(
 	if csr.clusterInfo.VersionArray[0] >= 6 {
 		opts = opts.SetCustomPipeline(
 			bson.M{
-				"showSystemEvents": true,
-				//"showExpandedEvents": true,
+				"showSystemEvents":   true,
+				"showExpandedEvents": true,
 			},
 		)
 	}
