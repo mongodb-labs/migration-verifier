@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 )
 
 // ReadWithDoneCheck takes a context and a channel to read from. It will read
