@@ -33,9 +33,9 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/option"
 	"github.com/cespare/permute/v2"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -1104,7 +1104,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
-				DocID:  mbson.ToRawValue("heyhey"),
+				DocID:  option.Some(mbson.ToRawValue("heyhey")),
 				ClusterTime: &bson.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
@@ -1120,7 +1120,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
-				DocID:  mbson.ToRawValue("hoohoo"),
+				DocID:  option.Some(mbson.ToRawValue("hoohoo")),
 				ClusterTime: &bson.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
@@ -1175,10 +1175,22 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now add 2 namespaces. Add them “out of order” to test
 	// that we sort the returned array by Namespace.
 
-	task2, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll2")
+	task2, err := verifier.InsertCollectionVerificationTask(
+		ctx,
+		"mydb.coll2",
+		option.None[bson.DateTime](),
+		option.None[bson.Timestamp](),
+		option.None[bson.Timestamp](),
+	)
 	suite.Require().NoError(err)
 
-	task1, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll1")
+	task1, err := verifier.InsertCollectionVerificationTask(
+		ctx,
+		"mydb.coll1",
+		option.None[bson.DateTime](),
+		option.None[bson.Timestamp](),
+		option.None[bson.Timestamp](),
+	)
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
@@ -1411,7 +1423,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	suite.Require().NoError(err)
 
 	event := ParsedEvent{
-		DocID:  mbson.ToRawValue(int32(55)),
+		DocID:  option.Some(mbson.ToRawValue(int32(55))),
 		OpType: "delete",
 		Ns: &Namespace{
 			DB:   "foo",
@@ -2398,7 +2410,8 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	recheckDocIDs := lo.Map(
 		rechecks,
 		func(r recheck.Doc, _ int) int {
-			num, err := mbson.CastRawValue[int32](r.PrimaryKey.DocumentID)
+			docID := r.PrimaryKey.DocumentID.MustGet()
+			num, err := mbson.CastRawValue[int32](docID)
 			suite.Require().NoError(err)
 			return int(num)
 		},

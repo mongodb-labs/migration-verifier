@@ -10,7 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/msync"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -151,6 +151,25 @@ func (rc *ChangeReaderCommon) addToEventCounts(opType string) {
 			cur.Replace++
 		case "delete":
 			cur.Delete++
+		case "create":
+			cur.Create++
+		case "modify":
+			cur.Modify++
+		case "createIndexes":
+			cur.CreateIndexes++
+		case "dropIndexes":
+			cur.DropIndexes++
+		case "shardCollection":
+			cur.ShardCollection++
+		case "reshardCollection":
+			cur.ReshardCollection++
+		case "refineCollectionShardKey":
+			cur.RefineCollectionShardKey++
+		default:
+			rc.logger.Warn().
+				Str("reader", string(rc.readerType)).
+				Str("opType", opType).
+				Msg("Encountered unrecognized change event type; not counting it in cumulative event counts.")
 		}
 		return cur
 	})

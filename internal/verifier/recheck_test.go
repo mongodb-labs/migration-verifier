@@ -13,7 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"github.com/samber/lo/mutable"
@@ -54,7 +54,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 				PrimaryKey: recheck.PrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
-					DocumentID:        mbson.ToRawValue("theDocID"),
+					DocumentID:        option.Some(mbson.ToRawValue("theDocID")),
 				},
 				FirstMismatchTime: recheckDocs[0].FirstMismatchTime,
 			},
@@ -65,7 +65,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 
 	event := ParsedEvent{
 		OpType: "insert",
-		DocID:  mbson.ToRawValue("theDocID"),
+		DocID:  option.Some(mbson.ToRawValue("theDocID")),
 		Ns: &Namespace{
 			DB:   "the",
 			Coll: "namespace",
@@ -91,7 +91,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 				PrimaryKey: recheck.PrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
-					DocumentID:        mbson.ToRawValue("theDocID"),
+					DocumentID:        option.Some(mbson.ToRawValue("theDocID")),
 				},
 				FirstMismatchTime: recheckDocs[0].FirstMismatchTime,
 			},
@@ -276,7 +276,7 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 				ctx,
 				mslices.Of(dbName),
 				mslices.Of(collName),
-				mslices.Of(docID),
+				mslices.Of(option.Some(docID)),
 				mslices.Of(int32(123)),
 				mslices.Of(bson.NewDateTimeFromTime(time.Now())),
 				option.None[whichCluster](),
@@ -318,7 +318,7 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 						ctx,
 						mslices.Of(dbName),
 						mslices.Of(collName),
-						mslices.Of(docID),
+						mslices.Of(option.Some(docID)),
 						mslices.Of(int32(123)),
 						mslices.Of(mismatchTime),
 						option.None[whichCluster](),
@@ -336,7 +336,7 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 							ctx,
 							mslices.Of(dbName, dbName, dbName),
 							mslices.Of(collName, collName, collName),
-							mslices.Of(docID, docID, docID),
+							mslices.Of(option.Some(docID), option.Some(docID), option.Some(docID)),
 							mslices.Of(int32(123), int32(123), int32(123)),
 							nil,
 							option.Some(cluster),
@@ -426,15 +426,15 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 		PrimaryKey: recheck.PrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        mbson.ToRawValue(id1),
+			DocumentID:        option.Some(mbson.ToRawValue(id1)),
 		},
 		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
+	d2.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id2))
 	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 	d3 := d1
-	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
+	d3.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id3))
 	d3.ChangeOpTime = option.Some(bson.Timestamp{123, 2})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
@@ -514,15 +514,15 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 		PrimaryKey: recheck.PrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        mbson.ToRawValue(id1),
+			DocumentID:        option.Some(mbson.ToRawValue(id1)),
 		},
 		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
+	d2.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id2))
 	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 	d3 := d1
-	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
+	d3.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id3))
 	d3.ChangeOpTime = option.Some(bson.Timestamp{123, 2})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
@@ -645,12 +645,12 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 		PrimaryKey: recheck.PrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        mbson.ToRawValue(id1),
+			DocumentID:        option.Some(mbson.ToRawValue(id1)),
 		},
 		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
+	d2.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id2))
 	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
@@ -700,7 +700,12 @@ func insertRecheckDocs(
 		ctx,
 		dbNames,
 		collNames,
-		rawIDs,
+		lo.Map(
+			rawIDs,
+			func(id bson.RawValue, _ int) option.Option[bson.RawValue] {
+				return option.Some(id)
+			},
+		),
 		dataSizes,
 		nil,
 		option.None[whichCluster](),

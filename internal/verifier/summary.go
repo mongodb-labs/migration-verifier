@@ -21,7 +21,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -669,6 +669,7 @@ func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
 		{"update", srcCounts.Update, dstCounts.Update},
 		{"replace", srcCounts.Replace, dstCounts.Replace},
 		{"delete", srcCounts.Delete, dstCounts.Delete},
+		{"DDL", srcCounts.CountDDL(), dstCounts.CountDDL()},
 	}
 
 	fmt.Fprintf(out, "Cumulative change events seen:\n")

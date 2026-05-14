@@ -8,7 +8,7 @@ package tasks
 
 import (
 	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/rs/zerolog"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )

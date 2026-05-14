@@ -18,7 +18,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -33,6 +33,9 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
 	generation int,
+	firstMismatchTime option.Option[bson.DateTime],
+	srcTimestamp option.Option[bson.Timestamp],
+	dstTimestamp option.Option[bson.Timestamp],
 ) (*tasks.Task, error) {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
@@ -52,6 +55,12 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 			Namespace: srcNamespace,
 			To:        dstNamespace,
 		},
+		SrcTimestamp: srcTimestamp,
+		DstTimestamp: dstTimestamp,
+	}
+
+	if mismatchTime, has := firstMismatchTime.Get(); has {
+		verificationTask.FirstMismatchTime = map[int32]bson.DateTime{0: mismatchTime}
 	}
 
 	logEvent := verifier.logger.Debug().
@@ -145,16 +154,28 @@ func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 func (verifier *Verifier) InsertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
+	firstMismatchTime option.Option[bson.DateTime],
+	srcTimestamp option.Option[bson.Timestamp],
+	dstTimestamp option.Option[bson.Timestamp],
 ) (*tasks.Task, error) {
-	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation)
+	return verifier.insertCollectionVerificationTask(
+		ctx,
+		srcNamespace,
+		verifier.generation,
+		firstMismatchTime,
+		srcTimestamp,
+		dstTimestamp,
+	)
 }
 
+/*
 func (verifier *Verifier) InsertFailedCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
 ) (*tasks.Task, error) {
 	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation+1)
 }
+*/
 
 func (verifier *Verifier) InsertPartitionVerificationTask(
 	ctx context.Context,

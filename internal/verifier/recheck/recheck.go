@@ -5,11 +5,15 @@ import (
 	"fmt"
 
 	"github.com/10gen/migration-verifier/mbson"
-	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
+)
+
+var (
+	docIDBSONHeader = bsoncore.AppendHeader(nil, 0, "docID")
 )
 
 // PrimaryKey stores the implicit type of recheck to perform
@@ -20,9 +24,10 @@ import (
 // sorting by _id will guarantee that all rechecks for a given
 // namespace appear consecutively.
 type PrimaryKey struct {
-	SrcDatabaseName   string        `bson:"db"`
-	SrcCollectionName string        `bson:"coll"`
-	DocumentID        bson.RawValue `bson:"docID"`
+	SrcDatabaseName   string `bson:"db"`
+	SrcCollectionName string `bson:"coll"`
+
+	DocumentID option.Option[bson.RawValue] `bson:"docID,omitempty"`
 
 	// Rand is here to allow “duplicate” entries. We do this because, with
 	// multiple change streams returning the same events, we expect duplicate
@@ -49,19 +54,26 @@ func (pk PrimaryKey) MarshalBSON() ([]byte, error) {
 
 func (pk PrimaryKey) MarshalToBSON() []byte {
 	// This is a very “hot” path, so we want to minimize allocations.
-	variableSize := len(pk.SrcDatabaseName) + len(pk.SrcCollectionName) + len(pk.DocumentID.Value)
+	variableSize := len(pk.SrcDatabaseName) + len(pk.SrcCollectionName)
+
+	docID, hasDocID := pk.DocumentID.Get()
+	if hasDocID {
+		variableSize += len(docIDBSONHeader) + len(docID.Value)
+	}
 
 	// This document’s nonvariable parts:
-	expectedLen := 42 + variableSize
+	expectedLen := 35 + variableSize
 
 	doc := make(bson.Raw, 4, expectedLen)
 
 	doc = bsoncore.AppendStringElement(doc, "db", pk.SrcDatabaseName)
 	doc = bsoncore.AppendStringElement(doc, "coll", pk.SrcCollectionName)
-	doc = bsoncore.AppendValueElement(doc, "docID", bsoncore.Value{
-		Type: bsoncore.Type(pk.DocumentID.Type),
-		Data: pk.DocumentID.Value,
-	})
+	if hasDocID {
+		doc = bsoncore.AppendValueElement(doc, "docID", bsoncore.Value{
+			Type: bsoncore.Type(docID.Type),
+			Data: docID.Value,
+		})
+	}
 	doc = bsoncore.AppendInt32Element(doc, "rand", pk.Rand)
 
 	doc = append(doc, 0)
@@ -105,7 +117,7 @@ func (pk *PrimaryKey) UnmarshalFromBSON(in []byte) error {
 				return errors.Wrapf(err, "parsing %#q field", string(key))
 			}
 
-			pk.DocumentID = rv
+			pk.DocumentID = option.Some(rv)
 		case "rand":
 			if err := mbson.UnmarshalElementValue(el, &pk.Rand); err != nil {
 				return err
@@ -114,6 +126,10 @@ func (pk *PrimaryKey) UnmarshalFromBSON(in []byte) error {
 	}
 
 	return nil
+}
+
+func (pk *PrimaryKey) NamespaceString() string {
+	return pk.SrcDatabaseName + "." + pk.SrcCollectionName
 }
 
 // MismatchHistory records historical numbers on a mismatch.

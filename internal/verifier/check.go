@@ -15,6 +15,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goaux/timer"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -395,10 +396,10 @@ func (verifier *Verifier) recallLastRecheckedOpTimes(ctx context.Context) error 
 				egCtx,
 				bson.D{
 					{"generation", bson.D{{"$gt", 0}}},
-					{"type", tasks.VerifyDocuments},
 					{"status", bson.D{{"$in", mslices.Of(
 						tasks.Completed,
 						tasks.Failed,
+						tasks.MetadataMismatch,
 					)}}},
 					{matrix.tsName, bson.D{{"$type", "timestamp"}}},
 				},
@@ -539,7 +540,13 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 		}
 	}
 	for _, src := range verifier.srcNamespaces {
-		_, err := verifier.InsertCollectionVerificationTask(ctx, src)
+		_, err := verifier.InsertCollectionVerificationTask(
+			ctx,
+			src,
+			option.None[bson.DateTime](),
+			option.None[bson.Timestamp](),
+			option.None[bson.Timestamp](),
+		)
 		if err != nil {
 			return errors.Wrapf(
 				err,
@@ -671,6 +678,14 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 		default:
 			panic("Unknown verification task type: " + task.Type)
 		}
+
+		if ts, has := task.SrcTimestamp.Get(); has {
+			verifier.NoteCompareOfOptime(src, ts)
+		}
+
+		if ts, has := task.DstTimestamp.Get(); has {
+			verifier.NoteCompareOfOptime(dst, ts)
+		}
 	}
 }
 
@@ -702,6 +717,10 @@ func (verifier *Verifier) processCreateRechecksTask(
 			task.Status,
 		)
 	}
+
+	// At this point another worker thread may cancel the generation’s context,
+	// which will cause the drop command below to fail spuriously. It’s not
+	// really worth fixing.
 
 	// NB: This must happen *after* we persist the task as completed.
 	// Otherwise Verifier could crash then, on restart, neglect to create all
