@@ -11,6 +11,8 @@ import (
 )
 
 func (suite *IntegrationTestSuite) TestDDLChangeEvents_Shard() {
+	suite.SkipUnlessSrcHasDDLEvents()
+
 	if suite.GetTopology(suite.srcMongoClient) != util.TopologySharded {
 		suite.T().Skip("need sharded source")
 	}
@@ -96,6 +98,8 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_Shard() {
 }
 
 func (suite *IntegrationTestSuite) TestDDLChangeEvents_ShardKeyMismatch() {
+	suite.SkipUnlessSrcHasDDLEvents()
+
 	if suite.GetTopology(suite.srcMongoClient) != util.TopologySharded {
 		suite.T().Skip("need sharded source")
 	}
@@ -172,6 +176,8 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_ShardKeyMismatch() {
 }
 
 func (suite *IntegrationTestSuite) TestDDLChangeEvents_Index() {
+	suite.SkipUnlessSrcHasDDLEvents()
+
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
 	ctx := suite.Context()
@@ -326,6 +332,8 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_Index() {
 // collection and documents, destination does not).  It then verifies that once
 // the destination is brought into sync the mismatch is resolved.
 func (suite *IntegrationTestSuite) TestDDLChangeEvents_NewCollectionWithDocs() {
+	suite.SkipUnlessSrcHasDDLEvents()
+
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
 	ctx := suite.Context()
@@ -414,6 +422,8 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_NewCollectionWithDocs() {
 // srcLastRecheckedTS is updated to the DDL event's optime, while
 // dstLastRecheckedTS stays zero (no dst DDL event occurred).
 func (suite *IntegrationTestSuite) TestDDLChangeEvents_LastRecheckedTimestampUpdated() {
+	suite.SkipUnlessSrcHasDDLEvents()
+
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
 	ctx := suite.Context()

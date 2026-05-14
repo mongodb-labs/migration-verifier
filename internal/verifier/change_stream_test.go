@@ -1201,16 +1201,8 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 
 func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 	ctx := suite.Context()
-	buildInfo, err := util.GetClusterInfo(
-		ctx,
-		logger.NewDefaultLogger(),
-		suite.dstMongoClient,
-	)
-	suite.Require().NoError(err)
 
-	if buildInfo.VersionArray[0] < 6 {
-		suite.T().Skipf("This test requires dst server v6+. (Found: %v)", buildInfo.VersionArray)
-	}
+	suite.SkipUnlessSrcHasDDLEvents()
 
 	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
 		db := client.Database(suite.DBNameForTest())
@@ -1258,7 +1250,7 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 		"should alter capped size",
 	)
 
-	_, err = suite.dstMongoClient.
+	_, err := suite.dstMongoClient.
 		Database(suite.DBNameForTest()).
 		Collection("mycoll").
 		Indexes().CreateOne(

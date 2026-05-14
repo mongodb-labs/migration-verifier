@@ -250,3 +250,17 @@ func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {
 
 	return name[excess:]
 }
+
+func (suite *IntegrationTestSuite) SkipUnlessSrcHasDDLEvents() {
+	ctx := suite.Context()
+	buildInfo, err := util.GetClusterInfo(
+		ctx,
+		logger.NewDefaultLogger(),
+		suite.srcMongoClient,
+	)
+	suite.Require().NoError(err)
+
+	if buildInfo.VersionArray[0] < 6 {
+		suite.T().Skipf("This test requires src server v6+. (Found: %v)", buildInfo.VersionArray)
+	}
+}
