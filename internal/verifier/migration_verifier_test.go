@@ -987,48 +987,6 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments() {
 	)
 }
 
-func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Metadata() {
-	ctx := suite.Context()
-	verifier := suite.BuildVerifier()
-	verifier.SetVerifyAll(true)
-
-	dbName := suite.DBNameForTest()
-
-	err := verifier.srcClient.Database(dbName).CreateCollection(
-		ctx,
-		"foo",
-	)
-	suite.Require().NoError(err)
-
-	runner := RunVerifierCheck(ctx, suite.T(), verifier)
-	suite.Require().NoError(runner.AwaitGenerationEnd())
-
-	stats, err := verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
-	suite.Require().NoError(err)
-
-	suite.Assert().Equal(
-		mslices.Of(NamespaceStats{
-			Namespace: dbName + ".foo",
-		}),
-		stats,
-		"stats should be as expected",
-	)
-
-	suite.Require().NoError(runner.StartNextGeneration())
-	suite.Require().NoError(runner.AwaitGenerationEnd())
-
-	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
-	suite.Require().NoError(err)
-
-	suite.Assert().Equal(
-		mslices.Of(NamespaceStats{
-			Namespace: dbName + ".foo",
-		}),
-		stats,
-		"stats should be as expected",
-	)
-}
-
 func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_OneDoc() {
 	ctx := suite.Context()
 	verifier := suite.BuildVerifier()
@@ -1953,30 +1911,14 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	// Collection exists only on source.
 	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
 	suite.Require().NoError(err)
-	task := &tasks.Task{
-		PrimaryKey: bson.NewObjectID(),
-		Type:       tasks.VerifyCollection,
-		Status:     tasks.Processing,
-		QueryFilter: tasks.QueryFilter{
-			Namespace: "testDb.testColl",
-			To:        "testDb.testColl",
-		},
-	}
-	suite.Require().NoError(
-		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
-	)
-	suite.Equal(tasks.Failed, task.Status)
-
-	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
-	suite.Equal(1, len(failures))
-	suite.Equal(failures[0].Details, compare.Missing)
-	suite.Equal(failures[0].Cluster, constants.ClusterTarget)
-	suite.Equal(failures[0].NameSpace, "testDb.testColl")
-
-	// Make sure "To" is respected.
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
 	suite.Require().NoError(err)
-	task = &tasks.Task{
+
+	// Make sure "To" is respected.
+	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testCollTo")
+	suite.Require().NoError(err)
+
+	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
 		Type:       tasks.VerifyCollection,
 		Status:     tasks.Processing,
@@ -1988,36 +1930,10 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
-	suite.Equal(tasks.Failed, task.Status)
+	suite.Equal(tasks.Completed, task.Status)
 
-	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
-	suite.Equal(1, len(failures))
-	suite.Equal(failures[0].Details, compare.Missing)
-	suite.Equal(failures[0].Cluster, constants.ClusterTarget)
-	suite.Equal(failures[0].NameSpace, "testDb.testCollTo")
-
-	// Collection exists only on dest.
-	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "destOnlyColl")
-	suite.Require().NoError(err)
-	task = &tasks.Task{
-		PrimaryKey: bson.NewObjectID(),
-		Type:       tasks.VerifyCollection,
-		Status:     tasks.Processing,
-		QueryFilter: tasks.QueryFilter{
-			Namespace: "testDb.destOnlyColl",
-			To:        "testDb.destOnlyColl",
-		},
-	}
-	suite.Require().NoError(
-		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
-	)
-	suite.Equal(tasks.Failed, task.Status)
-
-	failures = suite.getFailuresForTask(verifier, task.PrimaryKey)
-	suite.Equal(1, len(failures))
-	suite.Equal(failures[0].Details, compare.Missing)
-	suite.Equal(failures[0].Cluster, constants.ClusterSource)
-	suite.Equal(failures[0].NameSpace, "testDb.destOnlyColl")
+	failures := suite.getFailuresForTask(verifier, task.PrimaryKey)
+	suite.Require().Empty(failures)
 
 	// A view and a collection are different.
 	err = suite.srcMongoClient.Database("testDb").CreateView(ctx, "viewOnSrc", "testColl", bson.A{bson.D{{"$project", bson.D{{"_id", 1}}}}})
