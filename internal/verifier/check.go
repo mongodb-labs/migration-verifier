@@ -15,7 +15,6 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/goaux/timer"
 	"github.com/mongodb-labs/migration-tools/bsontools"
-	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -543,9 +542,6 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 		_, err := verifier.InsertCollectionVerificationTask(
 			ctx,
 			src,
-			option.None[bson.DateTime](),
-			option.None[bson.Timestamp](),
-			option.None[bson.Timestamp](),
 		)
 		if err != nil {
 			return errors.Wrapf(

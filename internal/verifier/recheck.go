@@ -80,12 +80,7 @@ func (verifier *Verifier) InsertFailedCompareRecheckDocs(
 		ctx,
 		dbNames,
 		collNames,
-		lo.Map(
-			documentIDs,
-			func(docID bson.RawValue, _ int) option.Option[bson.RawValue] {
-				return option.Some(docID)
-			},
-		),
+		documentIDs,
 		dataSizes,
 		firstMismatchTimes,
 		option.None[whichCluster](),
@@ -97,7 +92,7 @@ func (verifier *Verifier) insertRecheckDocs(
 	ctx context.Context,
 	dbNames []string,
 	collNames []string,
-	documentIDOpts []option.Option[bson.RawValue],
+	documentIDs []bson.RawValue,
 	dataSizes []int32,
 	firstMismatchTimes []bson.DateTime,
 	changeOrigin option.Option[whichCluster],
@@ -195,7 +190,7 @@ func (verifier *Verifier) insertRecheckDocs(
 			PrimaryKey: recheck.PrimaryKey{
 				SrcDatabaseName:   dbName,
 				SrcCollectionName: collNames[i],
-				DocumentID:        documentIDOpts[i],
+				DocumentID:        documentIDs[i],
 				Rand:              rand.Int32(),
 			},
 			DataSize:          dataSizes[i],
@@ -227,14 +222,14 @@ func (verifier *Verifier) insertRecheckDocs(
 		return errors.Wrapf(
 			err,
 			"persisting %d recheck(s) to be rechecked in generation %d",
-			len(documentIDOpts),
+			len(documentIDs),
 			recheckInGeneration,
 		)
 	}
 
 	if time.Since(start) > time.Second {
 		verifier.logger.Warn().
-			Int("count", len(documentIDOpts)).
+			Int("count", len(documentIDs)).
 			Int("insertThreads", insertThreads).
 			Stringer("totalTime", time.Since(start)).
 			Msg("Slow recheck persistence.")
@@ -242,7 +237,7 @@ func (verifier *Verifier) insertRecheckDocs(
 
 	verifier.logger.Trace().
 		Int("recheckInGeneration", recheckInGeneration).
-		Int("count", len(documentIDOpts)).
+		Int("count", len(documentIDs)).
 		Msg("Persisted rechecks.")
 
 	return nil
@@ -335,8 +330,8 @@ func (verifier *Verifier) GenerateRecheckTasks(
 	generation, _ := verifier.getGeneration()
 
 	verifier.logger.Info().
-		Int("priorGeneration", generation-1).
-		Msg("Creating new tasks from rechecks enqueued in prior generation.")
+		Int("generation", generation).
+		Msg("Creating new document-recheck tasks from enqueued rechecks.")
 
 	recheckColl := verifier.getRecheckQueueCollection(generation)
 
@@ -418,11 +413,10 @@ func (verifier *Verifier) GenerateRecheckTasks(
 	defer cursor.Close(findCtx)
 
 	var (
-		curTasks            []bson.Raw
-		curTasksBytes       int
-		totalCollTasks      int
-		totalDocTasks       int
-		totalDocTaskInserts int
+		curTasks      []bson.Raw
+		curTasksBytes int
+		totalTasks    int
+		totalInserts  int
 	)
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
@@ -440,7 +434,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			},
 		)
 
-		totalDocTaskInserts++
+		totalInserts++
 	}
 
 	persistBufferedRechecks := func() error {
@@ -465,7 +459,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 				namespace,
 			)
 		}
-		totalDocTasks++
+		totalTasks++
 
 		taskRaw, err := bson.Marshal(task)
 		if err != nil {
@@ -498,12 +492,6 @@ func (verifier *Verifier) GenerateRecheckTasks(
 
 	var lastIDRaw bson.RawValue
 
-	// A map of all collection-level tasks to create, along with their
-	// first mismatch times.
-	collFirstMismatchTime := map[string]bson.DateTime{}
-	collSrcTimestamp := map[string]bson.Timestamp{}
-	collDstTimestamp := map[string]bson.Timestamp{}
-
 	// We group these here using a sort rather than using aggregate because aggregate is
 	// subject to a 16MB limit on group size.
 	for cursor.Next(findCtx) {
@@ -513,57 +501,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			return err
 		}
 
-		idRaw, isDocEvent := doc.PrimaryKey.DocumentID.Get()
-
-		if optime, has := doc.ChangeOpTime.Get(); has {
-			// A recheck should either be for a change/write or a mismatch.
-			// Never both.
-			if doc.FirstMismatchTime.IsSome() {
-				panic("should not see change optime with a first-mismatch time")
-			}
-
-			if doc.FromDst {
-				latestDstTimestamp = newerTimestamp(latestDstTimestamp, optime)
-			} else {
-				latestSrcTimestamp = newerTimestamp(latestSrcTimestamp, optime)
-			}
-		}
-
-		if !isDocEvent {
-			nsStr := doc.PrimaryKey.NamespaceString()
-
-			if firstMT, has := doc.FirstMismatchTime.Get(); has {
-				oldFirstMT, nsSeen := collFirstMismatchTime[nsStr]
-
-				// Multiple mismatches for the same namespace means the last
-				// generation checked that namespace multiple times. That
-				// shouldn’t happen, but there’s no reason to complain if it
-				// does, so we should tolerate it just in case. To do so we
-				// take the earliest, most conservative mismatch time.
-				if !nsSeen || firstMT < oldFirstMT {
-					collFirstMismatchTime[nsStr] = firstMT
-				}
-			}
-
-			if optime, has := doc.ChangeOpTime.Get(); has {
-				// Reset the first-mismatch time in response to a change event.
-				collFirstMismatchTime[nsStr] = 0
-
-				if doc.FromDst {
-					collDstTimestamp[nsStr] = newerTimestamp(
-						collDstTimestamp[nsStr],
-						optime,
-					)
-				} else {
-					collSrcTimestamp[nsStr] = newerTimestamp(
-						collSrcTimestamp[nsStr],
-						optime,
-					)
-				}
-			}
-
-			continue
-		}
+		idRaw := doc.PrimaryKey.DocumentID
 
 		// We persist rechecks if any of these happen:
 		// - the namespace has changed
@@ -608,7 +546,19 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			metadataIndex -= 1
 		}
 
-		if doc.ChangeOpTime.IsSome() {
+		if optime, has := doc.ChangeOpTime.Get(); has {
+			// A recheck should either be for a change/write or a mismatch.
+			// Never both.
+			if doc.FirstMismatchTime.IsSome() {
+				panic("should not see change optime with a first-mismatch time")
+			}
+
+			if doc.FromDst {
+				latestDstTimestamp = newerTimestamp(latestDstTimestamp, optime)
+			} else {
+				latestSrcTimestamp = newerTimestamp(latestSrcTimestamp, optime)
+			}
+
 			delete(firstMismatchTime, int32(metadataIndex))
 		} else if fmt, has := doc.FirstMismatchTime.Get(); has {
 			if !isSameDoc {
@@ -625,7 +575,7 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		idsSizer.Add(idRaw)
 		dataSizeAccum += types.ByteCount(doc.DataSize)
 
-		idAccum = append(idAccum, idRaw)
+		idAccum = append(idAccum, doc.PrimaryKey.DocumentID)
 
 		totalRecheckData += types.ByteCount(doc.DataSize)
 		totalDocs++
@@ -650,32 +600,12 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		return errors.Wrapf(err, "persisting document recheck tasks")
 	}
 
-	for nsStr, firstMT := range collFirstMismatchTime {
-		_, err := verifier.InsertCollectionVerificationTask(
-			ctx,
-			nsStr,
-			option.IfNotZero(firstMT),
-			option.IfNotZero(collSrcTimestamp[nsStr]),
-			option.IfNotZero(collDstTimestamp[nsStr]),
-		)
-		if err != nil {
-			return errors.Wrapf(
-				err,
-				"inserting collection-level verification task for collection %#q",
-				nsStr,
-			)
-		}
-
-		totalCollTasks++
-	}
-
 	if totalDocs > 0 {
 		verifier.logger.Info().
 			Int("generation", generation).
 			Int64("totalDocs", int64(totalDocs)).
-			Int("newCollTasks", totalCollTasks).
-			Int("newDocTasks", totalDocTasks).
-			Int("docTaskInsertRequests", totalDocTaskInserts).
+			Int("tasks", totalTasks).
+			Int("insertRequests", totalInserts).
 			Str("totalData", reportutils.FmtBytes(totalRecheckData)).
 			Stringer("timeElapsed", time.Since(startTime)).
 			Msg("Scheduled documents for recheck in the new generation.")

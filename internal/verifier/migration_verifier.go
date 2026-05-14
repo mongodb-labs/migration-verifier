@@ -31,7 +31,6 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mring"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/timeseries"
 	"github.com/dustin/go-humanize"
@@ -1221,25 +1220,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	}
 
 	insertFailedCollection := func() error {
-		/*
-			_, err := verifier.InsertFailedCollectionVerificationTask(ctx, srcNs)
-		*/
-
-		firstMismatchTime, alreadyMismatched := task.FirstMismatchTime[0]
-		if !alreadyMismatched {
-			firstMismatchTime = bson.NewDateTimeFromTime(time.Now())
-		}
-
-		err := verifier.insertRecheckDocs(
-			ctx,
-			mslices.Of(srcColl.Database().Name()),
-			mslices.Of(srcColl.Name()),
-			mslices.Of(option.None[bson.RawValue]()),
-			mslices.Of(int32(0)),
-			mslices.Of(firstMismatchTime),
-			option.None[whichCluster](),
-			nil,
-		)
+		_, err := verifier.InsertFailedCollectionVerificationTask(ctx, srcNs)
 		return errors.Wrapf(
 			err,
 			"failed to persist metadata mismatch for collection %#q",

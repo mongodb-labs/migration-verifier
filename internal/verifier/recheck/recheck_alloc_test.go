@@ -21,7 +21,7 @@ func TestDocUnmarshal_NoExtraAllocs(t *testing.T) {
 		PrimaryKey: PrimaryKey{
 			SrcDatabaseName:   "mydb",
 			SrcCollectionName: "mycoll",
-			DocumentID:        option.Some(mbson.ToRawValue(int64(42))),
+			DocumentID:        mbson.ToRawValue(int64(42)),
 		},
 		DataSize:     100,
 		ChangeOpTime: option.Some(bson.Timestamp{T: 1, I: 2}),

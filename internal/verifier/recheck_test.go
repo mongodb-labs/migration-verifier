@@ -54,7 +54,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 				PrimaryKey: recheck.PrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
-					DocumentID:        option.Some(mbson.ToRawValue("theDocID")),
+					DocumentID:        mbson.ToRawValue("theDocID"),
 				},
 				FirstMismatchTime: recheckDocs[0].FirstMismatchTime,
 			},
@@ -91,7 +91,7 @@ func (suite *IntegrationTestSuite) TestFailedCompareThenReplace() {
 				PrimaryKey: recheck.PrimaryKey{
 					SrcDatabaseName:   "the",
 					SrcCollectionName: "namespace",
-					DocumentID:        option.Some(mbson.ToRawValue("theDocID")),
+					DocumentID:        mbson.ToRawValue("theDocID"),
 				},
 				FirstMismatchTime: recheckDocs[0].FirstMismatchTime,
 			},
@@ -276,7 +276,7 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 				ctx,
 				mslices.Of(dbName),
 				mslices.Of(collName),
-				mslices.Of(option.Some(docID)),
+				mslices.Of(docID),
 				mslices.Of(int32(123)),
 				mslices.Of(bson.NewDateTimeFromTime(time.Now())),
 				option.None[whichCluster](),
@@ -318,7 +318,7 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 						ctx,
 						mslices.Of(dbName),
 						mslices.Of(collName),
-						mslices.Of(option.Some(docID)),
+						mslices.Of(docID),
 						mslices.Of(int32(123)),
 						mslices.Of(mismatchTime),
 						option.None[whichCluster](),
@@ -336,7 +336,7 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 							ctx,
 							mslices.Of(dbName, dbName, dbName),
 							mslices.Of(collName, collName, collName),
-							mslices.Of(option.Some(docID), option.Some(docID), option.Some(docID)),
+							mslices.Of(docID, docID, docID),
 							mslices.Of(int32(123), int32(123), int32(123)),
 							nil,
 							option.Some(cluster),
@@ -426,15 +426,15 @@ func (suite *IntegrationTestSuite) TestLargeIDInsertions() {
 		PrimaryKey: recheck.PrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        option.Some(mbson.ToRawValue(id1)),
+			DocumentID:        mbson.ToRawValue(id1),
 		},
 		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id2))
+	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
 	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 	d3 := d1
-	d3.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id3))
+	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
 	d3.ChangeOpTime = option.Some(bson.Timestamp{123, 2})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
@@ -514,15 +514,15 @@ func (suite *IntegrationTestSuite) TestLargeDataInsertions() {
 		PrimaryKey: recheck.PrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        option.Some(mbson.ToRawValue(id1)),
+			DocumentID:        mbson.ToRawValue(id1),
 		},
 		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id2))
+	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
 	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 	d3 := d1
-	d3.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id3))
+	d3.PrimaryKey.DocumentID = mbson.ToRawValue(id3)
 	d3.ChangeOpTime = option.Some(bson.Timestamp{123, 2})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
@@ -645,12 +645,12 @@ func (suite *IntegrationTestSuite) TestGenerationalClear() {
 		PrimaryKey: recheck.PrimaryKey{
 			SrcDatabaseName:   "testDB",
 			SrcCollectionName: "testColl",
-			DocumentID:        option.Some(mbson.ToRawValue(id1)),
+			DocumentID:        mbson.ToRawValue(id1),
 		},
 		ChangeOpTime: option.Some(bson.Timestamp{123, 0}),
 	}
 	d2 := d1
-	d2.PrimaryKey.DocumentID = option.Some(mbson.ToRawValue(id2))
+	d2.PrimaryKey.DocumentID = mbson.ToRawValue(id2)
 	d2.ChangeOpTime = option.Some(bson.Timestamp{123, 1})
 
 	results := suite.fetchRecheckDocs(ctx, verifier)
@@ -700,12 +700,7 @@ func insertRecheckDocs(
 		ctx,
 		dbNames,
 		collNames,
-		lo.Map(
-			rawIDs,
-			func(id bson.RawValue, _ int) option.Option[bson.RawValue] {
-				return option.Some(id)
-			},
-		),
+		rawIDs,
 		dataSizes,
 		nil,
 		option.None[whichCluster](),

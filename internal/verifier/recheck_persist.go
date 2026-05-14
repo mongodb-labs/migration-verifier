@@ -102,7 +102,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 	dbNames := make([]string, 0, len(batch.events))
 	collNames := make([]string, 0, len(batch.events))
-	docIDOpts := make([]option.Option[bson.RawValue], 0, len(batch.events))
+	docIDs := make([]bson.RawValue, 0, len(batch.events))
 	dataSizes := make([]int32, 0, len(batch.events))
 	opTimes := make([]bson.Timestamp, 0, len(batch.events))
 
@@ -152,9 +152,19 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 			panic(fmt.Sprintf("unknown event origin: %s", eventOrigin))
 		}
 
+		docID, isDocEvent := changeEvent.DocID.Get()
+		if !isDocEvent {
+			verifier.InsertCollectionVerificationTask(
+				ctx,
+				srcDBName+"."+srcCollName,
+			)
+
+			continue
+		}
+
 		dbNames = append(dbNames, srcDBName)
 		collNames = append(collNames, srcCollName)
-		docIDOpts = append(docIDOpts, changeEvent.DocID)
+		docIDs = append(docIDs, docID)
 		opTimes = append(opTimes, *changeEvent.ClusterTime)
 
 		var dataSize int32
@@ -187,7 +197,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 	verifier.logger.Trace().
 		Str("origin", string(eventOrigin)).
-		Int("count", len(docIDOpts)).
+		Int("count", len(docIDs)).
 		Any("latestTimestamp", latestTimestamp).
 		Time("latestTimestampTime", latestTimestampTime).
 		Msg("Persisting rechecks for change events.")
@@ -196,7 +206,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 		ctx,
 		dbNames,
 		collNames,
-		docIDOpts,
+		docIDs,
 		dataSizes,
 		nil,
 		option.Some(eventOrigin),

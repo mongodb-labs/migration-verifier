@@ -1178,18 +1178,12 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	task2, err := verifier.InsertCollectionVerificationTask(
 		ctx,
 		"mydb.coll2",
-		option.None[bson.DateTime](),
-		option.None[bson.Timestamp](),
-		option.None[bson.Timestamp](),
 	)
 	suite.Require().NoError(err)
 
 	task1, err := verifier.InsertCollectionVerificationTask(
 		ctx,
 		"mydb.coll1",
-		option.None[bson.DateTime](),
-		option.None[bson.Timestamp](),
-		option.None[bson.Timestamp](),
 	)
 	suite.Require().NoError(err)
 
@@ -2410,7 +2404,7 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	recheckDocIDs := lo.Map(
 		rechecks,
 		func(r recheck.Doc, _ int) int {
-			docID := r.PrimaryKey.DocumentID.MustGet()
+			docID := r.PrimaryKey.DocumentID
 			num, err := mbson.CastRawValue[int32](docID)
 			suite.Require().NoError(err)
 			return int(num)
