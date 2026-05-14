@@ -546,6 +546,9 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			}
 
 			if optime, has := doc.ChangeOpTime.Get(); has {
+				// Reset the first-mismatch time in response to a change event.
+				collFirstMismatchTime[nsStr] = 0
+
 				if doc.FromDst {
 					collDstTimestamp[nsStr] = newerTimestamp(
 						collDstTimestamp[nsStr],
