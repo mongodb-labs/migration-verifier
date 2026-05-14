@@ -375,6 +375,70 @@ func (suite *IntegrationTestSuite) TestMismatchAndChangeRechecks() {
 	)
 }
 
+func (suite *IntegrationTestSuite) TestDupeRechecksStraddleBatch() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+	suite.Require().NoError(verifier.SetNumWorkers(10))
+
+	docsCount := maxRecheckIDs - 1
+
+	suite.T().Logf("Inserting %d rechecks …", docsCount)
+
+	dbName := suite.DBNameForTest()
+
+	ids := lo.Range(docsCount)
+	err := insertRecheckDocs(
+		ctx,
+		verifier,
+		dbName,
+		"testColl",
+		lo.ToAnySlice(ids),
+		lo.RepeatBy(docsCount, func(_ int) int32 { return 1 }),
+	)
+	suite.Require().NoError(err)
+
+	// Add a recheck for the source:
+	err = verifier.insertRecheckDocs(
+		ctx,
+		mslices.Of(dbName),
+		mslices.Of("testColl"),
+		mslices.Of(mbson.ToRawValue("foo")),
+		mslices.Of(int32(1)),
+		nil,
+		option.Some(src),
+		mslices.Of(bson.Timestamp{123, 456}),
+	)
+	suite.Require().NoError(err)
+
+	// Another for the destination:
+	err = verifier.insertRecheckDocs(
+		ctx,
+		mslices.Of(dbName),
+		mslices.Of("testColl"),
+		mslices.Of(mbson.ToRawValue("foo")),
+		mslices.Of(int32(1)),
+		nil,
+		option.Some(dst),
+		mslices.Of(bson.Timestamp{234, 345}),
+	)
+	suite.Require().NoError(err)
+
+	verifier.generation++
+
+	err = verifier.GenerateRecheckTasks(ctx, &testutil.MockSuccessNotifier{})
+	suite.Require().NoError(err)
+
+	taskColl := suite.metaMongoClient.Database(verifier.metaDBName).Collection(verificationTasksCollection)
+	cursor, err := taskColl.Find(ctx, bson.D{})
+	suite.Require().NoError(err)
+	var foundTasks []tasks.Task
+	err = cursor.All(ctx, &foundTasks)
+	suite.Require().NoError(err)
+
+	suite.Assert().EqualValues(1, len(foundTasks), "1 task should exist")
+}
+
 func (suite *IntegrationTestSuite) TestManyManyRechecks() {
 	if len(os.Getenv("CI")) > 0 {
 		suite.T().Skip("Skipping this test in CI. (It causes GitHub Action to self-terminate.)")
@@ -703,7 +767,7 @@ func insertRecheckDocs(
 		rawIDs,
 		dataSizes,
 		nil,
-		option.None[whichCluster](),
+		option.Some(src),
 		lo.RepeatBy(
 			len(dbNames),
 			func(index int) bson.Timestamp {
