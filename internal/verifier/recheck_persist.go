@@ -7,7 +7,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mmongo"
-	"github.com/10gen/migration-verifier/option"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -102,7 +102,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 	dbNames := make([]string, 0, len(batch.events))
 	collNames := make([]string, 0, len(batch.events))
-	docIDs := make([]bson.RawValue, 0, len(batch.events))
+	docIDOpts := make([]option.Option[bson.RawValue], 0, len(batch.events))
 	dataSizes := make([]int32, 0, len(batch.events))
 	opTimes := make([]bson.Timestamp, 0, len(batch.events))
 
@@ -154,7 +154,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 		dbNames = append(dbNames, srcDBName)
 		collNames = append(collNames, srcCollName)
-		docIDs = append(docIDs, changeEvent.DocID)
+		docIDOpts = append(docIDOpts, changeEvent.DocID)
 		opTimes = append(opTimes, *changeEvent.ClusterTime)
 
 		var dataSize int32
@@ -187,7 +187,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 	verifier.logger.Trace().
 		Str("origin", string(eventOrigin)).
-		Int("count", len(docIDs)).
+		Int("count", len(docIDOpts)).
 		Any("latestTimestamp", latestTimestamp).
 		Time("latestTimestampTime", latestTimestampTime).
 		Msg("Persisting rechecks for change events.")
@@ -196,7 +196,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 		ctx,
 		dbNames,
 		collNames,
-		docIDs,
+		docIDOpts,
 		dataSizes,
 		nil,
 		option.Some(eventOrigin),

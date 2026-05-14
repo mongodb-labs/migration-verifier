@@ -131,7 +131,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 				event.Ns,
 			)
 			suite.Assert().Equal("insert", event.OpType)
-			suite.Assert().Equal("ho", lo.Must(mbson.CastRawValue[string](event.DocID)))
+			suite.Assert().Equal("ho", lo.Must(mbson.CastRawValue[string](event.DocID.MustGet())))
 			suite.Assert().EqualValues(len(raw), event.FullDocLen.MustGet(), "doc length")
 		},
 	)
@@ -153,7 +153,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 				event.Ns,
 			)
 			suite.Assert().Equal("update", event.OpType)
-			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID)))
+			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID.MustGet())))
 		},
 	)
 
@@ -171,7 +171,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 				event.Ns,
 			)
 			suite.Assert().Equal("replace", event.OpType)
-			suite.Assert().Equal("ho", lo.Must(mbson.CastRawValue[string](event.DocID)))
+			suite.Assert().Equal("ho", lo.Must(mbson.CastRawValue[string](event.DocID.MustGet())))
 			suite.Assert().EqualValues(len(raw), event.FullDocLen.MustGet(), "doc length")
 		},
 	)
@@ -189,7 +189,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 				event.Ns,
 			)
 			suite.Assert().Equal("delete", event.OpType)
-			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID)))
+			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID.MustGet())))
 		},
 	)
 
@@ -222,7 +222,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 
 				suite.Assert().Equal(
 					bulkDocs[i][0].Value,
-					lo.Must(mbson.CastRawValue[float64](event.DocID)),
+					lo.Must(mbson.CastRawValue[float64](event.DocID.MustGet())),
 					"events[%d].DocID", i,
 				)
 			}
@@ -261,7 +261,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 			eventDocIDs := lo.Map(
 				events,
 				func(event ParsedEvent, _ int) any {
-					return lo.Must(mbson.CastRawValue[float64](event.DocID))
+					return lo.Must(mbson.CastRawValue[float64](event.DocID.MustGet()))
 				},
 			)
 
@@ -297,7 +297,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 			eventDocIDs := lo.Map(
 				events,
 				func(event ParsedEvent, _ int) any {
-					return lo.Must(mbson.CastRawValue[float64](event.DocID))
+					return lo.Must(mbson.CastRawValue[float64](event.DocID.MustGet()))
 				},
 			)
 

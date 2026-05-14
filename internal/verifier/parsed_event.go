@@ -5,8 +5,8 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/mbson"
-	"github.com/10gen/migration-verifier/option"
 	"github.com/mongodb-labs/migration-tools/bsontools"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
@@ -16,7 +16,7 @@ import (
 type ParsedEvent struct {
 	OpType       string                         `bson:"operationType"`
 	Ns           *Namespace                     `bson:"ns,omitempty"`
-	DocID        bson.RawValue                  `bson:"_docID,omitempty"`
+	DocID        option.Option[bson.RawValue]   `bson:"_docID,omitempty"`
 	FullDocument bson.Raw                       `bson:"fullDocument,omitempty"`
 	FullDocLen   option.Option[types.ByteCount] `bson:"_fullDocLen"`
 	ClusterTime  *bson.Timestamp                `bson:"clusterTime,omitEmpty"`
@@ -77,7 +77,7 @@ func (pe *ParsedEvent) UnmarshalFromBSON(in []byte) error {
 				return errors.Wrapf(err, "parsing %#q field", string(key))
 			}
 
-			pe.DocID = rv
+			pe.DocID = option.Some(rv)
 		case "fullDocument":
 			err := mbson.UnmarshalElementValue(el, &pe.FullDocument)
 			if err != nil {
@@ -106,6 +106,8 @@ func (pe *ParsedEvent) UnmarshalFromBSON(in []byte) error {
 			}
 
 			pe.ClusterTime = &ct
+		default:
+			// Ignore unrecognized fields.
 		}
 	}
 

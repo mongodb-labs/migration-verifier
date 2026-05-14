@@ -31,12 +31,13 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mring"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
-	"github.com/10gen/migration-verifier/option"
 	"github.com/10gen/migration-verifier/timeseries"
 	"github.com/dustin/go-humanize"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/mongodb-labs/migration-tools/mongotools/index"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -790,14 +791,6 @@ REPORTS:
 		)
 	}
 
-	if ts, has := task.SrcTimestamp.Get(); has {
-		verifier.NoteCompareOfOptime(src, ts)
-	}
-
-	if ts, has := task.DstTimestamp.Get(); has {
-		verifier.NoteCompareOfOptime(dst, ts)
-	}
-
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
 		Any("task", task.PrimaryKey).
@@ -1228,7 +1221,25 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	}
 
 	insertFailedCollection := func() error {
-		_, err := verifier.InsertFailedCollectionVerificationTask(ctx, srcNs)
+		/*
+			_, err := verifier.InsertFailedCollectionVerificationTask(ctx, srcNs)
+		*/
+
+		firstMismatchTime, alreadyMismatched := task.FirstMismatchTime[0]
+		if !alreadyMismatched {
+			firstMismatchTime = bson.NewDateTimeFromTime(time.Now())
+		}
+
+		err := verifier.insertRecheckDocs(
+			ctx,
+			mslices.Of(srcColl.Database().Name()),
+			mslices.Of(srcColl.Name()),
+			mslices.Of(option.None[bson.RawValue]()),
+			mslices.Of(int32(0)),
+			mslices.Of(firstMismatchTime),
+			option.None[whichCluster](),
+			nil,
+		)
 		return errors.Wrapf(
 			err,
 			"failed to persist metadata mismatch for collection %#q",

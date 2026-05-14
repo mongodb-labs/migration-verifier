@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/mbson"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -39,7 +40,7 @@ func TestPrimaryKeyBSON(t *testing.T) {
 	pk := PrimaryKey{
 		SrcDatabaseName:   "mydb",
 		SrcCollectionName: "mycoll",
-		DocumentID:        mbson.ToRawValue(123123),
+		DocumentID:        option.Some(mbson.ToRawValue(123123)),
 		Rand:              rand.Int32(),
 	}
 
@@ -70,7 +71,7 @@ func TestDocBSON(t *testing.T) {
 		PrimaryKey: PrimaryKey{
 			SrcDatabaseName:   "mydb",
 			SrcCollectionName: "mycoll",
-			DocumentID:        mbson.ToRawValue("heyhey"),
+			DocumentID:        option.Some(mbson.ToRawValue("heyhey")),
 		},
 	}
 
