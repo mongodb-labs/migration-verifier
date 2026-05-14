@@ -213,9 +213,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 				csr.logIgnoredDDL(cs.Current)
 
 				discardEvent = true
-			}
-
-			if toleratedSourceDDLOpTypes.Contains(opType) {
+			} else if csr.readerType == src && toleratedSourceDDLOpTypes.Contains(opType) {
 				csr.logger.Warn().
 					Stringer("changeStream", csr).
 					Any("event", changeEvents[eventsRead]).
