@@ -34,8 +34,6 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 	srcNamespace string,
 	generation int,
 	firstMismatchTime option.Option[bson.DateTime],
-	srcTimestamp option.Option[bson.Timestamp],
-	dstTimestamp option.Option[bson.Timestamp],
 ) (*tasks.Task, error) {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
@@ -55,8 +53,6 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 			Namespace: srcNamespace,
 			To:        dstNamespace,
 		},
-		SrcTimestamp: srcTimestamp,
-		DstTimestamp: dstTimestamp,
 	}
 
 	if mismatchTime, has := firstMismatchTime.Get(); has {
@@ -155,16 +151,12 @@ func (verifier *Verifier) InsertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
 	firstMismatchTime option.Option[bson.DateTime],
-	srcTimestamp option.Option[bson.Timestamp],
-	dstTimestamp option.Option[bson.Timestamp],
 ) (*tasks.Task, error) {
 	return verifier.insertCollectionVerificationTask(
 		ctx,
 		srcNamespace,
 		verifier.generation,
 		firstMismatchTime,
-		srcTimestamp,
-		dstTimestamp,
 	)
 }
 

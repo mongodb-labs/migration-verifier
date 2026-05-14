@@ -634,8 +634,6 @@ func (verifier *Verifier) GenerateRecheckTasks(
 			ctx,
 			nsStr,
 			option.IfNotZero(firstMT),
-			option.IfNotZero(latestSrcTimestamp),
-			option.IfNotZero(latestDstTimestamp),
 		)
 		if err != nil {
 			return errors.Wrapf(

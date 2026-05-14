@@ -544,8 +544,6 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 			ctx,
 			src,
 			option.None[bson.DateTime](),
-			option.None[bson.Timestamp](),
-			option.None[bson.Timestamp](),
 		)
 		if err != nil {
 			return errors.Wrapf(
