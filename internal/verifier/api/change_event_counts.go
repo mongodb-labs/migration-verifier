@@ -49,5 +49,11 @@ func (cec ChangeEventCounts) MarshalZerologObject(e *zerolog.Event) {
 		Int64("update", cec.Update).
 		Int64("replace", cec.Replace).
 		Int64("delete", cec.Delete).
-		Int64("DDL", cec.CountDDL())
+		Int64("create", cec.Create).
+		Int64("modify", cec.Modify).
+		Int64("createIndexes", cec.CreateIndexes).
+		Int64("dropIndexes", cec.DropIndexes).
+		Int64("shardCollection", cec.ShardCollection).
+		Int64("reshardCollection", cec.ReshardCollection).
+		Int64("refineCollectionShardKey", cec.RefineCollectionShardKey)
 }
