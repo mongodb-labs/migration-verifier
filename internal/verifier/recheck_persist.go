@@ -196,6 +196,11 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 		reader.addToEventCounts(changeEvent.OpType)
 	}
 
+	// This can happen if all change events were DDL events.
+	if len(docIDs) == 0 {
+		return nil
+	}
+
 	latestTimestampTime := time.Unix(int64(latestTimestamp.T), 0)
 
 	verifier.logger.Trace().
