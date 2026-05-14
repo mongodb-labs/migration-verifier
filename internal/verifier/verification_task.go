@@ -45,25 +45,14 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 	firstMismatchTime option.Option[bson.DateTime],
 	eventOrigin option.Option[whichCluster],
 	eventTimestamp option.Option[bson.Timestamp],
-) (*tasks.Task, error) {
+) error {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
 		var ok bool
 		dstNamespace, ok = verifier.nsMap.GetDstNamespace(srcNamespace)
 		if !ok {
-			return nil, fmt.Errorf("could not find Namespace %s", srcNamespace)
+			return fmt.Errorf("could not find Namespace %s", srcNamespace)
 		}
-	}
-
-	verificationTask := tasks.Task{
-		PrimaryKey: bson.NewObjectID(),
-		Generation: generation,
-		Status:     tasks.Added,
-		Type:       tasks.VerifyCollection,
-		QueryFilter: tasks.QueryFilter{
-			Namespace: srcNamespace,
-			To:        dstNamespace,
-		},
 	}
 
 	logEvent := verifier.logger.Debug().
@@ -79,7 +68,9 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 	}
 
 	updateFields := bson.M{
-		"$set":   bson.M{},
+		"$set": bson.M{
+			"status": tasks.Added,
+		},
 		"$unset": bson.M{},
 	}
 	if mt, has := firstMismatchTime.Get(); has {
@@ -131,7 +122,7 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 		srcNamespace,
 	).Run(ctx, verifier.logger)
 
-	return &verificationTask, err
+	return err
 }
 
 func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
@@ -199,7 +190,7 @@ func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 func (verifier *Verifier) InsertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
-) (*tasks.Task, error) {
+) error {
 	return verifier.insertCollectionVerificationTask(
 		ctx,
 		srcNamespace,
@@ -216,7 +207,7 @@ func (verifier *Verifier) InsertCollectionRecheckTask(
 	firstMismatchTime option.Option[bson.DateTime],
 	eventOrigin option.Option[whichCluster],
 	eventTimestamp option.Option[bson.Timestamp],
-) (*tasks.Task, error) {
+) error {
 	return verifier.insertCollectionVerificationTask(
 		ctx,
 		srcNamespace,

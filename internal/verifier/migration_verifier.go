@@ -1220,7 +1220,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	}
 
 	insertFailedCollection := func() error {
-		_, err := verifier.InsertCollectionRecheckTask(
+		err := verifier.InsertCollectionRecheckTask(
 			ctx,
 			srcNs,
 			option.Some(bson.NewDateTimeFromTime(time.Now())),

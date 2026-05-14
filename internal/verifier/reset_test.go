@@ -25,7 +25,7 @@ func (suite *IntegrationTestSuite) TestResetPrimaryTask() {
 	suite.Require().NoError(err)
 	suite.Require().True(created)
 
-	_, err = verifier.InsertCollectionVerificationTask(
+	err = verifier.InsertCollectionVerificationTask(
 		ctx,
 		"foo.bar",
 	)
@@ -59,16 +59,24 @@ func (suite *IntegrationTestSuite) TestResetNonPrimaryTasks() {
 	ns2 := "qux.quux"
 
 	// Create a collection-verification task, and set it to processing.
-	collTask, err := verifier.InsertCollectionVerificationTask(
+	err = verifier.InsertCollectionVerificationTask(
 		ctx,
 		ns1,
 	)
 	suite.Require().NoError(err)
 
+	var collTask tasks.Task
+	err = verifier.verificationTaskCollection().FindOne(ctx, bson.M{
+		"generation":             verifier.generation,
+		"type":                   tasks.VerifyCollection,
+		"query_filter.namespace": ns1,
+	}).Decode(&collTask)
+	suite.Require().NoError(err)
+
 	collTask.Status = tasks.Processing
 
 	suite.Require().NoError(
-		verifier.UpdateVerificationTask(ctx, collTask),
+		verifier.UpdateVerificationTask(ctx, &collTask),
 	)
 
 	// Create three partition tasks with the same namespace as the
