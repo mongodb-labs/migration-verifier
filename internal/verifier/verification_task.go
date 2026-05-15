@@ -17,9 +17,11 @@ import (
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -29,33 +31,31 @@ const (
 	verificationTasksCollection = "verification_tasks"
 )
 
+var (
+	tsSetField = map[whichCluster]string{
+		src: compare.SrcTimestampField,
+		dst: compare.DstTimestampField,
+	}
+)
+
 func (verifier *Verifier) insertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
 	generation int,
-) (*tasks.Task, error) {
+	eventOrigin option.Option[whichCluster],
+	eventTimestamp option.Option[bson.Timestamp],
+) error {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
 		var ok bool
 		dstNamespace, ok = verifier.nsMap.GetDstNamespace(srcNamespace)
 		if !ok {
-			return nil, fmt.Errorf("could not find Namespace %s", srcNamespace)
+			return fmt.Errorf("could not find Namespace %s", srcNamespace)
 		}
 	}
 
-	verificationTask := tasks.Task{
-		PrimaryKey: bson.NewObjectID(),
-		Generation: generation,
-		Status:     tasks.Added,
-		Type:       tasks.VerifyCollection,
-		QueryFilter: tasks.QueryFilter{
-			Namespace: srcNamespace,
-			To:        dstNamespace,
-		},
-	}
-
 	logEvent := verifier.logger.Debug().
-		Any("task", verificationTask.PrimaryKey)
+		Int("generation", generation)
 
 	if srcNamespace == dstNamespace {
 		logEvent.
@@ -66,18 +66,53 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 			Str("dstNamespace", dstNamespace)
 	}
 
-	logEvent.Msg("Adding metadata task.")
+	fieldsToSet := bson.M{
+		"status": tasks.Added,
+	}
+
+	if origin, has := eventOrigin.Get(); has {
+		ts := eventTimestamp.MustGetf("timestamp for event from %s cluster", origin)
+
+		field, ok := tsSetField[origin]
+		lo.Assertf(ok, "need known event origin but got %#q", origin)
+
+		fieldsToSet[field] = ts
+		logEvent.Any(field, ts)
+	} else if ts, has := eventTimestamp.Get(); has {
+		lo.Assertf(
+			false,
+			"eventTimestamp (%v) should not be set without eventOrigin",
+			ts,
+		)
+	}
+
+	logEvent.Msg("Adding/updating metadata task.")
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
-			_, err := verifier.verificationTaskCollection().InsertOne(ctx, verificationTask)
+			_, err := verifier.verificationTaskCollection().UpdateOne(
+				ctx,
+				bson.D{
+					{"generation", generation},
+					{"type", tasks.VerifyCollection},
+					{"query_filter", bson.D{
+						{"namespace", srcNamespace},
+						{"to", dstNamespace},
+					}},
+				},
+				bson.D{
+					{"$set", fieldsToSet},
+				},
+				options.UpdateOne().SetUpsert(true),
+			)
+
 			return err
 		},
 		"persisting namespace %#q's verification task",
 		srcNamespace,
 	).Run(ctx, verifier.logger)
 
-	return &verificationTask, err
+	return err
 }
 
 func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
@@ -145,15 +180,32 @@ func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 func (verifier *Verifier) InsertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
-) (*tasks.Task, error) {
-	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation)
+) error {
+	return verifier.insertCollectionVerificationTask(
+		ctx,
+		srcNamespace,
+		verifier.generation,
+		option.None[whichCluster](),
+		option.None[bson.Timestamp](),
+	)
 }
 
-func (verifier *Verifier) InsertFailedCollectionVerificationTask(
+func (verifier *Verifier) InsertCollectionRecheckTask(
 	ctx context.Context,
 	srcNamespace string,
-) (*tasks.Task, error) {
-	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation+1)
+	eventOrigin option.Option[whichCluster],
+	eventTimestamp option.Option[bson.Timestamp],
+) error {
+	verifier.mux.RLock()
+	defer verifier.mux.RUnlock()
+
+	return verifier.insertCollectionVerificationTask(
+		ctx,
+		srcNamespace,
+		verifier.generation+1,
+		eventOrigin,
+		eventTimestamp,
+	)
 }
 
 func (verifier *Verifier) InsertPartitionVerificationTask(

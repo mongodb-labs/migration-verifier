@@ -7,13 +7,16 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// TestOplogReader_SourceDDL verifies that source DDL crashes the oplog reader.
+// TestOplogReader_SourceDDL verifies that source DDL is OK.
 func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 	ctx := suite.Context()
+
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
 	verifier := suite.BuildVerifier()
 
@@ -38,28 +41,58 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 
 	batchReceiver := reader.getReadChannel()
 
-	timer := time.NewTimer(time.Minute)
+	events := []ParsedEvent{}
 
-	channelOpen := true
-	for channelOpen {
-		var batch eventBatch
-		select {
-		case <-ctx.Done():
-			suite.Require().NoError(ctx.Err())
-		case <-timer.C:
-			suite.Require().Fail("should read batch channel")
-		case batch, channelOpen = <-batchReceiver:
-			if channelOpen {
-				suite.T().Logf("got batch: %+v", batch)
+	suite.Assert().Eventually(
+		func() bool {
+			select {
+			case <-ctx.Done():
+				suite.Require().NoError(ctx.Err())
+			case batch, channelOpen := <-batchReceiver:
+				suite.Require().True(channelOpen, "channel should still be open")
+				if len(batch.events) == 0 {
+					return false
+				}
+
+				suite.T().Logf("got batch with %+v", batch.events)
+
+				events = append(events, batch.events...)
 			}
-		}
-	}
 
-	err := eg.Wait()
-	suite.Assert().ErrorAs(err, &UnknownEventError{})
+			return true
+		},
+		time.Minute,
+		time.Millisecond*100,
+		"should see create event",
+	)
 
-	// Confirm that the error text is wrapped:
-	suite.Assert().Contains(err.Error(), "reading")
+	suite.Assert().Equal("create", events[0].OpType)
+
+	suite.Assert().Eventually(
+		func() bool {
+			if len(events) > 1 {
+				return true
+			}
+
+			select {
+			case <-ctx.Done():
+				suite.Require().NoError(ctx.Err())
+			case batch, channelOpen := <-batchReceiver:
+				suite.Require().True(channelOpen, "channel should still be open")
+				if len(batch.events) == 0 {
+					return false
+				}
+				events = append(events, batch.events...)
+			}
+
+			return true
+		},
+		time.Minute,
+		time.Millisecond*100,
+		"should see insert event",
+	)
+
+	suite.Assert().Equal("insert", events[1].OpType)
 }
 
 // TestOplogReader_Documents verifies that the oplog reader sees & publishes
@@ -131,7 +164,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 				event.Ns,
 			)
 			suite.Assert().Equal("insert", event.OpType)
-			suite.Assert().Equal("ho", lo.Must(mbson.CastRawValue[string](event.DocID)))
+			suite.Assert().Equal("ho", lo.Must(mbson.CastRawValue[string](event.DocID.MustGet())))
 			suite.Assert().EqualValues(len(raw), event.FullDocLen.MustGet(), "doc length")
 		},
 	)
@@ -153,7 +186,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 				event.Ns,
 			)
 			suite.Assert().Equal("update", event.OpType)
-			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID)))
+			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID.MustGet())))
 		},
 	)
 
@@ -171,7 +204,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 				event.Ns,
 			)
 			suite.Assert().Equal("replace", event.OpType)
-			suite.Assert().Equal("ho", lo.Must(mbson.CastRawValue[string](event.DocID)))
+			suite.Assert().Equal("ho", lo.Must(mbson.CastRawValue[string](event.DocID.MustGet())))
 			suite.Assert().EqualValues(len(raw), event.FullDocLen.MustGet(), "doc length")
 		},
 	)
@@ -189,7 +222,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 				event.Ns,
 			)
 			suite.Assert().Equal("delete", event.OpType)
-			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID)))
+			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID.MustGet())))
 		},
 	)
 
@@ -222,7 +255,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 
 				suite.Assert().Equal(
 					bulkDocs[i][0].Value,
-					lo.Must(mbson.CastRawValue[float64](event.DocID)),
+					lo.Must(mbson.CastRawValue[float64](event.DocID.MustGet())),
 					"events[%d].DocID", i,
 				)
 			}
@@ -261,7 +294,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 			eventDocIDs := lo.Map(
 				events,
 				func(event ParsedEvent, _ int) any {
-					return lo.Must(mbson.CastRawValue[float64](event.DocID))
+					return lo.Must(mbson.CastRawValue[float64](event.DocID.MustGet()))
 				},
 			)
 
@@ -297,7 +330,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 			eventDocIDs := lo.Map(
 				events,
 				func(event ParsedEvent, _ int) any {
-					return lo.Must(mbson.CastRawValue[float64](event.DocID))
+					return lo.Must(mbson.CastRawValue[float64](event.DocID.MustGet()))
 				},
 			)
 

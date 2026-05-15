@@ -172,7 +172,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
 	// verifier.SetStartClean(true)
 	suite.Require().NoError(verifier.SetNumWorkers(3))
-	verifier.SetGenerationPauseDelay(0)
+	verifier.SetGenerationPauseDelay(100 * time.Millisecond)
 	verifier.SetWorkerSleepDelay(0)
 
 	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
@@ -249,4 +249,22 @@ func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {
 	excess := max(0, len(name)-maxDBNameLen)
 
 	return name[excess:]
+}
+
+func (suite *IntegrationTestSuite) SkipUnlessSrcHasDDLEvents() {
+	if os.Getenv("MVTEST_SRC_CHANGE_READER") == ChangeReaderOptOplog {
+		return
+	}
+
+	ctx := suite.Context()
+	buildInfo, err := util.GetClusterInfo(
+		ctx,
+		logger.NewDefaultLogger(),
+		suite.srcMongoClient,
+	)
+	suite.Require().NoError(err)
+
+	if buildInfo.VersionArray[0] < 6 {
+		suite.T().Skipf("This test requires src server v6+. (Found: %v)", buildInfo.VersionArray)
+	}
 }

@@ -152,9 +152,41 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 			panic(fmt.Sprintf("unknown event origin: %s", eventOrigin))
 		}
 
+		if err := reader.getEventRecorder().AddEvent(&changeEvent); err != nil {
+			return errors.Wrapf(
+				err,
+				"failed to augment stats with %s change event (%+v)",
+				eventOrigin,
+				changeEvent,
+			)
+		}
+
+		reader.addToEventCounts(changeEvent.OpType)
+
+		docID, isDocEvent := changeEvent.DocID.Get()
+		if !isDocEvent {
+			err := verifier.InsertCollectionRecheckTask(
+				ctx,
+				srcDBName+"."+srcCollName,
+				option.Some(eventOrigin),
+				option.Some(*changeEvent.ClusterTime),
+			)
+
+			if err != nil {
+				return errors.Wrapf(
+					err,
+					"insert collection-level recheck task for %s change event (%+v)",
+					eventOrigin,
+					changeEvent,
+				)
+			}
+
+			continue
+		}
+
 		dbNames = append(dbNames, srcDBName)
 		collNames = append(collNames, srcCollName)
-		docIDs = append(docIDs, changeEvent.DocID)
+		docIDs = append(docIDs, docID)
 		opTimes = append(opTimes, *changeEvent.ClusterTime)
 
 		var dataSize int32
@@ -170,17 +202,11 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 		}
 
 		dataSizes = append(dataSizes, dataSize)
+	}
 
-		if err := reader.getEventRecorder().AddEvent(&changeEvent); err != nil {
-			return errors.Wrapf(
-				err,
-				"failed to augment stats with %s change event (%+v)",
-				eventOrigin,
-				changeEvent,
-			)
-		}
-
-		reader.addToEventCounts(changeEvent.OpType)
+	// This can happen if all change events were DDL events.
+	if len(docIDs) == 0 {
+		return nil
 	}
 
 	latestTimestampTime := time.Unix(int64(latestTimestamp.T), 0)

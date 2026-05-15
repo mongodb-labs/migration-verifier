@@ -539,7 +539,10 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 		}
 	}
 	for _, src := range verifier.srcNamespaces {
-		_, err := verifier.InsertCollectionVerificationTask(ctx, src)
+		err := verifier.InsertCollectionVerificationTask(
+			ctx,
+			src,
+		)
 		if err != nil {
 			return errors.Wrapf(
 				err,
@@ -638,40 +641,65 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			continue
 		}
 
-		verifier.workerTracker.Set(workerNum, task)
-
-		switch task.Type {
-		case tasks.VerifyCollection:
-			err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, &task)
-			verifier.workerTracker.Unset(workerNum)
-
-			if err != nil {
-				return err
-			}
-			if task.Generation == 0 {
-				newVal := verifier.gen0PendingCollectionTasks.Add(-1)
-				if newVal == 0 {
-					verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
-				}
-			}
-		case tasks.VerifyDocuments:
-			err := verifier.ProcessVerifyTask(ctx, workerNum, &task)
-			verifier.workerTracker.Unset(workerNum)
-
-			if err != nil {
-				return err
-			}
-		case tasks.ProcessRecheckQueue:
-			err := verifier.processCreateRechecksTask(ctx, task)
-			verifier.workerTracker.Unset(workerNum)
-
-			if err != nil {
-				return err
-			}
-		default:
-			panic("Unknown verification task type: " + task.Type)
+		err = verifier.processOneTask(ctx, workerNum, task)
+		if err != nil {
+			return errors.Wrapf(
+				err,
+				"process %#q task %#q",
+				task.Type,
+				task.PrimaryKey,
+			)
 		}
 	}
+}
+
+func (verifier *Verifier) processOneTask(
+	ctx context.Context,
+	workerNum int,
+	task tasks.Task,
+) error {
+	verifier.workerTracker.Set(workerNum, task)
+	defer verifier.workerTracker.Unset(workerNum)
+
+	switch task.Type {
+	case tasks.VerifyCollection:
+		err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, &task)
+
+		if err != nil {
+			return err
+		}
+
+		if task.Generation == 0 {
+			newVal := verifier.gen0PendingCollectionTasks.Add(-1)
+			if newVal == 0 {
+				verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
+			}
+		}
+	case tasks.VerifyDocuments:
+		err := verifier.ProcessVerifyTask(ctx, workerNum, &task)
+
+		if err != nil {
+			return err
+		}
+	case tasks.ProcessRecheckQueue:
+		err := verifier.processCreateRechecksTask(ctx, task)
+
+		if err != nil {
+			return err
+		}
+	default:
+		panic("Unknown verification task type: " + task.Type)
+	}
+
+	if ts, has := task.SrcTimestamp.Get(); has {
+		verifier.NoteCompareOfOptime(src, ts)
+	}
+
+	if ts, has := task.DstTimestamp.Get(); has {
+		verifier.NoteCompareOfOptime(dst, ts)
+	}
+
+	return nil
 }
 
 func (verifier *Verifier) processCreateRechecksTask(
@@ -702,6 +730,10 @@ func (verifier *Verifier) processCreateRechecksTask(
 			task.Status,
 		)
 	}
+
+	// At this point another worker thread may cancel the generation’s context,
+	// which will cause the drop command below to fail spuriously. It’s not
+	// really worth fixing.
 
 	// NB: This must happen *after* we persist the task as completed.
 	// Otherwise Verifier could crash then, on restart, neglect to create all

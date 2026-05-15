@@ -816,6 +816,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
 		Generation: 1,
 		Ids: mslices.Of(
 			mbson.ToRawValue(id),
@@ -835,7 +836,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 	)
 	suite.Require().NoError(err, "must insert recheck task")
 
-	err = verifier.ProcessVerifyTask(ctx, 0, task)
+	err = verifier.processOneTask(ctx, 0, *task)
 	suite.Require().NoError(err)
 
 	verifier.srcLastRecheckedTS.Load(func(ts bson.Timestamp) {
@@ -1104,7 +1105,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
-				DocID:  mbson.ToRawValue("heyhey"),
+				DocID:  option.Some(mbson.ToRawValue("heyhey")),
 				ClusterTime: &bson.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
@@ -1120,7 +1121,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
-				DocID:  mbson.ToRawValue("hoohoo"),
+				DocID:  option.Some(mbson.ToRawValue("hoohoo")),
 				ClusterTime: &bson.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
@@ -1175,10 +1176,16 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now add 2 namespaces. Add them “out of order” to test
 	// that we sort the returned array by Namespace.
 
-	task2, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll2")
+	err = verifier.InsertCollectionVerificationTask(
+		ctx,
+		"mydb.coll2",
+	)
 	suite.Require().NoError(err)
 
-	task1, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll1")
+	err = verifier.InsertCollectionVerificationTask(
+		ctx,
+		"mydb.coll1",
+	)
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
@@ -1186,14 +1193,30 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 
 	suite.Assert().Equal(
 		[]NamespaceStats{
-			{Namespace: task1.QueryFilter.Namespace},
-			{Namespace: task2.QueryFilter.Namespace},
+			{Namespace: "mydb.coll1"},
+			{Namespace: "mydb.coll2"},
 		},
 		stats,
 		"One stats struct for each namespace",
 	)
 
 	// Now add document counts for each namespace.
+
+	var task1, task2 tasks.Task
+
+	err = verifier.verificationTaskCollection().FindOne(ctx, bson.M{
+		"generation":             verifier.generation,
+		"type":                   tasks.VerifyCollection,
+		"query_filter.namespace": "mydb.coll1",
+	}).Decode(&task1)
+	suite.Require().NoError(err)
+
+	err = verifier.verificationTaskCollection().FindOne(ctx, bson.M{
+		"generation":             verifier.generation,
+		"type":                   tasks.VerifyCollection,
+		"query_filter.namespace": "mydb.coll2",
+	}).Decode(&task2)
+	suite.Require().NoError(err)
 
 	task1.Status = tasks.Completed
 	task1.DocumentsCount = 1000
@@ -1203,10 +1226,10 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	task2.DocumentsCount = 900
 	task2.SourceBytesCount = 9_000
 
-	err = verifier.UpdateVerificationTask(ctx, task2)
+	err = verifier.UpdateVerificationTask(ctx, &task2)
 	suite.Require().NoError(err)
 
-	err = verifier.UpdateVerificationTask(ctx, task1)
+	err = verifier.UpdateVerificationTask(ctx, &task1)
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
@@ -1411,7 +1434,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	suite.Require().NoError(err)
 
 	event := ParsedEvent{
-		DocID:  mbson.ToRawValue(int32(55)),
+		DocID:  option.Some(mbson.ToRawValue(int32(55))),
 		OpType: "delete",
 		Ns: &Namespace{
 			DB:   "foo",
@@ -2398,7 +2421,8 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	recheckDocIDs := lo.Map(
 		rechecks,
 		func(r recheck.Doc, _ int) int {
-			num, err := mbson.CastRawValue[int32](r.PrimaryKey.DocumentID)
+			docID := r.PrimaryKey.DocumentID
+			num, err := mbson.CastRawValue[int32](docID)
 			suite.Require().NoError(err)
 			return int(num)
 		},
@@ -2989,36 +3013,49 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 func (suite *IntegrationTestSuite) awaitEnqueueOfRechecks(verifier *Verifier, minDocs int) {
 	suite.T().Helper()
 
+	suite.T().Logf(
+		"Waiting for at least %d recheck(s) to be enqueued for generation %d …",
+		minDocs,
+		1+verifier.generation,
+	)
+
 	var lastNonzeroRechecksCount int
 
-	suite.Eventually(func() bool {
-		cursor, err := verifier.getRecheckQueueCollection(1+verifier.generation).
-			Find(suite.Context(), bson.D{})
-		var rechecks []bson.D
-		suite.Require().NoError(err)
-		suite.Require().NoError(cursor.All(suite.Context(), &rechecks))
+	suite.Eventually(
+		func() bool {
+			cursor, err := verifier.getRecheckQueueCollection(1+verifier.generation).
+				Find(suite.Context(), bson.D{})
+			var rechecks []bson.D
+			suite.Require().NoError(err)
+			suite.Require().NoError(cursor.All(suite.Context(), &rechecks))
 
-		if len(rechecks) >= minDocs {
-			return true
-		}
+			if len(rechecks) >= minDocs {
+				return true
+			}
 
-		if len(rechecks) > 0 {
-			// Note any progress toward our minimum rechecks count.
-			if lastNonzeroRechecksCount != len(rechecks) {
-				suite.T().Logf(
-					"%d recheck(s) are enqueued, but we want %d.",
-					len(rechecks),
-					minDocs,
-				)
+			if len(rechecks) > 0 {
+				// Note any progress toward our minimum rechecks count.
+				if lastNonzeroRechecksCount != len(rechecks) {
+					suite.T().Logf(
+						"%d recheck(s) are enqueued, but we want %d.",
+						len(rechecks),
+						minDocs,
+					)
 
-				lastNonzeroRechecksCount = len(rechecks)
+					lastNonzeroRechecksCount = len(rechecks)
+				}
+
+				return false
 			}
 
 			return false
-		}
-
-		return false
-	}, 1*time.Minute, 100*time.Millisecond)
+		},
+		time.Minute,
+		time.Second,
+		"need %d recheck(s) to be enqueued for generation %d",
+		minDocs,
+		1+verifier.generation,
+	)
 }
 
 func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
@@ -3042,11 +3079,12 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 
 	// Insert two documents in generation 1. They should be batched and become a verify task in generation 2.
 	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	_, err := dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 	_, err = dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
-	suite.Require().NoError(runner.AwaitGenerationEnd())
+
 	suite.awaitEnqueueOfRechecks(verifier, 2)
 
 	// Run generation 2 and get verification status.
@@ -3061,9 +3099,9 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 
 	// Patch up only one of the two mismatched documents in generation 3.
 	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
-	suite.Require().NoError(runner.AwaitGenerationEnd())
 	suite.awaitEnqueueOfRechecks(verifier, 1)
 
 	status, err = verifier.GetVerificationStatus(ctx)
@@ -3077,9 +3115,9 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 
 	// Patch up the other mismatched document in generation 4.
 	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
-	suite.Require().NoError(runner.AwaitGenerationEnd())
 	suite.awaitEnqueueOfRechecks(verifier, 1)
 
 	suite.Assert().Eventually(

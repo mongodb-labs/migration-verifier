@@ -19,6 +19,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -191,7 +192,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 	suite.Require().Equal("insert", parsed.OpType)
 
 	suite.Require().Equal(
-		mbson.ToRawValue("abc"),
+		option.Some(mbson.ToRawValue("abc")),
 		parsed.DocID,
 		"event should reference expected document",
 	)
@@ -709,7 +710,7 @@ func (suite *IntegrationTestSuite) fetchPendingVerifierRechecks(ctx context.Cont
 	return recheckDocs
 }
 
-func (suite *IntegrationTestSuite) TestChangeStreamDDLError() {
+func (suite *IntegrationTestSuite) TestChangeStreamDropError() {
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
 	ctx := suite.Context()
@@ -1198,59 +1199,10 @@ func (suite *IntegrationTestSuite) testInsertsBeforeWritesOff(docsCount int) {
 	suite.Assert().Equal(docsCount, totalFailed, "all source docs should be missing")
 }
 
-func (suite *IntegrationTestSuite) TestCreateForbidden() {
-	ctx := suite.Context()
-	buildInfo, err := util.GetClusterInfo(
-		ctx,
-		logger.NewDefaultLogger(),
-		suite.srcMongoClient,
-	)
-	suite.Require().NoError(err)
-
-	if buildInfo.VersionArray[0] < 6 {
-		suite.T().Skipf("This test requires server v6+. (Found: %v)", buildInfo.VersionArray)
-	}
-
-	verifier := suite.BuildVerifier()
-
-	// start verifier
-	verifierRunner := RunVerifierCheck(suite.Context(), suite.T(), verifier)
-
-	// wait for generation 0 to end
-	suite.Require().NoError(verifierRunner.AwaitGenerationEnd())
-
-	db := suite.srcMongoClient.Database(suite.DBNameForTest())
-	coll := db.Collection("mycoll")
-	suite.Require().NoError(
-		db.CreateCollection(ctx, coll.Name()),
-	)
-
-	// The error from the create event will come either at WritesOff
-	// or when we finalize the change stream.
-	err = verifier.WritesOff(ctx)
-	if err == nil {
-		err = verifierRunner.Await()
-	}
-
-	suite.Require().Error(err, "should detect forbidden create event")
-
-	eventErr := UnknownEventError{}
-	suite.Require().ErrorAs(err, &eventErr)
-	suite.Assert().Contains(string(eventErr.Event), "create")
-}
-
 func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 	ctx := suite.Context()
-	buildInfo, err := util.GetClusterInfo(
-		ctx,
-		logger.NewDefaultLogger(),
-		suite.dstMongoClient,
-	)
-	suite.Require().NoError(err)
 
-	if buildInfo.VersionArray[0] < 6 {
-		suite.T().Skipf("This test requires dst server v6+. (Found: %v)", buildInfo.VersionArray)
-	}
+	suite.SkipUnlessSrcHasDDLEvents()
 
 	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
 		db := client.Database(suite.DBNameForTest())
@@ -1298,7 +1250,7 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 		"should alter capped size",
 	)
 
-	_, err = suite.dstMongoClient.
+	_, err := suite.dstMongoClient.
 		Database(suite.DBNameForTest()).
 		Collection("mycoll").
 		Indexes().CreateOne(
@@ -1318,18 +1270,6 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 	}
 
 	suite.Require().NoError(err, "should get no error")
-
-	suite.Assert().Contains(
-		logBuffer.String(),
-		"cappedSize",
-		"modify event should be recorded in log",
-	)
-
-	suite.Assert().Contains(
-		logBuffer.String(),
-		"barbar_1",
-		"createIndexes event should be recorded in log",
-	)
 }
 
 func (suite *IntegrationTestSuite) TestRecheckDocsWithDstChangeEvents() {

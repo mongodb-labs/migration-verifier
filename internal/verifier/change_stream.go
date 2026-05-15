@@ -6,6 +6,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/10gen/migration-verifier/agg"
+	"github.com/10gen/migration-verifier/agg/helpers"
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -26,6 +28,15 @@ var supportedEventOpTypes = mapset.NewSet(
 	"update",
 	"replace",
 	"delete",
+
+	// DDL events:
+	"create",
+	"modify",
+	"createIndexes",
+	"dropIndexes",
+	"shardCollection",
+	"reshardCollection",
+	"refineCollectionShardKey",
 )
 
 const (
@@ -117,7 +128,11 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 		pipeline,
 		bson.D{
 			{"$addFields", bson.D{
-				{"_docID", "$documentKey._id"},
+				{"_docID", agg.Cond{
+					If:   helpers.Exists{"$documentKey"},
+					Then: "$documentKey._id",
+					Else: "$$REMOVE",
+				}},
 
 				{"updateDescription", "$$REMOVE"},
 				{"wallTime", "$$REMOVE"},
@@ -397,6 +412,11 @@ func (csr *ChangeStreamReader) createChangeStream(
 	}
 
 	sctx := mongo.NewSessionContext(ctx, sess)
+
+	csr.logger.Debug().
+		Stringer("changeStreamReader", csr).
+		Any("pipeline", pipeline).
+		Msg("Opening change stream.")
 
 	changeStream, err := csr.watcherClient.Watch(sctx, pipeline, opts)
 	if err != nil {
