@@ -673,7 +673,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 			case isDDL:
 				collName, err := bsontools.RawLookup[string](op.Object, cmdName)
 				if err != nil {
-					return nil, bson.Timestamp{}, errors.Wrap(err, "getting createIndexes collection name")
+					return nil, bson.Timestamp{}, errors.Wrapf(err, "getting %s collection name", cmdName)
 				}
 
 				nsStr, err := bsontools.RawLookup[string](rawDoc, "ns")
@@ -692,6 +692,8 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 						ClusterTime: new(latestTS),
 					},
 				)
+
+				continue
 			case cmdName == "applyOps":
 			default:
 				if o.onDDLEvent == onDDLEventAllow {
