@@ -41,6 +41,8 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 
 	batchReceiver := reader.getReadChannel()
 
+	events := []ParsedEvent{}
+
 	suite.Assert().Eventually(
 		func() bool {
 			select {
@@ -52,7 +54,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 					return false
 				}
 
-				suite.Assert().Equal("create", batch.events[0].OpType)
+				events = append(events, batch.events...)
 			}
 
 			return true
@@ -62,8 +64,14 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 		"should see create event",
 	)
 
+	suite.Assert().Equal("create", events[0].OpType)
+
 	suite.Assert().Eventually(
 		func() bool {
+			if len(events) > 1 {
+				return true
+			}
+
 			select {
 			case <-ctx.Done():
 				suite.Require().NoError(ctx.Err())
@@ -72,8 +80,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 				if len(batch.events) == 0 {
 					return false
 				}
-
-				suite.Assert().Equal("insert", batch.events[0].OpType)
+				events = append(events, batch.events...)
 			}
 
 			return true
@@ -82,6 +89,8 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 		time.Millisecond*100,
 		"should see insert event",
 	)
+
+	suite.Assert().Equal("insert", events[1].OpType)
 }
 
 // TestOplogReader_Documents verifies that the oplog reader sees & publishes
