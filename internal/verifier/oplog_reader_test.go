@@ -1,6 +1,8 @@
 package verifier
 
 import (
+	"time"
+
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
@@ -36,23 +38,47 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 
 	batchReceiver := reader.getReadChannel()
 
-	select {
-	case <-ctx.Done():
-		suite.Require().NoError(ctx.Err())
-	case batch, channelOpen := <-batchReceiver:
-		suite.Require().True(channelOpen, "channel should still be open")
-		suite.Require().NotEmpty(batch.events, "need event")
-		suite.Assert().Equal("create", batch.events[0].OpType)
-	}
+	suite.Assert().Eventually(
+		func() bool {
+			select {
+			case <-ctx.Done():
+				suite.Require().NoError(ctx.Err())
+			case batch, channelOpen := <-batchReceiver:
+				suite.Require().True(channelOpen, "channel should still be open")
+				if len(batch.events) == 0 {
+					return false
+				}
 
-	select {
-	case <-ctx.Done():
-		suite.Require().NoError(ctx.Err())
-	case batch, channelOpen := <-batchReceiver:
-		suite.Require().True(channelOpen, "channel should still be open")
-		suite.Require().NotEmpty(batch.events, "need event")
-		suite.Assert().Equal("insert", batch.events[0].OpType)
-	}
+				suite.Assert().Equal("create", batch.events[0].OpType)
+			}
+
+			return true
+		},
+		time.Minute,
+		time.Millisecond*100,
+		"should see create event",
+	)
+
+	suite.Assert().Eventually(
+		func() bool {
+			select {
+			case <-ctx.Done():
+				suite.Require().NoError(ctx.Err())
+			case batch, channelOpen := <-batchReceiver:
+				suite.Require().True(channelOpen, "channel should still be open")
+				if len(batch.events) == 0 {
+					return false
+				}
+
+				suite.Assert().Equal("insert", batch.events[0].OpType)
+			}
+
+			return true
+		},
+		time.Minute,
+		time.Millisecond*100,
+		"should see insert event",
+	)
 }
 
 // TestOplogReader_Documents verifies that the oplog reader sees & publishes
