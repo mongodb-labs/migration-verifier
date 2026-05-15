@@ -54,6 +54,8 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 					return false
 				}
 
+				suite.T().Logf("got batch with %+v", batch.events)
+
 				events = append(events, batch.events...)
 			}
 

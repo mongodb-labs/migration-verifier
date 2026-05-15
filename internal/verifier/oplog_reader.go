@@ -559,7 +559,8 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 				return nil, bson.Timestamp{}, errors.Wrap(err, "getting first field name of o doc")
 			}
 
-			events, wasDDL, err := tryAppendDDLEvent(events, string(cmdName), oDoc, rawDoc, latestTS)
+			var wasDDL bool
+			events, wasDDL, err = tryAppendDDLEvent(events, string(cmdName), oDoc, rawDoc, latestTS)
 			if err != nil {
 				return nil, bson.Timestamp{}, err
 			}
@@ -640,7 +641,9 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 				return nil, bson.Timestamp{}, fmt.Errorf("no cmdname in op=c: %+v", op)
 			}
 
-			events, wasDDL, err := tryAppendDDLEvent(events, cmdName, op.Object, rawDoc, op.TS)
+			var wasDDL bool
+			var err error
+			events, wasDDL, err = tryAppendDDLEvent(events, cmdName, op.Object, rawDoc, op.TS)
 			if err != nil {
 				return nil, bson.Timestamp{}, err
 			}
