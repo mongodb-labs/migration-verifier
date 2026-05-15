@@ -3013,36 +3013,49 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 func (suite *IntegrationTestSuite) awaitEnqueueOfRechecks(verifier *Verifier, minDocs int) {
 	suite.T().Helper()
 
+	suite.T().Logf(
+		"Waiting for at least %d recheck(s) to be enqueued for generation %d …",
+		minDocs,
+		1+verifier.generation,
+	)
+
 	var lastNonzeroRechecksCount int
 
-	suite.Eventually(func() bool {
-		cursor, err := verifier.getRecheckQueueCollection(1+verifier.generation).
-			Find(suite.Context(), bson.D{})
-		var rechecks []bson.D
-		suite.Require().NoError(err)
-		suite.Require().NoError(cursor.All(suite.Context(), &rechecks))
+	suite.Eventually(
+		func() bool {
+			cursor, err := verifier.getRecheckQueueCollection(1+verifier.generation).
+				Find(suite.Context(), bson.D{})
+			var rechecks []bson.D
+			suite.Require().NoError(err)
+			suite.Require().NoError(cursor.All(suite.Context(), &rechecks))
 
-		if len(rechecks) >= minDocs {
-			return true
-		}
+			if len(rechecks) >= minDocs {
+				return true
+			}
 
-		if len(rechecks) > 0 {
-			// Note any progress toward our minimum rechecks count.
-			if lastNonzeroRechecksCount != len(rechecks) {
-				suite.T().Logf(
-					"%d recheck(s) are enqueued, but we want %d.",
-					len(rechecks),
-					minDocs,
-				)
+			if len(rechecks) > 0 {
+				// Note any progress toward our minimum rechecks count.
+				if lastNonzeroRechecksCount != len(rechecks) {
+					suite.T().Logf(
+						"%d recheck(s) are enqueued, but we want %d.",
+						len(rechecks),
+						minDocs,
+					)
 
-				lastNonzeroRechecksCount = len(rechecks)
+					lastNonzeroRechecksCount = len(rechecks)
+				}
+
+				return false
 			}
 
 			return false
-		}
-
-		return false
-	}, 1*time.Minute, 100*time.Millisecond)
+		},
+		time.Minute,
+		time.Second,
+		"need %d recheck(s) to be enqueued for generation %d",
+		minDocs,
+		1+verifier.generation,
+	)
 }
 
 func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
@@ -3066,11 +3079,12 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 
 	// Insert two documents in generation 1. They should be batched and become a verify task in generation 2.
 	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	_, err := dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 	_, err = dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
-	suite.Require().NoError(runner.AwaitGenerationEnd())
+
 	suite.awaitEnqueueOfRechecks(verifier, 2)
 
 	// Run generation 2 and get verification status.
@@ -3085,9 +3099,9 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 
 	// Patch up only one of the two mismatched documents in generation 3.
 	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
-	suite.Require().NoError(runner.AwaitGenerationEnd())
 	suite.awaitEnqueueOfRechecks(verifier, 1)
 
 	status, err = verifier.GetVerificationStatus(ctx)
@@ -3101,9 +3115,9 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 
 	// Patch up the other mismatched document in generation 4.
 	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
-	suite.Require().NoError(runner.AwaitGenerationEnd())
 	suite.awaitEnqueueOfRechecks(verifier, 1)
 
 	suite.Assert().Eventually(
