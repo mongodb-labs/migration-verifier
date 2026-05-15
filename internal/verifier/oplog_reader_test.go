@@ -1,8 +1,6 @@
 package verifier
 
 import (
-	"time"
-
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
@@ -11,7 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// TestOplogReader_SourceDDL verifies that source DDL crashes the oplog reader.
+// TestOplogReader_SourceDDL verifies that source DDL is OK.
 func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 	ctx := suite.Context()
 
@@ -38,28 +36,23 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 
 	batchReceiver := reader.getReadChannel()
 
-	timer := time.NewTimer(time.Minute)
-
-	channelOpen := true
-	for channelOpen {
-		var batch eventBatch
-		select {
-		case <-ctx.Done():
-			suite.Require().NoError(ctx.Err())
-		case <-timer.C:
-			suite.Require().Fail("should read batch channel")
-		case batch, channelOpen = <-batchReceiver:
-			if channelOpen {
-				suite.T().Logf("got batch: %+v", batch)
-			}
-		}
+	select {
+	case <-ctx.Done():
+		suite.Require().NoError(ctx.Err())
+	case batch, channelOpen := <-batchReceiver:
+		suite.Require().True(channelOpen, "channel should still be open")
+		suite.Require().NotEmpty(batch.events, "need event")
+		suite.Assert().Equal("create", batch.events[0].OpType)
 	}
 
-	err := eg.Wait()
-	suite.Assert().ErrorAs(err, &UnknownEventError{})
-
-	// Confirm that the error text is wrapped:
-	suite.Assert().Contains(err.Error(), "reading")
+	select {
+	case <-ctx.Done():
+		suite.Require().NoError(ctx.Err())
+	case batch, channelOpen := <-batchReceiver:
+		suite.Require().True(channelOpen, "channel should still be open")
+		suite.Require().NotEmpty(batch.events, "need event")
+		suite.Assert().Equal("insert", batch.events[0].OpType)
+	}
 }
 
 // TestOplogReader_Documents verifies that the oplog reader sees & publishes
