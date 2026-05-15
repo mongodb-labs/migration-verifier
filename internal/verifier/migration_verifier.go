@@ -1535,7 +1535,7 @@ func (verifier *Verifier) partitionCollection(
 	case partitions.SchemeID:
 		if verifier.srcHasSampleRate() {
 			var err error
-			partitionsCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task, shardKeyFields)
+			partitionsCount, err = verifier.createPartitionTasksWithSampleRate(ctx, workerNum, task, shardKeyFields)
 			if err != nil {
 				return errors.Wrapf(err, "partitioning %#q via $sampleRate", srcNs)
 			}
@@ -1645,8 +1645,6 @@ func (verifier *Verifier) partitionCollection(
 				return fmt.Errorf("reading natural partition: %w", err)
 			}
 
-			partitionsCount++
-
 			_, err = verifier.InsertPartitionVerificationTask(ctx, &partition, shardKeyFields, dstNs)
 			if err != nil {
 				return errors.Wrapf(
@@ -1656,6 +1654,13 @@ func (verifier *Verifier) partitionCollection(
 					srcNs,
 				)
 			}
+
+			partitionsCount++
+
+			verifier.workerTracker.SetNamespaceTaskPartitionsCount(
+				workerNum,
+				partitionsCount,
+			)
 		}
 	default:
 		panic(fmt.Sprintf("bad partition method (%#q); how did that happen?!?", verifier.partitioningScheme))

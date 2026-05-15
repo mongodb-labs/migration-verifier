@@ -390,8 +390,11 @@ func (verifier *Verifier) getComparisonStatistics(
 		for _, nsWorkerStats := range perNamespaceWorkerStats {
 			for _, workerStats := range nsWorkerStats {
 				activeWorkers++
-				comparedDocs += workerStats.SrcDocCount
-				comparedBytes += workerStats.SrcByteCount
+
+				if ws, ok := workerStats.TaskStatus.(DocumentTaskStatus); ok {
+					comparedDocs += ws.SrcDocCount
+					comparedBytes += ws.SrcByteCount
+				}
 			}
 		}
 	}
@@ -530,8 +533,15 @@ func (verifier *Verifier) printNamespaceStatistics(
 			threads = len(nsWorkerStats)
 
 			for _, workerStats := range nsWorkerStats {
-				docsCompared += workerStats.SrcDocCount
-				bytesCompared += workerStats.SrcByteCount
+				switch ws := workerStats.TaskStatus.(type) {
+				case DocumentTaskStatus:
+					docsCompared += ws.SrcDocCount
+					bytesCompared += ws.SrcByteCount
+				case NamespaceTaskStatus:
+					// No-op for namespace tasks
+				default:
+					// Unknown task type
+				}
 			}
 		}
 
@@ -922,12 +932,17 @@ func (verifier *Verifier) printWorkerStatus(builder *strings.Builder, now time.T
 		}
 
 		var detail string
-		if wsmap[w].TaskType == tasks.VerifyDocuments {
+		switch wsmap[w].TaskType {
+		case tasks.VerifyCollection:
+			detail = fmt.Sprintf("%d partitions", wsmap[w].TaskStatus.(NamespaceTaskStatus).PartitionsCount)
+		case tasks.VerifyDocuments:
 			detail = fmt.Sprintf(
 				"%s documents (%s)",
-				reportutils.FmtReal(wsmap[w].SrcDocCount),
-				reportutils.FmtBytes(wsmap[w].SrcByteCount),
+				reportutils.FmtReal(wsmap[w].TaskStatus.(DocumentTaskStatus).SrcDocCount),
+				reportutils.FmtBytes(wsmap[w].TaskStatus.(DocumentTaskStatus).SrcByteCount),
 			)
+		default:
+			detail = fmt.Sprintf("unknown task type %#q", wsmap[w].TaskType)
 		}
 
 		tableRows = append(
