@@ -7,6 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -14,6 +15,8 @@ import (
 // TestOplogReader_SourceDDL verifies that source DDL is OK.
 func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 	ctx := suite.Context()
+
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
 	verifier := suite.BuildVerifier()
 
