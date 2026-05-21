@@ -266,16 +266,20 @@ func (verifier *Verifier) SetDDLHandling(mode DDLHandling) {
 // applySrcDDLHandling pushes the current ddlHandling setting into the src
 // change reader.  Call this after initializeChangeReaders.
 func (verifier *Verifier) applySrcDDLHandling() {
-	if verifier.ddlHandling != DDLHandlingWarnMost {
-		return
-	}
-	switch r := verifier.srcChangeReader.(type) {
-	case *OplogReader:
-		r.onDDLEvent = onDDLEventWarnMost
-	case *ChangeStreamReader:
-		r.onDDLEvent = onDDLEventWarnMost
+	switch verifier.ddlHandling {
+	case DDLHandlingFailAll:
+		// Do nothing. Any DDL will cause an error.
+	case DDLHandlingWarnMost:
+		switch r := verifier.srcChangeReader.(type) {
+		case *OplogReader:
+			r.onDDLEvent = onDDLEventWarnMost
+		case *ChangeStreamReader:
+			r.onDDLEvent = onDDLEventWarnMost
+		default:
+			panic(fmt.Sprintf("unexpected change reader type: %T", r))
+		}
 	default:
-		panic(fmt.Sprintf("unexpected change reader type: %T", r))
+		panic("Unknown DDL handling mode: " + string(verifier.ddlHandling))
 	}
 }
 

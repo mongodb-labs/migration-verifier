@@ -642,7 +642,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 
 		switch task.Type {
 		case tasks.VerifyCollection:
-			err = verifier.ProcessCollectionVerificationTask(ctx, workerNum, &task)
+			err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, &task)
 			verifier.workerTracker.Unset(workerNum)
 
 			if err != nil {
@@ -655,14 +655,14 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 				}
 			}
 		case tasks.VerifyDocuments:
-			err = verifier.ProcessVerifyTask(ctx, workerNum, &task)
+			err := verifier.ProcessVerifyTask(ctx, workerNum, &task)
 			verifier.workerTracker.Unset(workerNum)
 
 			if err != nil {
 				return errors.Wrapf(err, "process %#q task %#q", task.Type, task.PrimaryKey)
 			}
 		case tasks.ProcessRecheckQueue:
-			err = verifier.processCreateRechecksTask(ctx, task)
+			err := verifier.processCreateRechecksTask(ctx, task)
 			verifier.workerTracker.Unset(workerNum)
 
 			if err != nil {

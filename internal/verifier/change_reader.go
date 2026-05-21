@@ -39,7 +39,7 @@ const (
 	batchChanBufferSize = 100
 
 	onDDLEventAllow    ddlEventHandling = "allow"
-	onDDLEventWarnMost ddlEventHandling = "warnMost"
+	onDDLEventWarnMost ddlEventHandling = ddlEventHandling(DDLHandlingWarnMost)
 )
 
 // allowedSrcDDLOpTypes are the change-stream/oplog operationType values that
