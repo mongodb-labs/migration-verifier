@@ -836,7 +836,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 	)
 	suite.Require().NoError(err, "must insert recheck task")
 
-	err = verifier.processOneTask(ctx, 0, *task)
+	err = verifier.ProcessVerifyTask(ctx, 0, task)
 	suite.Require().NoError(err)
 
 	verifier.srcLastRecheckedTS.Load(func(ts bson.Timestamp) {
