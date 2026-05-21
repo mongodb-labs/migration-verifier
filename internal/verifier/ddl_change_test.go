@@ -11,8 +11,7 @@ import (
 )
 
 // TestDDLChangeEvents_Index verifies that when createIndexes occurs on the
-// source while the verifier runs in warnMost mode, a warning is logged and
-// no recheck task is enqueued.
+// source while the verifier runs in warnMost mode, a warning is logged.
 func (suite *IntegrationTestSuite) TestDDLChangeEvents_Index() {
 	suite.SkipUnlessSrcHasDDLEvents()
 

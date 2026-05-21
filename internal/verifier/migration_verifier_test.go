@@ -1440,7 +1440,12 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 
-	batch.events[0].OpType = "flibbity"
+	event.DocID = option.None[bson.RawValue]()
+	event.OpType = "create"
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
+	suite.Require().NoError(err)
+
+	batch.events[0].OpType = "drop"
 	suite.Assert().Panics(
 		func() {
 			_ = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)

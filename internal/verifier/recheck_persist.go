@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -115,6 +116,12 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 		docID, ok := changeEvent.DocID.Get()
 		if !ok {
+			lo.Assert(
+				allowedSrcDDLOpTypes.Contains(changeEvent.OpType),
+				"opType %q is not an allowed DDL event type and is missing a document key",
+				changeEvent.OpType,
+			)
+
 			// DDL event: already logged by the reader; just count and skip.
 			continue
 		}
