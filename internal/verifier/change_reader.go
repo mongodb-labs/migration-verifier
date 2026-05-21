@@ -152,20 +152,6 @@ func (rc *ChangeReaderCommon) addToEventCounts(opType string) {
 			cur.Replace++
 		case "delete":
 			cur.Delete++
-		case "create":
-			cur.Create++
-		case "modify":
-			cur.Modify++
-		case "createIndexes":
-			cur.CreateIndexes++
-		case "dropIndexes":
-			cur.DropIndexes++
-		case "shardCollection":
-			cur.ShardCollection++
-		case "reshardCollection":
-			cur.ReshardCollection++
-		case "refineCollectionShardKey":
-			cur.RefineCollectionShardKey++
 		default:
 			rc.logger.Warn().
 				Str("reader", string(rc.readerType)).

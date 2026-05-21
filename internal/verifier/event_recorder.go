@@ -56,20 +56,6 @@ func (er EventRecorder) AddEvent(changeEvent *ParsedEvent) error {
 			nsStats.Replace++
 		case "delete":
 			nsStats.Delete++
-		case "create":
-			nsStats.Create++
-		case "modify":
-			nsStats.Modify++
-		case "createIndexes":
-			nsStats.CreateIndexes++
-		case "dropIndexes":
-			nsStats.DropIndexes++
-		case "shardCollection":
-			nsStats.ShardCollection++
-		case "reshardCollection":
-			nsStats.ReshardCollection++
-		case "refineCollectionShardKey":
-			nsStats.RefineCollectionShardKey++
 		default:
 			err = errors.Errorf("Event recorder received event with unknown optype: %+v", *changeEvent)
 		}

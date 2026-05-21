@@ -37,28 +37,12 @@ func TestChangeEventCounts_MarshalZerologObject(t *testing.T) {
 			Update:  2,
 			Replace: 3,
 			Delete:  4,
-
-			Create:                   5,
-			Modify:                   6,
-			CreateIndexes:            7,
-			DropIndexes:              8,
-			ShardCollection:          9,
-			ReshardCollection:        10,
-			RefineCollectionShardKey: 11,
 		})
 		assert.Equal(t, map[string]any{
 			"insert":  float64(1),
 			"update":  float64(2),
 			"replace": float64(3),
 			"delete":  float64(4),
-
-			"create":                   float64(5),
-			"modify":                   float64(6),
-			"createIndexes":            float64(7),
-			"dropIndexes":              float64(8),
-			"shardCollection":          float64(9),
-			"reshardCollection":        float64(10),
-			"refineCollectionShardKey": float64(11),
 		}, got)
 	})
 
@@ -77,14 +61,6 @@ func TestChangeEventCounts_ExtJSONKeys(t *testing.T) {
 		Update:  2,
 		Replace: 3,
 		Delete:  4,
-
-		Create:                   5,
-		Modify:                   6,
-		CreateIndexes:            7,
-		DropIndexes:              8,
-		ShardCollection:          9,
-		ReshardCollection:        10,
-		RefineCollectionShardKey: 11,
 	}
 
 	payload, err := bson.MarshalExtJSON(counts, true, false)
@@ -98,13 +74,5 @@ func TestChangeEventCounts_ExtJSONKeys(t *testing.T) {
 		"update":  int64(2),
 		"replace": int64(3),
 		"delete":  int64(4),
-
-		"create":                   int64(5),
-		"modify":                   int64(6),
-		"createIndexes":            int64(7),
-		"dropIndexes":              int64(8),
-		"shardCollection":          int64(9),
-		"reshardCollection":        int64(10),
-		"refineCollectionShardKey": int64(11),
 	}, got)
 }

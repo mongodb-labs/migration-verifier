@@ -669,7 +669,6 @@ func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
 		{"update", srcCounts.Update, dstCounts.Update},
 		{"replace", srcCounts.Replace, dstCounts.Replace},
 		{"delete", srcCounts.Delete, dstCounts.Delete},
-		{"DDL", srcCounts.CountDDL(), dstCounts.CountDDL()},
 	}
 
 	fmt.Fprintf(out, "Cumulative change events seen:\n")
