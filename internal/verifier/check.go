@@ -539,10 +539,7 @@ func (verifier *Verifier) CreateInitialTasksIfNeeded(ctx context.Context) error 
 		}
 	}
 	for _, src := range verifier.srcNamespaces {
-		err := verifier.InsertCollectionVerificationTask(
-			ctx,
-			src,
-		)
+		_, err := verifier.InsertCollectionVerificationTask(ctx, src)
 		if err != nil {
 			return errors.Wrapf(
 				err,

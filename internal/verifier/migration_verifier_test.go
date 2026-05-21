@@ -1176,16 +1176,10 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	// Now add 2 namespaces. Add them “out of order” to test
 	// that we sort the returned array by Namespace.
 
-	err = verifier.InsertCollectionVerificationTask(
-		ctx,
-		"mydb.coll2",
-	)
+	task2, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll2")
 	suite.Require().NoError(err)
 
-	err = verifier.InsertCollectionVerificationTask(
-		ctx,
-		"mydb.coll1",
-	)
+	task1, err := verifier.InsertCollectionVerificationTask(ctx, "mydb.coll1")
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
@@ -1193,30 +1187,14 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 
 	suite.Assert().Equal(
 		[]NamespaceStats{
-			{Namespace: "mydb.coll1"},
-			{Namespace: "mydb.coll2"},
+			{Namespace: task1.QueryFilter.Namespace},
+			{Namespace: task2.QueryFilter.Namespace},
 		},
 		stats,
 		"One stats struct for each namespace",
 	)
 
 	// Now add document counts for each namespace.
-
-	var task1, task2 tasks.Task
-
-	err = verifier.verificationTaskCollection().FindOne(ctx, bson.M{
-		"generation":             verifier.generation,
-		"type":                   tasks.VerifyCollection,
-		"query_filter.namespace": "mydb.coll1",
-	}).Decode(&task1)
-	suite.Require().NoError(err)
-
-	err = verifier.verificationTaskCollection().FindOne(ctx, bson.M{
-		"generation":             verifier.generation,
-		"type":                   tasks.VerifyCollection,
-		"query_filter.namespace": "mydb.coll2",
-	}).Decode(&task2)
-	suite.Require().NoError(err)
 
 	task1.Status = tasks.Completed
 	task1.DocumentsCount = 1000
@@ -1226,10 +1204,10 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	task2.DocumentsCount = 900
 	task2.SourceBytesCount = 9_000
 
-	err = verifier.UpdateVerificationTask(ctx, &task2)
+	err = verifier.UpdateVerificationTask(ctx, task2)
 	suite.Require().NoError(err)
 
-	err = verifier.UpdateVerificationTask(ctx, &task1)
+	err = verifier.UpdateVerificationTask(ctx, task1)
 	suite.Require().NoError(err)
 
 	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)

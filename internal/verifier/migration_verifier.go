@@ -1271,12 +1271,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	}
 
 	insertFailedCollection := func() error {
-		err := verifier.InsertCollectionRecheckTask(
-			ctx,
-			srcNs,
-			option.None[whichCluster](),
-			option.None[bson.Timestamp](),
-		)
+		_, err := verifier.InsertFailedCollectionVerificationTask(ctx, srcNs)
 
 		return errors.Wrapf(
 			err,

@@ -17,11 +17,9 @@ import (
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
-	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -31,31 +29,33 @@ const (
 	verificationTasksCollection = "verification_tasks"
 )
 
-var (
-	tsSetField = map[whichCluster]string{
-		src: compare.SrcTimestampField,
-		dst: compare.DstTimestampField,
-	}
-)
-
 func (verifier *Verifier) insertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
 	generation int,
-	eventOrigin option.Option[whichCluster],
-	eventTimestamp option.Option[bson.Timestamp],
-) error {
+) (*tasks.Task, error) {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
 		var ok bool
 		dstNamespace, ok = verifier.nsMap.GetDstNamespace(srcNamespace)
 		if !ok {
-			return fmt.Errorf("could not find Namespace %s", srcNamespace)
+			return nil, fmt.Errorf("could not find Namespace %s", srcNamespace)
 		}
 	}
 
+	verificationTask := tasks.Task{
+		PrimaryKey: bson.NewObjectID(),
+		Generation: generation,
+		Status:     tasks.Added,
+		Type:       tasks.VerifyCollection,
+		QueryFilter: tasks.QueryFilter{
+			Namespace: srcNamespace,
+			To:        dstNamespace,
+		},
+	}
+
 	logEvent := verifier.logger.Debug().
-		Int("generation", generation)
+		Any("task", verificationTask.PrimaryKey)
 
 	if srcNamespace == dstNamespace {
 		logEvent.
@@ -66,53 +66,18 @@ func (verifier *Verifier) insertCollectionVerificationTask(
 			Str("dstNamespace", dstNamespace)
 	}
 
-	fieldsToSet := bson.M{
-		"status": tasks.Added,
-	}
-
-	if origin, has := eventOrigin.Get(); has {
-		ts := eventTimestamp.MustGetf("timestamp for event from %s cluster", origin)
-
-		field, ok := tsSetField[origin]
-		lo.Assertf(ok, "need known event origin but got %#q", origin)
-
-		fieldsToSet[field] = ts
-		logEvent.Any(field, ts)
-	} else if ts, has := eventTimestamp.Get(); has {
-		lo.Assertf(
-			false,
-			"eventTimestamp (%v) should not be set without eventOrigin",
-			ts,
-		)
-	}
-
-	logEvent.Msg("Adding/updating metadata task.")
+	logEvent.Msg("Adding metadata task.")
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
-			_, err := verifier.verificationTaskCollection().UpdateOne(
-				ctx,
-				bson.D{
-					{"generation", generation},
-					{"type", tasks.VerifyCollection},
-					{"query_filter", bson.D{
-						{"namespace", srcNamespace},
-						{"to", dstNamespace},
-					}},
-				},
-				bson.D{
-					{"$set", fieldsToSet},
-				},
-				options.UpdateOne().SetUpsert(true),
-			)
-
+			_, err := verifier.verificationTaskCollection().InsertOne(ctx, verificationTask)
 			return err
 		},
 		"persisting namespace %#q's verification task",
 		srcNamespace,
 	).Run(ctx, verifier.logger)
 
-	return err
+	return &verificationTask, err
 }
 
 func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
@@ -180,32 +145,15 @@ func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 func (verifier *Verifier) InsertCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
-) error {
-	return verifier.insertCollectionVerificationTask(
-		ctx,
-		srcNamespace,
-		verifier.generation,
-		option.None[whichCluster](),
-		option.None[bson.Timestamp](),
-	)
+) (*tasks.Task, error) {
+	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation)
 }
 
-func (verifier *Verifier) InsertCollectionRecheckTask(
+func (verifier *Verifier) InsertFailedCollectionVerificationTask(
 	ctx context.Context,
 	srcNamespace string,
-	eventOrigin option.Option[whichCluster],
-	eventTimestamp option.Option[bson.Timestamp],
-) error {
-	verifier.mux.RLock()
-	defer verifier.mux.RUnlock()
-
-	return verifier.insertCollectionVerificationTask(
-		ctx,
-		srcNamespace,
-		verifier.generation+1,
-		eventOrigin,
-		eventTimestamp,
-	)
+) (*tasks.Task, error) {
+	return verifier.insertCollectionVerificationTask(ctx, srcNamespace, verifier.generation+1)
 }
 
 func (verifier *Verifier) InsertPartitionVerificationTask(
