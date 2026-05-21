@@ -60,7 +60,7 @@ func (suite *IntegrationTestSuite) TestCheckMissingNamespace() {
 			client.Database(dbName).CreateCollection(ctx, collName),
 		)
 
-		runner := RunVerifierCheck(ctx, suite.T(), verifier)
+		runner := RunVerifierCheck(ctx, t, verifier)
 		err := runner.AwaitGenerationEnd()
 
 		assert.ErrorContains(t, err, collName)
