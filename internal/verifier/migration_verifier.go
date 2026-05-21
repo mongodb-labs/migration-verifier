@@ -62,6 +62,9 @@ const (
 	DDLHandlingWarnMost DDLHandling = "warnMost"
 )
 
+// DDLHandlingOpts is the set of valid values for DDLHandling.
+var DDLHandlingOpts = []DDLHandling{DDLHandlingFailAll, DDLHandlingWarnMost}
+
 // ReadConcernSetting describes the verifier’s handling of read
 // concern.
 type ReadConcernSetting string
