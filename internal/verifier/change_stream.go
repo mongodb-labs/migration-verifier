@@ -30,16 +30,6 @@ var supportedEventOpTypes = mapset.NewSet(
 	"delete",
 )
 
-// allowedSrcDDLOpTypes are the change-stream operationType values that
-// correspond to allow-listed DDL commands (the values of ddlCmdNameToOpType).
-// In warnMost mode these emit a warning; in failAll mode they are errors.
-var allowedSrcDDLOpTypes = mapset.NewSet(
-	"create",
-	"modify",
-	"createIndexes",
-	"dropIndexes",
-)
-
 const (
 	maxChangeStreamAwaitTime = time.Second
 
@@ -215,16 +205,17 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 			// Discard the pre-allocated slot for this event.
 			changeEvents = changeEvents[:len(changeEvents)-1]
 
-			if csr.onDDLEvent == onDDLEventAllow {
+			switch csr.onDDLEvent {
+			case onDDLEventAllow:
 				// Destination: silently ignore DDL events from the migration tool.
 				csr.logIgnoredDDL(cs.Current)
 				continue
-			}
-
-			if csr.onDDLEvent == onDDLEventWarnMost && allowedSrcDDLOpTypes.Contains(opType) {
-				// Source in warnMost mode: warn for allow-listed DDL, skip it.
-				csr.logWarnDDL(cs.Current)
-				continue
+			case onDDLEventWarnMost:
+				if allowedSrcDDLOpTypes.Contains(opType) {
+					// Source in warnMost mode: warn for allow-listed DDL, skip it.
+					csr.logWarnDDL(cs.Current)
+					continue
+				}
 			}
 
 			return UnknownEventError{Event: clone.Clone(cs.Current)}

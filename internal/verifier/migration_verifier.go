@@ -271,6 +271,8 @@ func (verifier *Verifier) applySrcDDLHandling() {
 		r.onDDLEvent = onDDLEventWarnMost
 	case *ChangeStreamReader:
 		r.onDDLEvent = onDDLEventWarnMost
+	default:
+		panic(fmt.Sprintf("unexpected change reader type: %T", r))
 	}
 }
 

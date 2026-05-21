@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/msync"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -39,7 +40,22 @@ const (
 
 	onDDLEventAllow    ddlEventHandling = "allow"
 	onDDLEventWarnMost ddlEventHandling = "warnMost"
+)
 
+// allowedSrcDDLOpTypes are the change-stream/oplog operationType values that
+// correspond to allow-listed DDL commands (the values of ddlCmdNameToOpType).
+// In warnMost mode these emit a warning; in failAll mode they are errors.
+var allowedSrcDDLOpTypes = mapset.NewSet(
+	"create",
+	"modify",
+	"createIndexes",
+	"dropIndexes",
+	"shardCollection",
+	"reshardCollection",
+	"refineCollectionShardKey",
+)
+
+const (
 	changeReaderCollectionName = "changeReader"
 )
 
