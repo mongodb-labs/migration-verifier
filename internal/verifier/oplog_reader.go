@@ -42,9 +42,11 @@ const (
 	ChangeReaderOptOplog = "tailOplog"
 )
 
+// Since oplog mode only supports replica sets, these are the only DDL
+// events we expect to support.
 var ddlCmdNameToOpType = map[string]string{
-	"collMod":       "modify",
 	"create":        "create",
+	"collMod":       "modify",
 	"createIndexes": "createIndexes",
 	"dropIndexes":   "dropIndexes",
 }

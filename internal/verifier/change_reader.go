@@ -42,8 +42,9 @@ const (
 	onDDLEventWarnMost ddlEventHandling = ddlEventHandling(DDLHandlingWarnMost)
 )
 
-// allowedSrcDDLOpTypes are the change-stream/oplog operationType values that
-// correspond to allow-listed DDL commands (the values of ddlCmdNameToOpType).
+// allowedSrcDDLOpTypes are the change-stream operationType values that
+// correspond to allow-listed DDL commands.
+//
 // In warnMost mode these emit a warning; in failAll mode they are errors.
 var allowedSrcDDLOpTypes = mapset.NewSet(
 	"create",
