@@ -563,7 +563,7 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 			}
 
 			if string(cmdName) != "applyOps" {
-				skip, err := o.handleUnknownCommand(rawDoc, latestTS, allowDDLBeforeTS)
+				skip, err := o.handleUnknownCommand(string(cmdName), rawDoc, latestTS, allowDDLBeforeTS)
 				if err != nil {
 					return nil, bson.Timestamp{}, err
 				}
@@ -640,7 +640,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 			}
 
 			if cmdName != "applyOps" {
-				skip, err := o.handleUnknownCommand(rawDoc, op.TS, allowDDLBeforeTS)
+				skip, err := o.handleUnknownCommand(cmdName, rawDoc, op.TS, allowDDLBeforeTS)
 				if err != nil {
 					return nil, bson.Timestamp{}, err
 				}
@@ -697,6 +697,7 @@ func (o *OplogReader) warnIfAllowListedDDL(cmdName string, rawDoc bson.Raw) bool
 }
 
 func (o *OplogReader) handleUnknownCommand(
+	cmdName string,
 	rawDoc bson.Raw,
 	ts bson.Timestamp,
 	allowDDLBeforeTS bson.Timestamp,
@@ -714,7 +715,8 @@ func (o *OplogReader) handleUnknownCommand(
 		return true, nil
 	}
 
-	return false, UnknownEventError{rawDoc}
+	_, allowedInWarnMost := ddlCmdNameToOpType[cmdName]
+	return false, UnknownEventError{Event: rawDoc, AllowedInWarnMost: allowedInWarnMost}
 }
 
 func (o *OplogReader) getExcludedNSPrefixes() []string {

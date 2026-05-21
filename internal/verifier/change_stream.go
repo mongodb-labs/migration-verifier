@@ -37,11 +37,16 @@ const (
 )
 
 type UnknownEventError struct {
-	Event bson.Raw
+	Event            bson.Raw
+	AllowedInWarnMost bool
 }
 
 func (uee UnknownEventError) Error() string {
-	return fmt.Sprintf("received event with unknown optype: %+v", uee.Event)
+	msg := fmt.Sprintf("received event with unknown optype: %+v", uee.Event)
+	if uee.AllowedInWarnMost {
+		msg += fmt.Sprintf("; to skip this event, run the verifier with %q set to %q", "ddlHandling", DDLHandlingWarnMost)
+	}
+	return msg
 }
 
 type ChangeStreamReader struct {
@@ -218,7 +223,10 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 				}
 			}
 
-			return UnknownEventError{Event: clone.Clone(cs.Current)}
+			return UnknownEventError{
+				Event:             clone.Clone(cs.Current),
+				AllowedInWarnMost: allowedSrcDDLOpTypes.Contains(opType),
+			}
 		}
 
 		// This shouldn’t happen, but just in case:
