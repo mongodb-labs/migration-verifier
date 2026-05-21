@@ -37,7 +37,7 @@ const (
 )
 
 type UnknownEventError struct {
-	Event            bson.Raw
+	Event             bson.Raw
 	AllowedInWarnMost bool
 }
 
