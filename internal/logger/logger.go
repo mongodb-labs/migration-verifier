@@ -76,7 +76,7 @@ func NewDebugLogger() *Logger {
 	}
 }
 
-// Writer returns the underlying io.Writer used by this logger.
+// Writer returns the Logger’s underlying Writer.
 func (l *Logger) Writer() io.Writer {
 	return l.writer
 }
