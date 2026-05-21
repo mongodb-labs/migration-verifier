@@ -215,7 +215,6 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 				// Source in warnMost mode: warn and fall through to count it.
 				csr.logWarnDDL(cs.Current)
 			} else {
-				changeEvents = changeEvents[:len(changeEvents)-1]
 				return UnknownEventError{
 					Event:             clone.Clone(cs.Current),
 					AllowedInWarnMost: allowedSrcDDLOpTypes.Contains(opType),
