@@ -789,5 +789,7 @@ func (v *Verifier) initializeChangeReaders() error {
 		return fmt.Errorf("bad destination change reader: %#q", v.srcChangeReaderMethod)
 	}
 
+	v.applySrcDDLHandling()
+
 	return nil
 }

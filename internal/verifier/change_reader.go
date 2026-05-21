@@ -37,7 +37,8 @@ const (
 	// The number of batches we’ll hold in memory at once.
 	batchChanBufferSize = 100
 
-	onDDLEventAllow ddlEventHandling = "allow"
+	onDDLEventAllow    ddlEventHandling = "allow"
+	onDDLEventWarnMost ddlEventHandling = "warnMost"
 
 	changeReaderCollectionName = "changeReader"
 )
@@ -469,6 +470,13 @@ func (rc *ChangeReaderCommon) logIgnoredDDL(rawEvent bson.Raw) {
 		Str("reader", string(rc.readerType)).
 		Stringer("event", rawEvent).
 		Msg("Ignoring event with unrecognized type on destination. (It’s assumedly internal to the migration.)")
+}
+
+func (rc *ChangeReaderCommon) logWarnDDL(rawEvent bson.Raw) {
+	rc.logger.Warn().
+		Str("reader", string(rc.readerType)).
+		Stringer("event", rawEvent).
+		Msg("DDL event detected on source; continuing in warnMost mode.")
 }
 
 func addTimestampToLogEvent(ts bson.Timestamp, event *zerolog.Event) *zerolog.Event {

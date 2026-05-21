@@ -163,25 +163,11 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 		reader.addToEventCounts(changeEvent.OpType)
 
-		docID, isDocEvent := changeEvent.DocID.Get()
-		if !isDocEvent {
-			err := verifier.InsertCollectionRecheckTask(
-				ctx,
-				srcDBName+"."+srcCollName,
-				option.Some(eventOrigin),
-				option.Some(*changeEvent.ClusterTime),
-			)
-
-			if err != nil {
-				return errors.Wrapf(
-					err,
-					"insert collection-level recheck task for %s change event (%+v)",
-					eventOrigin,
-					changeEvent,
-				)
-			}
-
-			continue
+		docID, ok := changeEvent.DocID.Get()
+		if !ok {
+			// DDL events are filtered out at the reader level and must never
+			// reach this point.
+			panic(fmt.Sprintf("non-document event in PersistChangeEvents: %+v", changeEvent))
 		}
 
 		dbNames = append(dbNames, srcDBName)

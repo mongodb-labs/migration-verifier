@@ -28,15 +28,16 @@ var supportedEventOpTypes = mapset.NewSet(
 	"update",
 	"replace",
 	"delete",
+)
 
-	// DDL events:
+// allowedSrcDDLOpTypes are the change-stream operationType values that
+// correspond to allow-listed DDL commands (the values of ddlCmdNameToOpType).
+// In warnMost mode these emit a warning; in failAll mode they are errors.
+var allowedSrcDDLOpTypes = mapset.NewSet(
 	"create",
 	"modify",
 	"createIndexes",
 	"dropIndexes",
-	"shardCollection",
-	"reshardCollection",
-	"refineCollectionShardKey",
 )
 
 const (
@@ -211,21 +212,22 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 		opType := changeEvents[eventsRead].OpType
 		if !supportedEventOpTypes.Contains(opType) {
-			// We expect certain DDL events on the destination as part of
-			// a migration. For example, mongosync enables indexes’ uniqueness
-			// constraints and sets capped collection sizes, and sometimes
-			// indexes are created after initial sync.
+			// Discard the pre-allocated slot for this event.
+			changeEvents = changeEvents[:len(changeEvents)-1]
 
 			if csr.onDDLEvent == onDDLEventAllow {
+				// Destination: silently ignore DDL events from the migration tool.
 				csr.logIgnoredDDL(cs.Current)
-
-				// Discard this event, then keep reading.
-				changeEvents = changeEvents[:len(changeEvents)-1]
-
 				continue
-			} else {
-				return UnknownEventError{Event: clone.Clone(cs.Current)}
 			}
+
+			if csr.onDDLEvent == onDDLEventWarnMost && allowedSrcDDLOpTypes.Contains(opType) {
+				// Source in warnMost mode: warn for allow-listed DDL, skip it.
+				csr.logWarnDDL(cs.Current)
+				continue
+			}
+
+			return UnknownEventError{Event: clone.Clone(cs.Current)}
 		}
 
 		// This shouldn’t happen, but just in case:

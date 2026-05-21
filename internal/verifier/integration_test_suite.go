@@ -1,8 +1,10 @@
 package verifier
 
 import (
+	"bytes"
 	"cmp"
 	"context"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -236,6 +238,24 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	suite.Require().NoError(verifier.AddMetaIndexes(ctx))
 
 	return verifier
+}
+
+// BuildVerifierWarnMost creates a verifier in warnMost DDL mode whose logger
+// writes to both the default output and a bytes.Buffer for inspection.
+func (suite *IntegrationTestSuite) BuildVerifierWarnMost() (*Verifier, *bytes.Buffer) {
+	v := suite.BuildVerifier()
+	v.SetDDLHandling(DDLHandlingWarnMost)
+
+	var buf bytes.Buffer
+	combined := io.MultiWriter(v.logger.Writer(), &buf)
+	zl := zerolog.New(combined).Level(zerolog.GlobalLevel()).With().Timestamp().Logger()
+	v.logger = logger.NewLogger(&zl, combined)
+
+	// Re-apply DDL handling: BuildVerifier already called initializeChangeReaders,
+	// so we need to push the warnMost setting into the already-constructed reader.
+	v.applySrcDDLHandling()
+
+	return v, &buf
 }
 
 func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {

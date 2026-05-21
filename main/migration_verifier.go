@@ -61,6 +61,7 @@ const (
 	startFlag             = "start"
 	partitioningScheme    = "partitioningScheme"
 	indexSpecIgnoreFlag   = "indexSpecIgnore"
+	ddlHandlingFlag       = "ddlHandling"
 )
 
 var logLevelStrs = lo.Map(
@@ -227,6 +228,17 @@ func main() {
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  pprofInterval,
 			Usage: "Interval to periodically collect pprof profiles (e.g. --pprofInterval=\"5m\")",
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  ddlHandlingFlag,
+			Value: string(verifier.DDLHandlingFailAll),
+			Usage: "How to handle DDL events on the source. One of: " + strings.Join(
+				[]string{
+					string(verifier.DDLHandlingFailAll),
+					string(verifier.DDLHandlingWarnMost),
+				},
+				", ",
+			),
 		}),
 	}
 
@@ -446,6 +458,17 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	if err != nil {
 		return nil, err
 	}
+
+	ddlHandling := verifier.DDLHandling(cCtx.String(ddlHandlingFlag))
+	switch ddlHandling {
+	case verifier.DDLHandlingFailAll, verifier.DDLHandlingWarnMost:
+	default:
+		return nil, fmt.Errorf("invalid --%s value %#q; valid values are: %s, %s",
+			ddlHandlingFlag, ddlHandling,
+			verifier.DDLHandlingFailAll, verifier.DDLHandlingWarnMost,
+		)
+	}
+	v.SetDDLHandling(ddlHandling)
 
 	docCompareMethod := compare.Method(cCtx.String(docCompareMethod))
 	if !slices.Contains(compare.Methods, docCompareMethod) {

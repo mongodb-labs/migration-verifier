@@ -49,6 +49,19 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/writeconcern"
 )
 
+// DDLHandling describes how the verifier responds to DDL events on the source.
+type DDLHandling string
+
+const (
+	// DDLHandlingFailAll (default) causes any DDL event to abort verification.
+	DDLHandlingFailAll DDLHandling = "failAll"
+
+	// DDLHandlingWarnMost causes allow-listed DDL events (createIndexes,
+	// dropIndexes, collMod, create) to emit a warning log instead of failing.
+	// Non-allow-listed events such as drop or rename still cause an error.
+	DDLHandlingWarnMost DDLHandling = "warnMost"
+)
+
 // ReadConcernSetting describes the verifier’s handling of read
 // concern.
 type ReadConcernSetting string
@@ -164,6 +177,7 @@ type Verifier struct {
 	dstChangeReader changeReader
 
 	readConcernSetting ReadConcernSetting
+	ddlHandling        DDLHandling
 
 	// A user-defined $match-compatible document-level query filter.
 	// The filter is applied to all namespaces in both initial checking and iterative checking.
@@ -189,6 +203,7 @@ var _ api.MigrationVerifierAPI = &Verifier{}
 // VerifierSettings is NewVerifier’s argument.
 type VerifierSettings struct {
 	ReadConcernSetting
+	DDLHandling
 }
 
 // NewVerifier creates a new Verifier
@@ -196,6 +211,11 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 	readConcern := settings.ReadConcernSetting
 	if readConcern == "" {
 		readConcern = ReadConcernMajority
+	}
+
+	ddlHandling := settings.DDLHandling
+	if ddlHandling == "" {
+		ddlHandling = DDLHandlingFailAll
 	}
 
 	logger, logWriter := getLoggerAndWriter(logPath)
@@ -210,6 +230,7 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		failureDisplaySize:   DefaultFailureDisplaySize,
 
 		readConcernSetting: readConcern,
+		ddlHandling:        ddlHandling,
 
 		workerTracker:        NewWorkerTracker(NumWorkers),
 		docsComparedHistory:  history.New[types.DocumentCount](time.Minute),
@@ -231,6 +252,26 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 // ConfigureReadConcern
 func (verifier *Verifier) ConfigureReadConcern(setting ReadConcernSetting) {
 	verifier.readConcernSetting = setting
+}
+
+// SetDDLHandling configures how the verifier responds to DDL events on the source.
+// This must be called before initializeChangeReaders.
+func (verifier *Verifier) SetDDLHandling(mode DDLHandling) {
+	verifier.ddlHandling = mode
+}
+
+// applySrcDDLHandling pushes the current ddlHandling setting into the src
+// change reader.  Call this after initializeChangeReaders.
+func (verifier *Verifier) applySrcDDLHandling() {
+	if verifier.ddlHandling != DDLHandlingWarnMost {
+		return
+	}
+	switch r := verifier.srcChangeReader.(type) {
+	case *OplogReader:
+		r.onDDLEvent = onDDLEventWarnMost
+	case *ChangeStreamReader:
+		r.onDDLEvent = onDDLEventWarnMost
+	}
 }
 
 func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
