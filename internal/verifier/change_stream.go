@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
+	"github.com/10gen/migration-verifier/main/mvflags"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -44,7 +45,7 @@ type UnknownEventError struct {
 func (uee UnknownEventError) Error() string {
 	msg := fmt.Sprintf("received event with unknown optype: %+v", uee.Event)
 	if uee.AllowedInWarnMost {
-		msg += fmt.Sprintf("; to skip this event, run the verifier with %q set to %q", "ddlHandling", DDLHandlingWarnMost)
+		msg += fmt.Sprintf("; to skip this event, run the verifier with %q set to %q", mvflags.DDLHandlingFlag, DDLHandlingWarnMost)
 	}
 	return msg
 }
@@ -207,25 +208,18 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 		opType := changeEvents[eventsRead].OpType
 		if !supportedEventOpTypes.Contains(opType) {
-			// Discard the pre-allocated slot for this event.
-			changeEvents = changeEvents[:len(changeEvents)-1]
-
-			switch csr.onDDLEvent {
-			case onDDLEventAllow:
-				// Destination: silently ignore DDL events from the migration tool.
+			if csr.onDDLEvent == onDDLEventAllow {
+				// Destination: log and fall through so recheck_persist can count it.
 				csr.logIgnoredDDL(cs.Current)
-				continue
-			case onDDLEventWarnMost:
-				if allowedSrcDDLOpTypes.Contains(opType) {
-					// Source in warnMost mode: warn for allow-listed DDL, skip it.
-					csr.logWarnDDL(cs.Current)
-					continue
+			} else if csr.onDDLEvent == onDDLEventWarnMost && allowedSrcDDLOpTypes.Contains(opType) {
+				// Source in warnMost mode: warn and fall through to count it.
+				csr.logWarnDDL(cs.Current)
+			} else {
+				changeEvents = changeEvents[:len(changeEvents)-1]
+				return UnknownEventError{
+					Event:             clone.Clone(cs.Current),
+					AllowedInWarnMost: allowedSrcDDLOpTypes.Contains(opType),
 				}
-			}
-
-			return UnknownEventError{
-				Event:             clone.Clone(cs.Current),
-				AllowedInWarnMost: allowedSrcDDLOpTypes.Contains(opType),
 			}
 		}
 

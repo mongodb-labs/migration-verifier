@@ -28,6 +28,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/main/mvflags"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mring"
@@ -260,6 +261,11 @@ func (verifier *Verifier) ConfigureReadConcern(setting ReadConcernSetting) {
 // SetDDLHandling configures how the verifier responds to DDL events on the source.
 // This must be called before initializeChangeReaders.
 func (verifier *Verifier) SetDDLHandling(mode DDLHandling) {
+	if mode == DDLHandlingWarnMost {
+		verifier.logger.Warn().
+			Str(mvflags.DDLHandlingFlag, string(mode)).
+			Msg("You MUST scan the logs for DDL changes and manually confirm that they are correctly replicated.")
+	}
 	verifier.ddlHandling = mode
 }
 

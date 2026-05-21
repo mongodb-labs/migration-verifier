@@ -111,8 +111,12 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 	eventOrigin := reader.getWhichCluster()
 
 	for _, changeEvent := range batch.events {
-		if !supportedEventOpTypes.Contains(changeEvent.OpType) {
-			panic(fmt.Sprintf("Unsupported optype in event; should have failed already! event=%+v", changeEvent))
+		reader.addToEventCounts(changeEvent.OpType)
+
+		docID, ok := changeEvent.DocID.Get()
+		if !ok {
+			// DDL event: already logged by the reader; just count and skip.
+			continue
 		}
 
 		if changeEvent.ClusterTime == nil {
@@ -159,15 +163,6 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 				eventOrigin,
 				changeEvent,
 			)
-		}
-
-		reader.addToEventCounts(changeEvent.OpType)
-
-		docID, ok := changeEvent.DocID.Get()
-		if !ok {
-			// DDL events are filtered out at the reader level and must never
-			// reach this point.
-			panic(fmt.Sprintf("non-document event in PersistChangeEvents: %+v", changeEvent))
 		}
 
 		dbNames = append(dbNames, srcDBName)

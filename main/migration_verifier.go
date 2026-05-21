@@ -18,6 +18,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/main/mvflags"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/mongodb-labs/migration-tools/mongotools"
@@ -61,7 +62,6 @@ const (
 	startFlag             = "start"
 	partitioningScheme    = "partitioningScheme"
 	indexSpecIgnoreFlag   = "indexSpecIgnore"
-	ddlHandlingFlag       = "ddlHandling"
 )
 
 var logLevelStrs = lo.Map(
@@ -230,7 +230,7 @@ func main() {
 			Usage: "Interval to periodically collect pprof profiles (e.g. --pprofInterval=\"5m\")",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  ddlHandlingFlag,
+			Name:  mvflags.DDLHandlingFlag,
 			Value: string(verifier.DDLHandlingFailAll),
 			Usage: "How to handle DDL events on the source. One of: " + strings.Join(
 				lo.Map(
@@ -461,9 +461,9 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		return nil, err
 	}
 
-	ddlHandling := verifier.DDLHandling(cCtx.String(ddlHandlingFlag))
+	ddlHandling := verifier.DDLHandling(cCtx.String(mvflags.DDLHandlingFlag))
 	if !slices.Contains(verifier.DDLHandlingOpts, ddlHandling) {
-		return nil, errors.Errorf("invalid %#q (%s); valid values are: %#q", ddlHandlingFlag, ddlHandling, verifier.DDLHandlingOpts)
+		return nil, errors.Errorf("invalid %#q (%s); valid values are: %#q", mvflags.DDLHandlingFlag, ddlHandling, verifier.DDLHandlingOpts)
 	}
 	v.SetDDLHandling(ddlHandling)
 

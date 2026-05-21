@@ -27,6 +27,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -558,14 +559,22 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 				return nil, bson.Timestamp{}, errors.Wrap(err, "getting first field name of o doc")
 			}
 
-			if o.warnIfAllowListedDDL(string(cmdName), rawDoc) {
+			var wasDDL bool
+			events, wasDDL, err = o.tryAppendDDLEvent(events, string(cmdName), oDoc, rawDoc, latestTS)
+			if err != nil {
+				return nil, bson.Timestamp{}, err
+			}
+			if wasDDL {
 				continue
 			}
 
 			if string(cmdName) != "applyOps" {
-				skip, err := o.handleUnknownCommand(string(cmdName), rawDoc, latestTS, allowDDLBeforeTS)
+				skip, ddlEvent, err := o.handleUnknownCommand(string(cmdName), rawDoc, latestTS, allowDDLBeforeTS)
 				if err != nil {
 					return nil, bson.Timestamp{}, err
+				}
+				if ddlEvent != nil {
+					events = append(events, *ddlEvent)
 				}
 				if skip {
 					continue
@@ -635,14 +644,23 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 				return nil, bson.Timestamp{}, fmt.Errorf("no cmdname in op=c: %+v", op)
 			}
 
-			if o.warnIfAllowListedDDL(cmdName, rawDoc) {
+			var wasDDL bool
+			var err error
+			events, wasDDL, err = o.tryAppendDDLEvent(events, cmdName, op.Object, rawDoc, op.TS)
+			if err != nil {
+				return nil, bson.Timestamp{}, err
+			}
+			if wasDDL {
 				continue
 			}
 
 			if cmdName != "applyOps" {
-				skip, err := o.handleUnknownCommand(cmdName, rawDoc, op.TS, allowDDLBeforeTS)
+				skip, ddlEvent, err := o.handleUnknownCommand(cmdName, rawDoc, op.TS, allowDDLBeforeTS)
 				if err != nil {
 					return nil, bson.Timestamp{}, err
+				}
+				if ddlEvent != nil {
+					events = append(events, *ddlEvent)
 				}
 				if skip {
 					continue
@@ -682,18 +700,45 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 	return events, latestTS, nil
 }
 
-// warnIfAllowListedDDL returns true when the command is allow-listed AND the
-// reader is in warnMost mode.  In that case it logs a warning so the caller
-// can skip the event.
-func (o *OplogReader) warnIfAllowListedDDL(cmdName string, rawDoc bson.Raw) bool {
-	if _, isDDL := ddlCmdNameToOpType[cmdName]; !isDDL {
-		return false
+// tryAppendDDLEvent checks whether cmdName is a known DDL command. In warnMost
+// mode it appends a ParsedEvent to events so recheck_persist can warn and count
+// it. Returns (events, true, nil) when the command was DDL (caller should skip
+// to the next op), or (events, false, nil) otherwise.
+func (o *OplogReader) tryAppendDDLEvent(
+	events []ParsedEvent,
+	cmdName string,
+	oDoc bson.Raw,
+	rawDoc bson.Raw,
+	ts bson.Timestamp,
+) ([]ParsedEvent, bool, error) {
+	ddlOpType, isDDL := ddlCmdNameToOpType[cmdName]
+	if !isDDL {
+		return events, false, nil
 	}
 	if o.onDDLEvent != onDDLEventWarnMost {
-		return false
+		return events, false, nil
 	}
+
+	collName, err := bsontools.RawLookup[string](oDoc, cmdName)
+	if err != nil {
+		return events, true, errors.Wrap(err, "getting DDL collection name")
+	}
+
+	nsStr, err := bsontools.RawLookup[string](rawDoc, "ns")
+	if err != nil {
+		return events, true, errors.Wrap(err, "getting namespace")
+	}
+
+	dbName, _ := mmongo.SplitNamespace(nsStr)
+
 	o.logWarnDDL(rawDoc)
-	return true
+
+	return append(events, ParsedEvent{
+		OpType:      ddlOpType,
+		Ns:          NewNamespace(dbName, collName),
+		DocID:       option.None[bson.RawValue](),
+		ClusterTime: lo.ToPtr(ts),
+	}), true, nil
 }
 
 func (o *OplogReader) handleUnknownCommand(
@@ -701,22 +746,34 @@ func (o *OplogReader) handleUnknownCommand(
 	rawDoc bson.Raw,
 	ts bson.Timestamp,
 	allowDDLBeforeTS bson.Timestamp,
-) (bool, error) {
+) (skip bool, event *ParsedEvent, err error) {
 	if o.onDDLEvent == onDDLEventAllow {
 		o.logIgnoredDDL(rawDoc)
-		return true, nil
+		return true, nil, nil
 	}
 
 	if !ts.After(allowDDLBeforeTS) {
+		if o.onDDLEvent == onDDLEventWarnMost {
+			o.logWarnDDL(rawDoc)
+			nsStr, _ := mbson.Lookup[string](rawDoc, "ns")
+			dbName, _ := mmongo.SplitNamespace(nsStr)
+			return true, &ParsedEvent{
+				OpType:      cmdName,
+				Ns:          NewNamespace(dbName, ""),
+				DocID:       option.None[bson.RawValue](),
+				ClusterTime: lo.ToPtr(ts),
+			}, nil
+		}
+
 		o.logger.Info().
 			Stringer("event", rawDoc).
 			Msg("Ignoring unrecognized write from the past.")
 
-		return true, nil
+		return true, nil, nil
 	}
 
 	_, allowedInWarnMost := ddlCmdNameToOpType[cmdName]
-	return false, UnknownEventError{Event: rawDoc, AllowedInWarnMost: allowedInWarnMost}
+	return false, nil, UnknownEventError{Event: rawDoc, AllowedInWarnMost: allowedInWarnMost}
 }
 
 func (o *OplogReader) getExcludedNSPrefixes() []string {
