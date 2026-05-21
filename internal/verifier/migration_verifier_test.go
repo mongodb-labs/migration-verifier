@@ -1908,7 +1908,6 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	verifier := suite.BuildVerifier()
 	ctx := suite.Context()
 
-	// Collection exists only on source.
 	err := suite.srcMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
 	suite.Require().NoError(err)
 	err = suite.dstMongoClient.Database("testDb").CreateCollection(ctx, "testColl")
