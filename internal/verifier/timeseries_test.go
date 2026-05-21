@@ -7,7 +7,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
-	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
@@ -231,7 +230,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_BucketsOnly() {
 								SetMetaField("sensor"),
 						),
 					),
-					"should create source buckets collection",
+					"must create buckets collection",
 				)
 			}
 
@@ -251,26 +250,6 @@ func (suite *IntegrationTestSuite) TestTimeSeries_BucketsOnly() {
 				"missing buckets collection should show mismatch (status: %+v)",
 				verificationStatus,
 			)
-
-			// 8.0 doesn’t throw a NamespaceExists error here, but earlier
-			// server versions do.
-			err = dstDB.CreateCollection(
-				ctx,
-				bucketsCollName,
-				options.CreateCollection().SetTimeSeriesOptions(
-					options.TimeSeries().
-						SetTimeField("time").
-						SetMetaField("sensor"),
-				),
-			)
-
-			if err != nil {
-				suite.Require().True(
-					util.IsNamespaceExistsError(err),
-					"err (%v) must be namespace-exists",
-					err,
-				)
-			}
 
 			_, err = dstDB.
 				Collection(bucketsCollName).
