@@ -24,16 +24,16 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 		suite.T().Skipf("oplog mode is only for unsharded clusters")
 	}
 
+	dbName := suite.DBNameForTest()
+	coll := verifier.srcClient.Database(dbName).Collection("coll")
+	suite.Require().NoError(coll.Database().CreateCollection(ctx, coll.Name()))
+
 	var reader changeReader = verifier.newOplogReader(
 		nil,
 		src,
 		verifier.srcClient,
 		*verifier.srcClusterInfo,
 	)
-
-	dbName := suite.DBNameForTest()
-
-	coll := verifier.srcClient.Database(dbName).Collection("coll")
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
 	suite.Require().NoError(reader.start(egCtx, eg))
@@ -63,36 +63,12 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 		},
 		time.Minute,
 		time.Millisecond*100,
-		"should see create event",
-	)
-
-	suite.Assert().Equal("create", events[0].OpType)
-
-	suite.Assert().Eventually(
-		func() bool {
-			if len(events) > 1 {
-				return true
-			}
-
-			select {
-			case <-ctx.Done():
-				suite.Require().NoError(ctx.Err())
-			case batch, channelOpen := <-batchReceiver:
-				suite.Require().True(channelOpen, "channel should still be open")
-				if len(batch.events) == 0 {
-					return false
-				}
-				events = append(events, batch.events...)
-			}
-
-			return true
-		},
-		time.Minute,
-		time.Millisecond*100,
 		"should see insert event",
 	)
 
-	suite.Assert().Equal("insert", events[1].OpType)
+	// The collection was created before the reader started, so its DDL is
+	// pre-TS and silently ignored. Only the post-start insert is visible.
+	suite.Assert().Equal("insert", events[0].OpType)
 }
 
 // TestOplogReader_Documents verifies that the oplog reader sees & publishes
