@@ -492,7 +492,7 @@ func (rc *ChangeReaderCommon) logIgnoredDestDDL(rawEvent bson.Raw) {
 func (rc *ChangeReaderCommon) warnSourceDDL(rawEvent bson.Raw) {
 	rc.logger.Warn().
 		RawJSON("event", []byte(rawEvent.String())).
-		Msg("Ignoring DDL change on source. MANUALLY confirm that this change replicates to the destination.")
+		Msg("DDL event detected on source. MANUALLY confirm that this change replicates to the destination.")
 }
 
 func addTimestampToLogEvent(ts bson.Timestamp, event *zerolog.Event) *zerolog.Event {
