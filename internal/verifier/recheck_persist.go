@@ -116,9 +116,9 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 		docID, ok := changeEvent.DocID.Get()
 		if !ok {
-			lo.Assert(
+			lo.Assertf(
 				allowedSrcDDLOpTypes.Contains(changeEvent.OpType),
-				"opType %q is not an allowed DDL event type and is missing a document key",
+				"non-doc event (optype %#q) must be an allowed DDL event type",
 				changeEvent.OpType,
 			)
 

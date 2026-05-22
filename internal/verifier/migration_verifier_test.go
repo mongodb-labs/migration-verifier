@@ -1430,18 +1430,18 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 
-	event.OpType = "insert"
+	batch.events[0].OpType = "insert"
 	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
-	event.OpType = "replace"
+	batch.events[0].OpType = "replace"
 	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
-	event.OpType = "update"
+	batch.events[0].OpType = "update"
 	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 
-	event.DocID = option.None[bson.RawValue]()
-	event.OpType = "create"
+	batch.events[0].DocID = option.None[bson.RawValue]()
+	batch.events[0].OpType = "create"
 	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 
