@@ -107,18 +107,23 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL_WarnMost() {
 	indexName, err := coll.Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{"x", 1}}})
 	suite.Require().NoError(err)
 
-	suite.Require().NoError(
-		coll.Database().RunCommand(
-			ctx,
-			bson.D{
-				{"collMod", coll.Name()},
-				{"index", bson.D{
-					{"keyPattern", bson.D{{"x", 1}}},
-					{"prepareUnique", true},
-				}},
-			},
-		).Err(),
-	)
+	canModifyIndex := verifier.srcClusterInfo.VersionArray[0] >= 6
+
+	// collMod with prepareUnique requires v6+
+	if canModifyIndex {
+		suite.Require().NoError(
+			coll.Database().RunCommand(
+				ctx,
+				bson.D{
+					{"collMod", coll.Name()},
+					{"index", bson.D{
+						{"keyPattern", bson.D{{"x", 1}}},
+						{"prepareUnique", true},
+					}},
+				},
+			).Err(),
+		)
+	}
 
 	suite.Require().NoError(coll.Indexes().DropOne(ctx, indexName))
 
@@ -163,11 +168,14 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL_WarnMost() {
 	suite.Assert().Contains(err.Error(), "reading")
 
 	expectedCmds := []string{
-		`"create"`,
-		`"createIndexes"`,
-		`"collMod"`,
-		`"dropIndexes"`,
-		`renameCollection`, // no quotes because the log’s quotes get escaped
+		`"create"`, // quotes disambiguate from createIndexes
+		"createIndexes",
+		"dropIndexes",
+		"renameCollection",
+	}
+
+	if canModifyIndex {
+		expectedCmds = append(expectedCmds, "collMod")
 	}
 
 	logStr := logBuf.String()
