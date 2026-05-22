@@ -70,7 +70,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 }
 
 // TestOplogReader_SourceDDL verifies that source DDL crashes the oplog reader
-// by default.
+// when set up with warnMost.
 func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL_WarnMost() {
 	ctx := suite.Context()
 

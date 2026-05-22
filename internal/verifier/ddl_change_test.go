@@ -40,7 +40,7 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_Index() {
 
 	suite.Assert().Eventually(
 		func() bool {
-			if strings.Contains(logBuf.String(), "DDL event detected on source") {
+			if strings.Contains(string(logBuf.Bytes()), "DDL event detected on source") {
 				return true
 			}
 			suite.Require().NoError(verifierRunner.StartNextGeneration())
@@ -85,7 +85,7 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_LastRecheckedTimestampUna
 	// Run until the warning appears, confirming the event was processed.
 	suite.Assert().Eventually(
 		func() bool {
-			if strings.Contains(logBuf.String(), "DDL event detected on source") {
+			if strings.Contains(string(logBuf.Bytes()), "DDL event detected on source") {
 				return true
 			}
 			suite.Require().NoError(verifierRunner.StartNextGeneration())

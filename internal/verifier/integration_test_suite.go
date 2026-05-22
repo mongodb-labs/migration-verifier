@@ -1,7 +1,6 @@
 package verifier
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"io"
@@ -17,6 +16,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/mongodb-labs/migration-tools/synctools"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/suite"
@@ -242,11 +242,11 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 
 // BuildVerifierWarnMost creates a verifier in warnMost DDL mode whose logger
 // writes to both the default output and a bytes.Buffer for inspection.
-func (suite *IntegrationTestSuite) BuildVerifierWarnMost() (*Verifier, *bytes.Buffer) {
+func (suite *IntegrationTestSuite) BuildVerifierWarnMost() (*Verifier, *synctools.Buffer) {
 	v := suite.BuildVerifier()
 	v.SetDDLHandling(DDLHandlingWarnMost)
 
-	var buf bytes.Buffer
+	var buf synctools.Buffer
 	combined := io.MultiWriter(v.logger.Writer(), &buf)
 	zl := zerolog.New(combined).Level(zerolog.GlobalLevel()).With().Timestamp().Logger()
 	v.logger = logger.NewLogger(&zl, combined)
