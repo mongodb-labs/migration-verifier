@@ -91,7 +91,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL_WarnMost() {
 		verifier.srcClient,
 		*verifier.srcClusterInfo,
 	)
-	oplogReader.ChangeReaderCommon.onDDLEvent = onDDLEventWarnMost
+	oplogReader.onDDLEvent = onDDLEventWarnMost
 
 	var reader changeReader = oplogReader
 
