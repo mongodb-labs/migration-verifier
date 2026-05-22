@@ -758,7 +758,7 @@ func (v *Verifier) initializeChangeReaders() error {
 			*v.dstClusterInfo,
 		)
 	default:
-		return fmt.Errorf("bad destination change reader: %#q", v.srcChangeReaderMethod)
+		return fmt.Errorf("bad destination change reader: %#q", v.dstChangeReaderMethod)
 	}
 
 	v.applySrcDDLHandling()
