@@ -69,8 +69,8 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 	suite.Assert().Contains(err.Error(), "reading")
 }
 
-// TestOplogReader_SourceDDL verifies that source DDL crashes the oplog reader
-// when set up with warnMost.
+// TestOplogReader_SourceDDL_WarnMost verifies that warnMost logs warnings for
+// allow-listed source DDL, while non-allow-listed DDL still returns an error.
 func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL_WarnMost() {
 	ctx := suite.Context()
 
