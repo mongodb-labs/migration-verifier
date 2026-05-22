@@ -116,11 +116,13 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 		docID, ok := changeEvent.DocID.Get()
 		if !ok {
-			lo.Assertf(
-				allowedSrcDDLOpTypes.Contains(changeEvent.OpType),
-				"non-doc event (optype %#q) must be an allowed DDL event type",
-				changeEvent.OpType,
-			)
+			if reader.getWhichCluster() == src {
+				lo.Assertf(
+					allowedSrcDDLOpTypes.Contains(changeEvent.OpType),
+					"non-doc event (optype %#q) must be an allowed DDL event type",
+					changeEvent.OpType,
+				)
+			}
 
 			// DDL event: already logged by the reader; just count and skip.
 			continue
