@@ -482,18 +482,17 @@ func (rc *ChangeReaderCommon) updateTimestamps(sess *mongo.Session, token bson.R
 	}
 }
 
-func (rc *ChangeReaderCommon) logIgnoredDDL(rawEvent bson.Raw) {
+func (rc *ChangeReaderCommon) logIgnoredDestDDL(rawEvent bson.Raw) {
 	rc.logger.Info().
 		Str("reader", string(rc.readerType)).
-		Stringer("event", rawEvent).
+		RawJSON("event", []byte(rawEvent.String())).
 		Msg("Ignoring event with unrecognized type on destination. (It’s assumedly internal to the migration.)")
 }
 
-func (rc *ChangeReaderCommon) logWarnDDL(rawEvent bson.Raw) {
+func (rc *ChangeReaderCommon) warnSourceDDL(rawEvent bson.Raw) {
 	rc.logger.Warn().
-		Str("reader", string(rc.readerType)).
-		Stringer("event", rawEvent).
-		Msg("DDL event detected on source; continuing in warnMost mode.")
+		RawJSON("event", []byte(rawEvent.String())).
+		Msg("Ignoring DDL change on source. MANUALLY confirm that this change replicates to the destination.")
 }
 
 func addTimestampToLogEvent(ts bson.Timestamp, event *zerolog.Event) *zerolog.Event {

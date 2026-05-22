@@ -210,10 +210,10 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		if !supportedEventOpTypes.Contains(opType) {
 			if csr.onDDLEvent == onDDLEventAllow {
 				// Destination: log and fall through so recheck_persist can count it.
-				csr.logIgnoredDDL(cs.Current)
+				csr.logIgnoredDestDDL(cs.Current)
 			} else if csr.onDDLEvent == onDDLEventWarnMost && allowedSrcDDLOpTypes.Contains(opType) {
 				// Source in warnMost mode: warn and fall through to count it.
-				csr.logWarnDDL(cs.Current)
+				csr.warnSourceDDL(cs.Current)
 			} else {
 				return UnknownEventError{
 					Event:             clone.Clone(cs.Current),

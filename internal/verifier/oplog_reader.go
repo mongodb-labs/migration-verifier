@@ -45,10 +45,21 @@ const (
 // Since oplog mode only supports replica sets, these are the only DDL
 // events we expect to support.
 var ddlCmdNameToOpType = map[string]string{
-	"create":        "create",
-	"collMod":       "modify",
+	"create":  "create",
+	"collMod": "modify",
+
+	// With an empty collection we see this:
 	"createIndexes": "createIndexes",
-	"dropIndexes":   "dropIndexes",
+
+	// With a full collection we see this:
+	"commitIndexBuild": "createIndexes",
+
+	"dropIndexes": "dropIndexes",
+}
+
+var indexCmdsToDiscard = []string{
+	"startIndexBuild",
+	"abortIndexBuild",
 }
 
 // OplogReader reads change events via oplog tailing instead of a change stream.
@@ -713,6 +724,16 @@ func (o *OplogReader) tryAppendDDLEvent(
 	rawDoc bson.Raw,
 	ts bson.Timestamp,
 ) ([]ParsedEvent, bool, error) {
+
+	if slices.Contains(indexCmdsToDiscard, cmdName) {
+		o.logger.Debug().
+			Str("reader", string(o.readerType)).
+			RawJSON("event", []byte(rawDoc.String())).
+			Msg("Ignoring internal index event.")
+
+		return events, true, nil
+	}
+
 	ddlOpType, isDDL := ddlCmdNameToOpType[cmdName]
 	if !isDDL {
 		return events, false, nil
@@ -733,7 +754,7 @@ func (o *OplogReader) tryAppendDDLEvent(
 
 	dbName, _ := mmongo.SplitNamespace(nsStr)
 
-	o.logWarnDDL(rawDoc)
+	o.warnSourceDDL(rawDoc)
 
 	return append(events, ParsedEvent{
 		OpType:      ddlOpType,
@@ -750,13 +771,13 @@ func (o *OplogReader) handleUnknownCommand(
 	allowDDLBeforeTS bson.Timestamp,
 ) (skip bool, event *ParsedEvent, err error) {
 	if o.onDDLEvent == onDDLEventAllow {
-		o.logIgnoredDDL(rawDoc)
+		o.logIgnoredDestDDL(rawDoc)
 		return true, nil, nil
 	}
 
 	if !ts.After(allowDDLBeforeTS) {
 		if o.onDDLEvent == onDDLEventWarnMost {
-			o.logWarnDDL(rawDoc)
+			o.warnSourceDDL(rawDoc)
 			nsStr, _ := mbson.Lookup[string](rawDoc, "ns")
 			dbName, _ := mmongo.SplitNamespace(nsStr)
 			return true, &ParsedEvent{
