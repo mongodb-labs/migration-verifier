@@ -1,7 +1,6 @@
 package verifier
 
 import (
-	"bytes"
 	"io"
 	"strings"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-tools/synctools"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -80,7 +80,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL_WarnMost() {
 		suite.T().Skipf("oplog mode is only for unsharded clusters")
 	}
 
-	var logBuf bytes.Buffer
+	var logBuf synctools.Buffer
 	combined := io.MultiWriter(verifier.logger.Writer(), &logBuf)
 	zl := zerolog.New(combined).Level(zerolog.GlobalLevel()).With().Timestamp().Logger()
 	verifier.logger = logger.NewLogger(&zl, combined)
@@ -178,7 +178,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL_WarnMost() {
 		expectedCmds = append(expectedCmds, "collMod")
 	}
 
-	logStr := logBuf.String()
+	logStr := string(logBuf.Bytes())
 	for _, cmdName := range expectedCmds {
 		suite.Assert().True(
 			strings.Contains(logStr, cmdName),
