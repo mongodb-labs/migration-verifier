@@ -172,7 +172,7 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 }
 
 // BuildVerifierWarnMost creates a verifier in warnMost DDL mode whose logger
-// writes to both the default output and a bytes.Buffer for inspection.
+// writes to both the default output and a buffer for inspection.
 func (suite *IntegrationTestSuite) BuildVerifierWarnMostDDL() (*Verifier, *synctools.Buffer) {
 	v := suite.buildVerifierInternal(true)
 
