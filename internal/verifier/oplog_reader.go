@@ -580,7 +580,7 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 			}
 
 			var wasDDL bool
-			events, wasDDL, err = o.tryAppendDDLEvent(events, string(cmdName), oDoc, rawDoc, latestTS)
+			wasDDL, events, err = o.tryAppendDDLEvent(events, string(cmdName), oDoc, rawDoc, latestTS)
 			if err != nil {
 				return nil, bson.Timestamp{}, err
 			}
@@ -666,7 +666,7 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 
 			var wasDDL bool
 			var err error
-			events, wasDDL, err = o.tryAppendDDLEvent(events, cmdName, op.Object, rawDoc, op.TS)
+			wasDDL, events, err = o.tryAppendDDLEvent(events, cmdName, op.Object, rawDoc, op.TS)
 			if err != nil {
 				return nil, bson.Timestamp{}, err
 			}
@@ -730,7 +730,7 @@ func (o *OplogReader) tryAppendDDLEvent(
 	oDoc bson.Raw,
 	rawDoc bson.Raw,
 	ts bson.Timestamp,
-) ([]ParsedEvent, bool, error) {
+) (bool, []ParsedEvent, error) {
 
 	if slices.Contains(indexCmdsToDiscard, cmdName) {
 		o.logger.Debug().
@@ -738,37 +738,37 @@ func (o *OplogReader) tryAppendDDLEvent(
 			RawJSON("event", []byte(rawDoc.String())).
 			Msg("Ignoring internal index event.")
 
-		return events, true, nil
+		return true, events, nil
 	}
 
 	ddlOpType, isDDL := ddlCmdNameToOpType[cmdName]
 	if !isDDL {
-		return events, false, nil
+		return false, events, nil
 	}
 	if o.onDDLEvent != onDDLEventWarnMost {
-		return events, false, nil
+		return false, events, nil
 	}
 
 	collName, err := bsontools.RawLookup[string](oDoc, cmdName)
 	if err != nil {
-		return events, true, errors.Wrap(err, "getting DDL collection name")
+		return true, events, errors.Wrap(err, "getting DDL collection name")
 	}
 
 	nsStr, err := bsontools.RawLookup[string](rawDoc, "ns")
 	if err != nil {
-		return events, true, errors.Wrap(err, "getting namespace")
+		return true, events, errors.Wrap(err, "getting namespace")
 	}
 
 	dbName, _ := mmongo.SplitNamespace(nsStr)
 
 	o.warnSourceDDL(rawDoc)
 
-	return append(events, ParsedEvent{
+	return true, append(events, ParsedEvent{
 		OpType:      ddlOpType,
 		Ns:          NewNamespace(dbName, collName),
 		DocID:       option.None[bson.RawValue](),
 		ClusterTime: lo.ToPtr(ts),
-	}), true, nil
+	}), nil
 }
 
 func (o *OplogReader) handleUnknownCommand(
