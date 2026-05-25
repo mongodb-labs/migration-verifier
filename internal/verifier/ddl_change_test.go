@@ -24,7 +24,7 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_Index() {
 		suite.Require().NoError(client.Database(dbName).CreateCollection(ctx, "mycoll"))
 	}
 
-	verifier, logBuf := suite.BuildVerifierWarnMost()
+	verifier, logBuf := suite.BuildVerifierWarnMostDDL()
 	verifier.SetSrcNamespaces([]string{dbName + ".mycoll"})
 	verifier.SetDstNamespaces([]string{dbName + ".mycoll"})
 	verifier.SetNamespaceMap()
@@ -68,7 +68,7 @@ func (suite *IntegrationTestSuite) TestDDLChangeEvents_LastRecheckedTimestampUna
 		suite.Require().NoError(client.Database(dbName).CreateCollection(ctx, "mycoll"))
 	}
 
-	verifier, logBuf := suite.BuildVerifierWarnMost()
+	verifier, logBuf := suite.BuildVerifierWarnMostDDL()
 	verifier.SetSrcNamespaces([]string{dbName + ".mycoll"})
 	verifier.SetDstNamespaces([]string{dbName + ".mycoll"})
 	verifier.SetNamespaceMap()

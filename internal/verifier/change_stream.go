@@ -19,6 +19,7 @@ import (
 	clone "github.com/huandu/go-clone/generic"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -63,7 +64,14 @@ func (v *Verifier) newChangeStreamReader(
 	client *mongo.Client,
 	clusterInfo util.ClusterInfo,
 ) *ChangeStreamReader {
-	common := newChangeReaderCommon(cluster)
+	common := lo.TernaryF(
+		cluster == dst,
+		newDstChangeReaderCommon,
+		func() ChangeReaderCommon {
+			return newSrcChangeReaderCommon(v.ddlHandling)
+		},
+	)
+
 	common.namespaces = namespaces
 	common.readerType = cluster
 	common.watcherClient = client

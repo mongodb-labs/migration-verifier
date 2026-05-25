@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/10gen/migration-verifier/history"
@@ -129,6 +130,28 @@ type ChangeReaderCommon struct {
 	cumulativeEventCounts *msync.DataGuard[api.ChangeEventCounts]
 }
 
+func newSrcChangeReaderCommon(ddlHandling DDLHandling) ChangeReaderCommon {
+	reader := newChangeReaderCommon(src)
+
+	switch ddlHandling {
+	case DDLHandlingFailAll:
+		// Do nothing. Any DDL will cause an error.
+	case DDLHandlingWarnMost:
+		reader.onDDLEvent = onDDLEventWarnMost
+	default:
+		panic(fmt.Sprintf("unknown DDLHandling: %#q", ddlHandling))
+	}
+
+	return reader
+}
+
+func newDstChangeReaderCommon() ChangeReaderCommon {
+	reader := newChangeReaderCommon(dst)
+	reader.onDDLEvent = onDDLEventAllow
+
+	return reader
+}
+
 func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 	return ChangeReaderCommon{
 		readerType:            clusterName,
@@ -140,11 +163,6 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 		lastSeenClusterTime:   msync.NewTypedAtomic(option.None[bson.Timestamp]()),
 		batchSizeHistory:      history.New[int](time.Minute),
 		cumulativeEventCounts: msync.NewDataGuard(api.ChangeEventCounts{}),
-		onDDLEvent: lo.Ternary(
-			clusterName == dst,
-			onDDLEventAllow,
-			"",
-		),
 	}
 }
 

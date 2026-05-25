@@ -168,6 +168,23 @@ func (suite *IntegrationTestSuite) GetTopology(client *mongo.Client) util.Cluste
 }
 
 func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
+	return suite.buildVerifierInternal(false)
+}
+
+// BuildVerifierWarnMost creates a verifier in warnMost DDL mode whose logger
+// writes to both the default output and a bytes.Buffer for inspection.
+func (suite *IntegrationTestSuite) BuildVerifierWarnMostDDL() (*Verifier, *synctools.Buffer) {
+	v := suite.buildVerifierInternal(true)
+
+	var buf synctools.Buffer
+	combined := io.MultiWriter(v.logger.Writer(), &buf)
+	zl := zerolog.New(combined).Level(zerolog.GlobalLevel()).With().Timestamp().Logger()
+	v.logger = logger.NewLogger(&zl, combined)
+
+	return v, &buf
+}
+
+func (suite *IntegrationTestSuite) buildVerifierInternal(warnMost bool) *Verifier {
 	qfilter := tasks.QueryFilter{Namespace: "keyhole.dealers"}
 	task := tasks.Task{QueryFilter: qfilter}
 
@@ -231,6 +248,10 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		Stringer("partitioningScheme", envPartitionBy).
 		Msg("Created verifier.")
 
+	if warnMost {
+		verifier.SetDDLHandling(DDLHandlingWarnMost)
+	}
+
 	suite.Require().NoError(verifier.initializeChangeReaders())
 
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))
@@ -238,24 +259,6 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 	suite.Require().NoError(verifier.AddMetaIndexes(ctx))
 
 	return verifier
-}
-
-// BuildVerifierWarnMost creates a verifier in warnMost DDL mode whose logger
-// writes to both the default output and a bytes.Buffer for inspection.
-func (suite *IntegrationTestSuite) BuildVerifierWarnMost() (*Verifier, *synctools.Buffer) {
-	v := suite.BuildVerifier()
-	v.SetDDLHandling(DDLHandlingWarnMost)
-
-	var buf synctools.Buffer
-	combined := io.MultiWriter(v.logger.Writer(), &buf)
-	zl := zerolog.New(combined).Level(zerolog.GlobalLevel()).With().Timestamp().Logger()
-	v.logger = logger.NewLogger(&zl, combined)
-
-	// Re-apply DDL handling: BuildVerifier already called initializeChangeReaders,
-	// so we need to push the warnMost setting into the already-constructed reader.
-	v.applySrcDDLHandling()
-
-	return v, &buf
 }
 
 func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {

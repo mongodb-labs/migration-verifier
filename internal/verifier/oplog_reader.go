@@ -82,7 +82,14 @@ func (v *Verifier) newOplogReader(
 	client *mongo.Client,
 	clusterInfo util.ClusterInfo,
 ) *OplogReader {
-	common := newChangeReaderCommon(cluster)
+	common := lo.TernaryF(
+		cluster == dst,
+		newDstChangeReaderCommon,
+		func() ChangeReaderCommon {
+			return newSrcChangeReaderCommon(v.ddlHandling)
+		},
+	)
+
 	common.namespaces = namespaces
 	common.watcherClient = client
 	common.clusterInfo = clusterInfo

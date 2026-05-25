@@ -57,9 +57,9 @@ const (
 	// DDLHandlingFailAll (default) causes any DDL event to abort verification.
 	DDLHandlingFailAll DDLHandling = "failAll"
 
-	// DDLHandlingWarnMost causes allow-listed DDL events (createIndexes,
-	// dropIndexes, collMod, create) to emit a warning log instead of failing.
-	// Non-allow-listed events such as drop or rename still cause an error.
+	// DDLHandlingWarnMost causes allow-listed DDL events to emit a warning log
+	// instead of failing. Non-allow-listed events such as drop or rename still
+	// cause an error.
 	DDLHandlingWarnMost DDLHandling = "warnMost"
 )
 
@@ -267,26 +267,6 @@ func (verifier *Verifier) SetDDLHandling(mode DDLHandling) {
 			Msg("You MUST scan the logs for DDL changes and manually confirm that they are correctly replicated.")
 	}
 	verifier.ddlHandling = mode
-}
-
-// applySrcDDLHandling pushes the current ddlHandling setting into the src
-// change reader.  Call this after initializeChangeReaders.
-func (verifier *Verifier) applySrcDDLHandling() {
-	switch verifier.ddlHandling {
-	case DDLHandlingFailAll:
-		// Do nothing. Any DDL will cause an error.
-	case DDLHandlingWarnMost:
-		switch r := verifier.srcChangeReader.(type) {
-		case *OplogReader:
-			r.onDDLEvent = onDDLEventWarnMost
-		case *ChangeStreamReader:
-			r.onDDLEvent = onDDLEventWarnMost
-		default:
-			panic(fmt.Sprintf("unexpected change reader type: %T", r))
-		}
-	default:
-		panic("Unknown DDL handling mode: " + string(verifier.ddlHandling))
-	}
 }
 
 func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
