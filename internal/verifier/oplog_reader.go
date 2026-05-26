@@ -743,7 +743,7 @@ func (o *OplogReader) tryAppendDDLEvent(
 	case onDDLEventAllow:
 		lo.Assertf(
 			o.readerType == dst,
-			"DDL handling %#q should is for the destination only, not %s",
+			"DDL handling %#q should be for the destination only, not %s",
 			o.onDDLEvent,
 			o.readerType,
 		)
