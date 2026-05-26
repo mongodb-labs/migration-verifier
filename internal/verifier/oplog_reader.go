@@ -579,26 +579,22 @@ func (o *OplogReader) parseRawOps(events []ParsedEvent, allowDDLBeforeTS bson.Ti
 				return nil, bson.Timestamp{}, errors.Wrap(err, "getting first field name of o doc")
 			}
 
-			var wasDDL bool
-			wasDDL, events, err = o.tryAppendDDLEvent(events, string(cmdName), oDoc, rawDoc, latestTS)
+			var isSupportedDDL bool
+			isSupportedDDL, events, err = o.tryAppendDDLEvent(events, string(cmdName), oDoc, rawDoc, latestTS)
 			if err != nil {
 				return nil, bson.Timestamp{}, err
 			}
-			if wasDDL {
+			if isSupportedDDL {
 				continue
 			}
 
 			if string(cmdName) != "applyOps" {
-				skip, ddlEvent, err := o.handleUnknownCommand(string(cmdName), rawDoc, latestTS, allowDDLBeforeTS)
+				err := o.getUnknownEventErr(string(cmdName), rawDoc, latestTS, allowDDLBeforeTS)
 				if err != nil {
 					return nil, bson.Timestamp{}, err
 				}
-				if ddlEvent != nil {
-					events = append(events, *ddlEvent)
-				}
-				if skip {
-					continue
-				}
+
+				continue
 			}
 
 			// A transaction, or vectored writes outside a txn.
@@ -664,27 +660,23 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 				return nil, bson.Timestamp{}, fmt.Errorf("no cmdname in op=c: %+v", op)
 			}
 
-			var wasDDL bool
+			var isSupportedDDL bool
 			var err error
-			wasDDL, events, err = o.tryAppendDDLEvent(events, cmdName, op.Object, rawDoc, op.TS)
+			isSupportedDDL, events, err = o.tryAppendDDLEvent(events, cmdName, op.Object, rawDoc, op.TS)
 			if err != nil {
 				return nil, bson.Timestamp{}, err
 			}
-			if wasDDL {
+			if isSupportedDDL {
 				continue
 			}
 
 			if cmdName != "applyOps" {
-				skip, ddlEvent, err := o.handleUnknownCommand(cmdName, rawDoc, op.TS, allowDDLBeforeTS)
+				err := o.getUnknownEventErr(cmdName, rawDoc, op.TS, allowDDLBeforeTS)
 				if err != nil {
 					return nil, bson.Timestamp{}, err
 				}
-				if ddlEvent != nil {
-					events = append(events, *ddlEvent)
-				}
-				if skip {
-					continue
-				}
+
+				continue
 			}
 
 			// A transaction, or vectored writes outside a txn.
@@ -741,8 +733,8 @@ func (o *OplogReader) tryAppendDDLEvent(
 		return true, events, nil
 	}
 
-	ddlOpType, isDDL := ddlCmdNameToOpType[cmdName]
-	if !isDDL {
+	ddlOpType, isSupportedDDL := ddlCmdNameToOpType[cmdName]
+	if !isSupportedDDL {
 		return false, events, nil
 	}
 	if o.onDDLEvent != onDDLEventWarnMost {
@@ -771,39 +763,27 @@ func (o *OplogReader) tryAppendDDLEvent(
 	}), nil
 }
 
-func (o *OplogReader) handleUnknownCommand(
+func (o *OplogReader) getUnknownEventErr(
 	cmdName string,
 	rawDoc bson.Raw,
 	ts bson.Timestamp,
 	allowDDLBeforeTS bson.Timestamp,
-) (skip bool, event *ParsedEvent, err error) {
+) error {
 	if o.onDDLEvent == onDDLEventAllow {
 		o.logIgnoredDestDDL(rawDoc)
-		return true, nil, nil
+		return nil
 	}
 
 	if !ts.After(allowDDLBeforeTS) {
-		if o.onDDLEvent == onDDLEventWarnMost {
-			o.warnSourceDDL(rawDoc)
-			nsStr, _ := mbson.Lookup[string](rawDoc, "ns")
-			dbName, _ := mmongo.SplitNamespace(nsStr)
-			return true, &ParsedEvent{
-				OpType:      cmdName,
-				Ns:          NewNamespace(dbName, ""),
-				DocID:       option.None[bson.RawValue](),
-				ClusterTime: lo.ToPtr(ts),
-			}, nil
-		}
-
 		o.logger.Info().
 			Stringer("event", rawDoc).
 			Msg("Ignoring unrecognized write from the past.")
 
-		return true, nil, nil
+		return nil
 	}
 
 	_, allowedInWarnMost := ddlCmdNameToOpType[cmdName]
-	return false, nil, UnknownEventError{Event: rawDoc, AllowedInWarnMost: allowedInWarnMost}
+	return UnknownEventError{Event: rawDoc, AllowedInWarnMost: allowedInWarnMost}
 }
 
 func (o *OplogReader) getExcludedNSPrefixes() []string {
