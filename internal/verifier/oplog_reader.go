@@ -738,23 +738,41 @@ func (o *OplogReader) tryAppendDDLEvent(
 	if !isSupportedDDL {
 		return false, events, nil
 	}
-	if o.onDDLEvent != onDDLEventWarnMost {
+
+	switch o.onDDLEvent {
+	case onDDLEventAllow, onDDLEventWarnMost:
+		// Send the event to the persistor thread.
+	default:
 		return false, events, nil
 	}
 
 	collName, err := bsontools.RawLookup[string](oDoc, cmdName)
 	if err != nil {
-		return true, events, errors.Wrap(err, "getting DDL collection name")
+		return false, nil, errors.Wrap(err, "getting DDL collection name")
 	}
+
+	// The ns field in a DDL oplog entry is the database name followed by
+	// ".$cmd", so we can’t use it directly. We have to parse out the
+	// database name and then reconstruct the namespace with the collection
+	// name from the command object.
 
 	nsStr, err := bsontools.RawLookup[string](rawDoc, "ns")
 	if err != nil {
-		return true, events, errors.Wrap(err, "getting namespace")
+		return false, nil, errors.Wrap(err, "getting namespace")
 	}
 
 	dbName, _ := mmongo.SplitNamespace(nsStr)
 
-	o.warnSourceDDL(rawDoc)
+	if o.readerType == src {
+		lo.Assertf(
+			o.onDDLEvent == onDDLEventWarnMost,
+			"src DDL handling (%s) should be %#q by now",
+			o.onDDLEvent,
+			onDDLEventWarnMost,
+		)
+
+		o.warnSourceDDL(rawDoc)
+	}
 
 	return true, append(events, ParsedEvent{
 		OpType:      ddlOpType,

@@ -3060,7 +3060,8 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	// Dry run generation 0 to make sure change stream reader is started.
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	// Insert two documents in generation 1. They should be batched and become a verify task in generation 2.
+	// Insert two documents after generation 1.
+	// They should be batched and become a verify task in generation 2.
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	_, err := dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
@@ -3080,7 +3081,7 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 		status.FailedTasks,
 	)
 
-	// Patch up only one of the two mismatched documents in generation 3.
+	// Patch up only one of the two mismatched documents after generation 3.
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
@@ -3096,7 +3097,7 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 		status,
 	)
 
-	// Patch up the other mismatched document in generation 4.
+	// Patch up the other mismatched document after generation 4.
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
