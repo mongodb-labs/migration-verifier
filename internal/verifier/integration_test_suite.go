@@ -168,27 +168,33 @@ func (suite *IntegrationTestSuite) GetTopology(client *mongo.Client) util.Cluste
 }
 
 func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
-	return suite.buildVerifierInternal(false)
+	return suite.buildVerifierInternal(false, nil)
 }
 
-// BuildVerifierWarnMost creates a verifier in warnMost DDL mode whose logger
+// BuildVerifierWarnMostDDL creates a verifier in warnMost DDL mode whose logger
 // writes to both the default output and a buffer for inspection.
 func (suite *IntegrationTestSuite) BuildVerifierWarnMostDDL() (*Verifier, *synctools.Buffer) {
-	v := suite.buildVerifierInternal(true)
-
 	var buf synctools.Buffer
-	combined := io.MultiWriter(v.logger.Writer(), &buf)
-	zl := zerolog.New(combined).Level(zerolog.GlobalLevel()).With().Timestamp().Logger()
-	v.logger = logger.NewLogger(&zl, combined)
+	v := suite.buildVerifierInternal(true, &buf)
 
 	return v, &buf
 }
 
-func (suite *IntegrationTestSuite) buildVerifierInternal(warnMost bool) *Verifier {
+func (suite *IntegrationTestSuite) buildVerifierInternal(
+	warnMost bool,
+	logBuf *synctools.Buffer,
+) *Verifier {
 	qfilter := tasks.QueryFilter{Namespace: "keyhole.dealers"}
 	task := tasks.Task{QueryFilter: qfilter}
 
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
+
+	if logBuf != nil {
+		combined := io.MultiWriter(os.Stderr, logBuf)
+		zl := zerolog.New(combined).Level(zerolog.GlobalLevel()).With().Timestamp().Logger()
+		verifier.logger = logger.NewLogger(&zl, combined)
+	}
+
 	// verifier.SetStartClean(true)
 	suite.Require().NoError(verifier.SetNumWorkers(3))
 	verifier.SetGenerationPauseDelay(100 * time.Millisecond)
