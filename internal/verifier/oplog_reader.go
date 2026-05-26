@@ -740,7 +740,16 @@ func (o *OplogReader) tryAppendDDLEvent(
 	}
 
 	switch o.onDDLEvent {
-	case onDDLEventAllow, onDDLEventWarnMost:
+	case onDDLEventAllow:
+		lo.Assertf(
+			o.readerType == dst,
+			"DDL handling %#q should is for the destination only, not %s",
+			o.onDDLEvent,
+			o.readerType,
+		)
+
+		o.logIgnoredDestDDL(rawDoc)
+	case onDDLEventWarnMost:
 		// Send the event to the persistor thread.
 	default:
 		return false, events, nil
@@ -778,7 +787,7 @@ func (o *OplogReader) tryAppendDDLEvent(
 		OpType:      ddlOpType,
 		Ns:          NewNamespace(dbName, collName),
 		DocID:       option.None[bson.RawValue](),
-		ClusterTime: lo.ToPtr(ts),
+		ClusterTime: new(ts),
 	}), nil
 }
 
