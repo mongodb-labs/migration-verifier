@@ -702,11 +702,11 @@ func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
 	table.Render()
 
 	if ddlCount := srcCounts.CountDDL(); ddlCount > 0 {
-		if time.Since(verifier.lastDDLWarnTime) >= time.Minute {
+		if time.Since(time.Unix(0, verifier.lastDDLWarnTime.Load())) >= time.Minute {
 			verifier.logger.Warn().
 				Int64("ddlEventsCount", ddlCount).
 				Msg("Source DDL changes detected. Manually confirm their proper replication.")
-			verifier.lastDDLWarnTime = time.Now()
+			verifier.lastDDLWarnTime.Store(time.Now().UnixNano())
 		}
 	}
 }

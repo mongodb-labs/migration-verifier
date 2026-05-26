@@ -153,7 +153,7 @@ type Verifier struct {
 	cachedGen0Stats atomic.Pointer[api.GenerationStats]
 
 	generationStartTime  time.Time
-	lastDDLWarnTime      time.Time
+	lastDDLWarnTime      atomic.Int64
 	generationPauseDelay time.Duration
 	workerSleepDelay     time.Duration
 	docCompareMethod     compare.Method
