@@ -713,9 +713,10 @@ func (o *OplogReader) parseExprProjectedOps(events []ParsedEvent, allowDDLBefore
 }
 
 // tryAppendDDLEvent checks whether cmdName is a known DDL command. In warnMost
-// mode it appends a ParsedEvent to events so recheck_persist can warn and count
-// it. Returns (events, true, nil) when the command was DDL (caller should skip
-// to the next op), or (events, false, nil) otherwise.
+// mode it appends a ParsedEvent to events, and warnings are emitted by the
+// reader, not by recheck_persist. Returns (true, events, nil) when the command
+// was DDL (caller should skip to the next op), or (false, events, nil)
+// otherwise.
 func (o *OplogReader) tryAppendDDLEvent(
 	events []ParsedEvent,
 	cmdName string,
