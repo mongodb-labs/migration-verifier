@@ -219,18 +219,20 @@ func (suite *IntegrationTestSuite) TestTimeSeries_BucketsOnly() {
 		func() {
 			// The server forbids creation of a buckets collection without the
 			// relevant time-series options.
-			suite.Require().NoError(
-				db.CreateCollection(
-					ctx,
-					bucketsCollName,
-					options.CreateCollection().SetTimeSeriesOptions(
-						options.TimeSeries().
-							SetTimeField("time").
-							SetMetaField("sensor"),
+			for _, curDB := range mslices.Of(db, dstDB) {
+				suite.Require().NoError(
+					curDB.CreateCollection(
+						ctx,
+						bucketsCollName,
+						options.CreateCollection().SetTimeSeriesOptions(
+							options.TimeSeries().
+								SetTimeField("time").
+								SetMetaField("sensor"),
+						),
 					),
-				),
-				"should create source buckets collection",
-			)
+					"must create buckets collection",
+				)
+			}
 
 			_, err := db.Collection(bucketsCollName).InsertMany(
 				ctx,
@@ -247,19 +249,6 @@ func (suite *IntegrationTestSuite) TestTimeSeries_BucketsOnly() {
 				verificationStatus.FailedTasks,
 				"missing buckets collection should show mismatch (status: %+v)",
 				verificationStatus,
-			)
-
-			suite.Require().NoError(
-				dstDB.CreateCollection(
-					ctx,
-					bucketsCollName,
-					options.CreateCollection().SetTimeSeriesOptions(
-						options.TimeSeries().
-							SetTimeField("time").
-							SetMetaField("sensor"),
-					),
-				),
-				"should create destination buckets collection",
 			)
 
 			_, err = dstDB.
