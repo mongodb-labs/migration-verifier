@@ -355,21 +355,33 @@ func (suite *IntegrationTestSuite) TestLastRecheckedOpTime_Resume() {
 	suite.T().Logf("Waiting for last-recheck optimes to show …")
 
 	var srcTS, dstTS bson.Timestamp
-	for srcTS.IsZero() || dstTS.IsZero() {
-		suite.Require().NoError(
-			verifierRunner.StartNextGeneration(),
-		)
-		suite.Require().NoError(
-			verifierRunner.AwaitGenerationEnd(),
-		)
 
-		verifier1.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
-			srcTS = t
-		})
-		verifier1.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
-			dstTS = t
-		})
-	}
+	suite.Require().Eventually(
+		func() bool {
+			if !srcTS.IsZero() && !dstTS.IsZero() {
+				return true
+			}
+
+			suite.Require().NoError(
+				verifierRunner.StartNextGeneration(),
+			)
+			suite.Require().NoError(
+				verifierRunner.AwaitGenerationEnd(),
+			)
+
+			verifier1.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
+				srcTS = t
+			})
+			verifier1.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
+				dstTS = t
+			})
+
+			return false
+		},
+		time.Minute,
+		time.Second,
+		"last-rechecked timestamps must update",
+	)
 
 	v1Cancel(fmt.Errorf("ending verifier 1"))
 
