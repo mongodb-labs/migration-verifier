@@ -46,7 +46,7 @@ type UnknownEventError struct {
 func (uee UnknownEventError) Error() string {
 	msg := fmt.Sprintf("received event with unknown optype: %+v", uee.Event)
 	if uee.AllowedInWarnMost {
-		msg += fmt.Sprintf("; to skip this event, run the verifier with %q set to %q", mvflags.DDLHandlingFlag, DDLHandlingWarnMost)
+		msg += fmt.Sprintf("; to skip this event, run the verifier with %#q set to %#q", mvflags.DDLHandlingFlag, DDLHandlingWarnMost)
 	}
 	return msg
 }
