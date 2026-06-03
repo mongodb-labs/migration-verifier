@@ -19,6 +19,7 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
@@ -191,7 +192,7 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_BsonSize() {
 	suite.Require().Equal("insert", parsed.OpType)
 
 	suite.Require().Equal(
-		mbson.ToRawValue("abc"),
+		option.Some(mbson.ToRawValue("abc")),
 		parsed.DocID,
 		"event should reference expected document",
 	)
@@ -354,21 +355,33 @@ func (suite *IntegrationTestSuite) TestLastRecheckedOpTime_Resume() {
 	suite.T().Logf("Waiting for last-recheck optimes to show …")
 
 	var srcTS, dstTS bson.Timestamp
-	for srcTS.IsZero() || dstTS.IsZero() {
-		suite.Require().NoError(
-			verifierRunner.StartNextGeneration(),
-		)
-		suite.Require().NoError(
-			verifierRunner.AwaitGenerationEnd(),
-		)
 
-		verifier1.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
-			srcTS = t
-		})
-		verifier1.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
-			dstTS = t
-		})
-	}
+	suite.Require().Eventually(
+		func() bool {
+			if !srcTS.IsZero() && !dstTS.IsZero() {
+				return true
+			}
+
+			suite.Require().NoError(
+				verifierRunner.StartNextGeneration(),
+			)
+			suite.Require().NoError(
+				verifierRunner.AwaitGenerationEnd(),
+			)
+
+			verifier1.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
+				srcTS = t
+			})
+			verifier1.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
+				dstTS = t
+			})
+
+			return false
+		},
+		time.Minute,
+		time.Second,
+		"last-rechecked timestamps must update",
+	)
 
 	v1Cancel(fmt.Errorf("ending verifier 1"))
 
@@ -709,7 +722,7 @@ func (suite *IntegrationTestSuite) fetchPendingVerifierRechecks(ctx context.Cont
 	return recheckDocs
 }
 
-func (suite *IntegrationTestSuite) TestChangeStreamDDLError() {
+func (suite *IntegrationTestSuite) TestChangeStreamDropError() {
 	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
 	ctx := suite.Context()
@@ -1265,16 +1278,8 @@ func (suite *IntegrationTestSuite) TestCreateForbidden() {
 
 func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 	ctx := suite.Context()
-	buildInfo, err := util.GetClusterInfo(
-		ctx,
-		logger.NewDefaultLogger(),
-		suite.dstMongoClient,
-	)
-	suite.Require().NoError(err)
 
-	if buildInfo.VersionArray[0] < 6 {
-		suite.T().Skipf("This test requires dst server v6+. (Found: %v)", buildInfo.VersionArray)
-	}
+	suite.SkipUnlessSrcHasDDLEvents()
 
 	for _, client := range mslices.Of(suite.srcMongoClient, suite.dstMongoClient) {
 		db := client.Database(suite.DBNameForTest())
@@ -1322,7 +1327,7 @@ func (suite *IntegrationTestSuite) TestTolerateDestinationCollMod() {
 		"should alter capped size",
 	)
 
-	_, err = suite.dstMongoClient.
+	_, err := suite.dstMongoClient.
 		Database(suite.DBNameForTest()).
 		Collection("mycoll").
 		Indexes().CreateOne(

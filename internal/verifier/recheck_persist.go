@@ -9,6 +9,7 @@ import (
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -111,8 +112,20 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 	eventOrigin := reader.getWhichCluster()
 
 	for _, changeEvent := range batch.events {
-		if !supportedEventOpTypes.Contains(changeEvent.OpType) {
-			panic(fmt.Sprintf("Unsupported optype in event; should have failed already! event=%+v", changeEvent))
+		reader.addToEventCounts(changeEvent.OpType)
+
+		docID, ok := changeEvent.DocID.Get()
+		if !ok {
+			if reader.getWhichCluster() == src {
+				lo.Assertf(
+					allowedSrcDDLOpTypes.Contains(changeEvent.OpType),
+					"non-doc event (optype %#q) must be an allowed DDL event type",
+					changeEvent.OpType,
+				)
+			}
+
+			// DDL event: already logged by the reader; just count and skip.
+			continue
 		}
 
 		if changeEvent.ClusterTime == nil {
@@ -152,9 +165,18 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 			panic(fmt.Sprintf("unknown event origin: %s", eventOrigin))
 		}
 
+		if err := reader.getEventRecorder().AddEvent(&changeEvent); err != nil {
+			return errors.Wrapf(
+				err,
+				"failed to augment stats with %s change event (%+v)",
+				eventOrigin,
+				changeEvent,
+			)
+		}
+
 		dbNames = append(dbNames, srcDBName)
 		collNames = append(collNames, srcCollName)
-		docIDs = append(docIDs, changeEvent.DocID)
+		docIDs = append(docIDs, docID)
 		opTimes = append(opTimes, *changeEvent.ClusterTime)
 
 		var dataSize int32
@@ -170,17 +192,11 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 		}
 
 		dataSizes = append(dataSizes, dataSize)
+	}
 
-		if err := reader.getEventRecorder().AddEvent(&changeEvent); err != nil {
-			return errors.Wrapf(
-				err,
-				"failed to augment stats with %s change event (%+v)",
-				eventOrigin,
-				changeEvent,
-			)
-		}
-
-		reader.addToEventCounts(changeEvent.OpType)
+	// This can happen if all change events were DDL events.
+	if len(docIDs) == 0 {
+		return nil
 	}
 
 	latestTimestampTime := time.Unix(int64(latestTimestamp.T), 0)

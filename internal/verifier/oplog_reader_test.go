@@ -1,17 +1,24 @@
 package verifier
 
 import (
+	"io"
+	"strings"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
+	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-tools/synctools"
+	"github.com/rs/zerolog"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-// TestOplogReader_SourceDDL verifies that source DDL crashes the oplog reader.
+// TestOplogReader_SourceDDL verifies that source DDL crashes the oplog reader
+// by default.
 func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 	ctx := suite.Context()
 
@@ -60,6 +67,124 @@ func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL() {
 
 	// Confirm that the error text is wrapped:
 	suite.Assert().Contains(err.Error(), "reading")
+}
+
+// TestOplogReader_SourceDDL_WarnMost verifies that warnMost logs warnings for
+// allow-listed source DDL, while non-allow-listed DDL still returns an error.
+func (suite *IntegrationTestSuite) TestOplogReader_SourceDDL_WarnMost() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+
+	if suite.GetTopology(verifier.srcClient) == util.TopologySharded {
+		suite.T().Skipf("oplog mode is only for unsharded clusters")
+	}
+
+	var logBuf synctools.Buffer
+	combined := io.MultiWriter(verifier.logger.Writer(), &logBuf)
+	zl := zerolog.New(combined).Level(zerolog.GlobalLevel()).With().Timestamp().Logger()
+	verifier.logger = logger.NewLogger(&zl, combined)
+
+	oplogReader := verifier.newOplogReader(
+		nil,
+		src,
+		verifier.srcClient,
+		*verifier.srcClusterInfo,
+	)
+	oplogReader.onDDLEvent = onDDLEventWarnMost
+
+	var reader changeReader = oplogReader
+
+	dbName := suite.DBNameForTest()
+
+	coll := verifier.srcClient.Database(dbName).Collection("coll")
+
+	eg, egCtx := contextplus.ErrGroup(ctx)
+	suite.Require().NoError(reader.start(egCtx, eg))
+	lo.Must(coll.InsertOne(ctx, bson.D{{"_id", "hey"}, {"x", 1}}))
+
+	// Index build on a pre-existing collection:
+	indexName, err := coll.Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{"x", 1}}})
+	suite.Require().NoError(err)
+
+	canModifyIndex := verifier.srcClusterInfo.VersionArray[0] >= 6
+
+	// collMod with prepareUnique requires v6+
+	if canModifyIndex {
+		suite.Require().NoError(
+			coll.Database().RunCommand(
+				ctx,
+				bson.D{
+					{"collMod", coll.Name()},
+					{"index", bson.D{
+						{"keyPattern", bson.D{{"x", 1}}},
+						{"prepareUnique", true},
+					}},
+				},
+			).Err(),
+		)
+	}
+
+	suite.Require().NoError(coll.Indexes().DropOne(ctx, indexName))
+
+	// Index build on an empty collection:
+	_, err = coll.Database().Collection("othercoll").Indexes().
+		CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{"x", 1}}})
+	suite.Require().NoError(err)
+
+	suite.Require().NoError(
+		coll.Database().Client().Database("admin").RunCommand(
+			ctx,
+			bson.D{
+				{"renameCollection", coll.Database().Name() + "." + coll.Name()},
+				{"to", coll.Database().Name() + ".coll2"},
+			},
+		).Err(),
+	)
+
+	batchReceiver := reader.getReadChannel()
+
+	timer := time.NewTimer(time.Minute)
+
+	channelOpen := true
+	for channelOpen {
+		var batch eventBatch
+		select {
+		case <-ctx.Done():
+			suite.Require().NoError(ctx.Err())
+		case <-timer.C:
+			suite.Require().Fail("should read batch channel")
+		case batch, channelOpen = <-batchReceiver:
+			if channelOpen {
+				suite.T().Logf("got batch: %+v", batch)
+			}
+		}
+	}
+
+	err = eg.Wait()
+	suite.Assert().ErrorAs(err, &UnknownEventError{})
+
+	// Confirm that the error text is wrapped:
+	suite.Assert().Contains(err.Error(), "reading")
+
+	expectedCmds := []string{
+		`"create"`, // quotes disambiguate from createIndexes
+		"createIndexes",
+		"dropIndexes",
+		"renameCollection",
+	}
+
+	if canModifyIndex {
+		expectedCmds = append(expectedCmds, "collMod")
+	}
+
+	logStr := string(logBuf.Bytes())
+	for _, cmdName := range expectedCmds {
+		suite.Assert().True(
+			strings.Contains(logStr, cmdName),
+			"DDL warning log should mention %q", cmdName,
+		)
+	}
 }
 
 // TestOplogReader_Documents verifies that the oplog reader sees & publishes
@@ -131,7 +256,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 				event.Ns,
 			)
 			suite.Assert().Equal("insert", event.OpType)
-			suite.Assert().Equal("ho", lo.Must(mbson.CastRawValue[string](event.DocID)))
+			suite.Assert().Equal("ho", lo.Must(mbson.CastRawValue[string](event.DocID.MustGet())))
 			suite.Assert().EqualValues(len(raw), event.FullDocLen.MustGet(), "doc length")
 		},
 	)
@@ -153,7 +278,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 				event.Ns,
 			)
 			suite.Assert().Equal("update", event.OpType)
-			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID)))
+			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID.MustGet())))
 		},
 	)
 
@@ -171,7 +296,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 				event.Ns,
 			)
 			suite.Assert().Equal("replace", event.OpType)
-			suite.Assert().Equal("ho", lo.Must(mbson.CastRawValue[string](event.DocID)))
+			suite.Assert().Equal("ho", lo.Must(mbson.CastRawValue[string](event.DocID.MustGet())))
 			suite.Assert().EqualValues(len(raw), event.FullDocLen.MustGet(), "doc length")
 		},
 	)
@@ -189,7 +314,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 				event.Ns,
 			)
 			suite.Assert().Equal("delete", event.OpType)
-			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID)))
+			suite.Assert().Equal("hey", lo.Must(mbson.CastRawValue[string](event.DocID.MustGet())))
 		},
 	)
 
@@ -222,7 +347,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 
 				suite.Assert().Equal(
 					bulkDocs[i][0].Value,
-					lo.Must(mbson.CastRawValue[float64](event.DocID)),
+					lo.Must(mbson.CastRawValue[float64](event.DocID.MustGet())),
 					"events[%d].DocID", i,
 				)
 			}
@@ -261,7 +386,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 			eventDocIDs := lo.Map(
 				events,
 				func(event ParsedEvent, _ int) any {
-					return lo.Must(mbson.CastRawValue[float64](event.DocID))
+					return lo.Must(mbson.CastRawValue[float64](event.DocID.MustGet()))
 				},
 			)
 
@@ -297,7 +422,7 @@ func (suite *IntegrationTestSuite) TestOplogReader_Documents() {
 			eventDocIDs := lo.Map(
 				events,
 				func(event ParsedEvent, _ int) any {
-					return lo.Must(mbson.CastRawValue[float64](event.DocID))
+					return lo.Must(mbson.CastRawValue[float64](event.DocID.MustGet()))
 				},
 			)
 

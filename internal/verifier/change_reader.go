@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/10gen/migration-verifier/history"
@@ -10,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/msync"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -37,8 +39,25 @@ const (
 	// The number of batches we’ll hold in memory at once.
 	batchChanBufferSize = 100
 
-	onDDLEventAllow ddlEventHandling = "allow"
+	onDDLEventAllow    ddlEventHandling = "allow"
+	onDDLEventWarnMost ddlEventHandling = ddlEventHandling(DDLHandlingWarnMost)
+)
 
+// allowedSrcDDLOpTypes are the change-stream operationType values that
+// correspond to allow-listed DDL commands.
+//
+// In warnMost mode these emit a warning; in failAll mode they are errors.
+var allowedSrcDDLOpTypes = mapset.NewSet(
+	"create",
+	"modify",
+	"createIndexes",
+	"dropIndexes",
+	"shardCollection",
+	"reshardCollection",
+	"refineCollectionShardKey",
+)
+
+const (
 	changeReaderCollectionName = "changeReader"
 )
 
@@ -111,6 +130,28 @@ type ChangeReaderCommon struct {
 	cumulativeEventCounts *msync.DataGuard[api.ChangeEventCounts]
 }
 
+func newSrcChangeReaderCommon(ddlHandling DDLHandling) ChangeReaderCommon {
+	reader := newChangeReaderCommon(src)
+
+	switch ddlHandling {
+	case DDLHandlingFailAll:
+		// Do nothing. Any DDL will cause an error.
+	case DDLHandlingWarnMost:
+		reader.onDDLEvent = onDDLEventWarnMost
+	default:
+		panic(fmt.Sprintf("unknown DDLHandling: %#q", ddlHandling))
+	}
+
+	return reader
+}
+
+func newDstChangeReaderCommon() ChangeReaderCommon {
+	reader := newChangeReaderCommon(dst)
+	reader.onDDLEvent = onDDLEventAllow
+
+	return reader
+}
+
 func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 	return ChangeReaderCommon{
 		readerType:            clusterName,
@@ -122,11 +163,6 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 		lastSeenClusterTime:   msync.NewTypedAtomic(option.None[bson.Timestamp]()),
 		batchSizeHistory:      history.New[int](time.Minute),
 		cumulativeEventCounts: msync.NewDataGuard(api.ChangeEventCounts{}),
-		onDDLEvent: lo.Ternary(
-			clusterName == dst,
-			onDDLEventAllow,
-			"",
-		),
 	}
 }
 
@@ -151,6 +187,25 @@ func (rc *ChangeReaderCommon) addToEventCounts(opType string) {
 			cur.Replace++
 		case "delete":
 			cur.Delete++
+		case "create":
+			cur.Create++
+		case "modify":
+			cur.Modify++
+		case "createIndexes":
+			cur.CreateIndexes++
+		case "dropIndexes":
+			cur.DropIndexes++
+		case "shardCollection":
+			cur.ShardCollection++
+		case "reshardCollection":
+			cur.ReshardCollection++
+		case "refineCollectionShardKey":
+			cur.RefineCollectionShardKey++
+		default:
+			rc.logger.Warn().
+				Str("reader", string(rc.readerType)).
+				Str("opType", opType).
+				Msg("Encountered unrecognized change event type; not counting it in cumulative event counts.")
 		}
 		return cur
 	})
@@ -445,11 +500,17 @@ func (rc *ChangeReaderCommon) updateTimestamps(sess *mongo.Session, token bson.R
 	}
 }
 
-func (rc *ChangeReaderCommon) logIgnoredDDL(rawEvent bson.Raw) {
+func (rc *ChangeReaderCommon) logIgnoredDestDDL(rawEvent bson.Raw) {
 	rc.logger.Info().
 		Str("reader", string(rc.readerType)).
-		Stringer("event", rawEvent).
+		RawJSON("event", []byte(rawEvent.String())).
 		Msg("Ignoring event with unrecognized type on destination. (It’s assumedly internal to the migration.)")
+}
+
+func (rc *ChangeReaderCommon) warnSourceDDL(rawEvent bson.Raw) {
+	rc.logger.Warn().
+		RawJSON("event", []byte(rawEvent.String())).
+		Msg("DDL event detected on source. MANUALLY confirm that this change replicates to the destination.")
 }
 
 func addTimestampToLogEvent(ts bson.Timestamp, event *zerolog.Event) *zerolog.Event {

@@ -6,16 +6,20 @@ import (
 	"slices"
 	"time"
 
+	"github.com/10gen/migration-verifier/agg"
+	"github.com/10gen/migration-verifier/agg/helpers"
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
+	"github.com/10gen/migration-verifier/main/mvflags"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	mapset "github.com/deckarep/golang-set/v2"
 	clone "github.com/huandu/go-clone/generic"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -35,11 +39,16 @@ const (
 )
 
 type UnknownEventError struct {
-	Event bson.Raw
+	Event             bson.Raw
+	AllowedInWarnMost bool
 }
 
 func (uee UnknownEventError) Error() string {
-	return fmt.Sprintf("received event with unknown optype: %+v", uee.Event)
+	msg := fmt.Sprintf("received event with unknown optype: %+v", uee.Event)
+	if uee.AllowedInWarnMost {
+		msg += fmt.Sprintf("; to skip this event, run the verifier with %#q set to %#q", mvflags.DDLHandlingFlag, DDLHandlingWarnMost)
+	}
+	return msg
 }
 
 type ChangeStreamReader struct {
@@ -55,7 +64,14 @@ func (v *Verifier) newChangeStreamReader(
 	client *mongo.Client,
 	clusterInfo util.ClusterInfo,
 ) *ChangeStreamReader {
-	common := newChangeReaderCommon(cluster)
+	common := lo.TernaryF(
+		cluster == dst,
+		newDstChangeReaderCommon,
+		func() ChangeReaderCommon {
+			return newSrcChangeReaderCommon(v.ddlHandling)
+		},
+	)
+
 	common.namespaces = namespaces
 	common.readerType = cluster
 	common.watcherClient = client
@@ -117,7 +133,11 @@ func (csr *ChangeStreamReader) GetChangeStreamFilter() (pipeline mongo.Pipeline)
 		pipeline,
 		bson.D{
 			{"$addFields", bson.D{
-				{"_docID", "$documentKey._id"},
+				{"_docID", agg.Cond{
+					If:   helpers.Exists{"$documentKey"},
+					Then: "$documentKey._id",
+					Else: "$$REMOVE",
+				}},
 
 				{"updateDescription", "$$REMOVE"},
 				{"wallTime", "$$REMOVE"},
@@ -196,20 +216,17 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 		opType := changeEvents[eventsRead].OpType
 		if !supportedEventOpTypes.Contains(opType) {
-			// We expect certain DDL events on the destination as part of
-			// a migration. For example, mongosync enables indexes’ uniqueness
-			// constraints and sets capped collection sizes, and sometimes
-			// indexes are created after initial sync.
-
 			if csr.onDDLEvent == onDDLEventAllow {
-				csr.logIgnoredDDL(cs.Current)
-
-				// Discard this event, then keep reading.
-				changeEvents = changeEvents[:len(changeEvents)-1]
-
-				continue
+				// Destination: log and fall through so recheck_persist can count it.
+				csr.logIgnoredDestDDL(cs.Current)
+			} else if csr.onDDLEvent == onDDLEventWarnMost && allowedSrcDDLOpTypes.Contains(opType) {
+				// Source in warnMost mode: warn and fall through to count it.
+				csr.warnSourceDDL(cs.Current)
 			} else {
-				return UnknownEventError{Event: clone.Clone(cs.Current)}
+				return UnknownEventError{
+					Event:             clone.Clone(cs.Current),
+					AllowedInWarnMost: allowedSrcDDLOpTypes.Contains(opType),
+				}
 			}
 		}
 
@@ -397,6 +414,11 @@ func (csr *ChangeStreamReader) createChangeStream(
 	}
 
 	sctx := mongo.NewSessionContext(ctx, sess)
+
+	csr.logger.Debug().
+		Stringer("changeStreamReader", csr).
+		Any("pipeline", pipeline).
+		Msg("Opening change stream.")
 
 	changeStream, err := csr.watcherClient.Watch(sctx, pipeline, opts)
 	if err != nil {

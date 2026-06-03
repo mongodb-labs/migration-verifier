@@ -816,6 +816,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 
 	task := &tasks.Task{
 		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
 		Generation: 1,
 		Ids: mslices.Of(
 			mbson.ToRawValue(id),
@@ -1062,7 +1063,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll2"},
-				DocID:  mbson.ToRawValue("heyhey"),
+				DocID:  option.Some(mbson.ToRawValue("heyhey")),
 				ClusterTime: &bson.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
@@ -1078,7 +1079,7 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 			events: []ParsedEvent{{
 				OpType: "insert",
 				Ns:     &Namespace{DB: "mydb", Coll: "coll1"},
-				DocID:  mbson.ToRawValue("hoohoo"),
+				DocID:  option.Some(mbson.ToRawValue("hoohoo")),
 				ClusterTime: &bson.Timestamp{
 					T: uint32(time.Now().Unix()),
 				},
@@ -1369,7 +1370,7 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	suite.Require().NoError(err)
 
 	event := ParsedEvent{
-		DocID:  mbson.ToRawValue(int32(55)),
+		DocID:  option.Some(mbson.ToRawValue(int32(55))),
 		OpType: "delete",
 		Ns: &Namespace{
 			DB:   "foo",
@@ -1387,17 +1388,22 @@ func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
 	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 
-	event.OpType = "insert"
+	batch.events[0].OpType = "insert"
 	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
-	event.OpType = "replace"
+	batch.events[0].OpType = "replace"
 	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
-	event.OpType = "update"
+	batch.events[0].OpType = "update"
 	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
 	suite.Require().NoError(err)
 
-	batch.events[0].OpType = "flibbity"
+	batch.events[0].DocID = option.None[bson.RawValue]()
+	batch.events[0].OpType = "create"
+	err = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
+	suite.Require().NoError(err)
+
+	batch.events[0].OpType = "drop"
 	suite.Assert().Panics(
 		func() {
 			_ = verifier.PersistChangeEvents(ctx, batch, verifier.srcChangeReader)
@@ -2313,7 +2319,8 @@ func (suite *IntegrationTestSuite) TestVerifierDocMismatches() {
 	recheckDocIDs := lo.Map(
 		rechecks,
 		func(r recheck.Doc, _ int) int {
-			num, err := mbson.CastRawValue[int32](r.PrimaryKey.DocumentID)
+			docID := r.PrimaryKey.DocumentID
+			num, err := mbson.CastRawValue[int32](docID)
 			suite.Require().NoError(err)
 			return int(num)
 		},
@@ -2904,36 +2911,49 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 func (suite *IntegrationTestSuite) awaitEnqueueOfRechecks(verifier *Verifier, minDocs int) {
 	suite.T().Helper()
 
+	suite.T().Logf(
+		"Waiting for at least %d recheck(s) to be enqueued for generation %d …",
+		minDocs,
+		1+verifier.generation,
+	)
+
 	var lastNonzeroRechecksCount int
 
-	suite.Eventually(func() bool {
-		cursor, err := verifier.getRecheckQueueCollection(1+verifier.generation).
-			Find(suite.Context(), bson.D{})
-		var rechecks []bson.D
-		suite.Require().NoError(err)
-		suite.Require().NoError(cursor.All(suite.Context(), &rechecks))
+	suite.Eventually(
+		func() bool {
+			cursor, err := verifier.getRecheckQueueCollection(1+verifier.generation).
+				Find(suite.Context(), bson.D{})
+			var rechecks []bson.D
+			suite.Require().NoError(err)
+			suite.Require().NoError(cursor.All(suite.Context(), &rechecks))
 
-		if len(rechecks) >= minDocs {
-			return true
-		}
+			if len(rechecks) >= minDocs {
+				return true
+			}
 
-		if len(rechecks) > 0 {
-			// Note any progress toward our minimum rechecks count.
-			if lastNonzeroRechecksCount != len(rechecks) {
-				suite.T().Logf(
-					"%d recheck(s) are enqueued, but we want %d.",
-					len(rechecks),
-					minDocs,
-				)
+			if len(rechecks) > 0 {
+				// Note any progress toward our minimum rechecks count.
+				if lastNonzeroRechecksCount != len(rechecks) {
+					suite.T().Logf(
+						"%d recheck(s) are enqueued, but we want %d.",
+						len(rechecks),
+						minDocs,
+					)
 
-				lastNonzeroRechecksCount = len(rechecks)
+					lastNonzeroRechecksCount = len(rechecks)
+				}
+
+				return false
 			}
 
 			return false
-		}
-
-		return false
-	}, 1*time.Minute, 100*time.Millisecond)
+		},
+		time.Minute,
+		time.Second,
+		"need %d recheck(s) to be enqueued for generation %d",
+		minDocs,
+		1+verifier.generation,
+	)
 }
 
 func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
@@ -2955,13 +2975,15 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 	// Dry run generation 0 to make sure change stream reader is started.
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	// Insert two documents in generation 1. They should be batched and become a verify task in generation 2.
+	// Insert two documents after generation 1.
+	// They should be batched and become a verify task in generation 2.
 	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	_, err := dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
 	_, err = dstDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
-	suite.Require().NoError(runner.AwaitGenerationEnd())
+
 	suite.awaitEnqueueOfRechecks(verifier, 2)
 
 	// Run generation 2 and get verification status.
@@ -2974,11 +2996,11 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 		status.FailedTasks,
 	)
 
-	// Patch up only one of the two mismatched documents in generation 3.
+	// Patch up only one of the two mismatched documents after generation 3.
 	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 1}})
 	suite.Require().NoError(err)
-	suite.Require().NoError(runner.AwaitGenerationEnd())
 	suite.awaitEnqueueOfRechecks(verifier, 1)
 
 	status, err = verifier.GetVerificationStatus(ctx)
@@ -2990,11 +3012,11 @@ func (suite *IntegrationTestSuite) TestChangesOnDstBeforeSrc() {
 		status,
 	)
 
-	// Patch up the other mismatched document in generation 4.
+	// Patch up the other mismatched document after generation 4.
 	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
 	_, err = srcDB.Collection(collName).InsertOne(ctx, bson.D{{"_id", 2}})
 	suite.Require().NoError(err)
-	suite.Require().NoError(runner.AwaitGenerationEnd())
 	suite.awaitEnqueueOfRechecks(verifier, 1)
 
 	suite.Assert().Eventually(

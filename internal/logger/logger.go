@@ -76,6 +76,11 @@ func NewDebugLogger() *Logger {
 	}
 }
 
+// Writer returns the Logger’s underlying Writer.
+func (l *Logger) Writer() io.Writer {
+	return l.writer
+}
+
 // Rotate will rotate the underlying Logger writer iff it is a *lumberjack.Logger
 func (l *Logger) Rotate() {
 	switch w := l.writer.(type) {

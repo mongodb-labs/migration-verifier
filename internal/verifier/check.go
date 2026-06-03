@@ -646,7 +646,7 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			verifier.workerTracker.Unset(workerNum)
 
 			if err != nil {
-				return err
+				return errors.Wrapf(err, "process %#q task %#q", task.Type, task.PrimaryKey)
 			}
 			if task.Generation == 0 {
 				newVal := verifier.gen0PendingCollectionTasks.Add(-1)
@@ -659,14 +659,14 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 			verifier.workerTracker.Unset(workerNum)
 
 			if err != nil {
-				return err
+				return errors.Wrapf(err, "process %#q task %#q", task.Type, task.PrimaryKey)
 			}
 		case tasks.ProcessRecheckQueue:
 			err := verifier.processCreateRechecksTask(ctx, task)
 			verifier.workerTracker.Unset(workerNum)
 
 			if err != nil {
-				return err
+				return errors.Wrapf(err, "process %#q task %#q", task.Type, task.PrimaryKey)
 			}
 		default:
 			panic("Unknown verification task type: " + task.Type)
@@ -702,6 +702,10 @@ func (verifier *Verifier) processCreateRechecksTask(
 			task.Status,
 		)
 	}
+
+	// At this point another worker thread may cancel the generation’s context,
+	// which will cause the drop command below to fail spuriously. It’s not
+	// really worth fixing.
 
 	// NB: This must happen *after* we persist the task as completed.
 	// Otherwise Verifier could crash then, on restart, neglect to create all
@@ -754,7 +758,7 @@ func (v *Verifier) initializeChangeReaders() error {
 			*v.dstClusterInfo,
 		)
 	default:
-		return fmt.Errorf("bad destination change reader: %#q", v.srcChangeReaderMethod)
+		return fmt.Errorf("bad destination change reader: %#q", v.dstChangeReaderMethod)
 	}
 
 	return nil

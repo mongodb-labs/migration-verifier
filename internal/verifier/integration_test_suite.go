@@ -3,6 +3,7 @@ package verifier
 import (
 	"cmp"
 	"context"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/mongodb-labs/migration-tools/synctools"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/suite"
@@ -166,13 +168,36 @@ func (suite *IntegrationTestSuite) GetTopology(client *mongo.Client) util.Cluste
 }
 
 func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
+	return suite.buildVerifierInternal(false, nil)
+}
+
+// BuildVerifierWarnMostDDL creates a verifier in warnMost DDL mode whose logger
+// writes to both the default output and a buffer for inspection.
+func (suite *IntegrationTestSuite) BuildVerifierWarnMostDDL() (*Verifier, *synctools.Buffer) {
+	var buf synctools.Buffer
+	v := suite.buildVerifierInternal(true, &buf)
+
+	return v, &buf
+}
+
+func (suite *IntegrationTestSuite) buildVerifierInternal(
+	warnMost bool,
+	logBuf *synctools.Buffer,
+) *Verifier {
 	qfilter := tasks.QueryFilter{Namespace: "keyhole.dealers"}
 	task := tasks.Task{QueryFilter: qfilter}
 
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
+
+	if logBuf != nil {
+		combined := io.MultiWriter(os.Stderr, logBuf)
+		zl := zerolog.New(combined).Level(zerolog.GlobalLevel()).With().Timestamp().Logger()
+		verifier.logger = logger.NewLogger(&zl, combined)
+	}
+
 	// verifier.SetStartClean(true)
 	suite.Require().NoError(verifier.SetNumWorkers(3))
-	verifier.SetGenerationPauseDelay(0)
+	verifier.SetGenerationPauseDelay(100 * time.Millisecond)
 	verifier.SetWorkerSleepDelay(0)
 
 	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
@@ -229,6 +254,10 @@ func (suite *IntegrationTestSuite) BuildVerifier() *Verifier {
 		Stringer("partitioningScheme", envPartitionBy).
 		Msg("Created verifier.")
 
+	if warnMost {
+		verifier.SetDDLHandling(DDLHandlingWarnMost)
+	}
+
 	suite.Require().NoError(verifier.initializeChangeReaders())
 
 	suite.Require().NoError(verifier.srcClientCollection(&task).Drop(ctx))
@@ -249,4 +278,22 @@ func (suite *IntegrationTestSuite) DBNameForTest(suffixes ...string) string {
 	excess := max(0, len(name)-maxDBNameLen)
 
 	return name[excess:]
+}
+
+func (suite *IntegrationTestSuite) SkipUnlessSrcHasDDLEvents() {
+	if os.Getenv("MVTEST_SRC_CHANGE_READER") == ChangeReaderOptOplog {
+		return
+	}
+
+	ctx := suite.Context()
+	buildInfo, err := util.GetClusterInfo(
+		ctx,
+		logger.NewDefaultLogger(),
+		suite.srcMongoClient,
+	)
+	suite.Require().NoError(err)
+
+	if buildInfo.VersionArray[0] < 6 {
+		suite.T().Skipf("This test requires src server v6+. (Found: %v)", buildInfo.VersionArray)
+	}
 }

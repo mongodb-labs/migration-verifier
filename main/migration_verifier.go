@@ -18,6 +18,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/main/mvflags"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/mongodb-labs/migration-tools/mongotools"
@@ -227,6 +228,19 @@ func main() {
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  pprofInterval,
 			Usage: "Interval to periodically collect pprof profiles (e.g. --pprofInterval=\"5m\")",
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  mvflags.DDLHandlingFlag,
+			Value: string(verifier.DDLHandlingFailAll),
+			Usage: "How to handle DDL events on the source. One of: " + strings.Join(
+				lo.Map(
+					verifier.DDLHandlingOpts,
+					func(h verifier.DDLHandling, _ int) string {
+						return string(h)
+					},
+				),
+				", ",
+			),
 		}),
 	}
 
@@ -446,6 +460,12 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	if err != nil {
 		return nil, err
 	}
+
+	ddlHandling := verifier.DDLHandling(cCtx.String(mvflags.DDLHandlingFlag))
+	if !slices.Contains(verifier.DDLHandlingOpts, ddlHandling) {
+		return nil, errors.Errorf("invalid %#q (%s); valid values are: %#q", mvflags.DDLHandlingFlag, ddlHandling, verifier.DDLHandlingOpts)
+	}
+	v.SetDDLHandling(ddlHandling)
 
 	docCompareMethod := compare.Method(cCtx.String(docCompareMethod))
 	if !slices.Contains(compare.Methods, docCompareMethod) {

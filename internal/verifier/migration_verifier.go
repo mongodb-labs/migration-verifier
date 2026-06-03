@@ -28,6 +28,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/main/mvflags"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mring"
@@ -47,6 +48,22 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"go.mongodb.org/mongo-driver/v2/mongo/writeconcern"
 )
+
+// DDLHandling describes how the verifier responds to DDL events on the source.
+type DDLHandling string
+
+const (
+	// DDLHandlingFailAll (default) causes any DDL event to abort verification.
+	DDLHandlingFailAll DDLHandling = "failAll"
+
+	// DDLHandlingWarnMost causes allow-listed DDL events to emit a warning log
+	// instead of failing. Non-allow-listed events such as drop or rename still
+	// cause an error.
+	DDLHandlingWarnMost DDLHandling = "warnMost"
+)
+
+// DDLHandlingOpts is the set of valid values for DDLHandling.
+var DDLHandlingOpts = []DDLHandling{DDLHandlingFailAll, DDLHandlingWarnMost}
 
 // ReadConcernSetting describes the verifier’s handling of read
 // concern.
@@ -135,6 +152,7 @@ type Verifier struct {
 	cachedGen0Stats atomic.Pointer[api.GenerationStats]
 
 	generationStartTime  time.Time
+	lastDDLWarnTime      atomic.Int64
 	generationPauseDelay time.Duration
 	workerSleepDelay     time.Duration
 	docCompareMethod     compare.Method
@@ -163,6 +181,7 @@ type Verifier struct {
 	dstChangeReader changeReader
 
 	readConcernSetting ReadConcernSetting
+	ddlHandling        DDLHandling
 
 	// A user-defined $match-compatible document-level query filter.
 	// The filter is applied to all namespaces in both initial checking and iterative checking.
@@ -188,6 +207,7 @@ var _ api.MigrationVerifierAPI = &Verifier{}
 // VerifierSettings is NewVerifier’s argument.
 type VerifierSettings struct {
 	ReadConcernSetting
+	DDLHandling
 }
 
 // NewVerifier creates a new Verifier
@@ -195,6 +215,11 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 	readConcern := settings.ReadConcernSetting
 	if readConcern == "" {
 		readConcern = ReadConcernMajority
+	}
+
+	ddlHandling := settings.DDLHandling
+	if ddlHandling == "" {
+		ddlHandling = DDLHandlingFailAll
 	}
 
 	logger, logWriter := getLoggerAndWriter(logPath)
@@ -209,6 +234,7 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		failureDisplaySize:   DefaultFailureDisplaySize,
 
 		readConcernSetting: readConcern,
+		ddlHandling:        ddlHandling,
 
 		workerTracker:        NewWorkerTracker(NumWorkers),
 		docsComparedHistory:  history.New[types.DocumentCount](time.Minute),
@@ -230,6 +256,17 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 // ConfigureReadConcern
 func (verifier *Verifier) ConfigureReadConcern(setting ReadConcernSetting) {
 	verifier.readConcernSetting = setting
+}
+
+// SetDDLHandling configures how the verifier responds to DDL events on the source.
+// This must be called before initializeChangeReaders.
+func (verifier *Verifier) SetDDLHandling(mode DDLHandling) {
+	if mode == DDLHandlingWarnMost {
+		verifier.logger.Warn().
+			Str(mvflags.DDLHandlingFlag, string(mode)).
+			Msg("You MUST scan the logs for DDL changes and manually confirm that they are correctly replicated.")
+	}
+	verifier.ddlHandling = mode
 }
 
 func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
@@ -1212,6 +1249,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 
 	insertFailedCollection := func() error {
 		_, err := verifier.InsertFailedCollectionVerificationTask(ctx, srcNs)
+
 		return errors.Wrapf(
 			err,
 			"failed to persist metadata mismatch for collection %#q",

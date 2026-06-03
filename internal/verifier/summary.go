@@ -669,6 +669,7 @@ func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
 		{"update", srcCounts.Update, dstCounts.Update},
 		{"replace", srcCounts.Replace, dstCounts.Replace},
 		{"delete", srcCounts.Delete, dstCounts.Delete},
+		{"DDL", srcCounts.CountDDL(), dstCounts.CountDDL()},
 	}
 
 	fmt.Fprintf(out, "Cumulative change events seen:\n")
@@ -699,6 +700,15 @@ func (verifier *Verifier) printCumulativeChangeEventTable(out io.Writer) {
 	}
 
 	table.Render()
+
+	if ddlCount := srcCounts.CountDDL(); ddlCount > 0 {
+		if time.Since(time.Unix(0, verifier.lastDDLWarnTime.Load())) >= time.Minute {
+			verifier.logger.Warn().
+				Int64("ddlEventsCount", ddlCount).
+				Msg("Source DDL changes detected. Manually confirm their proper replication.")
+			verifier.lastDDLWarnTime.Store(time.Now().UnixNano())
+		}
+	}
 }
 
 func (verifier *Verifier) printChangeEventStatistics(builder io.Writer) int64 {
