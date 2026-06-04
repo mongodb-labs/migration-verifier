@@ -355,7 +355,7 @@ unaffected. When set, a corresponding entry is added to `notes`.
 | `--workerSleepDelay <milliseconds>`     | milliseconds workers sleep while waiting for work (default: 1000)                                                                                                                           |
 | `--srcNamespace <namespaces>`           | source namespaces to check                                                                                                                                                                  |
 | `--dstNamespace <namespaces>`           | destination namespaces to check                                                                                                                                                             |
-| `--metaDBName <name>`                   | name of the database in which to store verification metadata (default: "migration_verification_metadata")                                                                                   |
+| `--metaDBName <name>`                   | name of the database in which to store verification metadata (default: `__mdb_internal_migration_verifier`)                                                                                   |
 | `--docCompareMethod`                    | How to compare documents. See below for details.                                                                                                                                        |
 | `--partitioningScheme`                  | How to partition collections. See below for details.                                                                                                                                        |
 | `--srcChangeReader`                     | How to read changes from the source. See below for details.             |
@@ -547,78 +547,11 @@ If a checking is started with the above filter, the table below summarizes the v
 
 # Checking Failures
 
-Because the algorithm is generational, the only failures we care about are in the last generation to run. The first goal is to find the last generation:
-
-Switch to the verification database on the meta cluster, the default database for this is migration_verification_metadata:
-
-
-```
-use migration_verification_metadata
-db.verification_tasks.aggregate([{$sort: {'generation': -1}}, {$limit: 1}, {$project: {'generation': 1, '_id': 0}}])
-```
-
-
-Once we have the generation, we can filter on generation:
-
-
-```
-x = //generation from previous query
-db.verification_tasks.find({generation: x, status: 'failed'})
-```
-
-
-Failed 'verify' tasks will look like the following:
-
-
-```
-  {
-    _id: ObjectId("632c994915c7f27f0a3de33e"),
-    generation: 15,
-    _ids: [ 3, ObjectId("632c994915c7f27f0a3de55e"), 5, "hello" ],
-    id: 0,
-    status: 'failed',
-    type: 'verify',
-    parent_id: null,
-    query_filter: { partition: null, namespace: 'test.t', to: 'test.t' },
-    begin_time: ISODate("2022-09-22T17:20:12.388Z"),
-    failed_docs: null
-  }
-```
-
-
-Type `'verify`' denotes that this is a mismatch in documents. `_ids` lists the `_ids` of failing documents, which may be of any bson type. The `query_filter` `'namespace'` field is the source namespace, while the `'to'` field is the namespace on the destination.
-
-Any collection metadata mismatches will occur in a task with the type '`verifyCollection`', which looks like the following:
-
-
-```
-  x = 0
-  db.verification_tasks.find({generation: x, status: 'mismatch'})
-  {
-    _id: ObjectId("632c9c9f5c71ad5eb4fde2bd"),
-    generation: 0,
-    _ids: null,
-    id: 0,
-    status: 'mismatch',
-    type: 'verifyCollection',
-    parent_id: null,
-    query_filter: { partition: null, namespace: 'test.t', to: 'test.t' },
-    begin_time: ISODate("2022-09-22T17:34:23.441Z"),
-    failed_docs: [
-      {
-        id: 'x_1',
-        field: null,
-        type: null,
-        details: 'Missing',
-        cluster: 'dstClient',
-        namespace: 'test.t'
-      }
-    ]
-  },
-```
-
-
-In this case, '`failed_docs`' contains all the meta data mismatches, in this case an index named '`x_1`'.
+Use the [`/docMismatches`](#documents) and [`/nsMismatches`](#namespaces) APIs
+to inspect currently-tracked failures. Document mismatches (missing, extra, or
+differing content) appear in `/docMismatches`; namespace-level mismatches
+(missing collections, index differences, spec differences, etc.) appear in
+`/nsMismatches`.
 
 # Resumability
 
@@ -785,13 +718,7 @@ The verifier will read the oplog continually instead of reading a change stream.
 
 # Known Issues
 
-- The verifier may report missing documents on the destination that don’t actually appear to be missing (i.e., a nonexistent problem). This has been hard to reproduce. If missing documents are reported, it is good practice to check for false positives.
-
-- The verifier, during its first generation, may report a confusing “Mismatches found” but then report 0 problems. This is a reporting bug in mongosync; if you see it, check the documents in `migration_verification_metadata.verification_tasks` for generation 1 (not generation 0).
-
-- The verifier conflates “missing” documents with change events: if it finds a document missing and receives a change event for another document, the verifier records those together in its metadata. As a result, the verifier’s reporting can cause confusion: what its log calls “missing or changed” documents aren’t, in fact, necessarily failures; they could all just be change events that are pending a recheck.
-
-- If the server’s memory usage rises after generation 0, try reducing `recheckMaxSizeMB`. This will shrink the queries that the verifier sends, which in turn should reduce the server’s memory usage. (The number of actual queries sent will rise, of course.)
+- If memory usage rises after generation 0, try reducing `recheckMaxSizeMB`. This will shrink the queries that the verifier sends, which in turn should reduce the server’s memory usage. (The number of actual queries sent will rise, of course.)
 
 ## Time-Series Collections
 
@@ -803,6 +730,6 @@ NB: Given bucket documents’ size, hashed document comparison can be especially
 
 # Limitations
 
-- The verifier’s iterative process can handle data changes while it is running, until you hit the writesOff endpoint.  However, it cannot handle DDL commands.  If the verifier receives a DDL change stream event from the source, the verification will fail permanently.
+- The verifier does not verify DDL changes. By default, such changes will crash the verifier. (See the `--ddlHandling` option above for alternative behavior.)
 
 - The verifier cannot verify time-series collections under namespace filtering.
