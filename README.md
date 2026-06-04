@@ -730,4 +730,6 @@ NB: Given bucket documents’ size, hashed document comparison can be especially
 
 # Limitations
 
+- The verifier does not verify DDL changes. By default, such changes will crash the verifier. (See the `--ddlHandling` option above for alternative behavior.)
+
 - The verifier cannot verify time-series collections under namespace filtering.
