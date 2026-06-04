@@ -96,8 +96,7 @@ func main() {
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  metaURI,
-			Value: "mongodb://localhost",
-			Usage: "connection string to replset that stores verifier metadata",
+			Usage: "connection string to replset that stores verifier metadata (defaults to destination)",
 		}),
 		altsrc.NewIntFlag(cli.IntFlag{
 			Name:  serverPort,
@@ -391,18 +390,22 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	}
 
 	metaConnStr := cCtx.String(metaURI)
-	_, metaConnStr, err = mongotools.MaybeAddDirectConnection(metaConnStr)
-	if err != nil {
-		return nil, errors.Wrap(err, "parsing metadata connection string")
+
+	if metaConnStr == "" {
+		metaConnStr = dstConnStr
+
+		v.GetLogger().Info().
+			Msgf("Storing metadata on the destination cluster by default. Use a dedicated %#q instead if this underperforms.", metaURI)
+	} else {
+		_, metaConnStr, err = mongotools.MaybeAddDirectConnection(metaConnStr)
+		if err != nil {
+			return nil, errors.Wrap(err, "parsing metadata connection string")
+		}
 	}
+
 	err = v.SetMetaURI(ctx, metaConnStr)
 	if err != nil {
 		return nil, err
-	}
-
-	if dstConnStr == metaConnStr {
-		v.GetLogger().Warn().
-			Msg("Storing migration-verifier’s metadata on the destination can significantly impede performance. Use a dedicated cluster for the metadata if you can.")
 	}
 
 	v.SetServerPort(cCtx.Int(serverPort))

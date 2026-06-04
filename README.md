@@ -11,12 +11,6 @@ curl -sSL https://raw.githubusercontent.com/mongodb-labs/migration-verifier/refs
 ```
 (Alternatively, you can check out this repository then `./build.sh` to build from source.)
 
-Then start a local mongod to store verification metadata:
-```
-podman run -it --rm -p27017:27017 -v ./verifier_db:/data/db --entrypoint bash docker.io/mongodb/mongodb-community-server
-```
-(This will create a local `verifier_db` directory so that you can resume verification if needed. Omit `-v` with its argument to avoid that.)
-
 Finally, run verification:
 ```
 ./migration_verifier \
@@ -27,14 +21,8 @@ Finally, run verification:
     --start
 ```
 The above will stream verification logs to standard output. Once writes stop,
-watch for change stream lag to hit 0. The log will report either the found
+wait for change stream lag to hit 0. The log will report either the found
 mismatches or a confirmation of exact match between the clusters.
-
-# Verifier Metadata Considerations
-
-migration-verifier needs a `mongod` to store its state. By default, this is assumed to run on localhost:27017. For best performance this should be a standalone `mongod`.
-
-See [above](#Quick-Start) for a one-line command to start up such a `mongod`.
 
 # More Details
 
@@ -91,7 +79,14 @@ srcURI: mongodb://localhost:28010
 dstURI: mongodb://localhost:28011
 metaURI: mongodb://localhost:28012
 ```
+## Metadata considerations
 
+By default, the verifier stores its metadata on the destination cluster. This works well in most migrations. It does require a destination that can handle
+both the migration *and* the verification workloads concurrently.
+
+If this combined workload overpowers the destination, put the
+verification’s metadata on a different cluster. To do this, give that cluster’s
+connection string in the `--metaURI` parameter.
 
 ## Send the Verifier Process Commands:
 
@@ -347,7 +342,7 @@ unaffected. When set, a corresponding entry is added to `notes`.
 | `--configFile <value>`                  | path to an optional YAML config file                                                                                                                                                        |
 | `--srcURI <URI>`                        | source Host URI for migration verification (required)                                                                                                           |
 | `--dstURI <URI>`                        | destination Host URI for migration verification (required)                                                                                                      |
-| `--metaURI <URI>`                       | host URI for storing migration verification metadata (default: "mongodb://localhost")                                                                                                 |
+| `--metaURI <URI>`                       | host URI for storing migration verification metadata (default: same as `--dstURI`)                                                                                                 |
 | `--serverPort <port>`                   | port for the control web server (default: 27020)                                                                                                                                            |
 | `--logPath <path>`                      | logging file path (default: "stdout")                                                                                                                                                       |
 | `--numWorkers <number>`                 | number of worker threads to use for verification (default: 10)                                                                                                                              |
