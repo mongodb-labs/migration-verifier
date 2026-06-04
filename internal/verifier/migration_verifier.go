@@ -22,6 +22,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
+	"github.com/10gen/migration-verifier/internal/collspec"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
@@ -984,7 +985,7 @@ func (verifier *Verifier) partitionAndInspectNamespace(
 // not the collection data can be safely verified.
 func (verifier *Verifier) compareCollectionSpecifications(
 	srcNs, dstNs string,
-	srcSpec, dstSpec util.CollectionSpec,
+	srcSpec, dstSpec collspec.CollectionSpec,
 ) ([]compare.Result, bool, error) {
 
 	if srcSpec.Type != dstSpec.Type {
@@ -1229,7 +1230,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	srcNs := FullName(srcColl)
 	dstNs := FullName(dstColl)
 
-	srcSpecOpt, err := util.GetCollectionSpecIfExists(ctx, verifier.logger, srcColl)
+	srcSpecOpt, err := collspec.GetCollectionSpecIfExists(ctx, verifier.logger, srcColl)
 	if err != nil {
 		return errors.Wrapf(
 			err,
@@ -1238,7 +1239,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		)
 	}
 
-	dstSpecOpt, err := util.GetCollectionSpecIfExists(ctx, verifier.logger, dstColl)
+	dstSpecOpt, err := collspec.GetCollectionSpecIfExists(ctx, verifier.logger, dstColl)
 	if err != nil {
 		return errors.Wrapf(
 			err,
