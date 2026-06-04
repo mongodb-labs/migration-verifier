@@ -23,6 +23,16 @@ import (
 
 type GenerationStatus string
 
+type generationCompleteErr struct {
+	generation int
+}
+
+var _ error = generationCompleteErr{}
+
+func (e generationCompleteErr) Error() string {
+	return fmt.Sprintf("generation %d complete", e.generation)
+}
+
 const (
 	Gen0MetadataAnalysisComplete GenerationStatus = "gen0_metadata_analysis_complete"
 	GenerationInProgress         GenerationStatus = "inprogress"
@@ -152,7 +162,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 				finishedAllTasks = true
 
 				// Stop the thread that prints in-progress notifications.
-				canceler(errors.Errorf("generation %d finished", generation))
+				canceler(generationCompleteErr{generation: generation})
 				<-inProgressDone
 
 				verifier.PrintVerificationSummary(ctxIn, GenerationComplete)
@@ -164,7 +174,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	err := eg.Wait()
 
-	if finishedAllTasks && errors.Is(err, context.Canceled) {
+	if finishedAllTasks && errors.As(err, &generationCompleteErr{}) {
 		err = nil
 	}
 
