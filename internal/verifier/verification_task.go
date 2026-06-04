@@ -299,9 +299,20 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *task
 					},
 				},
 			)
+
+			// If the generation finishes while we’re updating the task,
+			// we can reasonably assume that it was our own update that
+			// triggered the generation completion. In that case, we can
+			// ignore the error since the task will be marked as completed
+			// anyway.
+			if errors.As(err, &generationCompleteErr{}) {
+				return nil
+			}
+
 			if err != nil {
 				return err
 			}
+
 			if result.MatchedCount == 0 {
 				return TaskError{
 					Code:    ErrorUpdateTask,
@@ -309,7 +320,7 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *task
 				}
 			}
 
-			return err
+			return nil
 		},
 		"updating task %v (namespace %#q)",
 		task.PrimaryKey,

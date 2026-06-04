@@ -816,13 +816,9 @@ REPORTS:
 	task.FoundSourceDocumentsCount = docsCount
 	task.SourceBytesCount = bytesCount
 
-	// While we update this task, another goroutine is polling for task
-	// statuses. If that goroutine sees all tasks as finished before this
-	// request returns, it will cancel the context before this request returns,
-	// which will cause UpdateVerificationTask to return an error.
 	err := verifier.UpdateVerificationTask(ctx, task)
 
-	if err != nil && !errors.As(err, &generationCompleteErr{}) {
+	if err != nil {
 		return errors.Wrapf(
 			err,
 			"failed to persist task %s's new status (%#q)",
