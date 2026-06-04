@@ -174,8 +174,10 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	err := eg.Wait()
 
-	if finishedAllTasks && errors.As(err, &generationCompleteErr{}) {
-		err = nil
+	if finishedAllTasks && errors.Is(err, context.Canceled) {
+		if errors.As(context.Cause(ctx), &generationCompleteErr{}) {
+			err = nil
+		}
 	}
 
 	if err == nil {
