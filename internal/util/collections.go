@@ -3,6 +3,8 @@ package util
 import (
 	"context"
 
+	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -37,26 +39,36 @@ func FullName(collection *mongo.Collection) string {
 // exist in the collection specification then an error is returned.
 func GetCollectionSpecIfExists(
 	ctx context.Context,
+	logger *logger.Logger,
 	coll *mongo.Collection,
 ) (option.Option[CollectionSpec], error) {
-	cursor, err := coll.Database().ListCollections(ctx, bson.M{"name": coll.Name()})
-	if err != nil {
-		return option.None[CollectionSpec](), errors.Wrapf(
-			err,
-			"failed to fetch %#q's specification",
-			FullName(coll),
-		)
-	}
-
 	var specs []CollectionSpec
-	err = cursor.All(ctx, &specs)
-	if err != nil {
-		return option.None[CollectionSpec](), errors.Wrapf(
-			err,
-			"failed to parse %#q's specification",
-			FullName(coll),
-		)
-	}
+
+	err := retry.New().WithCallback(
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			cursor, err := coll.Database().ListCollections(ctx, bson.M{"name": coll.Name()})
+			if err != nil {
+				return errors.Wrapf(
+					err,
+					"fetch %#q’s specification",
+					FullName(coll),
+				)
+			}
+
+			err = cursor.All(ctx, &specs)
+			if err != nil {
+				return errors.Wrapf(
+					err,
+					"parse %#q's specification",
+					FullName(coll),
+				)
+			}
+
+			return nil
+		},
+		"fetching namespace %#q’s specification",
+		FullName(coll),
+	).Run(ctx, logger)
 
 	switch len(specs) {
 	case 0:

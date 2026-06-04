@@ -1229,7 +1229,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 	srcNs := FullName(srcColl)
 	dstNs := FullName(dstColl)
 
-	srcSpecOpt, err := util.GetCollectionSpecIfExists(ctx, srcColl)
+	srcSpecOpt, err := util.GetCollectionSpecIfExists(ctx, verifier.logger, srcColl)
 	if err != nil {
 		return errors.Wrapf(
 			err,
@@ -1238,7 +1238,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		)
 	}
 
-	dstSpecOpt, err := util.GetCollectionSpecIfExists(ctx, dstColl)
+	dstSpecOpt, err := util.GetCollectionSpecIfExists(ctx, verifier.logger, dstColl)
 	if err != nil {
 		return errors.Wrapf(
 			err,
