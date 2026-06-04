@@ -24,12 +24,11 @@ type CollectionSpec struct {
 		ReadOnly bool `bson:"readOnly"`
 		UUID     bson.Binary
 
-		Extra map[string]any
+		Extra map[string]any `bson:",inline"`
 	}
 	IDIndex bson.Raw `bson:"idIndex"`
 
-	Extra map[string]any
-}
+	Extra map[string]any `bson:",inline"`
 
 func fullName(collection *mongo.Collection) string {
 	return collection.Database().Name() + "." + collection.Name()
@@ -47,6 +46,7 @@ func GetCollectionSpecIfExists(
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
+			specs = nil
 			cursor, err := coll.Database().ListCollections(ctx, bson.M{"name": coll.Name()})
 			if err != nil {
 				return errors.Wrapf(
@@ -70,14 +70,16 @@ func GetCollectionSpecIfExists(
 		"fetching namespace %#q's specification",
 		fullName(coll),
 	).Run(ctx, logger)
+	if err != nil {
+		return option.None[CollectionSpec](), err
+	}
 
 	switch len(specs) {
 	case 0:
 		return option.None[CollectionSpec](), nil
 	case 1:
 		if len(specs[0].Extra) > 0 || len(specs[0].Info.Extra) > 0 {
-			return option.None[CollectionSpec](), errors.Wrapf(
-				err,
+			return option.None[CollectionSpec](), errors.Errorf(
 				"%#q's specification (%v) contains unrecognized fields",
 				fullName(coll),
 				specs[0],
@@ -85,12 +87,11 @@ func GetCollectionSpecIfExists(
 		}
 
 		return option.Some(specs[0]), nil
+	default:
+		return option.None[CollectionSpec](), errors.Errorf(
+			"received multiple results (%v) when fetching %#q's specification",
+			specs,
+			fullName(coll),
+		)
 	}
-
-	return option.None[CollectionSpec](), errors.Wrapf(
-		err,
-		"received multiple results (%v) when fetching %#q's specification",
-		specs,
-		fullName(coll),
-	)
 }
