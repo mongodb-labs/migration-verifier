@@ -154,7 +154,7 @@ func main() {
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  metaDBName,
-			Value: "migration_verification_metadata",
+			Value: "__mdb_internal_migration_verifier",
 			Usage: "`name` of the database in which to store verification metadata",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
