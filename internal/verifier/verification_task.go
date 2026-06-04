@@ -314,7 +314,7 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *task
 						verifier.logger.Info().
 							Err(err).
 							Any("task", task.PrimaryKey).
-							Any("namespace", task.QueryFilter.Namespace).
+							Str("namespace", task.QueryFilter.Namespace).
 							Msg("Generation completed while updating task; ignoring error.")
 
 						return nil
