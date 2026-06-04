@@ -319,6 +319,8 @@ func (suite *IntegrationTestSuite) startSrcChangeStreamReaderAndHandler(
 }
 
 func (suite *IntegrationTestSuite) TestLastRecheckedOpTime_Resume() {
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+
 	ctx := suite.T().Context()
 
 	verifier1 := suite.BuildVerifier()
@@ -358,10 +360,6 @@ func (suite *IntegrationTestSuite) TestLastRecheckedOpTime_Resume() {
 
 	suite.Require().Eventually(
 		func() bool {
-			if !srcTS.IsZero() && !dstTS.IsZero() {
-				return true
-			}
-
 			suite.Require().NoError(
 				verifierRunner.StartNextGeneration(),
 			)
@@ -376,11 +374,11 @@ func (suite *IntegrationTestSuite) TestLastRecheckedOpTime_Resume() {
 				dstTS = t
 			})
 
-			return false
+			return !srcTS.IsZero() && !dstTS.IsZero()
 		},
 		time.Minute,
 		time.Second,
-		"last-rechecked timestamps must update",
+		"last-rechecked timestamps must exist",
 	)
 
 	v1Cancel(fmt.Errorf("ending verifier 1"))
@@ -422,21 +420,28 @@ func (suite *IntegrationTestSuite) TestLastRecheckedOpTime_Resume() {
 	suite.T().Logf("Waiting for last-recheck optimes to update …")
 
 	srcTS3, dstTS3 := srcTS, dstTS
-	for srcTS3.Equal(srcTS) || dstTS3.Equal(dstTS) {
-		suite.Require().NoError(
-			verifierRunner.StartNextGeneration(),
-		)
-		suite.Require().NoError(
-			verifierRunner.AwaitGenerationEnd(),
-		)
+	suite.Require().Eventually(
+		func() bool {
+			suite.Require().NoError(
+				verifierRunner.StartNextGeneration(),
+			)
+			suite.Require().NoError(
+				verifierRunner.AwaitGenerationEnd(),
+			)
 
-		verifier2.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
-			srcTS3 = t
-		})
-		verifier2.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
-			dstTS3 = t
-		})
-	}
+			verifier2.srcLastRecheckedTS.Load(func(t bson.Timestamp) {
+				srcTS3 = t
+			})
+			verifier2.dstLastRecheckedTS.Load(func(t bson.Timestamp) {
+				dstTS3 = t
+			})
+
+			return !srcTS3.Equal(srcTS) && !dstTS3.Equal(dstTS)
+		},
+		time.Minute,
+		time.Second,
+		"last-rechecked timestamps must update",
+	)
 
 	v2Cancel(fmt.Errorf("stopping verifier 2"))
 
