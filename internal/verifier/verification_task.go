@@ -311,6 +311,12 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *task
 				// error itself, but we want to avoid a dependency on that.)
 				if errors.Is(err, context.Canceled) {
 					if errors.As(context.Cause(ctx), &generationCompleteErr{}) {
+						verifier.logger.Info().
+							Err(err).
+							Any("task", task.PrimaryKey).
+							Any("namespace", task.QueryFilter.Namespace).
+							Msg("Generation completed while updating task; ignoring error.")
+
 						return nil
 					}
 				}
