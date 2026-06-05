@@ -119,7 +119,8 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	}
 
 	eg.Go(func() error {
-		delay := 30 * time.Second
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
 
 		for {
 			select {
@@ -127,7 +128,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 				return egCtx.Err()
 			case <-generationDone:
 				return nil
-			case <-time.After(delay):
+			case <-ticker.C:
 				verifier.PrintVerificationSummary(egCtx, GenerationInProgress)
 			}
 		}
