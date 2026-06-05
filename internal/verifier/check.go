@@ -101,7 +101,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 		case <-generationDone:
 			return nil
 		case <-egCtx.Done():
-			return nil
+			return egCtx.Err()
 		}
 	})
 
@@ -115,7 +115,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 			)
 		})
 
-		timer.Sleep(ctxIn, 10*time.Millisecond)
+		_ = timer.Sleep(ctxIn, 10*time.Millisecond)
 	}
 
 	eg.Go(func() error {
@@ -151,7 +151,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 			// The generation continues as long as >=1 task for this generation is
 			// “added” or “pending”.
 			if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 {
-				timer.Sleep(egCtx, verifier.verificationStatusCheckInterval)
+				_ = timer.Sleep(egCtx, verifier.verificationStatusCheckInterval)
 			} else {
 				verifier.logger.Debug().
 					Int("generation", generation).
