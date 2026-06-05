@@ -3,6 +3,8 @@ package retry
 import "time"
 
 const (
+	authenticationFailedCode = 18
+
 	// DefaultDurationLimit is the default time limit for all retries.
 	DefaultDurationLimit = 10 * time.Minute
 

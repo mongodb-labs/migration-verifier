@@ -1,9 +1,11 @@
 package retry
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
+	"testing"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
@@ -11,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -18,6 +21,9 @@ import (
 )
 
 type RetryCallback = func(context.Context, *FuncInfo) error
+
+// Overridden in tests
+var isTesting = testing.Testing()
 
 // Run() runs each given callback in parallel. If none of them fail,
 // then no error is returned.
@@ -273,11 +279,9 @@ func (r *Retryer) shouldRetryWithSleep(
 		panic("nil error should not get here")
 	}
 
-	isTransient := util.IsTransientError(err) || lo.SomeBy(
-		r.additionalErrorCodes,
-		func(code int) bool {
-			return mmongo.ErrorHasCode(err, code)
-		},
+	isTransient := cmp.Or(
+		util.IsTransientError(err),
+		errHasAnyCode(err, r.additionalErrorCodes),
 	)
 
 	event := logger.WithLevel(
@@ -309,7 +313,34 @@ func (r *Retryer) shouldRetryWithSleep(
 		return true
 	}
 
+	if isTesting {
+		// Unfortunately Go provides no compile-time mechanism to include this logic
+		// exclusively in tests, so we just put it in the production code.
+		retryableErrorCodesInTests := mslices.Of(
+			authenticationFailedCode,
+		)
+
+		if errHasAnyCode(err, retryableErrorCodesInTests) {
+			logger.Debug().
+				Strs("description", descriptions).
+				Err(err).
+				Msg("Treating error as retryable in test.")
+
+			return true
+		}
+	}
+
 	event.Msg("Non-retryable error occurred.")
+
+	return false
+}
+
+func errHasAnyCode(err error, codes []int) bool {
+	for _, code := range codes {
+		if mmongo.ErrorHasCode(err, code) {
+			return true
+		}
+	}
 
 	return false
 }
