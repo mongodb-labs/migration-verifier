@@ -301,26 +301,6 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *task
 			)
 
 			if err != nil {
-				// If the generation finishes while we’re updating the task,
-				// we can reasonably assume that it was our own update that
-				// triggered the generation completion. In that case, we can
-				// ignore the error since the task will be marked as completed
-				// anyway.
-				//
-				// (NB: contextplus means we could do an As() check against the
-				// error itself, but we want to avoid a dependency on that.)
-				if errors.Is(err, context.Canceled) {
-					if errors.As(context.Cause(ctx), &generationCompleteErr{}) {
-						verifier.logger.Info().
-							Err(err).
-							Any("task", task.PrimaryKey).
-							Str("namespace", task.QueryFilter.Namespace).
-							Msg("Generation completed while updating task; ignoring error.")
-
-						return nil
-					}
-				}
-
 				return err
 			}
 

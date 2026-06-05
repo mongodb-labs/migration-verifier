@@ -13,7 +13,6 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/goaux/timer"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -22,16 +21,6 @@ import (
 )
 
 type GenerationStatus string
-
-type generationCompleteErr struct {
-	generation int
-}
-
-var _ error = generationCompleteErr{}
-
-func (e generationCompleteErr) Error() string {
-	return fmt.Sprintf("generation %d complete", e.generation)
-}
 
 const (
 	Gen0MetadataAnalysisComplete GenerationStatus = "gen0_metadata_analysis_complete"
@@ -90,8 +79,15 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	verifier.writeStringBuilder(genStartReport)
 
-	cancelableCtx, canceler := contextplus.WithCancelCause(ctxIn)
-	eg, ctx := contextplus.ErrGroup(cancelableCtx)
+	eg, egCtx := contextplus.ErrGroup(ctxIn)
+
+	// This channel notifies the threads that the generation is done. We do
+	// this rather than cancel a context for 2 reasons:
+	// - Allow all blocking operations to finish gracefully rather than
+	//   returning an error.
+	// - Avoid “context canceled” errors everywhere, which clutter the logs.
+	//   (Or, clutter the code with special-case handling to avoid logging.)
+	generationDone := make(chan struct{})
 
 	// If the change reader fails, everything should stop.
 	eg.Go(func() error {
@@ -101,16 +97,16 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 				verifier.changeHandlingErr.Get(),
 				verifier.dstChangeReader.String(),
 			)
-		case <-ctx.Done():
+		case <-egCtx.Done():
 			return nil
 		}
 	})
 
 	// Start the worker threads.
-	for i := 0; i < verifier.numWorkers; i++ {
+	for i := range verifier.numWorkers {
 		eg.Go(func() error {
 			return errors.Wrapf(
-				verifier.work(ctx, i),
+				verifier.work(egCtx, generationDone, i),
 				"worker %d failed",
 				i,
 			)
@@ -120,26 +116,24 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 	waitForTaskCreation := 0
 
-	var finishedAllTasks bool
-
-	inProgressDone := make(chan struct{})
-	go func() {
-		defer close(inProgressDone)
-
+	eg.Go(func() error {
 		delay := 30 * time.Second
 
 		for {
-			if err := timer.SleepCause(cancelableCtx, delay); err != nil {
-				return
+			select {
+			case <-egCtx.Done():
+				return egCtx.Err()
+			case <-generationDone:
+				return nil
+			case <-time.After(delay):
+				verifier.PrintVerificationSummary(egCtx, GenerationInProgress)
 			}
-
-			verifier.PrintVerificationSummary(cancelableCtx, GenerationInProgress)
 		}
-	}()
+	})
 
 	eg.Go(func() error {
 		for {
-			verificationStatus, err := verifier.GetVerificationStatus(ctx)
+			verificationStatus, err := verifier.GetVerificationStatus(egCtx)
 			if err != nil {
 				return errors.Wrapf(
 					err,
@@ -159,38 +153,33 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 
 				time.Sleep(verifier.verificationStatusCheckInterval)
 			} else {
-				finishedAllTasks = true
+				verifier.logger.Debug().
+					Int("generation", generation).
+					Msg("No pending tasks remain for this generation. Signaling worker threads to finish.")
 
-				// Stop the thread that prints in-progress notifications.
-				canceler(generationCompleteErr{generation: generation})
-				<-inProgressDone
-
-				verifier.PrintVerificationSummary(ctxIn, GenerationComplete)
+				// Signal all threads that the generation is finished.
+				close(generationDone)
 
 				return nil
 			}
 		}
 	})
 
-	err := eg.Wait()
-
-	if finishedAllTasks && errors.Is(err, context.Canceled) {
-		if errors.As(context.Cause(ctx), &generationCompleteErr{}) {
-			err = nil
-		}
+	if err := eg.Wait(); err != nil {
+		return errors.Wrapf(
+			err,
+			"check generation %d failed",
+			generation,
+		)
 	}
 
-	if err == nil {
-		verifier.logger.Debug().
-			Int("generation", generation).
-			Msg("Check finished.")
-	}
+	verifier.logger.Debug().
+		Int("generation", generation).
+		Msg("Check generation finished.")
 
-	return errors.Wrapf(
-		err,
-		"check generation %d failed",
-		generation,
-	)
+	verifier.PrintVerificationSummary(ctxIn, GenerationComplete)
+
+	return nil
 }
 
 func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testChan ...chan struct{}) error {
@@ -611,7 +600,11 @@ func FetchFailedAndIncompleteTasks(
 }
 
 // work is the logic for an individual worker thread.
-func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
+func (verifier *Verifier) work(
+	ctx context.Context,
+	finished <-chan struct{},
+	workerNum int,
+) error {
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
 		Msg("Worker started.")
@@ -641,13 +634,14 @@ func (verifier *Verifier) work(ctx context.Context, workerNum int) error {
 
 		task, gotTask := taskOpt.Get()
 		if !gotTask {
-			duration := verifier.workerSleepDelay
-
-			if duration > 0 {
-				time.Sleep(duration)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-finished:
+				return nil
+			case <-time.After(verifier.workerSleepDelay):
+				continue
 			}
-
-			continue
 		}
 
 		verifier.workerTracker.Set(workerNum, task)
