@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/10gen/migration-verifier/internal/sharding"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
@@ -29,7 +30,7 @@ func (verifier *Verifier) verifyShardingIfNeeded(
 		return nil, nil
 	}
 
-	srcShardOpt, err := util.GetShardKey(ctx, srcColl)
+	srcShardOpt, err := sharding.GetShardKey(ctx, verifier.logger, srcColl)
 	if err != nil {
 		return nil, errors.Wrapf(
 			err,
@@ -38,7 +39,7 @@ func (verifier *Verifier) verifyShardingIfNeeded(
 		)
 	}
 
-	dstShardOpt, err := util.GetShardKey(ctx, dstColl)
+	dstShardOpt, err := sharding.GetShardKey(ctx, verifier.logger, dstColl)
 	if err != nil {
 		return nil, errors.Wrapf(
 			err,

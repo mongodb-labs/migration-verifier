@@ -21,6 +21,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/sharding"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/uuidutil"
@@ -884,7 +885,7 @@ func (verifier *Verifier) getShardKeyFields(
 	coll := verifier.srcClient.Database(namespaceAndUUID.DBName).
 		Collection(namespaceAndUUID.CollName)
 
-	shardKeyOpt, err := util.GetShardKey(ctx, coll)
+	shardKeyOpt, err := sharding.GetShardKey(ctx, verifier.logger, coll)
 	if err != nil {
 		return nil, errors.Wrapf(
 			err,

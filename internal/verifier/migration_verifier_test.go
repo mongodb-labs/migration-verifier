@@ -22,6 +22,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/sharding"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -275,7 +276,7 @@ func (suite *IntegrationTestSuite) TestVerifier_Dotted_Shard_Key() {
 		)
 
 		require.NoError(
-			util.DisableBalancing(ctx, coll),
+			sharding.DisableBalancing(ctx, coll),
 			"should disable %#q’s balancing on %s",
 			FullName(coll),
 			clientLabel,
