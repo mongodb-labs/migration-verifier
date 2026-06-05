@@ -29,6 +29,7 @@ type CollectionSpec struct {
 	IDIndex bson.Raw `bson:"idIndex"`
 
 	Extra map[string]any `bson:",inline"`
+}
 
 func fullName(collection *mongo.Collection) string {
 	return collection.Database().Name() + "." + collection.Name()
