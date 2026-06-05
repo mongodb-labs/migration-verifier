@@ -817,7 +817,6 @@ REPORTS:
 	task.SourceBytesCount = bytesCount
 
 	err := verifier.UpdateVerificationTask(ctx, task)
-
 	if err != nil {
 		return errors.Wrapf(
 			err,

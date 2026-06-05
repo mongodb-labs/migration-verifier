@@ -299,11 +299,9 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *task
 					},
 				},
 			)
-
 			if err != nil {
 				return err
 			}
-
 			if result.MatchedCount == 0 {
 				return TaskError{
 					Code:    ErrorUpdateTask,
@@ -311,7 +309,7 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *task
 				}
 			}
 
-			return nil
+			return err
 		},
 		"updating task %v (namespace %#q)",
 		task.PrimaryKey,
