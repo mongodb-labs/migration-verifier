@@ -1,9 +1,11 @@
 package retry
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
+	"testing"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
@@ -273,11 +275,9 @@ func (r *Retryer) shouldRetryWithSleep(
 		panic("nil error should not get here")
 	}
 
-	isTransient := util.IsTransientError(err) || lo.SomeBy(
-		r.additionalErrorCodes,
-		func(code int) bool {
-			return mmongo.ErrorHasCode(err, code)
-		},
+	isTransient := cmp.Or(
+		util.IsTransientError(err),
+		errHasAnyCode(err, r.additionalErrorCodes),
 	)
 
 	event := logger.WithLevel(
@@ -309,7 +309,34 @@ func (r *Retryer) shouldRetryWithSleep(
 		return true
 	}
 
+	if testing.Testing() {
+		// Unfortunately Go provides no compile-time mechanism to include this logic
+		// exclusively in tests, so we just put it in the production code.
+		retryableErrorCodesInTests := []int{
+			18, // AuthenticationFailed
+		}
+
+		if errHasAnyCode(err, retryableErrorCodesInTests) {
+			logger.Debug().
+				Strs("description", descriptions).
+				Err(err).
+				Msg("Treating error as retryable in test.")
+
+			return true
+		}
+	}
+
 	event.Msg("Non-retryable error occurred.")
+
+	return false
+}
+
+func errHasAnyCode(err error, codes []int) bool {
+	for _, code := range codes {
+		if mmongo.ErrorHasCode(err, code) {
+			return true
+		}
+	}
 
 	return false
 }
