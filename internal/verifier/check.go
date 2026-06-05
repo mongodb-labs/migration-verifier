@@ -158,7 +158,6 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 					Int("generation", generation).
 					Msg("No pending tasks remain for this generation. Signaling worker threads to finish.")
 
-				// Signal all threads that the generation is finished.
 				close(generationDone)
 
 				return nil
