@@ -13,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/goaux/timer"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -97,6 +98,8 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 				verifier.changeHandlingErr.Get(),
 				verifier.dstChangeReader.String(),
 			)
+		case <-generationDone:
+			return nil
 		case <-egCtx.Done():
 			return nil
 		}
@@ -111,10 +114,9 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 				i,
 			)
 		})
-		time.Sleep(10 * time.Millisecond)
-	}
 
-	waitForTaskCreation := 0
+		timer.Sleep(ctxIn, 10*time.Millisecond)
+	}
 
 	eg.Go(func() error {
 		delay := 30 * time.Second
@@ -149,9 +151,7 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 			// The generation continues as long as >=1 task for this generation is
 			// “added” or “pending”.
 			if verificationStatus.AddedTasks > 0 || verificationStatus.ProcessingTasks > 0 {
-				waitForTaskCreation++
-
-				time.Sleep(verifier.verificationStatusCheckInterval)
+				timer.Sleep(egCtx, verifier.verificationStatusCheckInterval)
 			} else {
 				verifier.logger.Debug().
 					Int("generation", generation).
