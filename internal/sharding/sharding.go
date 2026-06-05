@@ -1,8 +1,11 @@
-package util
+package sharding
 
 import (
 	"context"
 
+	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -20,6 +23,7 @@ const (
 // if the collection is unsharded.
 func GetShardKey(
 	ctx context.Context,
+	logger *logger.Logger,
 	coll *mongo.Collection,
 ) (option.Option[bson.Raw], error) {
 	namespace := coll.Database().Name() + "." + coll.Name()
@@ -32,18 +36,28 @@ func GetShardKey(
 		Key option.Option[bson.Raw]
 	}{}
 
-	err := configCollectionsColl.
-		FindOne(ctx, bson.D{{"_id", namespace}}).
-		Decode(&decoded)
+	err := retry.New().WithCallback(
+		func(ctx context.Context, ri *retry.FuncInfo) error {
+			err := configCollectionsColl.
+				FindOne(ctx, bson.D{{"_id", namespace}}).
+				Decode(&decoded)
 
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return option.None[bson.Raw](), nil
-	} else if err != nil {
-		return option.None[bson.Raw](), errors.Wrapf(
-			err,
-			"failed to find sharding info for %#q",
-			namespace,
-		)
+			if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+				return errors.Wrapf(
+					err,
+					"failed to find sharding info for %#q",
+					namespace,
+				)
+			}
+
+			return nil
+		},
+		"fetch %#q’s shard key",
+		namespace,
+	).Run(ctx, logger)
+
+	if err != nil {
+		return option.None[bson.Raw](), err
 	}
 
 	key, hasKey := decoded.Key.Get()
@@ -60,7 +74,7 @@ func DisableBalancing(ctx context.Context, coll *mongo.Collection) error {
 	client := coll.Database().Client()
 	configDB := client.Database("config")
 
-	ns := FullName(coll)
+	ns := util.FullName(coll)
 
 	_, err := configDB.
 		Collection(
