@@ -13,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/reportutils"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -20,6 +21,9 @@ import (
 )
 
 type RetryCallback = func(context.Context, *FuncInfo) error
+
+// Overridden in tests
+var isTesting = testing.Testing()
 
 // Run() runs each given callback in parallel. If none of them fail,
 // then no error is returned.
@@ -309,12 +313,12 @@ func (r *Retryer) shouldRetryWithSleep(
 		return true
 	}
 
-	if testing.Testing() {
+	if isTesting {
 		// Unfortunately Go provides no compile-time mechanism to include this logic
 		// exclusively in tests, so we just put it in the production code.
-		retryableErrorCodesInTests := []int{
-			18, // AuthenticationFailed
-		}
+		retryableErrorCodesInTests := mslices.Of(
+			authenticationFailedCode,
+		)
 
 		if errHasAnyCode(err, retryableErrorCodesInTests) {
 			logger.Debug().

@@ -173,6 +173,64 @@ func (suite *UnitTestSuite) TestCancelViaContext() {
 	wg.Wait()
 }
 
+// TestAuthnError verifies that authentication errors are retried in tests.
+//
+// Ideally we’d also check that they’re *NOT* retried in production, but we
+// have no good way to flex that since the production code checks
+// testing.Testing().
+func (suite *UnitTestSuite) TestAuthnError() {
+	ctx := suite.Context()
+	logger := suite.Logger()
+
+	customError := mongo.CommandError{
+		Name: "MySpecialAuthnError",
+		Code: authenticationFailedCode,
+	}
+
+	var attemptNumber int
+	f := func(_ context.Context, ri *FuncInfo) error {
+		attemptNumber = ri.GetAttemptNumber()
+		if attemptNumber == 0 {
+			return customError
+		}
+		return nil
+	}
+
+	suite.Run(
+		"test",
+		func() {
+			attemptNumber = 0
+
+			retryer := New()
+			err := retryer.WithCallback(f, "f").Run(ctx, logger)
+			suite.Assert().NoError(err)
+			suite.Assert().Equal(1, attemptNumber)
+		},
+	)
+
+	suite.Run(
+		"production",
+		func() {
+			attemptNumber = 0
+
+			isTesting = false
+			defer func() {
+				isTesting = true
+			}()
+
+			retryer := New()
+			err := retryer.WithCallback(f, "f").Run(ctx, logger)
+			suite.Assert().Error(err)
+			suite.Assert().Contains(
+				mongo.ErrorCodes(err),
+				authenticationFailedCode,
+				"error must indicate authn failure",
+			)
+			suite.Assert().Equal(0, attemptNumber)
+		},
+	)
+}
+
 func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 	logger := suite.Logger()
 
