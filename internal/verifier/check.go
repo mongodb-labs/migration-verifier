@@ -64,18 +64,8 @@ func (verifier *Verifier) Check(ctx context.Context, filter bson.D) {
 func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	generation := verifier.generation
 
-	verifier.logger.Debug().
-		Int("generation", generation).
-		Int("workersCount", verifier.numWorkers).
-		Msg("Starting verification worker threads.")
-
-	// Since we do a progress report right at the start we don’t need
-	// this to go in non-debug output.
-	startLabel := fmt.Sprintf("Starting check generation %d", generation)
-	verifier.logger.Debug().Msg(startLabel)
-
 	genStartReport := startReport()
-	genStartReport.WriteString(startLabel + "\n\n")
+	fmt.Fprintf(genStartReport, "Starting check generation %d\n\n", generation)
 	genStartReport.WriteString("Gathering collection metadata …\n")
 
 	verifier.writeStringBuilder(genStartReport)
