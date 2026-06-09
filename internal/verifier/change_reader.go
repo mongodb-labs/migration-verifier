@@ -405,21 +405,12 @@ func (rc *ChangeReaderCommon) persistResumeToken(ctx context.Context, token bson
 	}
 
 	coll := rc.metaDB.Collection(changeReaderCollectionName)
-
-	err = retry.New().WithCallback(
-		func(ctx context.Context, ri *retry.FuncInfo) error {
-			_, err := coll.ReplaceOne(
-				ctx,
-				bson.D{{"_id", docID}},
-				doc,
-				options.Replace().SetUpsert(true),
-			)
-			return err
-		},
-		"persisting %s resume token",
-		rc.readerType,
-	).Run(ctx, rc.logger)
-
+	_, err = coll.ReplaceOne(
+		ctx,
+		bson.D{{"_id", docID}},
+		doc,
+		options.Replace().SetUpsert(true),
+	)
 	if err != nil {
 		return errors.Wrapf(err, "persisting %s resume token (%v)", rc.readerType, token)
 	}
