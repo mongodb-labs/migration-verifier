@@ -84,7 +84,7 @@ func ListAllUserNamespaces(
 		var collNames []string
 
 		err := retry.New().WithCallback(
-			func(ctx context.Context, ri *retry.FuncInfo) error {
+			func(ctx context.Context, _ *retry.FuncInfo) error {
 				var err error
 				collNames, err = db.ListCollectionNames(ctx, filter)
 				return err
