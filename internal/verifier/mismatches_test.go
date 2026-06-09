@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
@@ -563,4 +564,50 @@ func (suite *IntegrationTestSuite) TestIndexSpecIgnoreInLogOutput() {
 	// The tally should show.
 	suite.Assert().Regexp(` 13(?:[^0-9]|$)`, output,
 		"log should contain the tolerated-mismatch count")
+}
+
+func (suite *IntegrationTestSuite) TestRecordAndClearMismatches() {
+	verifier := suite.BuildVerifier()
+
+	task := tasks.Task{
+		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyDocuments,
+		Generation: verifier.generation,
+	}
+
+	err := recordMismatches(
+		suite.Context(),
+		verifier.verificationDatabase(),
+		&task,
+		[]compare.Result{
+			{
+				ID:      mbson.ToRawValue("doc1"),
+				Field:   "fieldA",
+				Details: "mismatch details A",
+			},
+		},
+	)
+	suite.Require().NoError(err)
+
+	mismatchesChan := make(chan api.DocMismatchInfo, 100)
+
+	err = verifier.SendDocumentMismatches(
+		suite.Context(),
+		0,
+		mismatchesChan,
+	)
+	suite.Require().NoError(err)
+
+	mismatches := lo.ChannelToSlice(mismatchesChan)
+	suite.Assert().Len(mismatches, 1)
+
+	err = clearMismatchesForTask(
+		suite.Context(),
+		verifier.verificationDatabase(),
+		task,
+	)
+	suite.Require().NoError(err)
+
+	mismatches = lo.ChannelToSlice(mismatchesChan)
+	suite.Assert().Empty(mismatches, "mismatches should be cleared")
 }

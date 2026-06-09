@@ -591,11 +591,15 @@ func findAndSendMismatches[MT api.AnyMismatchInfo](
 func clearMismatchesForTask(
 	ctx context.Context,
 	db *mongo.Database,
-	taskID bson.ObjectID,
+	task tasks.Task,
 ) error {
 	_, err := db.Collection(mismatchesCollectionName).DeleteMany(
 		ctx,
-		bson.D{{"taskID", taskID}},
+		bson.D{
+			{"generation", task.Generation},
+			{"taskType", task.Type},
+			{"detail.id", task.PrimaryKey},
+		},
 	)
 	return err
 }

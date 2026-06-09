@@ -668,7 +668,7 @@ func (verifier *Verifier) processAnyTask(
 				verifier.clearMismatchesIfRetryingTask(
 					ctx,
 					workerNum,
-					task.PrimaryKey,
+					task,
 					fi.GetAttemptNumber(),
 				)
 
@@ -693,7 +693,7 @@ func (verifier *Verifier) processAnyTask(
 func (verifier *Verifier) clearMismatchesIfRetryingTask(
 	ctx context.Context,
 	workerNum int,
-	taskID bson.ObjectID,
+	task tasks.Task,
 	attemptNumber int,
 ) {
 	if attemptNumber == 0 {
@@ -702,19 +702,19 @@ func (verifier *Verifier) clearMismatchesIfRetryingTask(
 
 	verifier.logger.Info().
 		Int("workerNum", workerNum).
-		Any("task", taskID).
+		Any("task", task.PrimaryKey).
 		Int("attemptNumber", attemptNumber).
 		Msg("Clearing mismatches before retrying task.")
 
 	err := clearMismatchesForTask(
 		ctx,
 		verifier.verificationDatabase(),
-		taskID,
+		task,
 	)
 	if err != nil {
 		verifier.logger.Warn().
 			Err(err).
-			Any("task", taskID).
+			Any("task", task.PrimaryKey).
 			Msg("Failed to clear mismatches before retrying task. You may see duplicate mismatches.")
 	}
 }
