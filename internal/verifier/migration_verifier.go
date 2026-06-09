@@ -1089,27 +1089,40 @@ func (verifier *Verifier) ProcessCollectionVerificationTask(
 
 func getIndexesMap(
 	ctx context.Context,
+	logger *logger.Logger,
 	coll *mongo.Collection,
 ) (map[string]bson.Raw, error) {
 	var specs []bson.Raw
-	specsMap := map[string]bson.Raw{}
 
-	cursor, err := coll.Indexes().List(ctx)
+	err := retry.New().WithCallback(
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+
+			cursor, err := coll.Indexes().List(ctx)
+			if err != nil {
+				return errors.Wrap(
+					err,
+					"request indexes",
+				)
+			}
+			err = cursor.All(ctx, &specs)
+			if err != nil {
+				return errors.Wrap(
+					err,
+					"parse indexes",
+				)
+			}
+
+			return nil
+		},
+		"fetching %#q’s indexes",
+		FullName(coll),
+	).Run(ctx, logger)
+
 	if err != nil {
-		return nil, errors.Wrapf(
-			err,
-			"failed to read %#q’s indexes",
-			FullName(coll),
-		)
+		return nil, err
 	}
-	err = cursor.All(ctx, &specs)
-	if err != nil {
-		return nil, errors.Wrapf(
-			err,
-			"failed to parse %#q’s indexes",
-			FullName(coll),
-		)
-	}
+
+	specsMap := map[string]bson.Raw{}
 
 	for _, spec := range specs {
 		var name string
@@ -1143,7 +1156,7 @@ func (verifier *Verifier) verifyIndexes(
 	srcColl, dstColl *mongo.Collection,
 	srcIdIndexSpec, dstIdIndexSpec bson.Raw,
 ) ([]compare.Result, error) {
-	srcMap, err := getIndexesMap(ctx, srcColl)
+	srcMap, err := getIndexesMap(ctx, verifier.logger, srcColl)
 	if err != nil {
 		return nil, errors.Wrapf(
 			err,
@@ -1156,7 +1169,7 @@ func (verifier *Verifier) verifyIndexes(
 		srcMap["_id"] = srcIdIndexSpec
 	}
 
-	dstMap, err := getIndexesMap(ctx, dstColl)
+	dstMap, err := getIndexesMap(ctx, verifier.logger, dstColl)
 	if err != nil {
 		return nil, errors.Wrapf(
 			err,
