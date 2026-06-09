@@ -89,24 +89,24 @@ func (verifier *Verifier) ensureCreateRecheckTaskIfNeeded(
 
 	recheckColl := verifier.getRecheckQueueCollection(newGeneration)
 
-	err := recheckColl.FindOne(ctx, bson.D{}).Err()
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		verifier.logger.Info().
-			Int("generation", newGeneration).
-			Msg("Recheck queue is empty. Will thus not create recheck-creation task.")
-
-		return nil
-	} else if err != nil {
-		return errors.Wrapf(err, "fetching %#q’s first document", recheckColl.Name())
-	}
-
-	verifier.logger.Info().
-		Int("generation", newGeneration).
-		Msg("Creating/resetting recheck-creation task.")
-
 	return retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
-			_, err := verifier.verificationTaskCollection().UpdateOne(
+			err := recheckColl.FindOne(ctx, bson.D{}).Err()
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				verifier.logger.Info().
+					Int("generation", newGeneration).
+					Msg("Recheck queue is empty. Will thus not create recheck-creation task.")
+
+				return nil
+			} else if err != nil {
+				return errors.Wrapf(err, "fetching %#q’s first document", recheckColl.Name())
+			}
+
+			verifier.logger.Info().
+				Int("generation", newGeneration).
+				Msg("Creating/resetting recheck-creation task.")
+
+			_, err = verifier.verificationTaskCollection().UpdateOne(
 				ctx,
 				bson.D{
 					{"generation", newGeneration},
