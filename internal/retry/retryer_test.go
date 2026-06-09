@@ -75,7 +75,7 @@ func (suite *UnitTestSuite) TestRetryer() {
 }
 
 func (suite *UnitTestSuite) TestRetryerDurationLimitIsZero() {
-	retryer := New().WithRetryLimit(0)
+	retryer := New().WithTimeLimit(0)
 
 	attemptNumber := -1
 	f := func(_ context.Context, ri *FuncInfo) error {
@@ -103,7 +103,7 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 		// Artificially advance how much time was taken.
 		ri.lastReset.Store(
 			lastResetInfo{
-				time:        ri.lastReset.Load().time.Add(-2 * ri.loopInfo.durationLimit),
+				time:        ri.lastReset.Load().time.Add(-2 * ri.loopInfo.timeLimit.MustGet()),
 				description: option.Some("artificially rewinding time"),
 			},
 		)
@@ -120,7 +120,7 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 
 	// The error should be the limit-exceeded error, with the
 	// last-noted error being the transient error.
-	suite.Assert().ErrorAs(err, &RetryDurationLimitExceededErr{})
+	suite.Assert().ErrorAs(err, &RetryLimitExceededErr{})
 	suite.Assert().ErrorIs(err, someNetworkError)
 	suite.Equal(1, noSuccessIterations)
 
@@ -359,7 +359,7 @@ func (suite *UnitTestSuite) TestMulti_LongRunningSuccess() {
 
 	startTime := time.Now()
 	retryerLimit := 2 * time.Second
-	retryer := New().WithRetryLimit(retryerLimit)
+	retryer := New().WithTimeLimit(retryerLimit)
 
 	succeedPastTime := startTime.Add(retryerLimit + 1*time.Second)
 

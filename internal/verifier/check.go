@@ -656,24 +656,30 @@ func (verifier *Verifier) processAnyTask(
 	verifier.workerTracker.Set(workerNum, task)
 	defer verifier.workerTracker.Unset(workerNum)
 
-	return retry.New().WithCallback(
-		func(ctx context.Context, _ *retry.FuncInfo) error {
-			switch task.Type {
-			case tasks.VerifyCollection:
-				return verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
-			case tasks.VerifyDocuments:
-				_, err := verifier.ProcessVerifyTask(ctx, workerNum, task)
-				return err
-			case tasks.ProcessRecheckQueue:
-				return verifier.processCreateRechecksTask(ctx, task)
-			default:
-				panic("Unknown verification task type: " + task.Type)
-			}
-		},
-		"process %#q task %#q",
-		task.Type,
-		task.PrimaryKey,
-	).Run(ctx, verifier.logger)
+	// This retryer is special because it retries an entire task. That can
+	// take a long time, so we configure this retryer with no time limit and
+	// a max attempt limit of 5 (arbitrary) to prevent infinite retries.
+	return retry.New().
+		WithoutTimeLimit().
+		WithMaxAttempts(5).
+		WithCallback(
+			func(ctx context.Context, _ *retry.FuncInfo) error {
+				switch task.Type {
+				case tasks.VerifyCollection:
+					return verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
+				case tasks.VerifyDocuments:
+					_, err := verifier.ProcessVerifyTask(ctx, workerNum, task)
+					return err
+				case tasks.ProcessRecheckQueue:
+					return verifier.processCreateRechecksTask(ctx, task)
+				default:
+					panic("Unknown verification task type: " + task.Type)
+				}
+			},
+			"process %#q task %#q",
+			task.Type,
+			task.PrimaryKey,
+		).Run(ctx, verifier.logger)
 }
 
 func (verifier *Verifier) processCreateRechecksTask(

@@ -5,8 +5,8 @@ import "time"
 const (
 	authenticationFailedCode = 18
 
-	// DefaultDurationLimit is the default time limit for all retries.
-	DefaultDurationLimit = 10 * time.Minute
+	// DefaultTimeLimit is the default time limit for all retries.
+	DefaultTimeLimit = 10 * time.Minute
 
 	// Constants for spacing out the retry attempts.
 	// See: https://en.wikipedia.org/wiki/Exponential_backoff

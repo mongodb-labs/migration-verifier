@@ -7,13 +7,13 @@ import (
 	"github.com/10gen/migration-verifier/internal/reportutils"
 )
 
-type RetryDurationLimitExceededErr struct {
+type RetryLimitExceededErr struct {
 	lastErr  error
 	attempts int
 	duration time.Duration
 }
 
-func (rde RetryDurationLimitExceededErr) Error() string {
+func (rde RetryLimitExceededErr) Error() string {
 	return fmt.Sprintf(
 		"retryable function did not succeed after %d attempt(s) over %s; last error was: %v",
 		rde.attempts,
@@ -22,7 +22,7 @@ func (rde RetryDurationLimitExceededErr) Error() string {
 	)
 }
 
-func (rde RetryDurationLimitExceededErr) Unwrap() error {
+func (rde RetryLimitExceededErr) Unwrap() error {
 	return rde.lastErr
 }
 

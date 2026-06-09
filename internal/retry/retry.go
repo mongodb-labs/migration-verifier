@@ -74,7 +74,7 @@ func (r *Retryer) runRetryLoop(
 	startTime := time.Now()
 
 	li := &LoopInfo{
-		durationLimit: r.retryLimit,
+		timeLimit: r.timeLimit,
 	}
 	funcinfos := lo.Map(
 		r.callbacks,
@@ -194,17 +194,29 @@ func (r *Retryer) runRetryLoop(
 			return wrapErrWithDescriptions(cbErr, descriptions)
 		}
 
-		// Our error is transient. If we've exhausted the allowed time
-		// then fail.
+		// Our error is transient. If we've exhausted the allowed time or
+		// attempts then fail.
+		limitExceeded := false
 
-		if failedFuncInfo.GetDurationSoFar() > li.durationLimit {
-			var err error = RetryDurationLimitExceededErr{
-				attempts: li.attemptsSoFar,
-				duration: failedFuncInfo.GetDurationSoFar(),
-				lastErr:  groupErr.errFromCallback,
+		if maxDuration, has := li.timeLimit.Get(); has {
+			limitExceeded = failedFuncInfo.GetDurationSoFar() > maxDuration
+		}
+
+		if !limitExceeded {
+			if maxAttempts, has := li.maxAttempts.Get(); has {
+				limitExceeded = li.attemptsSoFar >= maxAttempts
 			}
+		}
 
-			return wrapErrWithDescriptions(err, descriptions)
+		if limitExceeded {
+			return wrapErrWithDescriptions(
+				RetryLimitExceededErr{
+					attempts: li.attemptsSoFar,
+					duration: failedFuncInfo.GetDurationSoFar(),
+					lastErr:  groupErr.errFromCallback,
+				},
+				descriptions,
+			)
 		}
 
 		// Sleep and increase the sleep time for the next retry,

@@ -29,8 +29,8 @@ require (
 )
 
 require (
-	github.com/ccoveille/go-safecast/v2 v2.0.0
-	github.com/mongodb-labs/migration-tools v0.0.0-20260522185419-3bb2cc4cdea0
+	github.com/ccoveille/go-safecast/v2 v2.0.1
+	github.com/mongodb-labs/migration-tools v0.0.0-20260609163806-88dc31f0c877
 	github.com/samber/slog-zerolog/v2 v2.9.2
 	github.com/wI2L/jsondiff v0.7.0
 )

@@ -57,6 +57,14 @@ func None[T any]() Option[T] {
 	return Option[T]{}
 }
 
+// NoneOf is a convenience that calls None for the static (compile-time) type
+// of the provided expression. For example, if you have a value `obj`, you can
+// call `NoneOf(obj)` to get an empty Option for `obj`’s static type without
+// writing the type out explicitly.
+func NoneOf[T any](_ T) Option[T] {
+	return None[T]()
+}
+
 // FromPointer will convert a nilable pointer into its
 // equivalent Option.
 func FromPointer[T any](valPtr *T) Option[T] {
@@ -139,6 +147,14 @@ func (o Option[T]) OrElse(fallback T) T {
 	}
 
 	return fallback
+}
+
+// ToNone returns an empty Option of the receiver’s type.
+// This simplifies “evacuation” of Options. For example:
+//
+//	opt = opt.ToNone()
+func (Option[T]) ToNone() Option[T] {
+	return None[T]()
 }
 
 // ToPointer converts the Option to a nilable pointer.

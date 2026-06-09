@@ -19,7 +19,8 @@ import (
 // The duration tracks the duration of retrying for transient errors only.
 type LoopInfo struct {
 	attemptsSoFar int
-	durationLimit time.Duration
+	timeLimit     option.Option[time.Duration]
+	maxAttempts   option.Option[int]
 }
 
 type lastResetInfo struct {
@@ -68,9 +69,19 @@ func (fi *FuncInfo) Log(logger *zerolog.Logger, cmdName string, clientType strin
 	}
 	event.Str("context", msg).
 		Int("attemptNumber", fi.GetAttemptNumber()).
-		Str("durationSoFar", reportutils.DurationToHMS(fi.GetDurationSoFar())).
-		Str("durationLimit", reportutils.DurationToHMS(fi.loopInfo.durationLimit)).
-		Msg("Running retryable function")
+		Str("durationSoFar", reportutils.DurationToHMS(fi.GetDurationSoFar()))
+
+	if timeLimit, has := fi.loopInfo.timeLimit.Get(); has {
+		event.
+			Str("timeLimit", reportutils.DurationToHMS(timeLimit))
+	}
+
+	if maxAttempts, has := fi.loopInfo.maxAttempts.Get(); has {
+		event.
+			Int("maxAttempts", maxAttempts)
+	}
+
+	event.Msg("Running retryable function")
 }
 
 // GetAttemptNumber returns the Info's current attempt number (0-indexed).
