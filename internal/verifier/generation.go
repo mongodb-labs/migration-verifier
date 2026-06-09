@@ -79,8 +79,7 @@ func (v *Verifier) readGeneration(ctx context.Context) (option.Option[int], erro
 	parsed := generationDoc{}
 
 	err := retry.New().WithCallback(
-		func(ctx context.Context, ri *retry.FuncInfo) error {
-			err := db.Collection(generationCollName).FindOne(
+		func(ctx context.Context, _ *retry.FuncInfo) error {
 				ctx,
 				bson.D{},
 			).Decode(&parsed)
