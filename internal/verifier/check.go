@@ -634,40 +634,46 @@ func (verifier *Verifier) work(
 			}
 		}
 
-		verifier.workerTracker.Set(workerNum, task)
+		err = verifier.processAnyTask(ctx, workerNum, task)
+		if err != nil {
+			return err
+		}
 
-		switch task.Type {
-		case tasks.VerifyCollection:
-			err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, &task)
-			verifier.workerTracker.Unset(workerNum)
+		if task.Type == tasks.VerifyCollection && task.Generation == 0 {
 
-			if err != nil {
-				return errors.Wrapf(err, "process %#q task %#q", task.Type, task.PrimaryKey)
+			newVal := verifier.gen0PendingCollectionTasks.Add(-1)
+			if newVal == 0 {
+				verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
 			}
-			if task.Generation == 0 {
-				newVal := verifier.gen0PendingCollectionTasks.Add(-1)
-				if newVal == 0 {
-					verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
-				}
-			}
-		case tasks.VerifyDocuments:
-			err := verifier.ProcessVerifyTask(ctx, workerNum, &task)
-			verifier.workerTracker.Unset(workerNum)
-
-			if err != nil {
-				return errors.Wrapf(err, "process %#q task %#q", task.Type, task.PrimaryKey)
-			}
-		case tasks.ProcessRecheckQueue:
-			err := verifier.processCreateRechecksTask(ctx, task)
-			verifier.workerTracker.Unset(workerNum)
-
-			if err != nil {
-				return errors.Wrapf(err, "process %#q task %#q", task.Type, task.PrimaryKey)
-			}
-		default:
-			panic("Unknown verification task type: " + task.Type)
 		}
 	}
+}
+
+func (verifier *Verifier) processAnyTask(
+	ctx context.Context,
+	workerNum int,
+	task tasks.Task,
+) error {
+	verifier.workerTracker.Set(workerNum, task)
+	defer verifier.workerTracker.Unset(workerNum)
+
+	return retry.New().WithCallback(
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			switch task.Type {
+			case tasks.VerifyCollection:
+				return verifier.ProcessCollectionVerificationTask(ctx, -1, &task)
+			case tasks.VerifyDocuments:
+				return verifier.ProcessVerifyTask(ctx, -1, &task)
+			case tasks.ProcessRecheckQueue:
+				return verifier.processCreateRechecksTask(ctx, task)
+			default:
+				panic("Unknown verification task type: " + task.Type)
+			}
+		},
+		"process %#q task %#q",
+		task.Type,
+		task.PrimaryKey,
+	).Run(ctx, verifier.logger)
 }
 
 func (verifier *Verifier) processCreateRechecksTask(
