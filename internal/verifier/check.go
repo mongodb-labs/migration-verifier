@@ -664,28 +664,16 @@ func (verifier *Verifier) processAnyTask(
 		WithMaxAttempts(5).
 		WithCallback(
 			func(ctx context.Context, fi *retry.FuncInfo) error {
+				// This is useless, but also harmless, for recheck-queue tasks:
+				verifier.clearMismatchesIfRetryingTask(
+					ctx,
+					workerNum,
+					task.PrimaryKey,
+					fi.GetAttemptNumber(),
+				)
+
 				switch task.Type {
 				case tasks.VerifyCollection:
-					if fi.GetAttemptNumber() > 0 {
-						verifier.logger.Info().
-							Int("workerNum", workerNum).
-							Any("task", task.PrimaryKey).
-							Int("attemptNumber", fi.GetAttemptNumber()).
-							Msg("Clearing mismatches before retrying task.")
-
-						err := clearMismatchesForTask(
-							ctx,
-							verifier.verificationDatabase(),
-							task.PrimaryKey,
-						)
-						if err != nil {
-							verifier.logger.Warn().
-								Err(err).
-								Any("task", task.PrimaryKey).
-								Msg("Failed to clear mismatches before retrying task. You may see duplicate mismatches.")
-						}
-					}
-
 					return verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
 				case tasks.VerifyDocuments:
 					_, err := verifier.ProcessVerifyTask(ctx, workerNum, task)
@@ -700,6 +688,35 @@ func (verifier *Verifier) processAnyTask(
 			task.Type,
 			task.PrimaryKey,
 		).Run(ctx, verifier.logger)
+}
+
+func (verifier *Verifier) clearMismatchesIfRetryingTask(
+	ctx context.Context,
+	workerNum int,
+	taskID bson.ObjectID,
+	attemptNumber int,
+) {
+	if attemptNumber == 0 {
+		return
+	}
+
+	verifier.logger.Info().
+		Int("workerNum", workerNum).
+		Any("task", taskID).
+		Int("attemptNumber", attemptNumber).
+		Msg("Clearing mismatches before retrying task.")
+
+	err := clearMismatchesForTask(
+		ctx,
+		verifier.verificationDatabase(),
+		taskID,
+	)
+	if err != nil {
+		verifier.logger.Warn().
+			Err(err).
+			Any("task", taskID).
+			Msg("Failed to clear mismatches before retrying task. You may see duplicate mismatches.")
+	}
 }
 
 func (verifier *Verifier) processCreateRechecksTask(
