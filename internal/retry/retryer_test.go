@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/10gen/migration-verifier/contextplus"
@@ -47,30 +49,92 @@ func (suite *UnitTestSuite) TestRetryer() {
 
 	suite.Run("with a function that succeeds after two attempts", func() {
 		attemptNumber := -1
-		f := func(_ context.Context, ri *FuncInfo) error {
-			attemptNumber = ri.GetAttemptNumber()
-			if attemptNumber < 2 {
-				return someNetworkError
-			}
-			return nil
-		}
+		var err error
 
-		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
+		synctest.Test(suite.T(), func(*testing.T) {
+			f := func(_ context.Context, ri *FuncInfo) error {
+				attemptNumber = ri.GetAttemptNumber()
+				if attemptNumber < 2 {
+					return someNetworkError
+				}
+				return nil
+			}
+			err = retryer.WithCallback(f, "f").Run(suite.Context(), logger)
+		})
 		suite.NoError(err)
 		suite.Equal(2, attemptNumber)
 
-		attemptNumber = -1
-		f2 := func(_ context.Context, ri *FuncInfo) error {
-			attemptNumber = ri.GetAttemptNumber()
-			if attemptNumber < 2 {
-				return someNetworkError
+		synctest.Test(suite.T(), func(*testing.T) {
+			attemptNumber = -1
+			f2 := func(_ context.Context, ri *FuncInfo) error {
+				attemptNumber = ri.GetAttemptNumber()
+				if attemptNumber < 2 {
+					return someNetworkError
+				}
+				return nil
 			}
-			return nil
-		}
-
-		err = retryer.WithCallback(f2, "f2").Run(suite.Context(), logger)
+			err = retryer.WithCallback(f2, "f2").Run(suite.Context(), logger)
+		})
 		suite.NoError(err)
 		suite.Equal(2, attemptNumber)
+	})
+}
+
+func (suite *UnitTestSuite) TestRetryerMaxAttempts() {
+	ctx := suite.Context()
+	logger := suite.Logger()
+
+	errTransient := someNetworkError
+
+	makeCounter := func(failTimes int) (func(context.Context, *FuncInfo) error, *int) {
+		attempts := 0
+		return func(_ context.Context, _ *FuncInfo) error {
+			attempts++
+			if attempts <= failTimes {
+				return errTransient
+			}
+			return nil
+		}, &attempts
+	}
+
+	retryer := New().WithMaxAttempts(3).WithoutTimeLimit()
+
+	suite.Run("succeeds on first attempt", func() {
+		f, attempts := makeCounter(0)
+		err := retryer.WithCallback(f, "f").Run(ctx, logger)
+		suite.NoError(err)
+		suite.Equal(1, *attempts)
+	})
+
+	suite.Run("fails once then succeeds", func() {
+		f, attempts := makeCounter(1)
+		var err error
+		synctest.Test(suite.T(), func(*testing.T) {
+			err = retryer.WithCallback(f, "f").Run(ctx, logger)
+		})
+		suite.NoError(err)
+		suite.Equal(2, *attempts)
+	})
+
+	suite.Run("fails twice then succeeds", func() {
+		f, attempts := makeCounter(2)
+		var err error
+		synctest.Test(suite.T(), func(*testing.T) {
+			err = retryer.WithCallback(f, "f").Run(ctx, logger)
+		})
+		suite.NoError(err)
+		suite.Equal(3, *attempts)
+	})
+
+	suite.Run("fails all 3 times", func() {
+		f, attempts := makeCounter(3)
+		var err error
+		synctest.Test(suite.T(), func(*testing.T) {
+			err = retryer.WithCallback(f, "f").Run(ctx, logger)
+		})
+		suite.ErrorAs(err, &RetryLimitExceededErr{})
+		suite.ErrorIs(err, errTransient)
+		suite.Equal(3, *attempts)
 	})
 }
 
@@ -127,18 +191,20 @@ func (suite *UnitTestSuite) TestRetryerDurationReset() {
 	// 2) Calling IterationSuccess() means f will run more than once because the
 	// duration should be reset.
 	successIterations := 0
-	f2 := func(_ context.Context, ri *FuncInfo) error {
-		ri.NoteSuccess("immediate success")
+	synctest.Test(suite.T(), func(*testing.T) {
+		f2 := func(_ context.Context, ri *FuncInfo) error {
+			ri.NoteSuccess("immediate success")
 
-		successIterations++
-		if successIterations == 1 {
-			return someNetworkError
+			successIterations++
+			if successIterations == 1 {
+				return someNetworkError
+			}
+
+			return nil
 		}
 
-		return nil
-	}
-
-	err = retryer.WithCallback(f2, "f2").Run(suite.Context(), logger)
+		err = retryer.WithCallback(f2, "f2").Run(suite.Context(), logger)
+	})
 	suite.Assert().NoError(err)
 	suite.Assert().Equal(2, successIterations)
 }
@@ -175,7 +241,7 @@ func (suite *UnitTestSuite) TestCancelViaContext() {
 
 // TestAuthnError verifies that authentication errors are retried in tests.
 //
-// Ideally we’d also check that they’re *NOT* retried in production, but we
+// Ideally we'd also check that they're *NOT* retried in production, but we
 // have no good way to flex that since the production code checks
 // testing.Testing().
 func (suite *UnitTestSuite) TestAuthnError() {
@@ -199,10 +265,12 @@ func (suite *UnitTestSuite) TestAuthnError() {
 	suite.Run(
 		"test",
 		func() {
-			attemptNumber = 0
-
-			retryer := New()
-			err := retryer.WithCallback(f, "f").Run(ctx, logger)
+			var err error
+			synctest.Test(suite.T(), func(*testing.T) {
+				attemptNumber = 0
+				retryer := New()
+				err = retryer.WithCallback(f, "f").Run(ctx, logger)
+			})
 			suite.Assert().NoError(err)
 			suite.Assert().Equal(1, attemptNumber)
 		},
@@ -256,17 +324,21 @@ func (suite *UnitTestSuite) TestRetryerAdditionalErrorCodes() {
 	})
 
 	suite.Run("with one additional error code", func() {
-		retryer := New()
-		retryer = retryer.WithErrorCodes(42)
-		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
+		var err error
+		synctest.Test(suite.T(), func(*testing.T) {
+			retryer := New().WithErrorCodes(42)
+			err = retryer.WithCallback(f, "f").Run(suite.Context(), logger)
+		})
 		suite.NoError(err)
 		suite.Equal(1, attemptNumber)
 	})
 
 	suite.Run("with multiple additional error codes", func() {
-		retryer := New()
-		retryer = retryer.WithErrorCodes(42, 43, 44)
-		err := retryer.WithCallback(f, "f").Run(suite.Context(), logger)
+		var err error
+		synctest.Test(suite.T(), func(*testing.T) {
+			retryer := New().WithErrorCodes(42, 43, 44)
+			err = retryer.WithCallback(f, "f").Run(suite.Context(), logger)
+		})
 		suite.NoError(err)
 		suite.Equal(1, attemptNumber)
 	})
@@ -315,27 +387,30 @@ func (suite *UnitTestSuite) TestMulti_Transient() {
 			func() {
 				cb1Attempts := 0
 				cb2Attempts := 0
+				var err error
 
-				err := New().WithCallback(
-					func(ctx context.Context, _ *FuncInfo) error {
-						cb1Attempts++
+				synctest.Test(suite.T(), func(*testing.T) {
+					err = New().WithCallback(
+						func(ctx context.Context, _ *FuncInfo) error {
+							cb1Attempts++
 
-						return nil
-					},
-					"succeeds every time",
-				).WithCallback(
-					func(_ context.Context, _ *FuncInfo) error {
-						cb2Attempts++
+							return nil
+						},
+						"succeeds every time",
+					).WithCallback(
+						func(_ context.Context, _ *FuncInfo) error {
+							cb2Attempts++
 
-						switch cb2Attempts {
-						case 1, 2:
-							return someNetworkError
-						default:
-							return finalErr
-						}
-					},
-					"fails variously",
-				).Run(ctx, logger)
+							switch cb2Attempts {
+							case 1, 2:
+								return someNetworkError
+							default:
+								return finalErr
+							}
+						},
+						"fails variously",
+					).Run(ctx, logger)
+				})
 
 				if finalErr == nil {
 					suite.Assert().NoError(err)
@@ -351,41 +426,44 @@ func (suite *UnitTestSuite) TestMulti_Transient() {
 }
 
 // TestMulti_LongRunningSuccess verifies that a long-running
-// success won’t spuriously fail because another thread keeps
+// success won't spuriously fail because another thread keeps
 // restarting.
 func (suite *UnitTestSuite) TestMulti_LongRunningSuccess() {
 	ctx := suite.Context()
 	logger := suite.Logger()
 
-	startTime := time.Now()
-	retryerLimit := 2 * time.Second
-	retryer := New().WithTimeLimit(retryerLimit)
+	var err error
+	synctest.Test(suite.T(), func(*testing.T) {
+		startTime := time.Now()
+		retryerLimit := 2 * time.Second
+		retryer := New().WithTimeLimit(retryerLimit)
 
-	succeedPastTime := startTime.Add(retryerLimit + 1*time.Second)
+		succeedPastTime := startTime.Add(retryerLimit + 1*time.Second)
 
-	err := retryer.WithCallback(
-		func(ctx context.Context, fi *FuncInfo) error {
-			fi.NoteSuccess("success right away")
+		err = retryer.WithCallback(
+			func(ctx context.Context, fi *FuncInfo) error {
+				fi.NoteSuccess("success right away")
 
-			if time.Now().Before(succeedPastTime) {
-				time.Sleep(1 * time.Second)
-				return someNetworkError
-			}
+				if time.Now().Before(succeedPastTime) {
+					time.Sleep(1 * time.Second)
+					return someNetworkError
+				}
 
-			return nil
-		},
-		"quick success, then fail; all success after a bit",
-	).WithCallback(
-		func(ctx context.Context, fi *FuncInfo) error {
-			if time.Now().Before(succeedPastTime) {
-				<-ctx.Done()
-				return ctx.Err()
-			}
+				return nil
+			},
+			"quick success, then fail; all success after a bit",
+		).WithCallback(
+			func(ctx context.Context, fi *FuncInfo) error {
+				if time.Now().Before(succeedPastTime) {
+					<-ctx.Done()
+					return ctx.Err()
+				}
 
-			return nil
-		},
-		"long-running: hangs then succeeds",
-	).Run(ctx, logger)
+				return nil
+			},
+			"long-running: hangs then succeeds",
+		).Run(ctx, logger)
+	})
 
 	suite.Assert().NoError(err)
 }

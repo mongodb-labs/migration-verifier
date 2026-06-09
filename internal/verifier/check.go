@@ -663,9 +663,29 @@ func (verifier *Verifier) processAnyTask(
 		WithoutTimeLimit().
 		WithMaxAttempts(5).
 		WithCallback(
-			func(ctx context.Context, _ *retry.FuncInfo) error {
+			func(ctx context.Context, fi *retry.FuncInfo) error {
 				switch task.Type {
 				case tasks.VerifyCollection:
+					if fi.GetAttemptNumber() > 0 {
+						verifier.logger.Info().
+							Int("workerNum", workerNum).
+							Any("task", task.PrimaryKey).
+							Int("attemptNumber", fi.GetAttemptNumber()).
+							Msg("Clearing mismatches before retrying task.")
+
+						err := clearMismatchesForTask(
+							ctx,
+							verifier.verificationDatabase(),
+							task.PrimaryKey,
+						)
+						if err != nil {
+							verifier.logger.Warn().
+								Err(err).
+								Any("task", task.PrimaryKey).
+								Msg("Failed to clear mismatches before retrying task. You may see duplicate mismatches.")
+						}
+					}
+
 					return verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
 				case tasks.VerifyDocuments:
 					_, err := verifier.ProcessVerifyTask(ctx, workerNum, task)

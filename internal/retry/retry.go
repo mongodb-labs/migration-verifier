@@ -74,7 +74,8 @@ func (r *Retryer) runRetryLoop(
 	startTime := time.Now()
 
 	li := &LoopInfo{
-		timeLimit: r.timeLimit,
+		timeLimit:   r.timeLimit,
+		maxAttempts: r.maxAttempts,
 	}
 	funcinfos := lo.Map(
 		r.callbacks,

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mongodb-labs/migration-tools/option"
+	"github.com/samber/lo"
 )
 
 type retryCallbackInfo struct {
@@ -43,6 +44,8 @@ func (r *Retryer) WithErrorCodes(codes ...int) *Retryer {
 
 // WithTimeLimit returns a new retryer with the specified time limit.
 func (r *Retryer) WithTimeLimit(limit time.Duration) *Retryer {
+	lo.Assert(limit > 0, "time limit must be positive")
+
 	r2 := r.clone()
 	r2.timeLimit = option.Some(limit)
 
@@ -57,6 +60,8 @@ func (r *Retryer) WithoutTimeLimit() *Retryer {
 }
 
 func (r *Retryer) WithMaxAttempts(max int) *Retryer {
+	lo.Assert(max > 0, "max attempts must be positive")
+
 	r2 := r.clone()
 	r2.maxAttempts = option.Some(max)
 
