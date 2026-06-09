@@ -39,7 +39,7 @@ func ListAllUserNamespaces(
 	collectionNamespaces := []string{}
 
 	err := retry.New().WithCallback(
-		func(ctx context.Context, ri *retry.FuncInfo) error {
+		func(ctx context.Context, _ *retry.FuncInfo) error {
 
 			var err error
 			dbNames, err = client.ListDatabaseNames(ctx, bson.D{
