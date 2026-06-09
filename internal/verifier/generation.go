@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -74,23 +75,32 @@ func (v *Verifier) persistGenerationWhileLocked(ctx context.Context) error {
 func (v *Verifier) readGeneration(ctx context.Context) (option.Option[int], error) {
 	db := v.verificationDatabase()
 
-	result := db.Collection(generationCollName).FindOne(
-		ctx,
-		bson.D{},
-	)
-
+	var foundNothing bool
 	parsed := generationDoc{}
 
-	err := result.Decode(&parsed)
+	err := retry.New().WithCallback(
+		func(ctx context.Context, ri *retry.FuncInfo) error {
+			err := db.Collection(generationCollName).FindOne(
+				ctx,
+				bson.D{},
+			).Decode(&parsed)
+
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				foundNothing = true
+				return nil
+			}
+
+			return err
+		},
+		"read persisted generation",
+	).Run(ctx, v.logger)
 
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			err = nil
-		} else {
-			err = errors.Wrap(err, "failed to read persisted generation")
-		}
-
 		return option.None[int](), err
+	}
+
+	if foundNothing {
+		return option.None[int](), nil
 	}
 
 	if parsed.MetadataVersion != verifierMetadataVersion {
