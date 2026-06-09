@@ -658,7 +658,11 @@ func mismatchResultsToVerificationResults(mismatch *MismatchDetails, srcClientDo
 	return
 }
 
-func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, task *tasks.Task) error {
+func (verifier *Verifier) ProcessVerifyTask(
+	ctx context.Context,
+	workerNum int,
+	task tasks.Task,
+) (tasks.Task, error) {
 	start := time.Now()
 
 	debugLog := verifier.logger.Debug().
@@ -676,7 +680,7 @@ func (verifier *Verifier) ProcessVerifyTask(ctx context.Context, workerNum int, 
 	reportsResultChan := verifier.FetchAndCompareDocuments(
 		compareCtx,
 		workerNum,
-		task,
+		&task,
 	)
 
 	problemsCount := 0
@@ -688,7 +692,7 @@ REPORTS:
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return tasks.Task{}, ctx.Err()
 		case repResult, open := <-reportsResultChan:
 			if !open {
 				lo.Assertf(
@@ -701,7 +705,7 @@ REPORTS:
 
 			report, err := repResult.Get()
 			if err != nil {
-				return errors.Wrapf(
+				return tasks.Task{}, errors.Wrapf(
 					err,
 					"worker %d failed to process document comparison task %s (namespace: %#q)",
 					workerNum,
@@ -754,7 +758,7 @@ REPORTS:
 					func() error {
 						err := verifier.InsertFailedCompareRecheckDocs(
 							egCtx,
-							task,
+							&task,
 							idsToRecheck,
 							dataSizes,
 							firstMismatchTimes,
@@ -774,7 +778,7 @@ REPORTS:
 					err := recordMismatches(
 						egCtx,
 						verifier.metaClient.Database(verifier.metaDBName),
-						task,
+						&task,
 						problems,
 					)
 
@@ -788,7 +792,7 @@ REPORTS:
 			)
 
 			if err := eg.Wait(); err != nil {
-				return errors.Wrapf(err, "persisting mismatches/rechecks")
+				return tasks.Task{}, errors.Wrapf(err, "persisting mismatches/rechecks")
 			}
 		}
 	}
@@ -818,9 +822,9 @@ REPORTS:
 	task.FoundSourceDocumentsCount = docsCount
 	task.SourceBytesCount = bytesCount
 
-	err := verifier.UpdateVerificationTask(ctx, task)
+	err := verifier.UpdateVerificationTask(ctx, &task)
 	if err != nil {
-		return errors.Wrapf(
+		return tasks.Task{}, errors.Wrapf(
 			err,
 			"failed to persist task %s's new status (%#q)",
 			task.PrimaryKey,
@@ -845,7 +849,7 @@ REPORTS:
 		Stringer("timeElapsed", time.Since(start)).
 		Msg("Finished document comparison task.")
 
-	return nil
+	return task, nil
 }
 
 func (verifier *Verifier) logChunkInfo(ctx context.Context, namespaceAndUUID *uuidutil.NamespaceAndUUID) {
@@ -1062,7 +1066,7 @@ func (verifier *Verifier) compareCollectionSpecifications(
 func (verifier *Verifier) ProcessCollectionVerificationTask(
 	ctx context.Context,
 	workerNum int,
-	task *tasks.Task,
+	task tasks.Task,
 ) error {
 	verifier.logger.Debug().
 		Int("workerNum", workerNum).
@@ -1070,7 +1074,7 @@ func (verifier *Verifier) ProcessCollectionVerificationTask(
 		Str("namespace", task.QueryFilter.Namespace).
 		Msg("Processing collection.")
 
-	err := verifier.verifyMetadataAndPartitionCollection(ctx, workerNum, task)
+	err := verifier.verifyMetadataAndPartitionCollection(ctx, workerNum, &task)
 	if err != nil {
 		return errors.Wrapf(
 			err,
@@ -1081,7 +1085,7 @@ func (verifier *Verifier) ProcessCollectionVerificationTask(
 	}
 
 	return errors.Wrapf(
-		verifier.UpdateVerificationTask(ctx, task),
+		verifier.UpdateVerificationTask(ctx, &task),
 		"failed to update verification task %s's status",
 		task.PrimaryKey,
 	)

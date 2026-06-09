@@ -640,7 +640,6 @@ func (verifier *Verifier) work(
 		}
 
 		if task.Type == tasks.VerifyCollection && task.Generation == 0 {
-
 			newVal := verifier.gen0PendingCollectionTasks.Add(-1)
 			if newVal == 0 {
 				verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
@@ -661,9 +660,10 @@ func (verifier *Verifier) processAnyTask(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			switch task.Type {
 			case tasks.VerifyCollection:
-				return verifier.ProcessCollectionVerificationTask(ctx, -1, &task)
+				return verifier.ProcessCollectionVerificationTask(ctx, -1, task)
 			case tasks.VerifyDocuments:
-				return verifier.ProcessVerifyTask(ctx, -1, &task)
+				_, err := verifier.ProcessVerifyTask(ctx, -1, task)
+				return err
 			case tasks.ProcessRecheckQueue:
 				return verifier.processCreateRechecksTask(ctx, task)
 			default:
