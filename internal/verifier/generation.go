@@ -80,6 +80,7 @@ func (v *Verifier) readGeneration(ctx context.Context) (option.Option[int], erro
 
 	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
+			err := db.Collection(generationCollName).FindOne(
 				ctx,
 				bson.D{},
 			).Decode(&parsed)
