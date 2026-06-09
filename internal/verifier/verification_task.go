@@ -285,35 +285,36 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 }
 
 func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *tasks.Task) error {
+	return retry.New().WithCallback(
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			result, err := verifier.verificationTaskCollection().UpdateOne(
+				ctx,
+				bson.M{"_id": task.PrimaryKey},
+				bson.M{
+					"$set": bson.M{
+						"status":                       task.Status,
+						"documents_count":              task.DocumentsCount,
+						"found_source_documents_count": task.FoundSourceDocumentsCount,
+						"source_bytes_count":           task.SourceBytesCount,
+					},
+				},
+			)
+			if err != nil {
+				return err
+			}
+			if result.MatchedCount == 0 {
+				return TaskError{
+					Code:    ErrorUpdateTask,
+					Message: fmt.Sprintf(`no matched task updated: "%v"`, task.PrimaryKey),
+				}
+			}
 
-	result, err := verifier.verificationTaskCollection().UpdateOne(
-		ctx,
-		bson.M{"_id": task.PrimaryKey},
-		bson.M{
-			"$set": bson.M{
-				"status":                       task.Status,
-				"documents_count":              task.DocumentsCount,
-				"found_source_documents_count": task.FoundSourceDocumentsCount,
-				"source_bytes_count":           task.SourceBytesCount,
-			},
+			return err
 		},
-	)
-	if err != nil {
-		return errors.Wrapf(err,
-			"updating task %v (namespace %#q)",
-			task.PrimaryKey,
-			task.QueryFilter.Namespace,
-		)
-	}
-
-	if result.MatchedCount == 0 {
-		return TaskError{
-			Code:    ErrorUpdateTask,
-			Message: fmt.Sprintf(`no matched task updated: "%v"`, task.PrimaryKey),
-		}
-	}
-
-	return nil
+		"updating task %v (namespace %#q)",
+		task.PrimaryKey,
+		task.QueryFilter.Namespace,
+	).Run(ctx, verifier.logger)
 }
 
 func (verifier *Verifier) CreatePrimaryTaskIfNeeded(ctx context.Context) (bool, error) {
