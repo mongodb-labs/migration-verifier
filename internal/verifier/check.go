@@ -660,9 +660,9 @@ func (verifier *Verifier) processAnyTask(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			switch task.Type {
 			case tasks.VerifyCollection:
-				return verifier.ProcessCollectionVerificationTask(ctx, -1, task)
+				return verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
 			case tasks.VerifyDocuments:
-				_, err := verifier.ProcessVerifyTask(ctx, -1, task)
+				_, err := verifier.ProcessVerifyTask(ctx, workerNum, task)
 				return err
 			case tasks.ProcessRecheckQueue:
 				return verifier.processCreateRechecksTask(ctx, task)
