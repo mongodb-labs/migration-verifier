@@ -23,7 +23,7 @@ type Retryer struct {
 	maxAttempts          option.Option[int]
 }
 
-// New returns a new Retryer with DefaultDurationLimit as its time limit.
+// New returns a new Retryer with DefaultTimeLimit as its time limit.
 func New() *Retryer {
 	return &Retryer{
 		timeLimit: option.Some(DefaultTimeLimit),
