@@ -35,8 +35,9 @@ var isTesting = testing.Testing()
 // The retryer tracks the last time each callback either a) succeeded or b)
 // was canceled. Whenever a callback fails, the retryer checks how long it
 // has gone since a success/cancellation. If that time period exceeds the
-// retryer's duration limit, then the retry loop ends, and a
-// RetryDurationLimitExceededErr is returned.
+// retryer's duration limit, or if the number of attempts exceeds the retryer’s
+// attempt limit, then the retryer returns an error instead of retrying again.
+// (By default only duration is limited, but either or both limits can be set.)
 //
 // Note that, if a given callback runs multiple potentially-retryable requests,
 // each successful request should be noted in the callback's FuncInfo.
