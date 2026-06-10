@@ -598,7 +598,7 @@ func clearMismatchesForTask(
 		bson.D{
 			{"generation", task.Generation},
 			{"taskType", task.Type},
-			{"detail.id", task.PrimaryKey},
+			{"taskID", task.PrimaryKey},
 		},
 	)
 	return err

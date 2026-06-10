@@ -608,6 +608,15 @@ func (suite *IntegrationTestSuite) TestRecordAndClearMismatches() {
 	)
 	suite.Require().NoError(err)
 
+	mismatchesChan = make(chan api.DocMismatchInfo, 100)
+
+	err = verifier.SendDocumentMismatches(
+		suite.Context(),
+		0,
+		mismatchesChan,
+	)
+	suite.Require().NoError(err)
+
 	mismatches = lo.ChannelToSlice(mismatchesChan)
 	suite.Assert().Empty(mismatches, "mismatches should be cleared")
 }
