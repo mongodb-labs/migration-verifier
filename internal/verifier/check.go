@@ -634,39 +634,88 @@ func (verifier *Verifier) work(
 			}
 		}
 
-		verifier.workerTracker.Set(workerNum, task)
-
-		switch task.Type {
-		case tasks.VerifyCollection:
-			err := verifier.ProcessCollectionVerificationTask(ctx, workerNum, &task)
-			verifier.workerTracker.Unset(workerNum)
-
-			if err != nil {
-				return errors.Wrapf(err, "process %#q task %#q", task.Type, task.PrimaryKey)
-			}
-			if task.Generation == 0 {
-				newVal := verifier.gen0PendingCollectionTasks.Add(-1)
-				if newVal == 0 {
-					verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
-				}
-			}
-		case tasks.VerifyDocuments:
-			err := verifier.ProcessVerifyTask(ctx, workerNum, &task)
-			verifier.workerTracker.Unset(workerNum)
-
-			if err != nil {
-				return errors.Wrapf(err, "process %#q task %#q", task.Type, task.PrimaryKey)
-			}
-		case tasks.ProcessRecheckQueue:
-			err := verifier.processCreateRechecksTask(ctx, task)
-			verifier.workerTracker.Unset(workerNum)
-
-			if err != nil {
-				return errors.Wrapf(err, "process %#q task %#q", task.Type, task.PrimaryKey)
-			}
-		default:
-			panic("Unknown verification task type: " + task.Type)
+		err = verifier.processAnyTask(ctx, workerNum, task)
+		if err != nil {
+			return err
 		}
+
+		if task.Type == tasks.VerifyCollection && task.Generation == 0 {
+			newVal := verifier.gen0PendingCollectionTasks.Add(-1)
+			if newVal == 0 {
+				verifier.PrintVerificationSummary(ctx, Gen0MetadataAnalysisComplete)
+			}
+		}
+	}
+}
+
+func (verifier *Verifier) processAnyTask(
+	ctx context.Context,
+	workerNum int,
+	task tasks.Task,
+) error {
+	verifier.workerTracker.Set(workerNum, task)
+	defer verifier.workerTracker.Unset(workerNum)
+
+	// This retryer is special because it retries an entire task. That can
+	// take a long time, so we configure this retryer with no time limit and
+	// a max attempt limit of 5 (arbitrary) to prevent infinite retries.
+	return retry.New().
+		WithoutTimeLimit().
+		WithMaxAttempts(5).
+		WithCallback(
+			func(ctx context.Context, fi *retry.FuncInfo) error {
+				// This is useless, but also harmless, for recheck-queue tasks:
+				verifier.clearMismatchesIfRetryingTask(
+					ctx,
+					workerNum,
+					task,
+					fi.GetAttemptNumber(),
+				)
+
+				switch task.Type {
+				case tasks.VerifyCollection:
+					return verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
+				case tasks.VerifyDocuments:
+					_, err := verifier.ProcessVerifyTask(ctx, workerNum, task)
+					return err
+				case tasks.ProcessRecheckQueue:
+					return verifier.processCreateRechecksTask(ctx, task)
+				default:
+					panic("Unknown verification task type: " + task.Type)
+				}
+			},
+			"process %#q task %#q",
+			task.Type,
+			task.PrimaryKey,
+		).Run(ctx, verifier.logger)
+}
+
+func (verifier *Verifier) clearMismatchesIfRetryingTask(
+	ctx context.Context,
+	workerNum int,
+	task tasks.Task,
+	attemptNumber int,
+) {
+	if attemptNumber == 0 {
+		return
+	}
+
+	verifier.logger.Info().
+		Int("workerNum", workerNum).
+		Any("task", task.PrimaryKey).
+		Int("attemptNumber", attemptNumber).
+		Msg("Clearing mismatches before retrying task.")
+
+	err := clearMismatchesForTask(
+		ctx,
+		verifier.verificationDatabase(),
+		task,
+	)
+	if err != nil {
+		verifier.logger.Warn().
+			Err(err).
+			Any("task", task.PrimaryKey).
+			Msg("Failed to clear mismatches before retrying task. You may see duplicate mismatches.")
 	}
 }
 

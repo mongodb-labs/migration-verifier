@@ -35,8 +35,9 @@ var isTesting = testing.Testing()
 // The retryer tracks the last time each callback either a) succeeded or b)
 // was canceled. Whenever a callback fails, the retryer checks how long it
 // has gone since a success/cancellation. If that time period exceeds the
-// retryer's duration limit, then the retry loop ends, and a
-// RetryDurationLimitExceededErr is returned.
+// retryer's duration limit, or if the number of attempts exceeds the retryer’s
+// attempt limit, then the retryer returns an error instead of retrying again.
+// (By default only duration is limited, but either or both limits can be set.)
 //
 // Note that, if a given callback runs multiple potentially-retryable requests,
 // each successful request should be noted in the callback's FuncInfo.
@@ -74,7 +75,8 @@ func (r *Retryer) runRetryLoop(
 	startTime := time.Now()
 
 	li := &LoopInfo{
-		durationLimit: r.retryLimit,
+		timeLimit:   r.timeLimit,
+		maxAttempts: r.maxAttempts,
 	}
 	funcinfos := lo.Map(
 		r.callbacks,
@@ -194,17 +196,29 @@ func (r *Retryer) runRetryLoop(
 			return wrapErrWithDescriptions(cbErr, descriptions)
 		}
 
-		// Our error is transient. If we've exhausted the allowed time
-		// then fail.
+		// Our error is transient. If we've exhausted the allowed time or
+		// attempts then fail.
+		limitExceeded := false
 
-		if failedFuncInfo.GetDurationSoFar() > li.durationLimit {
-			var err error = RetryDurationLimitExceededErr{
-				attempts: li.attemptsSoFar,
-				duration: failedFuncInfo.GetDurationSoFar(),
-				lastErr:  groupErr.errFromCallback,
+		if maxDuration, has := li.timeLimit.Get(); has {
+			limitExceeded = failedFuncInfo.GetDurationSoFar() > maxDuration
+		}
+
+		if !limitExceeded {
+			if maxAttempts, has := li.maxAttempts.Get(); has {
+				limitExceeded = li.attemptsSoFar >= maxAttempts
 			}
+		}
 
-			return wrapErrWithDescriptions(err, descriptions)
+		if limitExceeded {
+			return wrapErrWithDescriptions(
+				RetryLimitExceededErr{
+					attempts: li.attemptsSoFar,
+					duration: failedFuncInfo.GetDurationSoFar(),
+					lastErr:  groupErr.errFromCallback,
+				},
+				descriptions,
+			)
 		}
 
 		// Sleep and increase the sleep time for the next retry,

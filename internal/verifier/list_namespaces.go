@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/mmongo"
@@ -11,7 +12,6 @@ import (
 	"github.com/10gen/migration-verifier/timeseries"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // ListAllUserNamespaces lists all the user collections on a cluster,
@@ -35,21 +35,37 @@ func ListAllUserNamespaces(
 		excluded = append(excluded, e)
 	}
 
-	dbNames, err := client.ListDatabaseNames(ctx, bson.D{
-		{"$and", []bson.D{
-			{{"name", bson.D{{"$nin", excluded}}}},
-			util.ExcludePrefixesQuery("name", namespaces.ExcludedDBPrefixes),
-		}},
-	})
+	var dbNames []string
+	collectionNamespaces := []string{}
+
+	err := retry.New().WithCallback(
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+
+			var err error
+			dbNames, err = client.ListDatabaseNames(ctx, bson.D{
+				{"$and", []bson.D{
+					{{"name", bson.D{{"$nin", excluded}}}},
+					util.ExcludePrefixesQuery("name", namespaces.ExcludedDBPrefixes),
+				}},
+			})
+
+			if err != nil {
+				return err
+			}
+
+			return nil
+		},
+		"list DB names",
+	).Run(ctx, logger)
 
 	if err != nil {
 		return nil, err
 	}
+
 	logger.Debug().
 		Strs("databases", dbNames).
 		Msg("All user databases.")
 
-	collectionNamespaces := []string{}
 	for _, dbName := range dbNames {
 		db := client.Database(dbName)
 
@@ -65,17 +81,32 @@ func ListAllUserNamespaces(
 			}},
 		}
 
-		specifications, err := db.ListCollectionSpecifications(ctx, filter, options.ListCollections().SetNameOnly(true))
+		var collNames []string
+
+		err := retry.New().WithCallback(
+			func(ctx context.Context, _ *retry.FuncInfo) error {
+				var err error
+				collNames, err = db.ListCollectionNames(ctx, filter)
+				return err
+			},
+			"list DB %#q’s collection names",
+			dbName,
+		).Run(ctx, logger)
+
 		if err != nil {
 			return nil, err
 		}
+
 		logger.Debug().
 			Str("database", dbName).
-			Any("specifications", specifications).
-			Msg("Found database members.")
+			Strs("collections", collNames).
+			Msg("All collection names.")
 
-		for _, spec := range specifications {
-			collectionNamespaces = append(collectionNamespaces, dbName+"."+spec.Name)
+		for _, collName := range collNames {
+			collectionNamespaces = append(
+				collectionNamespaces,
+				dbName+"."+collName,
+			)
 		}
 	}
 	return collectionNamespaces, nil

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mongodb-labs/migration-tools/option"
+	"github.com/samber/lo"
 )
 
 type retryCallbackInfo struct {
@@ -15,17 +16,18 @@ type retryCallbackInfo struct {
 
 // Retryer handles retrying operations that fail because of network failures.
 type Retryer struct {
-	retryLimit           time.Duration
+	timeLimit            option.Option[time.Duration]
 	before               option.Option[func() error]
 	callbacks            []retryCallbackInfo
 	description          option.Option[string]
 	additionalErrorCodes []int
+	maxAttempts          option.Option[int]
 }
 
-// New returns a new Retryer with DefaultDurationLimit as its time limit.
+// New returns a new Retryer with DefaultTimeLimit as its time limit.
 func New() *Retryer {
 	return &Retryer{
-		retryLimit: DefaultDurationLimit,
+		timeLimit: option.Some(DefaultTimeLimit),
 	}
 }
 
@@ -40,10 +42,28 @@ func (r *Retryer) WithErrorCodes(codes ...int) *Retryer {
 	return r2
 }
 
-// WithRetryLimit returns a new retryer with the specified time limit.
-func (r *Retryer) WithRetryLimit(limit time.Duration) *Retryer {
+// WithTimeLimit returns a new retryer with the specified time limit.
+func (r *Retryer) WithTimeLimit(limit time.Duration) *Retryer {
+	lo.Assert(limit >= 0, "time limit must be nonnegative")
+
 	r2 := r.clone()
-	r2.retryLimit = limit
+	r2.timeLimit = option.Some(limit)
+
+	return r2
+}
+
+func (r *Retryer) WithoutTimeLimit() *Retryer {
+	r2 := r.clone()
+	r2.timeLimit = r2.timeLimit.ToNone()
+
+	return r2
+}
+
+func (r *Retryer) WithMaxAttempts(max int) *Retryer {
+	lo.Assert(max > 0, "max attempts must be positive")
+
+	r2 := r.clone()
+	r2.maxAttempts = option.Some(max)
 
 	return r2
 }

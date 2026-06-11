@@ -200,7 +200,7 @@ func (suite *IntegrationTestSuite) TestProcessVerifyTask_Failure() {
 		},
 	}
 
-	err := verifier.ProcessVerifyTask(ctx, 12, task)
+	_, err := verifier.ProcessVerifyTask(ctx, 12, *task)
 
 	expectedIDHex := task.PrimaryKey.Hex()
 
@@ -837,7 +837,7 @@ func (suite *IntegrationTestSuite) TestVerifierFetchDocuments_ChangeOpTime() {
 	)
 	suite.Require().NoError(err, "must insert recheck task")
 
-	err = verifier.ProcessVerifyTask(ctx, 0, task)
+	*task, err = verifier.ProcessVerifyTask(ctx, 0, *task)
 	suite.Require().NoError(err)
 
 	verifier.srcLastRecheckedTS.Load(func(ts bson.Timestamp) {

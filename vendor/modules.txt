@@ -42,7 +42,7 @@ github.com/bytedance/sonic/loader/internal/abi
 github.com/bytedance/sonic/loader/internal/iasm/expr
 github.com/bytedance/sonic/loader/internal/iasm/x86_64
 github.com/bytedance/sonic/loader/internal/rt
-# github.com/ccoveille/go-safecast/v2 v2.0.0
+# github.com/ccoveille/go-safecast/v2 v2.0.1
 ## explicit; go 1.21
 github.com/ccoveille/go-safecast/v2
 # github.com/cespare/permute/v2 v2.0.0-beta2
@@ -203,7 +203,7 @@ github.com/modern-go/concurrent
 # github.com/modern-go/reflect2 v1.0.2
 ## explicit; go 1.12
 github.com/modern-go/reflect2
-# github.com/mongodb-labs/migration-tools v0.0.0-20260522185419-3bb2cc4cdea0
+# github.com/mongodb-labs/migration-tools v0.0.0-20260609163806-88dc31f0c877
 ## explicit; go 1.25.7
 github.com/mongodb-labs/migration-tools/bsontools
 github.com/mongodb-labs/migration-tools/future

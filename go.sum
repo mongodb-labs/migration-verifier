@@ -7,6 +7,8 @@ github.com/bytedance/sonic/loader v0.2.4 h1:ZWCw4stuXUsn1/+zQDqeE7JKP+QO47tz7QCN
 github.com/bytedance/sonic/loader v0.2.4/go.mod h1:N8A3vUdtUebEY2/VQC0MyhYeKUFosQU6FxH2JmUe6VI=
 github.com/ccoveille/go-safecast/v2 v2.0.0 h1:+5eyITXAUj3wMjad6cRVJKGnC7vDS55zk0INzJagub0=
 github.com/ccoveille/go-safecast/v2 v2.0.0/go.mod h1:JIYA4CAR33blIDuE6fSwCp2sz1oOBahXnvmdBhOAABs=
+github.com/ccoveille/go-safecast/v2 v2.0.1 h1:2+mIu3gXtwmWelBia2kkxfB8eP4orTHDH7ClSlWkd6I=
+github.com/ccoveille/go-safecast/v2 v2.0.1/go.mod h1:JIYA4CAR33blIDuE6fSwCp2sz1oOBahXnvmdBhOAABs=
 github.com/cespare/permute/v2 v2.0.0-beta2 h1:iiJWgDsInCbnwfDZiLJX7cVlJevgIM1pUiArcUylUMc=
 github.com/cespare/permute/v2 v2.0.0-beta2/go.mod h1:7e2Tqe0fjn1T4rTjDLJjQ+kNtt+UW4B9lg10asqWw0A=
 github.com/cloudwego/base64x v0.1.5 h1:XPciSp1xaq2VCSt6lF0phncD4koWyULpl5bUxbfCyP4=
@@ -94,6 +96,8 @@ github.com/modern-go/reflect2 v1.0.2 h1:xBagoLtFs94CBntxluKeaWgTMpvLxC4ur3nMaC9G
 github.com/modern-go/reflect2 v1.0.2/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=
 github.com/mongodb-labs/migration-tools v0.0.0-20260522185419-3bb2cc4cdea0 h1:rcwt6yxagYjYtM83Ayxl5GbcErFvBS51k57+saTJDj8=
 github.com/mongodb-labs/migration-tools v0.0.0-20260522185419-3bb2cc4cdea0/go.mod h1:sBx9rr+6+EPgS9hEot8oLGXiBKoiwX6tQ46xKO2g5u4=
+github.com/mongodb-labs/migration-tools v0.0.0-20260609163806-88dc31f0c877 h1:EZ0cmoqYznA2k/Ro+5cbC8EupnAMIpLbUsiblfsyKM4=
+github.com/mongodb-labs/migration-tools v0.0.0-20260609163806-88dc31f0c877/go.mod h1:kr/kTzB30NlOUXeib9a/wmT5eysIog/fEpc1T0Ze++U=
 github.com/olekukonko/tablewriter v0.0.5 h1:P2Ga83D34wi1o9J6Wh1mRuqd4mF/x/lgBS7N7AbDhec=
 github.com/olekukonko/tablewriter v0.0.5/go.mod h1:hPp6KlRPjbx+hW8ykQs1w3UBbZlj6HuIJcUGPhkA7kY=
 github.com/pelletier/go-toml/v2 v2.2.3 h1:YmeHyLY8mFWbdkNWwpr+qIL2bEqT0o95WSdkNHvL12M=
