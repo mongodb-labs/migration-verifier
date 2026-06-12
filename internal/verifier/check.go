@@ -120,8 +120,6 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 			case <-timer.C:
 				verifier.PrintVerificationSummary(egCtx, GenerationInProgress)
 			}
-
-			timer.Stop()
 		}
 	})
 
