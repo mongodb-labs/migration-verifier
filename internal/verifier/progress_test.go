@@ -19,6 +19,16 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+func (suite *IntegrationTestSuite) TestGetProgress_Idle() {
+	verifier := suite.BuildVerifier()
+	verifier.SetVerifyAll(true)
+
+	prog, err := verifier.GetProgress(suite.Context())
+	suite.Require().NoError(err)
+
+	suite.Assert().Equal(Idle, prog.Phase, "phase")
+}
+
 // TestGetProgress_Gen0Stats verifies that gen0Stats is absent while generation
 // 0 is active and is correctly populated (and cached) once generation 1 begins.
 func (suite *IntegrationTestSuite) TestGetProgress_Gen0Stats() {
