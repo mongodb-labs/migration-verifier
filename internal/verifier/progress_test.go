@@ -23,6 +23,12 @@ func (suite *IntegrationTestSuite) TestGetProgress_Idle() {
 	verifier := suite.BuildVerifier()
 	verifier.SetVerifyAll(true)
 
+	// BuildVerifier creates the change streams, which in production doesn’t
+	// happen until the check starts. Manually remove them here to simulate
+	// the pre-check state.
+	verifier.srcChangeReader = nil
+	verifier.dstChangeReader = nil
+
 	prog, err := verifier.GetProgress(suite.Context())
 	suite.Require().NoError(err)
 
