@@ -112,13 +112,44 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 	}
 
 	var srcLag, dstLag option.Option[time.Duration]
+	var srcChangeStats, dstChangeStats api.ProgressChangeStats
 
-	if times, has := verifier.srcChangeReader.getCurrentTimestamps().Get(); has {
-		srcLag = option.Some(times.Lag())
+	if verifier.srcChangeReader != nil {
+		if times, has := verifier.srcChangeReader.getCurrentTimestamps().Get(); has {
+			srcLag = option.Some(times.Lag())
+		}
+
+		srcChangeStats = api.ProgressChangeStats{
+			EventsPerSecond: verifier.srcChangeReader.getEventsPerSecond(),
+			LagSecs: option.Map(
+				srcLag,
+				chain(
+					time.Duration.Seconds,
+					safecast.MustConvert[int, float64],
+				),
+			),
+			BufferSaturation: verifier.srcChangeReader.getBufferSaturation(),
+			EventCounts:      verifier.srcChangeReader.GetCumulativeEventCounts(),
+		}
 	}
 
-	if times, has := verifier.dstChangeReader.getCurrentTimestamps().Get(); has {
-		dstLag = option.Some(times.Lag())
+	if verifier.dstChangeReader != nil {
+		if times, has := verifier.dstChangeReader.getCurrentTimestamps().Get(); has {
+			dstLag = option.Some(times.Lag())
+		}
+
+		dstChangeStats = api.ProgressChangeStats{
+			EventsPerSecond: verifier.dstChangeReader.getEventsPerSecond(),
+			LagSecs: option.Map(
+				dstLag,
+				chain(
+					time.Duration.Seconds,
+					safecast.MustConvert[int, float64],
+				),
+			),
+			BufferSaturation: verifier.dstChangeReader.getBufferSaturation(),
+			EventCounts:      verifier.dstChangeReader.GetCumulativeEventCounts(),
+		}
 	}
 
 	progress := api.Progress{
@@ -143,30 +174,8 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 		SrcLastRecheckedTS: srcLastRecheckedTS,
 		DstLastRecheckedTS: dstLastRecheckedTS,
 
-		SrcChangeStats: api.ProgressChangeStats{
-			EventsPerSecond: verifier.srcChangeReader.getEventsPerSecond(),
-			LagSecs: option.Map(
-				srcLag,
-				chain(
-					time.Duration.Seconds,
-					safecast.MustConvert[int, float64],
-				),
-			),
-			BufferSaturation: verifier.srcChangeReader.getBufferSaturation(),
-			EventCounts:      verifier.srcChangeReader.GetCumulativeEventCounts(),
-		},
-		DstChangeStats: api.ProgressChangeStats{
-			EventsPerSecond: verifier.dstChangeReader.getEventsPerSecond(),
-			LagSecs: option.Map(
-				dstLag,
-				chain(
-					time.Duration.Seconds,
-					safecast.MustConvert[int, float64],
-				),
-			),
-			BufferSaturation: verifier.dstChangeReader.getBufferSaturation(),
-			EventCounts:      verifier.dstChangeReader.GetCumulativeEventCounts(),
-		},
+		SrcChangeStats: srcChangeStats,
+		DstChangeStats: dstChangeStats,
 
 		DocsComparedPerSecond: history.RatePer(
 			verifier.docsComparedHistory.Get(),
