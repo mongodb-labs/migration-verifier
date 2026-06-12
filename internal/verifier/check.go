@@ -109,16 +109,15 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	}
 
 	eg.Go(func() error {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
 		for {
+			timer := time.NewTimer(30 * time.Second)
+
 			select {
 			case <-egCtx.Done():
 				return egCtx.Err()
 			case <-generationDone:
 				return nil
-			case <-ticker.C:
+			case <-timer.C:
 				verifier.PrintVerificationSummary(egCtx, GenerationInProgress)
 			}
 		}
