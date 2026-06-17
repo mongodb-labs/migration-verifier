@@ -1455,7 +1455,7 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	id := rand.Intn(1000)
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
-	verifier.SetDocCompareMethod(compare.IgnoreOrder)
+	require.NoError(t, verifier.SetDocCompareMethod(compare.IgnoreOrder))
 
 	type compareTest struct {
 		label       string
@@ -1600,11 +1600,14 @@ func TestVerifierCompareDocs(t *testing.T) {
 	}
 
 	for _, curTest := range compareTests {
-		verifier.SetDocCompareMethod(
-			lo.Ternary(
-				!curTest.checkOrder,
-				compare.IgnoreOrder,
-				compare.Binary,
+		require.NoError(
+			t,
+			verifier.SetDocCompareMethod(
+				lo.Ternary(
+					!curTest.checkOrder,
+					compare.IgnoreOrder,
+					compare.Binary,
+				),
 			),
 		)
 
@@ -2791,7 +2794,7 @@ func (suite *IntegrationTestSuite) TestVerifierWithFilter() {
 	verifier.SetSrcNamespaces([]string{dbname1 + ".testColl1"})
 	verifier.SetDstNamespaces([]string{dbname2 + ".testColl3"})
 	verifier.SetNamespaceMap()
-	verifier.SetDocCompareMethod(compare.IgnoreOrder)
+	suite.Require().NoError(verifier.SetDocCompareMethod(compare.IgnoreOrder))
 	// Set this value low to test the verifier with multiple partitions.
 	verifier.partitionSizeInBytes = 50
 

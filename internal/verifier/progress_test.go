@@ -126,7 +126,9 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsHashedReportsActualD
 
 	verifier := suite.BuildVerifier()
 	verifier.SetVerifyAll(true)
-	verifier.SetDocCompareMethod(compare.ToHashedIndexKey)
+	suite.Require().NoError(
+		verifier.SetDocCompareMethod(compare.ToHashedIndexKey),
+	)
 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())

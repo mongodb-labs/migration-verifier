@@ -530,7 +530,7 @@ func (s *IntegrationTestSuite) TestFetchAndCompareDocuments_BigProblems() {
 
 	// For this test to work we need binary comparison … or else memory usage
 	// will be too modest to trip the failure.
-	verifier.SetDocCompareMethod(compare.Binary)
+	s.Require().NoError(verifier.SetDocCompareMethod(compare.Binary))
 
 	s.Require().NoError(verifier.startChangeHandling(ctx))
 

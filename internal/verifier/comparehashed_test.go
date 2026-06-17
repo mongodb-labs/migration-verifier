@@ -90,7 +90,7 @@ func (suite *IntegrationTestSuite) TestCompare_Hashed() {
 				verifier.SetSrcNamespaces([]string{ns})
 				verifier.SetDstNamespaces([]string{ns})
 				verifier.SetNamespaceMap()
-				verifier.SetDocCompareMethod(compare.ToHashedIndexKey)
+				suite.Require().NoError(verifier.SetDocCompareMethod(compare.ToHashedIndexKey))
 
 				runner := RunVerifierCheck(ctx, suite.T(), verifier)
 				suite.Require().NoError(runner.AwaitGenerationEnd())
