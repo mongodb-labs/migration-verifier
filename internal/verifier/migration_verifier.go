@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	_ "net/http/pprof"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/history"
 	"github.com/10gen/migration-verifier/internal/collspec"
+	"github.com/10gen/migration-verifier/internal/comparehashed"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/reportutils"
@@ -381,13 +383,17 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 		return err
 	}
 
-	verifier.logger.Info().
+	verifier.logger.Debug().
 		Msg("Reading metadata’s cluster info.")
 
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.metaClient)
 	if err != nil {
 		return errors.Wrap(err, "read metadata cluster info")
 	}
+
+	verifier.logger.Info().
+		Any("clusterInfo", clusterInfo).
+		Msg("Found metadata’s cluster info.")
 
 	verifier.metaURI = uri
 	verifier.metaClusterInfo = &clusterInfo
@@ -479,8 +485,32 @@ func (verifier *Verifier) SetMetaDBName(arg string) {
 	verifier.metaDBName = arg
 }
 
-func (verifier *Verifier) SetDocCompareMethod(method compare.Method) {
+func (verifier *Verifier) SetDocCompareMethod(method compare.Method) error {
+	lo.Assert(
+		verifier.srcClusterInfo != nil,
+		"source cluster info must be set",
+	)
+	lo.Assert(
+		verifier.dstClusterInfo != nil,
+		"destination cluster info must be set",
+	)
+
+	if !slices.Contains(compare.Methods, method) {
+		return errors.Errorf("invalid doc compare method (%s); valid values are: %#q", method, compare.Methods)
+	}
+
+	if method == compare.ToHashedIndexKey {
+		if minVer, needed := comparehashed.MinNextVersion(verifier.srcClusterInfo.VersionArray).Get(); needed {
+			return errors.Errorf("source version %v is too old for document comparison mode %#q; try version %v", verifier.srcClusterInfo.VersionArray, compare.ToHashedIndexKey, minVer)
+		}
+
+		if minVer, needed := comparehashed.MinNextVersion(verifier.dstClusterInfo.VersionArray).Get(); needed {
+			return errors.Errorf("destination version %v is too old for document comparison mode %#q; try version %v", verifier.dstClusterInfo.VersionArray, compare.ToHashedIndexKey, minVer)
+		}
+	}
+
 	verifier.docCompareMethod = method
+	return nil
 }
 
 func (verifier *Verifier) SetPartitioningScheme(method partitions.Scheme) {

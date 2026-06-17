@@ -330,6 +330,10 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		verifierSettings.ReadConcernSetting = verifier.ReadConcernIgnore
 	}
 
+	logPath := cCtx.String(logPath)
+
+	v := verifier.NewVerifier(verifierSettings, logPath)
+
 	missingStringArgs := lo.Filter(
 		mslices.Of(srcURI, dstURI),
 		func(setting string, _ int) bool {
@@ -338,12 +342,8 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	)
 
 	if len(missingStringArgs) > 0 {
-		return nil, fmt.Errorf("missing required parameters: %#q", missingStringArgs)
+		return v, fmt.Errorf("missing required parameters: %#q", missingStringArgs)
 	}
-
-	logPath := cCtx.String(logPath)
-
-	v := verifier.NewVerifier(verifierSettings, logPath)
 
 	logger := v.GetLogger()
 
@@ -471,10 +471,10 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	v.SetDDLHandling(ddlHandling)
 
 	docCompareMethod := compare.Method(cCtx.String(docCompareMethod))
-	if !slices.Contains(compare.Methods, docCompareMethod) {
-		return nil, errors.Errorf("invalid doc compare method (%s); valid values are: %#q", docCompareMethod, compare.Methods)
+	err = v.SetDocCompareMethod(docCompareMethod)
+	if err != nil {
+		return nil, errors.Wrapf(err, "set doc compare method (%s)", docCompareMethod)
 	}
-	v.SetDocCompareMethod(docCompareMethod)
 
 	partitioningScheme := cCtx.String(partitioningScheme)
 	if !slices.Contains(partitions.Schemes, partitioningScheme) {

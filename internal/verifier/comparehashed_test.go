@@ -24,8 +24,8 @@ func (suite *IntegrationTestSuite) TestCompare_Hashed() {
 	suite.Require().NoError(err)
 
 	// We only check the source since the destination should be more recent.
-	if !comparehashed.CanCompareDocsViaToHashedIndexKey(buildInfo.VersionArray) {
-		suite.T().Skipf("source (%v) can’t do hashed comparison", buildInfo.VersionArray)
+	if minVer, needed := comparehashed.MinNextVersion(buildInfo.VersionArray).Get(); needed {
+		suite.T().Skipf("source (%v) can’t do hashed comparison; needs at least %v", buildInfo.VersionArray, minVer)
 	}
 
 	decimal128_42, err := bson.ParseDecimal128("42")
