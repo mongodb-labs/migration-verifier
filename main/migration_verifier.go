@@ -330,10 +330,6 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		verifierSettings.ReadConcernSetting = verifier.ReadConcernIgnore
 	}
 
-	logPath := cCtx.String(logPath)
-
-	v := verifier.NewVerifier(verifierSettings, logPath)
-
 	missingStringArgs := lo.Filter(
 		mslices.Of(srcURI, dstURI),
 		func(setting string, _ int) bool {
@@ -342,8 +338,12 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 	)
 
 	if len(missingStringArgs) > 0 {
-		return v, fmt.Errorf("missing required parameters: %#q", missingStringArgs)
+		return nil, fmt.Errorf("missing required parameters: %#q", missingStringArgs)
 	}
+
+	logPath := cCtx.String(logPath)
+
+	v := verifier.NewVerifier(verifierSettings, logPath)
 
 	logger := v.GetLogger()
 
