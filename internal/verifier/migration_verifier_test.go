@@ -1602,15 +1602,10 @@ func TestVerifierCompareDocs(t *testing.T) {
 	}
 
 	for _, curTest := range compareTests {
-		require.NoError(
-			t,
-			verifier.SetDocCompareMethod(
-				lo.Ternary(
-					!curTest.checkOrder,
-					compare.IgnoreOrder,
-					compare.Binary,
-				),
-			),
+		verifier.docCompareMethod = lo.Ternary(
+			!curTest.checkOrder,
+			compare.IgnoreOrder,
+			compare.Binary,
 		)
 
 		indexFields := curTest.indexFields
