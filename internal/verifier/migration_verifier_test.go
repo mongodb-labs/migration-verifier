@@ -1455,7 +1455,9 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 	id := rand.Intn(1000)
 	verifier := NewVerifier(VerifierSettings{}, "stderr")
-	require.NoError(t, verifier.SetDocCompareMethod(compare.IgnoreOrder))
+
+	// set directly to avoid checking server version
+	verifier.docCompareMethod = compare.IgnoreOrder
 
 	type compareTest struct {
 		label       string
