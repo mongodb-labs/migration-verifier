@@ -203,14 +203,6 @@ func (suite *IntegrationTestSuite) buildVerifierInternal(
 	verifier.verificationStatusCheckInterval = 10 * time.Millisecond
 	verifier.resumeTokenPersistInterval = 10 * time.Millisecond
 
-	docCompareMethod := compare.Default
-	envDocCompareMethod := os.Getenv("MVTEST_DOC_COMPARE_METHOD")
-	if envDocCompareMethod != "" {
-		docCompareMethod = compare.Method(envDocCompareMethod)
-
-		// Forgo validation because the tested code should do that.
-	}
-	verifier.SetDocCompareMethod(docCompareMethod)
 	verifier.SetPartitioningScheme(partitions.SchemeID)
 
 	ctx := suite.Context()
@@ -227,6 +219,18 @@ func (suite *IntegrationTestSuite) buildVerifierInternal(
 		verifier.SetMetaURI(ctx, suite.metaConnStr),
 		"should set metadata connection string",
 	)
+
+	docCompareMethod := compare.Default
+	envDocCompareMethod := os.Getenv("MVTEST_DOC_COMPARE_METHOD")
+	if envDocCompareMethod != "" {
+		docCompareMethod = compare.Method(envDocCompareMethod)
+
+		// Forgo validation because the tested code should do that.
+	}
+	suite.Require().NoError(
+		verifier.SetDocCompareMethod(docCompareMethod),
+	)
+
 	verifier.SetMetaDBName(metaDBName)
 
 	envSrcChangeReader := cmp.Or(

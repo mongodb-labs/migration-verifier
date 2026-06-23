@@ -107,8 +107,8 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsHashedReportsActualD
 	)
 	suite.Require().NoError(err)
 
-	if !comparehashed.CanCompareDocsViaToHashedIndexKey(buildInfo.VersionArray) {
-		suite.T().Skipf("source (%v) can't do hashed comparison", buildInfo.VersionArray)
+	if minVer, needed := comparehashed.MinNextVersion(buildInfo.VersionArray).Get(); needed {
+		suite.T().Skipf("source (%v) can't do hashed comparison; needs at least %v", buildInfo.VersionArray, minVer)
 	}
 
 	dbName := suite.DBNameForTest()
@@ -126,7 +126,9 @@ func (suite *IntegrationTestSuite) TestGetProgress_Gen0StatsHashedReportsActualD
 
 	verifier := suite.BuildVerifier()
 	verifier.SetVerifyAll(true)
-	verifier.SetDocCompareMethod(compare.ToHashedIndexKey)
+	suite.Require().NoError(
+		verifier.SetDocCompareMethod(compare.ToHashedIndexKey),
+	)
 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())

@@ -3,9 +3,7 @@ package verifier
 import (
 	"context"
 
-	"github.com/10gen/migration-verifier/internal/comparehashed"
 	"github.com/10gen/migration-verifier/internal/util"
-	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
@@ -23,13 +21,17 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 
 	verifier.srcURI = uri
 
-	verifier.logger.Info().
+	verifier.logger.Debug().
 		Msg("Reading source’s cluster info.")
 
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.srcClient)
 	if err != nil {
 		return errors.Wrap(err, "failed to read source cluster info")
 	}
+
+	verifier.logger.Info().
+		Any("clusterInfo", clusterInfo).
+		Msg("Found source’s cluster info.")
 
 	verifier.srcClusterInfo = &clusterInfo
 
@@ -52,38 +54,7 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 		return errors.Errorf("unsupported source version: %v", clusterInfo.VersionArray)
 	}
 
-	if verifier.docCompareMethod == compare.ToHashedIndexKey {
-		if !comparehashed.CanCompareDocsViaToHashedIndexKey(clusterInfo.VersionArray) {
-			return errors.Errorf("document comparison mode %#q doesn’t work on source version %v", compare.ToHashedIndexKey, clusterInfo.VersionArray)
-		}
-	}
-
-	verifier.maybeSuggestHashedComparisonOptimization()
-
 	return checkURIAgainstServerVersion(uri, clusterInfo)
-}
-
-func (verifier *Verifier) maybeSuggestHashedComparisonOptimization() {
-	if verifier.srcClusterInfo == nil || verifier.dstClusterInfo == nil {
-		// We’re not ready yet.
-		return
-	}
-
-	if verifier.docCompareMethod != compare.Default {
-		// User already gave a non-default comparison method.
-		return
-	}
-
-	if !comparehashed.CanCompareDocsViaToHashedIndexKey(verifier.srcClusterInfo.VersionArray) {
-		return
-	}
-
-	if !comparehashed.CanCompareDocsViaToHashedIndexKey(verifier.dstClusterInfo.VersionArray) {
-		return
-	}
-
-	verifier.logger.Info().
-		Msg("Source & destination cluster seem recent enough to use hashed document comparison, which dramatically accelerates verification. See README for details.")
 }
 
 func isVersionSupported(version []int) bool {
@@ -98,22 +69,20 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 		return errors.Wrapf(err, "failed to connect to destination %#q", uri)
 	}
 
-	verifier.logger.Info().
+	verifier.logger.Debug().
 		Msg("Reading destination’s cluster info.")
 
 	clusterInfo, err := util.GetClusterInfo(ctx, verifier.logger, verifier.dstClient)
 	if err != nil {
-		return errors.Wrap(err, "failed to read destination build info")
+		return errors.Wrap(err, "failed to read destination cluster info")
 	}
+
+	verifier.logger.Info().
+		Any("clusterInfo", clusterInfo).
+		Msg("Found destination’s cluster info.")
 
 	if !isVersionSupported(clusterInfo.VersionArray) {
 		return errors.Errorf("unsupported destination version: %v", clusterInfo.VersionArray)
-	}
-
-	if verifier.docCompareMethod == compare.ToHashedIndexKey {
-		if !comparehashed.CanCompareDocsViaToHashedIndexKey(clusterInfo.VersionArray) {
-			return errors.Errorf("document comparison mode %#q doesn’t work on destination version %v", compare.ToHashedIndexKey, clusterInfo.VersionArray)
-		}
 	}
 
 	verifier.dstClusterInfo = &clusterInfo
