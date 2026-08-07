@@ -5,19 +5,16 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
 )
 
 func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri).SetReadPreference(
-		verifier.readPreference,
-	)
-	var err error
-	verifier.srcClient, err = mongo.Connect(opts)
+	client, clientOpts, err := verifier.getClient(ctx, uri, verifier.readPreference)
 	if err != nil {
-		return errors.Wrapf(err, "failed to connect to source %#q", uri)
+		return errors.Wrapf(err, "connect to source")
 	}
+
+	verifier.srcClient = client
 
 	verifier.srcURI = uri
 
@@ -39,7 +36,7 @@ func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
 		err := RefreshSrcMongosInstances(
 			ctx,
 			verifier.logger,
-			opts,
+			clientOpts,
 		)
 
 		if err != nil {
@@ -62,12 +59,12 @@ func isVersionSupported(version []int) bool {
 }
 
 func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri)
-	var err error
-	verifier.dstClient, err = mongo.Connect(opts)
+	client, clientOpts, err := verifier.getClient(ctx, uri, verifier.readPreference)
 	if err != nil {
-		return errors.Wrapf(err, "failed to connect to destination %#q", uri)
+		return errors.Wrapf(err, "connect to destination")
 	}
+
+	verifier.dstClient = client
 
 	verifier.logger.Debug().
 		Msg("Reading destination’s cluster info.")
@@ -91,7 +88,7 @@ func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
 		err := RefreshDstMongosInstances(
 			ctx,
 			verifier.logger,
-			opts,
+			clientOpts,
 		)
 
 		if err != nil {

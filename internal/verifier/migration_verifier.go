@@ -273,7 +273,11 @@ func (verifier *Verifier) SetDDLHandling(mode DDLHandling) {
 	verifier.ddlHandling = mode
 }
 
-func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
+func (verifier *Verifier) getClient(
+	ctx context.Context,
+	uri string,
+	rp *readpref.ReadPref,
+) (*mongo.Client, *options.ClientOptions, error) {
 	appName := buildvar.GetClientAppName()
 	opts := &options.ClientOptions{
 		AppName: &appName,
@@ -285,7 +289,20 @@ func (verifier *Verifier) getClientOpts(uri string) *options.ClientOptions {
 		opts.SetReadConcern(readconcern.Majority())
 	})
 
-	return opts
+	if rp != nil {
+		opts.SetReadPreference(rp)
+	}
+
+	client, err := mongo.Connect(opts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create connection: %w", err)
+	}
+
+	if err := client.Ping(ctx, readpref.Primary()); err != nil {
+		return nil, nil, fmt.Errorf("ping: %w", err)
+	}
+
+	return client, opts, nil
 }
 
 func (verifier *Verifier) SetFailureDisplaySize(size int64) {
@@ -376,15 +393,10 @@ func (verifier *Verifier) GetLogger() *logger.Logger {
 }
 
 func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
-	opts := verifier.getClientOpts(uri)
 	var err error
-	verifier.metaClient, err = mongo.Connect(opts)
+	verifier.metaClient, _, err = verifier.getClient(ctx, uri, readpref.Primary())
 	if err != nil {
-		return err
-	}
-
-	if err := verifier.metaClient.Ping(ctx, readpref.Primary()); err != nil {
-		return errors.Wrapf(err, "connect to metadata server (%s)", uri)
+		return errors.Wrapf(err, "connect to metadata")
 	}
 
 	verifier.logger.Debug().
