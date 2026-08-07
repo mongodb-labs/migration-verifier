@@ -40,7 +40,7 @@ func MaybeAddDirectConnection(in string) (bool, string, error) {
 	}
 
 	_, query, _ := strings.Cut(in, "?")
-	if strings.Contains(query, "&") && !strings.HasSuffix(query, "&") {
+	if len(query) > 0 && !strings.HasSuffix(query, "&") {
 		in += "&"
 	}
 
