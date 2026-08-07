@@ -383,6 +383,10 @@ func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 		return err
 	}
 
+	if err := verifier.metaClient.Ping(ctx, readpref.Primary()); err != nil {
+		return errors.Wrapf(err, "connect to metadata server (%s)", uri)
+	}
+
 	verifier.logger.Debug().
 		Msg("Reading metadata’s cluster info.")
 
