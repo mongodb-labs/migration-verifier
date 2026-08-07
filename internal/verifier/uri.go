@@ -5,6 +5,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
 )
 
@@ -112,9 +113,11 @@ func checkURIAgainstServerVersion(uri string, bi util.ClusterInfo) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to parse and validate connection string")
 	}
-	if cs == nil {
-		panic("parsed and validated connection string (" + uri + ") must not be nil")
-	}
+
+	lo.Assert(
+		cs != nil,
+		"parsed and validated connection string must not be nil",
+	)
 
 	// migration-verifier disallows SRV strings for pre-v5 clusters for the
 	// same reason as mongosync’s embedded verifier: mongoses can be added
