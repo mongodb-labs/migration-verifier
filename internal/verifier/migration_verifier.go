@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -298,7 +299,9 @@ func (verifier *Verifier) getClient(
 		return nil, nil, fmt.Errorf("create connection: %w", err)
 	}
 
-	if err := client.Ping(ctx, readpref.Primary()); err != nil {
+	pingRP := cmp.Or(rp, readpref.Primary())
+
+	if err := client.Ping(ctx, pingRP); err != nil {
 		return nil, nil, fmt.Errorf("ping: %w", err)
 	}
 
