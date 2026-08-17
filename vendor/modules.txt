@@ -388,6 +388,7 @@ go.mongodb.org/mongo-driver/v2/x/mongo/driver/operation
 go.mongodb.org/mongo-driver/v2/x/mongo/driver/session
 go.mongodb.org/mongo-driver/v2/x/mongo/driver/topology
 go.mongodb.org/mongo-driver/v2/x/mongo/driver/wiremessage
+go.mongodb.org/mongo-driver/v2/x/mongo/driver/xoptions
 # golang.org/x/arch v0.16.0
 ## explicit; go 1.23.0
 golang.org/x/arch/x86/x86asm
