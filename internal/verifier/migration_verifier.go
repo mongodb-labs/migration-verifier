@@ -274,15 +274,19 @@ func (verifier *Verifier) SetDDLHandling(mode DDLHandling) {
 	verifier.ddlHandling = mode
 }
 
-func (verifier *Verifier) getClient(
-	ctx context.Context,
+// buildClientOpts assembles the driver options for a cluster connection.
+//
+// This function is tested directly.
+//
+// NB: The options MUST come from options.Client() rather than a
+// &options.ClientOptions{} literal. Only the constructor populates HTTPClient,
+// and mongo.Connect hands that field straight to the authenticator with no nil
+// fallback, so a literal segfaults the OIDC authenticator’s Azure/GCP callbacks.
+func (verifier *Verifier) buildClientOpts(
 	uri string,
 	rp *readpref.ReadPref,
-) (*mongo.Client, *options.ClientOptions, error) {
-	appName := buildvar.GetClientAppName()
-	opts := &options.ClientOptions{
-		AppName: &appName,
-	}
+) *options.ClientOptions {
+	opts := options.Client().SetAppName(buildvar.GetClientAppName())
 	opts.ApplyURI(uri)
 	opts.SetWriteConcern(writeconcern.Majority())
 
@@ -293,6 +297,16 @@ func (verifier *Verifier) getClient(
 	if rp != nil {
 		opts.SetReadPreference(rp)
 	}
+
+	return opts
+}
+
+func (verifier *Verifier) getClient(
+	ctx context.Context,
+	uri string,
+	rp *readpref.ReadPref,
+) (*mongo.Client, *options.ClientOptions, error) {
+	opts := verifier.buildClientOpts(uri, rp)
 
 	client, err := mongo.Connect(opts)
 	if err != nil {
