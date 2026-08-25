@@ -7,6 +7,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
@@ -18,14 +19,40 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/xoptions"
+)
+
+type bucketModel string
+
+const (
+	bucketsCollection bucketModel = "system.buckets"
+	bucketsRawData    bucketModel = "rawData"
 )
 
 func (suite *IntegrationTestSuite) skipIfNoTimeseries() {
 	// NB: MongoDB 5.0 lacked a change stream for time-series buckets,
 	// so v6 is the minimum allowed version for time-series.
-	if suite.BuildVerifier().srcClusterInfo.VersionArray[0] < 6 {
+	if !canTimeseries(suite.BuildVerifier().srcClusterInfo) {
 		suite.T().Skipf("Need a source version with time-series support.")
 	}
+}
+
+func canTimeseries(ci *util.ClusterInfo) bool {
+	return ci.VersionArray[0] >= 6
+}
+
+func tsBucketModel(ci *util.ClusterInfo) bucketModel {
+	lo.Assertf(
+		canTimeseries(ci),
+		"expect time-series capability but found %+v",
+		ci,
+	)
+
+	return lo.Ternary(
+		ci.VersionArray[0] >= 9,
+		bucketsRawData,
+		bucketsCollection,
+	)
 }
 
 func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
@@ -407,14 +434,16 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 	})
 	suite.Require().NoError(err, "should insert measurement")
 
-	copyDocs(
-		suite.T(),
-		srcDB.Collection(timeseries.BucketPrefix+collName),
-		suite.dstMongoClient.Database(dbName).Collection(timeseries.BucketPrefix+collName),
-	)
-
 	verifier := suite.BuildVerifier()
 	verifier.SetVerifyAll(true)
+
+	copyBuckets(
+		suite.T(),
+		verifier.srcClusterInfo,
+		srcDB.Collection(collName),
+		verifier.dstClusterInfo,
+		suite.dstMongoClient.Database(dbName).Collection(collName),
+	)
 
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
@@ -458,19 +487,62 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Simple() {
 	)
 }
 
-func copyDocs(
+func copyBuckets(
 	t *testing.T,
-	srcColl, dstColl *mongo.Collection,
+	srcClusterInfo *util.ClusterInfo,
+	srcColl *mongo.Collection,
+	dstClusterInfo *util.ClusterInfo,
+	dstColl *mongo.Collection,
 ) {
 	ctx := t.Context()
 
-	cursor, err := srcColl.Find(ctx, bson.D{})
-	require.NoError(t, err, "should open src cursor")
+	findOpts := options.Find()
+
+	srcBucketsModel := tsBucketModel(srcClusterInfo)
+	switch srcBucketsModel {
+	case bucketsCollection:
+		srcColl = srcColl.Database().Collection(timeseries.BucketPrefix + srcColl.Name())
+	case bucketsRawData:
+		require.NoError(
+			t,
+			xoptions.SetInternalFindOptions(
+				findOpts,
+				"rawData",
+				true,
+			),
+			"must set find opts",
+		)
+	default:
+		lo.Assertf(false, "bad src buckets model: %#q", srcBucketsModel)
+	}
+
+	cursor, err := srcColl.Find(ctx, bson.D{}, findOpts)
+	require.NoError(t, err, "should open src %#q cursor", srcColl.Name())
+
+	insertOpts := options.InsertOne()
+
+	dstBucketsModel := tsBucketModel(dstClusterInfo)
+	switch dstBucketsModel {
+	case bucketsCollection:
+		dstColl = dstColl.Database().Collection(timeseries.BucketPrefix + dstColl.Name())
+	case bucketsRawData:
+		require.NoError(
+			t,
+			xoptions.SetInternalInsertOneOptions(
+				insertOpts,
+				"rawData",
+				true,
+			),
+			"must set insert opts",
+		)
+	default:
+		lo.Assertf(false, "bad dst buckets model: %#q", dstBucketsModel)
+	}
 
 	inserted := 0
 	for cursor.Next(ctx) {
-		_, err := dstColl.InsertOne(ctx, cursor.Current)
-		require.NoError(t, err, "should insert on dst")
+		_, err := dstColl.InsertOne(ctx, cursor.Current, insertOpts)
+		require.NoError(t, err, "should insert on dst %#q", dstColl.Name())
 
 		inserted++
 	}

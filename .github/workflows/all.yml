@@ -126,6 +126,8 @@ jobs:
 
           - [ '8.0', '8.0' ]
 
+          - [ 'latest', 'latest' ]
+
         toHashedIndexKey: [true, false]
 
         partitioningScheme: ["_id", "natural"]
