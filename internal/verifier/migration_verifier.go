@@ -280,9 +280,10 @@ func (verifier *Verifier) getClient(
 	rp *readpref.ReadPref,
 ) (*mongo.Client, *options.ClientOptions, error) {
 	appName := buildvar.GetClientAppName()
-	opts := &options.ClientOptions{
-		AppName: &appName,
-	}
+	// NB: Use options.Client() rather than a &options.ClientOptions{} literal;
+	// only the constructor populates HTTPClient, and a nil one segfaults the
+	// OIDC authenticator's Azure/GCP callbacks.
+	opts := options.Client().SetAppName(appName)
 	opts.ApplyURI(uri)
 	opts.SetWriteConcern(writeconcern.Majority())
 
