@@ -129,6 +129,50 @@ func (suite *IntegrationTestSuite) TestChangeStreamReader_RetriesTransientOpenFa
 	suite.Require().NoError(eg.Wait())
 }
 
+// TestChangeStreamReader_StartFailsWhenOpenNeverSucceeds verifies that when
+// the change stream can never be opened, start returns the error and the
+// reader’s errgroup exits rather than blocking forever on the initial-create
+// result.
+func (suite *IntegrationTestSuite) TestChangeStreamReader_StartFailsWhenOpenNeverSucceeds() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+
+	reader, ok := verifier.srcChangeReader.(*ChangeStreamReader)
+	if !ok {
+		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeReader, reader)
+	}
+
+	// A non-transient error makes the retryer give up immediately, so this
+	// test doesn’t have to wait out the retry time limit.
+	reader.createIteratorCb = func(context.Context, *mongo.Session) (bson.Timestamp, error) {
+		return bson.Timestamp{}, mongo.CommandError{
+			Code:    42, // not a known transient error code
+			Message: "something went wrong",
+		}
+	}
+
+	// The stream never opens, so iteration should never begin.
+	reader.iterateCb = func(context.Context, retry.SuccessNotifier, *mongo.Session) error {
+		return nil
+	}
+
+	eg, egCtx := contextplus.ErrGroup(ctx)
+
+	err := reader.start(egCtx, eg)
+
+	suite.Require().Error(err, "start should return the open failure")
+	suite.Assert().Contains(
+		mongo.ErrorCodes(err),
+		42,
+		"start’s error should include the open failure’s code",
+	)
+
+	// The reader goroutine must have exited, so waiting on the errgroup must
+	// return promptly with the failure rather than block.
+	suite.Require().Error(eg.Wait())
+}
+
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
 	ctx := suite.Context()
 
