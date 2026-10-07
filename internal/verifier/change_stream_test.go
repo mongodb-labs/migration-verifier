@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -71,6 +72,61 @@ func (suite *IntegrationTestSuite) TestChangeStreamFilter_InitialNonempty() {
 			},
 		)
 	}
+}
+
+// TestChangeStreamReader_RetriesTransientOpenFailure verifies that a transient
+// error while opening the change stream is retried rather than immediately
+// failing the reader.
+func (suite *IntegrationTestSuite) TestChangeStreamReader_RetriesTransientOpenFailure() {
+	ctx := suite.Context()
+
+	verifier := suite.BuildVerifier()
+
+	reader, ok := verifier.srcChangeReader.(*ChangeStreamReader)
+	if !ok {
+		suite.T().Skipf("source change reader is a %T; this test needs a %T", verifier.srcChangeReader, reader)
+	}
+
+	realCreate := reader.createIteratorCb
+
+	openAttempts := 0
+	reader.createIteratorCb = func(ctx context.Context, sess *mongo.Session) (bson.Timestamp, error) {
+		openAttempts++
+
+		if openAttempts <= 2 {
+			return bson.Timestamp{}, mongo.CommandError{
+				Code:    11601, // Interrupted
+				Message: "operation was interrupted",
+			}
+		}
+
+		return realCreate(ctx, sess)
+	}
+
+	// Once the change stream is open, don’t consume events; just close it so
+	// the reader goroutine can exit.
+	reader.iterateCb = func(ctx context.Context, _ retry.SuccessNotifier, _ *mongo.Session) error {
+		if reader.changeStream != nil {
+			_ = reader.changeStream.Close(ctx)
+		}
+
+		return nil
+	}
+
+	eg, egCtx := contextplus.ErrGroup(ctx)
+
+	suite.Require().NoError(
+		reader.start(egCtx, eg),
+		"reader should retry a transient failure to open the change stream",
+	)
+
+	suite.Assert().Equal(
+		3,
+		openAttempts,
+		"reader should have retried opening the change stream",
+	)
+
+	suite.Require().NoError(eg.Wait())
 }
 
 func (suite *IntegrationTestSuite) TestChangeStreamFilter_NoNamespaces() {
