@@ -20,6 +20,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/xoptions"
 )
 
 type Scheme string
@@ -129,6 +130,7 @@ func PartitionCollectionWithSize(
 	ctx context.Context,
 	uuidEntry *uuidutil.NamespaceAndUUID,
 	srcClient *mongo.Client,
+	srcInfo util.ClusterInfo,
 	subLogger *logger.Logger,
 	partitionSize types.ByteCount,
 	globalFilter bson.D,
@@ -143,6 +145,7 @@ func PartitionCollectionWithSize(
 		ctx,
 		uuidEntry,
 		srcClient,
+		srcInfo,
 		partitionSize,
 		subLogger,
 		globalFilter,
@@ -159,6 +162,7 @@ func PartitionCollectionWithSize(
 			ctx,
 			uuidEntry,
 			srcClient,
+			srcInfo,
 			partitionSize,
 			subLogger,
 			nil,
@@ -176,6 +180,7 @@ func partitionCollectionWithParameters(
 	ctx context.Context,
 	uuidEntry *uuidutil.NamespaceAndUUID,
 	srcClient *mongo.Client,
+	srcInfo util.ClusterInfo,
 	partitionBytes types.ByteCount,
 	subLogger *logger.Logger,
 	globalFilter bson.D,
@@ -193,7 +198,14 @@ func partitionCollectionWithParameters(
 
 	// Get the collection's size in bytes and its document count. It is okay if these return zero since there might still be
 	// items in the collection. Rely on getOuterIDBound to do a majority read to determine if we continue processing the collection.
-	collSizeInBytes, collDocCount, isCapped, err := GetSizeAndDocumentCount(ctx, subLogger, srcColl)
+	collSizeInBytes, collDocCount, isCapped, err := GetSizeAndDocumentCount(
+		ctx,
+		subLogger,
+		srcColl,
+		GetSizeAndDocumentCountOptions{
+			RawData: util.ClusterHasRawData([2]int(srcInfo.VersionArray)),
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -307,11 +319,20 @@ func partitionCollectionWithParameters(
 	return partitions, nil
 }
 
+type GetSizeAndDocumentCountOptions struct {
+	RawData bool
+}
+
 // GetSizeAndDocumentCount uses collStats to return a collection's byte size, document count, and
 // capped status, in that order.
 //
 // Exported for usage in integration tests.
-func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl *mongo.Collection) (types.ByteCount, types.DocumentCount, bool, error) {
+func GetSizeAndDocumentCount(
+	ctx context.Context,
+	logger *logger.Logger,
+	srcColl *mongo.Collection,
+	opts GetSizeAndDocumentCountOptions,
+) (types.ByteCount, types.DocumentCount, bool, error) {
 	srcDB := srcColl.Database()
 	collName := srcColl.Name()
 
@@ -344,7 +365,20 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 				}}},
 			}
 
-			cursor, driverErr := srcDB.Collection(collName).Aggregate(ctx, pipeline)
+			aggOpts := options.Aggregate()
+			if opts.RawData {
+				err := xoptions.SetInternalAggregateOptions(
+					aggOpts,
+					"rawData",
+					true,
+				)
+
+				if err != nil {
+					return errors.Wrap(err, "set internal aggregate options")
+				}
+			}
+
+			cursor, driverErr := srcDB.Collection(collName).Aggregate(ctx, pipeline, aggOpts)
 			if driverErr != nil {
 				return driverErr
 			}

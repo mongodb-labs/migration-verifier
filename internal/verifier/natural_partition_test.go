@@ -221,6 +221,9 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 					ctx,
 					verifier.logger,
 					coll,
+					partitions.GetSizeAndDocumentCountOptions{
+						RawData: util.ClusterHasRawData([2]int(verifier.srcClusterInfo.VersionArray)),
+					},
 				)
 				suite.Require().NoError(err, "fetching & persisting collection size")
 
@@ -367,6 +370,7 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 			100_000,
 			logger,
 			suite.srcConnStr,
+			util.ClusterInfo{VersionArray: srcVersion[:]},
 			readpref.Primary(),
 		)
 		require.NoError(t, err)

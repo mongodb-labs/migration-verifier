@@ -36,6 +36,11 @@ func ClusterHasBSONSize(va [2]int) bool {
 	return major > 4
 }
 
+func ClusterHasRawData(va [2]int) bool {
+	// RawData was added in v8.3, but we don’t support that.
+	return va[0] >= 9
+}
+
 func ClusterHasCurrentOpIdleCursors(va [2]int) bool {
 	major := va[0]
 

@@ -946,14 +946,21 @@ func (verifier *Verifier) logChunkInfo(ctx context.Context, namespaceAndUUID *uu
 	}
 }
 
-func (verifier *Verifier) getShardKeyFields(
+func (verifier *Verifier) getSrcShardKeyFields(
 	ctx context.Context,
 	namespaceAndUUID *uuidutil.NamespaceAndUUID,
 ) ([]string, error) {
 	coll := verifier.srcClient.Database(namespaceAndUUID.DBName).
 		Collection(namespaceAndUUID.CollName)
 
-	shardKeyOpt, err := sharding.GetShardKey(ctx, verifier.logger, coll)
+	shardKeyOpt, err := sharding.GetShardKey(
+		ctx,
+		verifier.logger,
+		coll,
+		sharding.GetShardKeyOpts{
+			RawData: util.ClusterHasRawData([2]int(verifier.srcClusterInfo.VersionArray)),
+		},
+	)
 	if err != nil {
 		return nil, errors.Wrapf(
 			err,
@@ -1006,6 +1013,7 @@ func (verifier *Verifier) partitionAndInspectNamespace(
 		ctx,
 		namespaceAndUUID,
 		verifier.srcClient,
+		*verifier.srcClusterInfo,
 		verifier.logger,
 		verifier.partitionSizeInBytes,
 		verifier.globalFilter,
@@ -1509,6 +1517,9 @@ func (verifier *Verifier) setCollectionSizeInTask(
 		ctx,
 		verifier.logger,
 		srcColl,
+		partitions.GetSizeAndDocumentCountOptions{
+			RawData: util.ClusterHasRawData([2]int(verifier.srcClusterInfo.VersionArray)),
+		},
 	)
 	if err != nil {
 		return 0, 0, false, errors.Wrapf(err, "getting %#q’s size", FullName(srcColl))
@@ -1553,7 +1564,7 @@ func (verifier *Verifier) partitionCollection(
 
 	var partitionsCount int
 
-	shardKeyFields, err := verifier.getShardKeyFields(
+	shardKeyFields, err := verifier.getSrcShardKeyFields(
 		ctx,
 		&uuidutil.NamespaceAndUUID{
 			DBName:   srcColl.Database().Name(),
@@ -1608,8 +1619,26 @@ func (verifier *Verifier) partitionCollection(
 	// actually comparing the buckets, and the buckets’ IDs should always be
 	// in roughly sequential order on disk.
 	schemeToUse := verifier.partitioningScheme
-	if strings.HasPrefix(srcColl.Name(), timeseries.BucketPrefix) {
-		schemeToUse = partitions.SchemeID
+
+	if schemeToUse != partitions.SchemeID {
+		forceID := strings.HasPrefix(srcColl.Name(), timeseries.BucketPrefix)
+
+		if !forceID {
+			specOpt, err := collspec.GetCollectionSpecIfExists(ctx, verifier.logger, srcColl)
+			if err != nil {
+				return errors.Wrapf(err, "getting %#q’s specification", srcNs)
+			}
+
+			if spec, has := specOpt.Get(); has {
+				forceID = spec.Type == "timeseries"
+			} else {
+				return fmt.Errorf("%#q returned no collection specification (disappeared?!?)", srcNs)
+			}
+		}
+
+		if forceID {
+			schemeToUse = partitions.SchemeID
+		}
 	}
 
 	verifier.logger.Debug().
@@ -1715,6 +1744,7 @@ func (verifier *Verifier) partitionCollection(
 			verifier.partitionSizeInBytes,
 			verifier.logger,
 			verifier.srcURI,
+			*verifier.srcClusterInfo,
 			verifier.readPreference,
 		)
 		if err != nil {

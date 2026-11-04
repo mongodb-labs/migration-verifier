@@ -145,6 +145,9 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		ctx,
 		verifier.logger,
 		srcColl,
+		partitions.GetSizeAndDocumentCountOptions{
+			RawData: util.ClusterHasRawData([2]int(verifier.srcClusterInfo.VersionArray)),
+		},
 	)
 	if err != nil {
 		return 0, errors.Wrapf(err, "getting %#q’s size", srcNs)
@@ -207,10 +210,16 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		)
 	}
 
+	custom := bson.M{}
+	if util.ClusterHasRawData([2]int(verifier.srcClusterInfo.VersionArray)) {
+		custom["rawData"] = true
+	}
+
 	cursor, err := partitions.ForPartitionAggregation(srcColl).Aggregate(
 		ctx,
 		pipeline,
 		options.Aggregate().
+			SetCustom(custom).
 			SetBatchSize(1).
 			SetHint(bson.D{{"_id", 1}}),
 	)

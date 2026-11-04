@@ -380,6 +380,14 @@ func (csr *ChangeStreamReader) createChangeStream(
 		)
 	}
 
+	if util.ClusterHasRawData([2]int(csr.clusterInfo.VersionArray)) {
+		opts = opts.SetCustom(
+			bson.M{
+				"rawData": true,
+			},
+		)
+	}
+
 	savedResumeToken, err := csr.loadResumeToken(ctx)
 	if err != nil {
 		return bson.Timestamp{}, errors.Wrap(err, "failed to load persisted change stream resume token")
