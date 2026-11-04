@@ -13,12 +13,13 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/internal/csot"
 	"go.mongodb.org/mongo-driver/v2/internal/mongoutil"
+	"go.mongodb.org/mongo-driver/v2/internal/randutil"
 	"go.mongodb.org/mongo-driver/v2/internal/serverselector"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver"
-	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/operation"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/session"
 )
 
@@ -26,7 +27,11 @@ import (
 // the method call is using.
 var ErrWrongClient = errors.New("session was not created by this client")
 
-var withTransactionTimeout = 120 * time.Second
+var (
+	withTransactionTimeout = 120 * time.Second
+	backoffInitial         = 5 * time.Millisecond
+	backoffMax             = 500 * time.Millisecond
+)
 
 // Session is a MongoDB logical session. Sessions can be used to enable causal
 // consistency for a group of operations or to execute operations in an ACID
@@ -76,6 +81,12 @@ func SessionFromContext(ctx context.Context) *Session {
 	return sess
 }
 
+// timeout returns the timeout that applies to operations executed on this
+// session, which is inherited from the Client that created it.
+func (s *Session) timeout() *time.Duration {
+	return s.client.timeout
+}
+
 // ID returns the current ID document associated with the session. The ID
 // document is in the form {"id": <BSON binary value>}.
 func (s *Session) ID() bson.Raw {
@@ -84,6 +95,9 @@ func (s *Session) ID() bson.Raw {
 
 // EndSession aborts any existing transactions and close the session.
 func (s *Session) EndSession(ctx context.Context) {
+	ctx, cancel := csot.WithTimeout(ctx, s.timeout())
+	defer cancel()
+
 	if s.clientSession.TransactionInProgress() {
 		// ignore all errors aborting during an end session
 		_ = s.AbortTransaction(ctx)
@@ -121,16 +135,43 @@ func (s *Session) WithTransaction(
 	fn func(ctx context.Context) (any, error),
 	opts ...options.Lister[options.TransactionOptions],
 ) (any, error) {
-	timeout := time.NewTimer(withTransactionTimeout)
+	transTimeout := withTransactionTimeout
+	if s.client.timeout != nil {
+		transTimeout = *s.client.timeout
+	}
+	startTime := time.Now()
+	timeout := time.NewTimer(transTimeout)
 	defer timeout.Stop()
+	var expDur time.Duration
 	var err error
 	for {
+		if expDur == 0 {
+			expDur = backoffInitial
+		} else {
+			expDur += expDur / 2
+			if expDur > backoffMax {
+				expDur = backoffMax
+			}
+			backoff := randutil.JitterDuration(expDur)
+			if time.Since(startTime)+backoff > transTimeout {
+				return nil, timeoutError{Wrapped: err}
+			}
+			sleep := time.NewTimer(backoff)
+			select {
+			case <-timeout.C:
+				sleep.Stop()
+				return nil, timeoutError{Wrapped: err}
+			case <-sleep.C:
+			}
+		}
+
 		err = s.StartTransaction(opts...)
 		if err != nil {
 			return nil, err
 		}
 
-		res, err := fn(NewSessionContext(ctx, s))
+		var res any
+		res, err = fn(NewSessionContext(ctx, s))
 		if err != nil {
 			if s.clientSession.TransactionRunning() {
 				// Wrap the user-provided Context in a new one that behaves like context.Background() for deadlines and
@@ -140,7 +181,7 @@ func (s *Session) WithTransaction(
 
 			select {
 			case <-timeout.C:
-				return nil, err
+				return nil, timeoutError{Wrapped: err}
 			default:
 			}
 
@@ -179,15 +220,14 @@ func (s *Session) WithTransaction(
 				return res, nil
 			}
 
-			select {
-			case <-timeout.C:
-				return res, err
-			default:
-			}
-
 			var cerr CommandError
 			if errors.As(err, &cerr) {
 				if cerr.HasErrorLabel(driver.UnknownTransactionCommitResult) && !cerr.IsMaxTimeMSExpiredError() {
+					select {
+					case <-timeout.C:
+						return res, timeoutError{Wrapped: err}
+					default:
+					}
 					continue
 				}
 				if cerr.HasErrorLabel(driver.TransientTransactionError) {
@@ -227,6 +267,9 @@ func (s *Session) StartTransaction(opts ...options.Lister[options.TransactionOpt
 // returns an error if there is no active transaction for this session or if the
 // transaction has been committed or aborted.
 func (s *Session) AbortTransaction(ctx context.Context) error {
+	ctx, cancel := csot.WithTimeout(ctx, s.timeout())
+	defer cancel()
+
 	err := s.clientSession.CheckAbortTransaction()
 	if err != nil {
 		return err
@@ -240,11 +283,24 @@ func (s *Session) AbortTransaction(ctx context.Context) error {
 	selector := makePinnedSelector(s.clientSession, &serverselector.Write{})
 
 	s.clientSession.Aborting = true
-	_ = operation.NewAbortTransaction().Session(s.clientSession).ClusterClock(s.client.clock).Database("admin").
-		Deployment(s.deployment).WriteConcern(s.clientSession.CurrentWc).ServerSelector(selector).
-		Retry(driver.RetryOncePerCommand).CommandMonitor(s.client.monitor).
-		RecoveryToken(bsoncore.Document(s.clientSession.RecoveryToken)).ServerAPI(s.client.serverAPI).
-		Authenticator(s.client.authenticator).Logger(s.client.logger).Execute(ctx)
+	retry := driver.RetryOncePerCommand
+	op := abortTransactionOp{
+		session:                   s.clientSession,
+		clock:                     s.client.clock,
+		database:                  "admin",
+		deployment:                s.deployment,
+		writeConcern:              s.clientSession.CurrentWc,
+		selector:                  selector,
+		retry:                     &retry,
+		maxAdaptiveRetries:        s.client.effectiveAdaptiveRetries(true),
+		enableOverloadRetargeting: s.client.enableOverloadRetargeting,
+		monitor:                   s.client.monitor,
+		recoveryToken:             bsoncore.Document(s.clientSession.RecoveryToken),
+		serverAPI:                 s.client.serverAPI,
+		authenticator:             s.client.authenticator,
+		logger:                    s.client.logger,
+	}
+	_ = op.execute(ctx)
 
 	s.clientSession.Aborting = false
 	_ = s.clientSession.AbortTransaction()
@@ -256,6 +312,9 @@ func (s *Session) AbortTransaction(ctx context.Context) error {
 // method returns an error if there is no active transaction for this session or
 // if the transaction has been aborted.
 func (s *Session) CommitTransaction(ctx context.Context) error {
+	ctx, cancel := csot.WithTimeout(ctx, s.timeout())
+	defer cancel()
+
 	err := s.clientSession.CheckCommitTransaction()
 	if err != nil {
 		return err
@@ -274,13 +333,25 @@ func (s *Session) CommitTransaction(ctx context.Context) error {
 	selector := makePinnedSelector(s.clientSession, &serverselector.Write{})
 
 	s.clientSession.Committing = true
-	op := operation.NewCommitTransaction().
-		Session(s.clientSession).ClusterClock(s.client.clock).Database("admin").Deployment(s.deployment).
-		WriteConcern(s.clientSession.CurrentWc).ServerSelector(selector).Retry(driver.RetryOncePerCommand).
-		CommandMonitor(s.client.monitor).RecoveryToken(bsoncore.Document(s.clientSession.RecoveryToken)).
-		ServerAPI(s.client.serverAPI).Authenticator(s.client.authenticator).Logger(s.client.logger)
+	retry := driver.RetryOncePerCommand
+	op := commitTransactionOp{
+		session:                   s.clientSession,
+		clock:                     s.client.clock,
+		database:                  "admin",
+		deployment:                s.deployment,
+		writeConcern:              s.clientSession.CurrentWc,
+		selector:                  selector,
+		retry:                     &retry,
+		maxAdaptiveRetries:        s.client.effectiveAdaptiveRetries(true),
+		enableOverloadRetargeting: s.client.enableOverloadRetargeting,
+		monitor:                   s.client.monitor,
+		recoveryToken:             bsoncore.Document(s.clientSession.RecoveryToken),
+		serverAPI:                 s.client.serverAPI,
+		authenticator:             s.client.authenticator,
+		logger:                    s.client.logger,
+	}
 
-	err = op.Execute(ctx)
+	err = op.execute(ctx)
 	// Return error without updating transaction state if it is a timeout, as the transaction has not
 	// actually been committed.
 	if IsTimeout(err) {
@@ -330,6 +401,12 @@ func (s *Session) AdvanceOperationTime(ts *bson.Timestamp) error {
 // Client is the Client associated with the session.
 func (s *Session) Client() *Client {
 	return s.client
+}
+
+// TransactionRunning returns true if the session has started a transaction and
+// it hasn't been committed or aborted.
+func (s *Session) TransactionRunning() bool {
+	return s.clientSession != nil && s.clientSession.TransactionRunning()
 }
 
 // sessionFromContext checks for a sessionImpl in the argued context and returns the session if it

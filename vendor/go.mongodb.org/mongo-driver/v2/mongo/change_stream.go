@@ -24,8 +24,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/description"
-	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/mnet"
-	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/operation"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/session"
 )
 
@@ -71,7 +69,7 @@ type ChangeStream struct {
 	// TryNext. If continued access is required, a copy must be made.
 	Current bson.Raw
 
-	aggregate       *operation.Aggregate
+	aggregate       *aggregateOp
 	pipelineSlice   []bsoncore.Document
 	pipelineOptions map[string]bsoncore.Value
 	cursor          changeStreamCursor
@@ -109,7 +107,7 @@ func newChangeStream(ctx context.Context, config changeStreamConfig, pipeline an
 		ctx = context.Background()
 	}
 
-	cursorOpts := config.client.createBaseCursorOptions()
+	cursorOpts := config.client.createBaseCursorOptions(config.client.retryReads)
 
 	cursorOpts.MarshalValueEncoderFn = newEncoderFn(config.bsonOpts, config.registry)
 
@@ -142,15 +140,26 @@ func newChangeStream(ctx context.Context, config changeStreamConfig, pipeline an
 		return nil, cs.Err()
 	}
 
-	cs.aggregate = operation.NewAggregate(nil).
-		ReadPreference(config.readPreference).ReadConcern(config.readConcern).
-		Deployment(cs.client.deployment).ClusterClock(cs.client.clock).
-		CommandMonitor(cs.client.monitor).Session(cs.sess).ServerSelector(cs.selector).Retry(driver.RetryNone).
-		ServerAPI(cs.client.serverAPI).Crypt(config.crypt).Timeout(cs.client.timeout).
-		Authenticator(cs.client.authenticator)
+	retry := driver.RetryNone
+	cs.aggregate = &aggregateOp{
+		readPreference:            config.readPreference,
+		readConcern:               config.readConcern,
+		deployment:                cs.client.deployment,
+		clock:                     cs.client.clock,
+		monitor:                   cs.client.monitor,
+		session:                   cs.sess,
+		selector:                  cs.selector,
+		retry:                     &retry,
+		maxAdaptiveRetries:        cursorOpts.MaxAdaptiveRetries,
+		enableOverloadRetargeting: cursorOpts.EnableOverloadRetargeting,
+		serverAPI:                 cs.client.serverAPI,
+		crypt:                     config.crypt,
+		timeout:                   cs.client.timeout,
+		authenticator:             cs.client.authenticator,
+	}
 
 	if cs.options.Collation != nil {
-		cs.aggregate.Collation(bsoncore.Document(toDocument(cs.options.Collation)))
+		cs.aggregate.collation = bsoncore.Document(toDocument(cs.options.Collation))
 	}
 	if cs.options.Comment != nil {
 		comment, err := marshalValue(cs.options.Comment, cs.bsonOpts, cs.registry)
@@ -158,11 +167,11 @@ func newChangeStream(ctx context.Context, config changeStreamConfig, pipeline an
 			return nil, err
 		}
 
-		cs.aggregate.Comment(comment)
+		cs.aggregate.comment = comment
 		cs.cursorOptions.Comment = comment
 	}
 	if cs.options.BatchSize != nil {
-		cs.aggregate.BatchSize(*cs.options.BatchSize)
+		cs.aggregate.batchSize = cs.options.BatchSize
 		cs.cursorOptions.BatchSize = *cs.options.BatchSize
 	}
 	if cs.options.MaxAwaitTime != nil {
@@ -181,7 +190,7 @@ func newChangeStream(ctx context.Context, config changeStreamConfig, pipeline an
 			}
 			customOptions[optionName] = optionValueBSON
 		}
-		cs.aggregate.CustomOptions(customOptions)
+		cs.aggregate.customOptions = customOptions
 	}
 	if cs.options.CustomPipeline != nil {
 		// Marshal all custom pipeline options before building pipeline slice. Return
@@ -200,11 +209,12 @@ func newChangeStream(ctx context.Context, config changeStreamConfig, pipeline an
 
 	switch cs.streamType {
 	case ClientStream:
-		cs.aggregate.Database("admin")
+		cs.aggregate.database = "admin"
 	case DatabaseStream:
-		cs.aggregate.Database(config.databaseName)
+		cs.aggregate.database = config.databaseName
 	case CollectionStream:
-		cs.aggregate.Collection(config.collectionName).Database(config.databaseName)
+		cs.aggregate.collection = config.collectionName
+		cs.aggregate.database = config.databaseName
 	default:
 		closeImplicitSession(cs.sess)
 		return nil, fmt.Errorf("must supply a valid StreamType in config, instead of %v", cs.streamType)
@@ -231,7 +241,7 @@ func newChangeStream(ctx context.Context, config changeStreamConfig, pipeline an
 	}
 	var pipelineArr bsoncore.Document
 	pipelineArr, cs.err = cs.pipelineToBSON()
-	cs.aggregate.Pipeline(pipelineArr)
+	cs.aggregate.pipeline = pipelineArr
 
 	if cs.err = cs.executeOperation(ctx, false); cs.err != nil {
 		closeImplicitSession(cs.sess)
@@ -241,36 +251,63 @@ func newChangeStream(ctx context.Context, config changeStreamConfig, pipeline an
 	return cs, cs.Err()
 }
 
-func (cs *ChangeStream) createOperationDeployment(server driver.Server, connection *mnet.Connection) driver.Deployment {
-	return &changeStreamDeployment{
+func (cs *ChangeStream) createOperationDeployment(ctx context.Context) (*changeStreamDeployment, error) {
+	var cancel context.CancelFunc
+
+	deployment := &changeStreamDeployment{
 		topologyKind: cs.client.deployment.Kind(),
-		server:       server,
-		conn:         connection,
 	}
+	deployment.close = func() error {
+		var err error
+		if deployment.conn != nil {
+			err = deployment.conn.Close()
+		}
+		if cancel != nil {
+			cancel()
+		}
+		return err
+	}
+	deployment.reset = func() error {
+		_ = deployment.close()
+
+		var err error
+		var connCtx context.Context
+		connCtx, cancel = csot.WithServerSelectionTimeout(ctx, cs.client.deployment.GetServerSelectionTimeout())
+		deployment.server, err = cs.client.deployment.SelectServer(connCtx, cs.selector)
+		if err != nil {
+			cancel()
+			return err
+		}
+		deployment.conn, err = deployment.server.Connection(connCtx)
+		if err != nil {
+			cancel()
+			return err
+		}
+		cs.wireVersion = deployment.conn.Description().WireVersion
+		return nil
+	}
+	if err := deployment.reset(); err != nil {
+		return nil, err
+	}
+	return deployment, nil
 }
 
 func (cs *ChangeStream) executeOperation(ctx context.Context, resuming bool) error {
-	var server driver.Server
-	var conn *mnet.Connection
+	var deployment *changeStreamDeployment
 
 	// Apply the client-level timeout if the operation-level timeout is not set.
 	ctx, cancel := csot.WithTimeout(ctx, cs.client.timeout)
 	defer cancel()
 
-	connCtx, cancel := csot.WithServerSelectionTimeout(ctx, cs.client.deployment.GetServerSelectionTimeout())
-	defer cancel()
-
-	if server, cs.err = cs.client.deployment.SelectServer(connCtx, cs.selector); cs.err != nil {
+	deployment, cs.err = cs.createOperationDeployment(ctx)
+	if cs.err != nil {
 		return cs.Err()
 	}
+	defer func() {
+		_ = deployment.close()
+	}()
 
-	if conn, cs.err = server.Connection(connCtx); cs.err != nil {
-		return cs.Err()
-	}
-	defer conn.Close()
-	cs.wireVersion = conn.Description().WireVersion
-
-	cs.aggregate.Deployment(cs.createOperationDeployment(server, conn))
+	cs.aggregate.deployment = deployment
 
 	if resuming {
 		cs.replaceOptions(cs.wireVersion)
@@ -290,7 +327,7 @@ func (cs *ChangeStream) executeOperation(ctx context.Context, resuming bool) err
 		if plArr, cs.err = cs.pipelineToBSON(); cs.err != nil {
 			return cs.Err()
 		}
-		cs.aggregate.Pipeline(plArr)
+		cs.aggregate.pipeline = plArr
 	}
 
 	// Execute the aggregate, retrying on retryable errors once (1) if retryable reads are enabled and
@@ -306,7 +343,7 @@ func (cs *ChangeStream) executeOperation(ctx context.Context, resuming bool) err
 	var err error
 AggregateExecuteLoop:
 	for {
-		err = cs.aggregate.Execute(ctx)
+		err = cs.aggregate.execute(ctx)
 		// If no error or no retries remain, do not retry.
 		if err == nil || retries == 0 {
 			break AggregateExecuteLoop
@@ -319,30 +356,15 @@ AggregateExecuteLoop:
 				break AggregateExecuteLoop
 			}
 
-			connCtx, cancel := csot.WithServerSelectionTimeout(ctx, cs.client.deployment.GetServerSelectionTimeout())
-			defer cancel()
-
 			// If error is retryable: subtract 1 from retries, redo server selection, checkout
 			// a connection, and restart loop.
 			retries--
-			server, err = cs.client.deployment.SelectServer(connCtx, cs.selector)
-			if err != nil {
-				break AggregateExecuteLoop
-			}
-
-			conn.Close()
-
-			conn, err = server.Connection(connCtx)
-			if err != nil {
-				break AggregateExecuteLoop
-			}
-			defer conn.Close()
-
-			// Update the wire version with data from the new connection.
-			cs.wireVersion = conn.Description().WireVersion
 
 			// Reset deployment.
-			cs.aggregate.Deployment(cs.createOperationDeployment(server, conn))
+			err = deployment.reset()
+			if err != nil {
+				break AggregateExecuteLoop
+			}
 		} else {
 			// Do not retry if error is not a driver error.
 			break AggregateExecuteLoop
@@ -353,8 +375,8 @@ AggregateExecuteLoop:
 		return cs.err
 	}
 
-	cr := cs.aggregate.ResultCursorResponse()
-	cr.Server = server
+	cr := cs.aggregate.resultCursorResponse()
+	cr.Server = deployment.server
 
 	cs.cursor, cs.err = driver.NewBatchCursor(cr, cs.sess, cs.client.clock, cs.cursorOptions)
 	if cs.err = wrapErrors(cs.err); cs.err != nil {
@@ -553,6 +575,9 @@ func (cs *ChangeStream) SetBatchSize(size int32) {
 	// Set batch size on the cursor options also so any "resumed" change stream
 	// cursors will pick up the latest batch size setting.
 	cs.cursorOptions.BatchSize = size
+	if cs.cursor == nil {
+		return
+	}
 	cs.cursor.SetBatchSize(size)
 }
 
