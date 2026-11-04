@@ -18,19 +18,16 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/event"
 	"go.mongodb.org/mongo-driver/v2/internal/driverutil"
+	"go.mongodb.org/mongo-driver/v2/internal/handshake/operation"
 	"go.mongodb.org/mongo-driver/v2/internal/logger"
 	"go.mongodb.org/mongo-driver/v2/mongo/address"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/description"
 	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/mnet"
-	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/operation"
 )
 
-const (
-	minHeartbeatInterval = 500 * time.Millisecond
-	wireVersion42        = 8 // Wire version for MongoDB 4.2
-)
+const minHeartbeatInterval = 500 * time.Millisecond
 
 // Server state constants.
 const (
@@ -370,6 +367,12 @@ func (s *Server) ProcessHandshakeError(err error, startingGenerationNumber uint6
 		return
 	}
 
+	// Do not clear the pool when backpressure error label applied.
+	var de driver.Error
+	if errors.As(err, &de) && de.HasErrorLabel(driver.ErrSystemOverloadedError) {
+		return
+	}
+
 	// Must hold the processErrorLock while updating the server description and clearing the pool.
 	// Not holding the lock leads to possible out-of-order processing of pool.clear() and
 	// pool.ready() calls from concurrent server description updates.
@@ -515,8 +518,8 @@ func (s *Server) ProcessError(err error, describer mnet.Describer) driver.Proces
 		s.RequestImmediateCheck()
 
 		res := driver.ServerMarkedUnknown
-		// If the node is shutting down or is older than 4.2, we synchronously clear the pool
-		if cerr.NodeIsShuttingDown() || wireVersion == nil || wireVersion.Max < wireVersion42 {
+		// If the node is shutting down or unknown, we synchronously clear the pool.
+		if cerr.NodeIsShuttingDown() || wireVersion == nil {
 			res = driver.ConnectionPoolCleared
 			s.pool.clear(err, serviceID)
 		}
@@ -534,8 +537,8 @@ func (s *Server) ProcessError(err error, describer mnet.Describer) driver.Proces
 		s.RequestImmediateCheck()
 
 		res := driver.ServerMarkedUnknown
-		// If the node is shutting down or is older than 4.2, we synchronously clear the pool
-		if wcerr.NodeIsShuttingDown() || wireVersion == nil || wireVersion.Max < wireVersion42 {
+		// If the node is shutting down or unknown, we synchronously clear the pool.
+		if wcerr.NodeIsShuttingDown() || wireVersion == nil {
 			res = driver.ConnectionPoolCleared
 			s.pool.clear(err, serviceID)
 		}
