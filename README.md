@@ -550,7 +550,9 @@ differing content) appear in `/docMismatches`; namespace-level mismatches
 
 # Resumability
 
-The migration-verifier periodically persists its change stream’s resume token so that, in the event of a catastrophic failure (e.g., memory exhaustion), when restarted the verifier will receive any change events that happened while the verifier was down.
+migration-verifier will, upon restart, resume with minimal loss of progress.
+
+The only exception to this is that, when the source is 4.2 or earlier, $natural scans are not resumable (see [MongoDB 4.2 & Earlier](#mongodb-4.2-&-earlier) for more details).
 
 # Performance
 
