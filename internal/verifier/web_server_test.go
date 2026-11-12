@@ -210,7 +210,7 @@ func (suite *WebServerTestSuite) TestOperationalEndpoint_RequestInProgress() {
 	defer server.operationalAPILock.Release(1)
 
 	w := httptest.NewRecorder()
-	req, err := http.NewRequest("POST", "/api/v1/check", strings.NewReader(`{}`))
+	req, err := http.NewRequest("POST", "/api/v1/check", strings.NewReader(`{"filter":{"x":1}}`))
 	suite.Require().NoError(err)
 
 	router.ServeHTTP(w, req)
