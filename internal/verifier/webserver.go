@@ -215,8 +215,10 @@ func (server *WebServer) Run(ctx context.Context) error {
 
 	<-webServerCtx.Done()
 
+	serverCtxErr := context.Cause(webServerCtx)
+
 	server.logger.Info().
-		AnErr("reason", context.Cause(webServerCtx)).
+		AnErr("reason", serverCtxErr).
 		Msg("Web server shutting down.")
 
 	if err := server.srv.Shutdown(context.Background()); err != nil {
@@ -232,7 +234,8 @@ func (server *WebServer) Run(ctx context.Context) error {
 		server.logger.Error().Err(server.mongosyncError).Msg("Web server exit because of MigrationVerifier error")
 		return server.mongosyncError
 	}
-	return nil
+
+	return serverCtxErr
 }
 
 // EmptyRequest is for request with empty body
