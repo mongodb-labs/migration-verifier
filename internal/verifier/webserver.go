@@ -298,9 +298,12 @@ func (server *WebServer) makeCheckEndPoint(ctx context.Context) func(c *gin.Cont
 				Err(err).
 				Msg("Failed to start check.")
 
-			c.JSON(
+			c.AbortWithStatusJSON(
 				http.StatusInternalServerError,
-				gin.H{"error": fmt.Sprintf("See server logs (ref: %s) for details.", token)},
+				api.Response{
+					Error:            new("InternalServerError"),
+					ErrorDescription: new(fmt.Sprintf("See server logs (ref: %s) for details.", token)),
+				},
 			)
 
 			return

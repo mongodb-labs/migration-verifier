@@ -26,6 +26,7 @@ func (verifier *Verifier) MaybeStartPeriodicHeapProfileCollection(ctx context.Co
 			}
 		}
 	}()
+
 }
 
 func collectHeapUsage() {
