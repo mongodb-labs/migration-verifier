@@ -44,8 +44,6 @@ type WebServer struct {
 	logger             *logger.Logger
 	srv                *http.Server
 	operationalAPILock *semaphore.Weighted
-	signalShutdown     context.CancelCauseFunc
-	mongosyncError     error
 }
 
 // NewWebServer creates a WebServer object
@@ -60,10 +58,16 @@ func NewWebServer(port int, mapi api.MigrationVerifierAPI, logger *logger.Logger
 
 func (server *WebServer) operationalAPILockMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Turn the request away, but keep the server running: the request
+		// in progress is fine.
 		if !server.operationalAPILock.TryAcquire(1) {
-			err := fmt.Errorf("request in progress")
-			server.operationalErrorResponse(c, err)
-			c.Abort()
+			errorName := "RequestInProgressError"
+			errorDescription := RequestInProgressErrorDescription
+			c.AbortWithStatusJSON(
+				http.StatusConflict,
+				api.Response{Success: false, Error: &errorName, ErrorDescription: &errorDescription},
+			)
+
 			return
 		}
 		defer server.operationalAPILock.Release(1)
@@ -200,8 +204,6 @@ func (server *WebServer) Run(ctx context.Context) error {
 
 	webServerCtx, shutDownWebServer := contextplus.WithCancelCause(ctx)
 
-	server.signalShutdown = shutDownWebServer
-
 	go func() {
 		// Handle incoming requests. We always get a non-nil error at the end.
 		err := server.srv.Serve(listener)
@@ -223,16 +225,10 @@ func (server *WebServer) Run(ctx context.Context) error {
 
 	if err := server.srv.Shutdown(context.Background()); err != nil {
 		// Web Server wasn't gracefully shutdown
-		server.logger.Error().Err(err).Msg("Web server forced to shutdown")
-	}
-
-	server.logger.Info().
-		Msg("Web server has been shut down.")
-
-	if server.mongosyncError != nil {
-		// Web Server shutdown because of MigrationVerifier error
-		server.logger.Error().Err(server.mongosyncError).Msg("Web server exit because of MigrationVerifier error")
-		return server.mongosyncError
+		server.logger.Error().Err(err).Msg("Web server shutdown failed.")
+	} else {
+		server.logger.Info().
+			Msg("Web server is shut down.")
 	}
 
 	return serverCtxErr
@@ -255,10 +251,7 @@ func (server *WebServer) checkEndPoint(c *gin.Context) {
 	}
 
 	server.Mapi.StartCheck(context.Background(), req.Filter)
-	//if err != nil {
-	//	server.operationalErrorResponse(c, err)
-	//	return
-	//}
+
 	successResponse(c)
 }
 
@@ -524,15 +517,4 @@ READ:
 
 func successResponse(c *gin.Context) {
 	c.JSON(http.StatusOK, api.Response{true, nil, nil})
-}
-
-func (server *WebServer) operationalErrorResponse(c *gin.Context, err error) {
-	errorName := "APIError"
-
-	server.logger.Error().Err(err).Msg("Un-recoverable error during operational API handler, shutting down.")
-	server.mongosyncError = err
-	server.signalShutdown(err)
-
-	errorDescription := err.Error()
-	c.JSON(http.StatusOK, api.Response{false, &errorName, &errorDescription})
 }
