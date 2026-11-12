@@ -228,7 +228,7 @@ func (suite *WebServerTestSuite) TestOperationalEndpoint_RequestInProgress() {
 	suite.Require().NoError(json.Unmarshal(w.Body.Bytes(), &resp))
 	suite.Assert().False(resp.Success)
 	suite.Require().NotNil(resp.Error)
-	suite.Assert().Equal("RequestInProgressError", *resp.Error)
+	suite.Assert().Equal("RequestInProgress", *resp.Error)
 
 	suite.Assert().Nil(mock.filter, "no check started")
 }

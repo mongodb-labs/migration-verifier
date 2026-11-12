@@ -32,10 +32,12 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-// RequestInProgressErrorDescription is the error description for RequestInProgressError
-const RequestInProgressErrorDescription = "Another request is currently in progress"
-
-const minDurationSecsKey = "minDurationSecs"
+// RequestInProgressErrorDescription is the RequestInProgress error’s description.
+const (
+	RequestInProgressErrorDescription = "Another request is currently in progress"
+	shutdownTimeout                   = time.Minute
+	minDurationSecsKey                = "minDurationSecs"
+)
 
 // WebServer represents the HTTP server
 type WebServer struct {
@@ -183,7 +185,7 @@ func (server *WebServer) setupRouter(ctx context.Context) *gin.Engine {
 	return router
 }
 
-// Run checks the web server. This is a blocking call.
+// Run starts the web server. This is a blocking call.
 // This function should only be called once during each Webserver's life time.
 func (server *WebServer) Run(ctx context.Context, startCheck bool) error {
 	addrStr := fmt.Sprintf("0.0.0.0:%d", server.port)
@@ -209,8 +211,14 @@ func (server *WebServer) Run(ctx context.Context, startCheck bool) error {
 
 	if startCheck {
 		err := server.Mapi.StartCheck(webServerCtx, nil)
-		if err != nil && !errors.Is(err, api.ErrCheckInProgress) {
-			return errors.Wrap(err, "starting check")
+
+		// Since we just started the server there should be no conflict.
+		if err != nil {
+			err := errors.Wrap(err, "starting check")
+
+			server.shutDown(err)
+
+			return err
 		}
 	}
 
@@ -230,19 +238,28 @@ func (server *WebServer) Run(ctx context.Context, startCheck bool) error {
 
 	serverCtxErr := context.Cause(webServerCtx)
 
+	server.shutDown(serverCtxErr)
+
+	return serverCtxErr
+}
+
+func (server *WebServer) shutDown(reason error) {
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
 	server.logger.Info().
-		AnErr("reason", serverCtxErr).
+		AnErr("reason", reason).
 		Msg("Web server shutting down.")
 
-	if err := server.srv.Shutdown(context.Background()); err != nil {
+	if err := server.srv.Shutdown(ctx); err != nil {
 		// Web Server wasn't gracefully shutdown
-		server.logger.Error().Err(err).Msg("Web server shutdown failed.")
+		server.logger.Error().
+			Err(err).
+			Msg("Web server shutdown failed.")
 	} else {
 		server.logger.Info().
 			Msg("Web server is shut down.")
 	}
-
-	return serverCtxErr
 }
 
 // EmptyRequest is for request with empty body
