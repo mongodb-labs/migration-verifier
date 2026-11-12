@@ -1904,7 +1904,7 @@ func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mong
 	return verifier.dstClientDatabase(dbName).Collection(collName)
 }
 
-func (verifier *Verifier) StartServer() error {
+func (verifier *Verifier) RunServer() error {
 	server := NewWebServer(verifier.port, verifier, verifier.logger)
 	return server.Run(context.Background())
 }

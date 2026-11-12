@@ -277,10 +277,10 @@ func main() {
 				return verifier.CheckDriver(ctx, nil)
 			} else {
 				if cCtx.Bool(startFlag) {
-					verifier.Check(ctx, nil)
+					verifier.StartCheck(ctx, nil)
 				}
 
-				return verifier.StartServer()
+				return verifier.RunServer()
 			}
 		},
 	}

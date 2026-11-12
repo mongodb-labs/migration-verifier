@@ -48,7 +48,7 @@ var (
 // testChan is a pair of channels for coordinating generations in tests.
 // testChan[0] is a channel signalled when when a generation is complete
 // testChan[1] is a channel signalled when Check should continue with the next generation.
-func (verifier *Verifier) Check(ctx context.Context, filter bson.D) {
+func (verifier *Verifier) StartCheck(ctx context.Context, filter bson.D) {
 	go func() {
 		err := verifier.CheckDriver(ctx, filter)
 		if err != nil {

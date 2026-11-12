@@ -42,7 +42,7 @@ func NewMockVerifier() *MockVerifier {
 	return &MockVerifier{}
 }
 
-func (verifier *MockVerifier) Check(ctx context.Context, filter bson.D) {
+func (verifier *MockVerifier) StartCheck(ctx context.Context, filter bson.D) {
 	verifier.filter = filter
 }
 func (verifier *MockVerifier) WritesOff(ctx context.Context) error { return nil }

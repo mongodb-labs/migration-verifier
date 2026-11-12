@@ -243,7 +243,7 @@ func (server *WebServer) checkEndPoint(c *gin.Context) {
 		return
 	}
 
-	server.Mapi.Check(context.Background(), req.Filter)
+	server.Mapi.StartCheck(context.Background(), req.Filter)
 	//if err != nil {
 	//	server.operationalErrorResponse(c, err)
 	//	return
