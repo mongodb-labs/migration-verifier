@@ -198,6 +198,33 @@ func (suite *WebServerTestSuite) TestDocMismatchesEndPoint_Success() {
 	suite.Assert().ErrorIs(decoder.Decode(&resp), io.EOF, "should be done")
 }
 
+// An operational request that arrives while another is in progress is turned
+// away, and the server keeps running.
+func (suite *WebServerTestSuite) TestOperationalEndpoint_RequestInProgress() {
+	mock := NewMockVerifier()
+	server := NewWebServer(27020, mock, logger.NewDebugLogger())
+	router := server.setupRouter()
+
+	// Hold the lock as a request in progress would.
+	suite.Require().True(server.operationalAPILock.TryAcquire(1))
+	defer server.operationalAPILock.Release(1)
+
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest("POST", "/api/v1/check", strings.NewReader(`{}`))
+	suite.Require().NoError(err)
+
+	router.ServeHTTP(w, req)
+	suite.Require().Equal(http.StatusConflict, w.Code)
+
+	var resp api.Response
+	suite.Require().NoError(json.Unmarshal(w.Body.Bytes(), &resp))
+	suite.Assert().False(resp.Success)
+	suite.Require().NotNil(resp.Error)
+	suite.Assert().Equal("RequestInProgressError", *resp.Error)
+
+	suite.Assert().Nil(mock.filter, "no check started")
+}
+
 func (suite *WebServerTestSuite) TestCheckEndPoint() {
 	router := suite.webServer.setupRouter()
 
