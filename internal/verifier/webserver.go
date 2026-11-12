@@ -244,7 +244,11 @@ func (server *WebServer) Run(ctx context.Context, startCheck bool) error {
 }
 
 func (server *WebServer) shutDown(reason error) {
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	ctx, cancel := contextplus.WithTimeoutCause(
+		context.Background(),
+		shutdownTimeout,
+		fmt.Errorf("web server shutdown timed out"),
+	)
 	defer cancel()
 
 	server.logger.Info().

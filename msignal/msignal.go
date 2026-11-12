@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+
+	"github.com/10gen/migration-verifier/contextplus"
 )
 
 // NotifyContext is like the standard library’s signal.NotifyContext,
@@ -14,7 +16,7 @@ import (
 // When/if https://github.com/golang/go/issues/60756 is resolved,
 // replace any callers of this function with the standard library’s function.
 func NotifyContext(parent context.Context, signals ...os.Signal) (ctx context.Context, stop context.CancelFunc) {
-	ctx, cancel := context.WithCancelCause(parent)
+	ctx, cancel := contextplus.WithCancelCause(parent)
 	c := &signalCtx{
 		Context: ctx,
 		cancel:  cancel,
