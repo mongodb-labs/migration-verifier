@@ -144,7 +144,7 @@ func (server *WebServer) RequestAndResponseLogger(skipResponseBodyPaths ...strin
 	}
 }
 
-func (server *WebServer) setupRouter() *gin.Engine {
+func (server *WebServer) setupRouter(ctx context.Context) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	// This is set so that gin does not decode JSON numbers into float64.
 	// The actual BSON type conversion for JSON numbers is deferred to go-driver.
@@ -167,7 +167,10 @@ func (server *WebServer) setupRouter() *gin.Engine {
 	{
 		v1 := api.Group("/v1")
 		{
-			v1.POST("/check", server.operationalAPILockMiddleware(), server.checkEndPoint)
+			// This endpoint is special because it doesn’t block. Its handler
+			// thus needs both the server context and the request handle.
+			v1.POST("/check", server.operationalAPILockMiddleware(), server.makeCheckEndPoint(ctx))
+
 			v1.POST("/writesOff", server.operationalAPILockMiddleware(), server.writesOffEndpoint)
 			v1.GET("/progress", server.progressEndpoint)
 			v1.GET("/summary", server.summaryEndpoint)
@@ -198,11 +201,11 @@ func (server *WebServer) Run(ctx context.Context) error {
 		Int("port", boundPort).
 		Msg("Web server started.")
 
-	server.srv = &http.Server{
-		Handler: server.setupRouter(),
-	}
-
 	webServerCtx, shutDownWebServer := contextplus.WithCancelCause(ctx)
+
+	server.srv = &http.Server{
+		Handler: server.setupRouter(webServerCtx),
+	}
 
 	go func() {
 		// Handle incoming requests. We always get a non-nil error at the end.
@@ -210,7 +213,8 @@ func (server *WebServer) Run(ctx context.Context) error {
 
 		// Shut down the server manually if needed.
 		if !errors.Is(err, http.ErrServerClosed) {
-			server.logger.Error().Err(err).Msg("Web server failed check")
+			server.logger.Error().Err(err).Msg("Web server failed.")
+
 			shutDownWebServer(err)
 		}
 	}()
@@ -242,17 +246,19 @@ type CheckRequest struct {
 	Filter bson.D `bson:"filter"`
 }
 
-func (server *WebServer) checkEndPoint(c *gin.Context) {
+func (server *WebServer) makeCheckEndPoint(ctx context.Context) func(c *gin.Context) {
 	var req CheckRequest
 
-	if err := c.ShouldBindWith(&req, webserver.ExtJSONBinding); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	return func(c *gin.Context) {
+		if err := c.ShouldBindWith(&req, webserver.ExtJSONBinding); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		server.Mapi.StartCheck(ctx, req.Filter)
+
+		successResponse(c)
 	}
-
-	server.Mapi.StartCheck(context.Background(), req.Filter)
-
-	successResponse(c)
 }
 
 func (server *WebServer) writesOffEndpoint(c *gin.Context) {
