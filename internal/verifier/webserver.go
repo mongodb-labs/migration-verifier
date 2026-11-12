@@ -185,7 +185,7 @@ func (server *WebServer) setupRouter(ctx context.Context) *gin.Engine {
 
 // Run checks the web server. This is a blocking call.
 // This function should only be called once during each Webserver's life time.
-func (server *WebServer) Run(ctx context.Context) error {
+func (server *WebServer) Run(ctx context.Context, startCheck bool) error {
 	addrStr := fmt.Sprintf("0.0.0.0:%d", server.port)
 	server.logger.Info().
 		Str("address", addrStr).
@@ -205,6 +205,13 @@ func (server *WebServer) Run(ctx context.Context) error {
 
 	server.srv = &http.Server{
 		Handler: server.setupRouter(webServerCtx),
+	}
+
+	if startCheck {
+		err := server.Mapi.StartCheck(webServerCtx, nil)
+		if err != nil && !errors.Is(err, api.ErrCheckInProgress) {
+			return errors.Wrap(err, "starting check")
+		}
 	}
 
 	go func() {
