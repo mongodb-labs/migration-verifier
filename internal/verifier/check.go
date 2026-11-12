@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
@@ -43,12 +44,18 @@ var (
 	)
 )
 
-// Check is the asynchronous entry point to Check, should only be called by the web server. Use
-// CheckDriver directly for synchronous run.
-// testChan is a pair of channels for coordinating generations in tests.
-// testChan[0] is a channel signalled when when a generation is complete
-// testChan[1] is a channel signalled when Check should continue with the next generation.
-func (verifier *Verifier) StartCheck(ctx context.Context, filter bson.D) {
+// StartCheck runs CheckDriver in the background. It fails with
+// api.ErrCheckInProgress if a check that it started is still running. A
+// failed check is only logged. Use CheckDriver directly for a synchronous run.
+func (verifier *Verifier) StartCheck(ctx context.Context, filter bson.D) error {
+	verifier.mux.Lock()
+	inProgress := verifier.running
+	verifier.mux.Unlock()
+
+	if inProgress {
+		return api.ErrCheckInProgress
+	}
+
 	go func() {
 		err := verifier.CheckDriver(ctx, filter)
 
@@ -59,7 +66,10 @@ func (verifier *Verifier) StartCheck(ctx context.Context, filter bson.D) {
 				Msg("Check failed.")
 		}
 	}()
+
 	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
+
+	return nil
 }
 
 func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {

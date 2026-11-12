@@ -42,8 +42,10 @@ func NewMockVerifier() *MockVerifier {
 	return &MockVerifier{}
 }
 
-func (verifier *MockVerifier) StartCheck(ctx context.Context, filter bson.D) {
+func (verifier *MockVerifier) StartCheck(ctx context.Context, filter bson.D) error {
 	verifier.filter = filter
+
+	return nil
 }
 func (verifier *MockVerifier) WritesOff(ctx context.Context) error { return nil }
 func (verifier *MockVerifier) WritesOn(ctx context.Context)        {}
@@ -109,7 +111,7 @@ func (suite *WebServerTestSuite) TestDocMismatchesEndPoint_ImmediateError() {
 		return fmt.Errorf("sudden error")
 	}
 
-	router := suite.webServer.setupRouter()
+	router := suite.webServer.setupRouter(suite.T().Context())
 
 	w := httptest.NewRecorder()
 	w.Body = bytes.NewBuffer(nil)
@@ -156,7 +158,7 @@ func (suite *WebServerTestSuite) TestDocMismatchesEndPoint_Success() {
 		return nil
 	}
 
-	router := suite.webServer.setupRouter()
+	router := suite.webServer.setupRouter(suite.T().Context())
 
 	w := httptest.NewRecorder()
 	w.Body = bytes.NewBuffer(nil)
@@ -203,7 +205,7 @@ func (suite *WebServerTestSuite) TestDocMismatchesEndPoint_Success() {
 func (suite *WebServerTestSuite) TestOperationalEndpoint_RequestInProgress() {
 	mock := NewMockVerifier()
 	server := NewWebServer(27020, mock, logger.NewDebugLogger())
-	router := server.setupRouter()
+	router := server.setupRouter(suite.T().Context())
 
 	// Hold the lock as a request in progress would.
 	suite.Require().True(server.operationalAPILock.TryAcquire(1))
@@ -226,7 +228,7 @@ func (suite *WebServerTestSuite) TestOperationalEndpoint_RequestInProgress() {
 }
 
 func (suite *WebServerTestSuite) TestCheckEndPoint() {
-	router := suite.webServer.setupRouter()
+	router := suite.webServer.setupRouter(suite.T().Context())
 
 	input := `{
 		"filter": {
@@ -300,7 +302,7 @@ func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_ImmediateError() {
 		return fmt.Errorf("sudden error")
 	}
 
-	router := suite.webServer.setupRouter()
+	router := suite.webServer.setupRouter(suite.T().Context())
 
 	w := httptest.NewRecorder()
 	w.Body = bytes.NewBuffer(nil)
@@ -341,7 +343,7 @@ func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_Success() {
 		return nil
 	}
 
-	router := suite.webServer.setupRouter()
+	router := suite.webServer.setupRouter(suite.T().Context())
 
 	w := httptest.NewRecorder()
 	w.Body = bytes.NewBuffer(nil)
@@ -375,7 +377,7 @@ func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_Success() {
 }
 
 func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_InvalidTolerance() {
-	router := suite.webServer.setupRouter()
+	router := suite.webServer.setupRouter(suite.T().Context())
 
 	w := httptest.NewRecorder()
 	w.Body = bytes.NewBuffer(nil)
@@ -404,7 +406,7 @@ func (suite *WebServerTestSuite) TestNsMismatchesEndPoint_ValidTolerance() {
 		return nil
 	}
 
-	router := suite.webServer.setupRouter()
+	router := suite.webServer.setupRouter(suite.T().Context())
 
 	w := httptest.NewRecorder()
 	w.Body = bytes.NewBuffer(nil)
@@ -456,7 +458,7 @@ func (suite *WebServerTestSuite) TestSummaryEndPoint_Success() {
 		return want, nil
 	}
 
-	router := suite.webServer.setupRouter()
+	router := suite.webServer.setupRouter(suite.T().Context())
 
 	w := httptest.NewRecorder()
 	w.Body = bytes.NewBuffer(nil)
@@ -487,7 +489,7 @@ func (suite *WebServerTestSuite) TestSummaryEndPoint_Success() {
 }
 
 func (suite *WebServerTestSuite) TestSummaryEndPoint_InvalidMinDurationSecs() {
-	router := suite.webServer.setupRouter()
+	router := suite.webServer.setupRouter(suite.T().Context())
 
 	w := httptest.NewRecorder()
 	w.Body = bytes.NewBuffer(nil)
@@ -513,7 +515,7 @@ func (suite *WebServerTestSuite) TestSummaryEndPoint_MinDurationSecsForwarded() 
 		return api.SummaryResponse{}, nil
 	}
 
-	router := suite.webServer.setupRouter()
+	router := suite.webServer.setupRouter(suite.T().Context())
 
 	w := httptest.NewRecorder()
 	w.Body = bytes.NewBuffer(nil)
@@ -536,7 +538,7 @@ func (suite *WebServerTestSuite) TestSummaryEndPoint_ImmediateError() {
 		return api.SummaryResponse{}, fmt.Errorf("sudden error")
 	}
 
-	router := suite.webServer.setupRouter()
+	router := suite.webServer.setupRouter(suite.T().Context())
 
 	w := httptest.NewRecorder()
 	w.Body = bytes.NewBuffer(nil)
@@ -623,7 +625,7 @@ func (suite *WebServerTestSuite) TestRequestAndResponseLogger_ResponseBodySuppre
 		zl := zerolog.New(&logBuf).Level(zerolog.DebugLevel)
 		lg := logger.NewLogger(&zl, &logBuf)
 		ws := NewWebServer(27020, suite.mockVerifier, lg)
-		router := ws.setupRouter()
+		router := ws.setupRouter(suite.T().Context())
 
 		var reqBody io.Reader
 		if tc.reqBody != "" {

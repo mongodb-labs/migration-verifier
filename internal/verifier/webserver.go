@@ -247,15 +247,33 @@ type CheckRequest struct {
 }
 
 func (server *WebServer) makeCheckEndPoint(ctx context.Context) func(c *gin.Context) {
-	var req CheckRequest
-
 	return func(c *gin.Context) {
+		var req CheckRequest
+
 		if err := c.ShouldBindWith(&req, webserver.ExtJSONBinding); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		server.Mapi.StartCheck(ctx, req.Filter)
+		err := server.Mapi.StartCheck(ctx, req.Filter)
+		if errors.Is(err, api.ErrCheckInProgress) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		} else if err != nil {
+			token := errorRef(c)
+
+			server.logger.Error().
+				Str("token", token).
+				Err(err).
+				Msg("Failed to start check.")
+
+			c.JSON(
+				http.StatusInternalServerError,
+				gin.H{"error": fmt.Sprintf("See server logs (token: %s) for details.", token)},
+			)
+
+			return
+		}
 
 		successResponse(c)
 	}
@@ -440,12 +458,7 @@ func serveMismatches[T api.AnyMismatchInfo](
 	errEncoder := json.NewEncoder(c.Writer)
 
 	sendError := func(err error) {
-		// Prefer the trace ID, which should be set. Just in case, though,
-		// we create our own ID for the error.
-		errRef := cmp.Or(
-			c.Writer.Header().Get("Trace-Id"),
-			strconv.FormatUint(rand.Uint64(), 16),
-		)
+		errRef := errorRef(c)
 
 		server.logger.Error().
 			Str("request", c.Request.URL.Path).
@@ -519,6 +532,16 @@ READ:
 			sendError(err)
 		}
 	}
+}
+
+// errorRef returns an ID to report to the client in place of an internal
+// error, and to log with the error. It prefers the request’s trace ID, which
+// should be set; just in case, though, it creates an ID otherwise.
+func errorRef(c *gin.Context) string {
+	return cmp.Or(
+		c.Writer.Header().Get("Trace-Id"),
+		strconv.FormatUint(rand.Uint64(), 16),
+	)
 }
 
 func successResponse(c *gin.Context) {

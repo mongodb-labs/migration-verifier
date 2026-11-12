@@ -293,7 +293,9 @@ func main() {
 				return verifier.CheckDriver(ctx, nil)
 			} else {
 				if cCtx.Bool(startFlag) {
-					verifier.StartCheck(ctx, nil)
+					if err := verifier.StartCheck(ctx, nil); err != nil {
+						return errors.Wrap(err, "starting check")
+					}
 				}
 
 				return verifier.RunServer(ctx)

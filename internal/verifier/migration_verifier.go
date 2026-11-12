@@ -156,6 +156,9 @@ type Verifier struct {
 	// and never changes after that.
 	cachedGen0Stats atomic.Pointer[api.GenerationStats]
 
+	// checkStarted is set while a check that StartCheck started is running.
+	checkStarted atomic.Bool
+
 	generationStartTime  time.Time
 	lastDDLWarnTime      atomic.Int64
 	generationPauseDelay time.Duration
