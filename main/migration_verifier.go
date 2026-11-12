@@ -16,6 +16,7 @@ import (
 
 	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/metrics"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/verifier"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
@@ -25,6 +26,7 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/mongodb-labs/migration-tools/mongotools"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/mongodb-labs/migration-tools/sysinfo"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -65,7 +67,17 @@ const (
 	startFlag             = "start"
 	partitioningScheme    = "partitioningScheme"
 	indexSpecIgnoreFlag   = "indexSpecIgnore"
+	metricsLogPath        = "metricsLogPath"
+	disableMetricsLogging = "disableMetricsLogging"
 )
+
+// metricsNotice goes in the metrics flags’ help text, which is where users
+// find the feature.
+const metricsNotice = "Metrics are diagnostic output, not a supported interface: " +
+	"any metric, label, or name, and the file format, may change or disappear in any release without notice."
+
+// metricsShutdownTimeout bounds the meter provider’s shutdown on exit.
+const metricsShutdownTimeout = 10 * time.Second
 
 var logLevelStrs = lo.Map(
 	mslices.Of(
@@ -245,6 +257,15 @@ func main() {
 			Usage: "Interval to periodically collect pprof profiles (e.g. --pprofInterval=\"5m\")",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
+			Name:  metricsLogPath,
+			Value: ".",
+			Usage: "`directory` for the metrics file (" + metrics.FileName + "). " + metricsNotice,
+		}),
+		altsrc.NewBoolFlag(cli.BoolFlag{
+			Name:  disableMetricsLogging,
+			Usage: "Do not write the metrics file. " + metricsNotice,
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  mvflags.DDLHandlingFlag,
 			Value: string(verifier.DDLHandlingFailAll),
 			Usage: "How to handle DDL events on the source. One of: " + strings.Join(
@@ -258,6 +279,8 @@ func main() {
 			),
 		}),
 	}
+
+	var metricsPipeline option.Option[*metrics.Pipeline]
 
 	app := &cli.App{
 		Name:    "migration-verifier",
@@ -284,6 +307,11 @@ func main() {
 				return err
 			}
 
+			if pipeline, has := setUpMetrics(cCtx, verifier).Get(); has {
+				metricsPipeline = option.Some(pipeline)
+				verifier.SetMetricsHandler(pipeline.Handler())
+			}
+
 			if cCtx.Bool(checkOnly) {
 				err := verifier.WritesOff(ctx)
 				if err != nil {
@@ -300,6 +328,12 @@ func main() {
 	err := app.Run(os.Args)
 
 	stopCatchingSignals()
+
+	// log.Fatal and exitBySignal exit without running deferred calls, so this
+	// can’t be a defer.
+	if pipeline, has := metricsPipeline.Get(); has {
+		shutDownMetrics(pipeline)
+	}
 
 	// After a signal, any error most likely comes from the shutdown, so it
 	// isn’t fatal. The signal is the context’s cause: err itself rarely wraps
@@ -337,6 +371,32 @@ func exitBySignal(sig os.Signal) {
 	}
 
 	os.Exit(status)
+}
+
+// setUpMetrics creates the metrics pipeline. A failure is only logged:
+// metrics never stop a verification.
+func setUpMetrics(cCtx *cli.Context, v *verifier.Verifier) option.Option[*metrics.Pipeline] {
+	settings := metrics.Settings{}
+	if !cCtx.Bool(disableMetricsLogging) {
+		settings.FileDir = option.Some(cCtx.String(metricsLogPath))
+	}
+
+	pipeline, err := metrics.Setup(v.GetLogger(), settings)
+	if err != nil {
+		v.GetLogger().Warn().Err(err).Msg("Failed to set up metrics. Continuing without them.")
+		return option.None[*metrics.Pipeline]()
+	}
+
+	return option.Some(pipeline)
+}
+
+func shutDownMetrics(pipeline *metrics.Pipeline) {
+	ctx, cancel := context.WithTimeout(context.Background(), metricsShutdownTimeout)
+	defer cancel()
+
+	if err := pipeline.Shutdown(ctx); err != nil {
+		log.Warn().Err(err).Msg("Failed to shut down metrics.")
+	}
 }
 
 func handleLogLevelArg(cCtx *cli.Context) error {
