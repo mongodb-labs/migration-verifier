@@ -1904,9 +1904,9 @@ func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mong
 	return verifier.dstClientDatabase(dbName).Collection(collName)
 }
 
-func (verifier *Verifier) RunServer() error {
+func (verifier *Verifier) RunServer(ctx context.Context) error {
 	server := NewWebServer(verifier.port, verifier, verifier.logger)
-	return server.Run(context.Background())
+	return server.Run(ctx)
 }
 
 // Returned boolean indicates that namespaces are cached, and

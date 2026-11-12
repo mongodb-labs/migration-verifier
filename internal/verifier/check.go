@@ -52,10 +52,10 @@ func (verifier *Verifier) StartCheck(ctx context.Context, filter bson.D) {
 	go func() {
 		err := verifier.CheckDriver(ctx, filter)
 		if err != nil {
-			verifier.logger.Fatal().
+			verifier.logger.Error().
 				Int("generation", verifier.generation).
 				Err(err).
-				Msg("Fatal error.")
+				Msg("Check failed.")
 		}
 	}()
 	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)

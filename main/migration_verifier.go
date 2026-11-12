@@ -8,8 +8,10 @@ import (
 	"math"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/10gen/migration-verifier/buildvar"
@@ -79,7 +81,12 @@ func main() {
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	ctx := context.TODO()
+
+	ctx, _ := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM, // also handle termination signal
+	)
 
 	flags := []cli.Flag{
 		altsrc.NewStringFlag(cli.StringFlag{
@@ -280,7 +287,7 @@ func main() {
 					verifier.StartCheck(ctx, nil)
 				}
 
-				return verifier.RunServer()
+				return verifier.RunServer(ctx)
 			}
 		},
 	}
