@@ -61,7 +61,7 @@ func (server *WebServer) operationalAPILockMiddleware() gin.HandlerFunc {
 		// Turn the request away, but keep the server running: the request
 		// in progress is fine.
 		if !server.operationalAPILock.TryAcquire(1) {
-			errorName := "RequestInProgressError"
+			errorName := "RequestInProgress"
 			errorDescription := RequestInProgressErrorDescription
 			c.AbortWithStatusJSON(
 				http.StatusConflict,
@@ -264,19 +264,26 @@ func (server *WebServer) makeCheckEndPoint(ctx context.Context) func(c *gin.Cont
 
 		err := server.Mapi.StartCheck(ctx, req.Filter)
 		if errors.Is(err, api.ErrCheckInProgress) {
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			c.AbortWithStatusJSON(
+				http.StatusConflict,
+				api.Response{
+					Error:            new("CheckInProgress"),
+					ErrorDescription: new(err.Error()),
+				},
+			)
+
 			return
 		} else if err != nil {
 			token := errorRef(c)
 
 			server.logger.Error().
-				Str("token", token).
+				Str("ref", token).
 				Err(err).
 				Msg("Failed to start check.")
 
 			c.JSON(
 				http.StatusInternalServerError,
-				gin.H{"error": fmt.Sprintf("See server logs (token: %s) for details.", token)},
+				gin.H{"error": fmt.Sprintf("See server logs (ref: %s) for details.", token)},
 			)
 
 			return

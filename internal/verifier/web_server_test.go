@@ -28,7 +28,9 @@ type WebServerTestSuite struct {
 }
 
 type MockVerifier struct {
-	filter                  bson.D
+	filter        bson.D
+	startCheckErr error // what StartCheck returns
+
 	getSummary              func(context.Context, uint32) (api.SummaryResponse, error)
 	sendDocumentMismatches  func(context.Context, uint32, chan<- api.DocMismatchInfo) error
 	sendNamespaceMismatches func(
@@ -43,6 +45,10 @@ func NewMockVerifier() *MockVerifier {
 }
 
 func (verifier *MockVerifier) StartCheck(ctx context.Context, filter bson.D) error {
+	if verifier.startCheckErr != nil {
+		return verifier.startCheckErr
+	}
+
 	verifier.filter = filter
 
 	return nil
@@ -225,6 +231,41 @@ func (suite *WebServerTestSuite) TestOperationalEndpoint_RequestInProgress() {
 	suite.Assert().Equal("RequestInProgressError", *resp.Error)
 
 	suite.Assert().Nil(mock.filter, "no check started")
+}
+
+// /check reports a check that’s already running as a conflict, and any other
+// failure to start a check as an internal error whose details are only in the
+// server’s log.
+func (suite *WebServerTestSuite) TestCheckEndPoint_StartCheckFails() {
+	testCases := []struct {
+		name         string
+		err          error
+		expectStatus int
+	}{
+		{"check in progress", fmt.Errorf("oops: %w", api.ErrCheckInProgress), http.StatusConflict},
+		{"other failure", fmt.Errorf("secret detail"), http.StatusInternalServerError},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			mock := NewMockVerifier()
+			mock.startCheckErr = tc.err
+
+			router := NewWebServer(27020, mock, logger.NewDebugLogger()).setupRouter(suite.T().Context())
+
+			w := httptest.NewRecorder()
+			req, err := http.NewRequest("POST", "/api/v1/check", strings.NewReader(`{}`))
+			suite.Require().NoError(err)
+
+			router.ServeHTTP(w, req)
+			suite.Assert().Equal(tc.expectStatus, w.Code)
+
+			if tc.expectStatus == http.StatusInternalServerError {
+				suite.Assert().NotContains(w.Body.String(), "secret detail")
+				suite.Assert().Contains(w.Body.String(), "server logs")
+			}
+		})
+	}
 }
 
 func (suite *WebServerTestSuite) TestCheckEndPoint() {

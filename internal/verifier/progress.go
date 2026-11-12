@@ -208,7 +208,7 @@ func chain[T1, T2, T3 any](f1 func(a T1) T2, f2 func(b T2) T3) func(T1) T3 {
 func (verifier *Verifier) getPhaseWhileLocked() string {
 	verifier.assertLocked()
 
-	if !verifier.running {
+	if !verifier.running.Load() {
 		return Idle
 	}
 

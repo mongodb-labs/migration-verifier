@@ -44,20 +44,20 @@ var (
 	)
 )
 
-// StartCheck runs CheckDriver in the background. It fails with
-// api.ErrCheckInProgress if a check that it started is still running. A
-// failed check is only logged. Use CheckDriver directly for a synchronous run.
+// StartCheck runs a check in the background. It fails with
+// api.ErrCheckInProgress if a check is already running. A failed check is only
+// logged. Use CheckDriver directly for a synchronous run.
 func (verifier *Verifier) StartCheck(ctx context.Context, filter bson.D) error {
-	verifier.mux.Lock()
-	inProgress := verifier.running
-	verifier.mux.Unlock()
-
-	if inProgress {
+	// Claim the check before returning, so that a second call fails rather
+	// than racing this one.
+	if !verifier.claimCheck() {
 		return api.ErrCheckInProgress
 	}
 
+	profileCtx, stopProfile := contextplus.WithCancelCause(ctx)
+
 	go func() {
-		err := verifier.CheckDriver(ctx, filter)
+		err := verifier.runClaimedCheck(ctx, filter)
 
 		if err != nil {
 			verifier.logger.Error().
@@ -65,9 +65,11 @@ func (verifier *Verifier) StartCheck(ctx context.Context, filter bson.D) error {
 				Err(err).
 				Msg("Check failed.")
 		}
+
+		stopProfile(err)
 	}()
 
-	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
+	verifier.MaybeStartPeriodicHeapProfileCollection(profileCtx)
 
 	return nil
 }
@@ -182,21 +184,35 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	return nil
 }
 
+// claimCheck marks a check as running. It returns false if one already is.
+// Whoever claims a check must run it with runClaimedCheck.
+func (verifier *Verifier) claimCheck() bool {
+	return verifier.running.CompareAndSwap(false, true)
+}
+
+// CheckDriver runs a check and returns when it finishes. If a check is already
+// running, it does nothing.
 func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testChan ...chan struct{}) error {
-	verifier.mux.Lock()
-	if verifier.running {
-		verifier.mux.Unlock()
+	if !verifier.claimCheck() {
 		verifier.logger.Info().Msg("Verifier already checking the collections")
 		return nil
 	}
-	verifier.running = true
+
+	return verifier.runClaimedCheck(ctx, filter, testChan...)
+}
+
+// runClaimedCheck runs a check that claimCheck has claimed, and releases the
+// claim when it returns.
+func (verifier *Verifier) runClaimedCheck(
+	ctx context.Context,
+	filter bson.D,
+	testChan ...chan struct{},
+) error {
+	defer verifier.running.Store(false)
+
+	verifier.mux.Lock()
 	verifier.globalFilter = filter
 
-	defer func() {
-		verifier.mux.Lock()
-		verifier.running = false
-		verifier.mux.Unlock()
-	}()
 	var err error
 	if verifier.startClean {
 		verifier.logger.Info().Msg("Dropping old verifier metadata")

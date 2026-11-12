@@ -122,7 +122,7 @@ var timeFormat = time.RFC3339
 type Verifier struct {
 	writesOff          bool
 	lastGeneration     bool
-	running            bool
+	running            atomic.Bool // whether a check is running; claim with claimCheck
 	generation         int
 	port               int
 	srcURI             string
@@ -155,9 +155,6 @@ type Verifier struct {
 	// It is populated on the first /progress call after generation 0 completes
 	// and never changes after that.
 	cachedGen0Stats atomic.Pointer[api.GenerationStats]
-
-	// checkStarted is set while a check that StartCheck started is running.
-	checkStarted atomic.Bool
 
 	generationStartTime  time.Time
 	lastDDLWarnTime      atomic.Int64
@@ -1907,9 +1904,9 @@ func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mong
 	return verifier.dstClientDatabase(dbName).Collection(collName)
 }
 
-func (verifier *Verifier) RunServer(ctx context.Context, start bool) error {
+func (verifier *Verifier) RunServer(ctx context.Context, startCheck bool) error {
 	server := NewWebServer(verifier.port, verifier, verifier.logger)
-	return server.Run(ctx, start)
+	return server.Run(ctx, startCheck)
 }
 
 // Returned boolean indicates that namespaces are cached, and
