@@ -214,10 +214,18 @@ func (server *WebServer) Run(ctx context.Context) error {
 	}()
 
 	<-webServerCtx.Done()
+
+	server.logger.Info().
+		AnErr("reason", context.Cause(webServerCtx)).
+		Msg("Web server shutting down.")
+
 	if err := server.srv.Shutdown(context.Background()); err != nil {
 		// Web Server wasn't gracefully shutdown
 		server.logger.Error().Err(err).Msg("Web server forced to shutdown")
 	}
+
+	server.logger.Info().
+		Msg("Web server has been shut down.")
 
 	if server.mongosyncError != nil {
 		// Web Server shutdown because of MigrationVerifier error
