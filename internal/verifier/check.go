@@ -17,6 +17,7 @@ import (
 	"github.com/goaux/timer"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -54,7 +55,9 @@ func (verifier *Verifier) StartCheck(
 ) error {
 	// Claim the check before returning, so that a second call fails rather
 	// than racing this one.
-	if !verifier.claimCheck() {
+	release := verifier.claimCheck()
+
+	if release == nil {
 		return api.ErrCheckInProgress
 	}
 
@@ -63,6 +66,8 @@ func (verifier *Verifier) StartCheck(
 	verifier.MaybeStartPeriodicHeapProfileCollection(profileCtx)
 
 	go func() {
+		defer release()
+
 		err := verifier.runClaimedCheck(ctx, filter)
 
 		if err != nil && ctx.Err() == nil {
@@ -190,31 +195,37 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	return nil
 }
 
-// claimCheck marks a check as running. It returns false if one already is.
-// Whoever claims a check must run it with runClaimedCheck.
-func (verifier *Verifier) claimCheck() bool {
-	return verifier.running.CompareAndSwap(false, true)
+// claimCheck marks a check as running. It returns a function to release the
+// claim, or nil if a check is already running.
+func (verifier *Verifier) claimCheck() func() {
+	if verifier.running.CompareAndSwap(false, true) {
+		return func() { verifier.running.Store(false) }
+	}
+
+	return nil
 }
 
 // CheckDriver runs a check and returns when it finishes. If a check is already
 // running, it does nothing.
 func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testChan ...chan struct{}) error {
-	if !verifier.claimCheck() {
+	release := verifier.claimCheck()
+	if release == nil {
 		verifier.logger.Info().Msg("Verifier already checking the collections")
 		return nil
 	}
 
+	defer release()
+
 	return verifier.runClaimedCheck(ctx, filter, testChan...)
 }
 
-// runClaimedCheck runs a check that claimCheck has claimed, and releases the
-// claim when it returns.
+// runClaimedCheck runs a check that claimCheck has claimed.
 func (verifier *Verifier) runClaimedCheck(
 	ctx context.Context,
 	filter bson.D,
 	testChan ...chan struct{},
 ) error {
-	defer verifier.running.Store(false)
+	lo.Assert(verifier.running.Load(), "must be running")
 
 	verifier.mux.Lock()
 	verifier.globalFilter = filter
