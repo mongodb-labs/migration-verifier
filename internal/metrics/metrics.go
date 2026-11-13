@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -39,8 +40,8 @@ const (
 
 // Settings configures Setup.
 type Settings struct {
-	// FileDir is the directory for the metrics file. If unset, no metrics
-	// file is written.
+	// FileDir is the directory for the metrics file. It must already exist.
+	// If unset, no metrics file is written.
 	FileDir option.Option[string]
 }
 
@@ -84,8 +85,14 @@ func Setup(lgr *logger.Logger, settings Settings) (*Pipeline, error) {
 	var file option.Option[io.Closer]
 
 	if dir, has := settings.FileDir.Get(); has {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, fmt.Errorf("creating metrics directory %#q: %w", dir, err)
+		// lumberjack opens the file only on the first write, so check the
+		// directory now to fail at startup rather than at the first export.
+		info, err := os.Stat(dir)
+		if err != nil {
+			return nil, fmt.Errorf("checking metrics directory: %w", err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("%#q is %s; must be a directory", dir, describeFileType(info.Mode()))
 		}
 
 		rotatingFile := &lumberjack.Logger{
@@ -137,4 +144,26 @@ func newResource(lgr *logger.Logger) *resource.Resource {
 	}
 
 	return resource.NewWithAttributes(semconv.SchemaURL, attrs...)
+}
+
+// describeFileType describes a file type for an error message.
+func describeFileType(mode fs.FileMode) string {
+	switch {
+	case mode.IsRegular():
+		return "regular file"
+	case mode.IsDir():
+		return "directory"
+	case mode&fs.ModeSymlink != 0:
+		return "symbolic link"
+	case mode&fs.ModeNamedPipe != 0:
+		return "named pipe"
+	case mode&fs.ModeSocket != 0:
+		return "socket"
+	case mode&fs.ModeCharDevice != 0:
+		return "character device"
+	case mode&fs.ModeDevice != 0:
+		return "device"
+	default:
+		return fmt.Sprintf("type %s", mode.Type())
+	}
 }

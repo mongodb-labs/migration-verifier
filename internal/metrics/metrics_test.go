@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -40,7 +41,7 @@ func TestSetup_ServesRuntimeMetricsWithResourceLabels(t *testing.T) {
 }
 
 func TestSetup_WritesMetricsFile(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "metrics")
+	dir := t.TempDir()
 
 	pipeline, err := Setup(logger.NewDebugLogger(), Settings{FileDir: option.Some(dir)})
 	require.NoError(t, err)
@@ -67,6 +68,21 @@ func TestSetup_WritesMetricsFile(t *testing.T) {
 	// Every sample in the export has a timestamp.
 	series := findLine(t, string(contents), "go_goroutines{")
 	assert.Len(t, strings.Fields(series[strings.LastIndexByte(series, '}')+1:]), 2, series)
+}
+
+func TestSetup_FailsWithoutDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing")
+
+	_, err := Setup(logger.NewDebugLogger(), Settings{FileDir: option.Some(dir)})
+	require.ErrorIs(t, err, fs.ErrNotExist)
+	assert.NoDirExists(t, dir)
+
+	notDir := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(notDir, nil, 0o600))
+
+	_, err = Setup(logger.NewDebugLogger(), Settings{FileDir: option.Some(notDir)})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "regular file")
 }
 
 func TestSetup_NoFileWhenUnset(t *testing.T) {
