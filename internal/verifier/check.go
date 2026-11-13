@@ -45,9 +45,13 @@ var (
 )
 
 // StartCheck runs a check in the background. It fails with
-// api.ErrCheckInProgress if a check is already running. A failed check is only
-// logged. Use CheckDriver directly for a synchronous run.
-func (verifier *Verifier) StartCheck(ctx context.Context, filter bson.D) error {
+// api.ErrCheckInProgress if a check is already running. If the check fails,
+// reportErr is called with the error.
+func (verifier *Verifier) StartCheck(
+	ctx context.Context,
+	reportErr func(error),
+	filter bson.D,
+) error {
 	// Claim the check before returning, so that a second call fails rather
 	// than racing this one.
 	if !verifier.claimCheck() {
@@ -61,11 +65,13 @@ func (verifier *Verifier) StartCheck(ctx context.Context, filter bson.D) error {
 	go func() {
 		err := verifier.runClaimedCheck(ctx, filter)
 
-		if err != nil {
+		if err != nil && ctx.Err() == nil {
 			verifier.logger.Error().
 				Int("generation", verifier.generation).
 				Err(err).
 				Msg("Check failed.")
+
+			reportErr(fmt.Errorf("check failed in generation %d: %w", verifier.generation, err))
 		}
 
 		stopProfile(err)

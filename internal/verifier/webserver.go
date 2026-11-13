@@ -146,8 +146,11 @@ func (server *WebServer) RequestAndResponseLogger(skipResponseBodyPaths ...strin
 	}
 }
 
-func (server *WebServer) setupRouter(ctx context.Context) *gin.Engine {
+// setupRouter sets up the Gin router with all the necessary routes and middleware.
+// The cancelFunc cancels the server context.
+func (server *WebServer) setupRouter(ctx context.Context, cancelFunc context.CancelCauseFunc) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
+
 	// This is set so that gin does not decode JSON numbers into float64.
 	// The actual BSON type conversion for JSON numbers is deferred to go-driver.
 	gin.EnableJsonDecoderUseNumber()
@@ -171,7 +174,7 @@ func (server *WebServer) setupRouter(ctx context.Context) *gin.Engine {
 		{
 			// This endpoint is special because it doesn’t block. Its handler
 			// thus needs both the server context and the request handle.
-			v1.POST("/check", server.operationalAPILockMiddleware(), server.makeCheckEndPoint(ctx))
+			v1.POST("/check", server.operationalAPILockMiddleware(), server.makeCheckEndPoint(ctx, cancelFunc))
 
 			v1.POST("/writesOff", server.operationalAPILockMiddleware(), server.writesOffEndpoint)
 			v1.GET("/progress", server.progressEndpoint)
@@ -203,16 +206,17 @@ func (server *WebServer) Run(ctx context.Context, startCheck bool) error {
 		Int("port", boundPort).
 		Msg("Web server started.")
 
-	webServerCtx, shutDownWebServer := contextplus.WithCancelCause(ctx)
+	webServerCtx, cancelWebServer := contextplus.WithCancelCause(ctx)
 
 	server.srv = &http.Server{
-		Handler: server.setupRouter(webServerCtx),
+		Handler: server.setupRouter(webServerCtx, cancelWebServer),
 	}
 
 	if startCheck {
-		err := server.Mapi.StartCheck(webServerCtx, nil)
+		err := server.Mapi.StartCheck(webServerCtx, cancelWebServer, nil)
 
-		// Since we just started the server there should be no conflict.
+		// Since we just started the server there should be no conflict,
+		// but we might as well check anyhow.
 		if err != nil {
 			err := errors.Wrap(err, "starting check")
 
@@ -230,7 +234,7 @@ func (server *WebServer) Run(ctx context.Context, startCheck bool) error {
 		if !errors.Is(err, http.ErrServerClosed) {
 			server.logger.Error().Err(err).Msg("Web server failed.")
 
-			shutDownWebServer(err)
+			cancelWebServer(err)
 		}
 	}()
 
@@ -274,7 +278,7 @@ type CheckRequest struct {
 	Filter bson.D `bson:"filter"`
 }
 
-func (server *WebServer) makeCheckEndPoint(ctx context.Context) func(c *gin.Context) {
+func (server *WebServer) makeCheckEndPoint(ctx context.Context, cancelFunc context.CancelCauseFunc) func(c *gin.Context) {
 	return func(c *gin.Context) {
 		var req CheckRequest
 
@@ -283,7 +287,7 @@ func (server *WebServer) makeCheckEndPoint(ctx context.Context) func(c *gin.Cont
 			return
 		}
 
-		err := server.Mapi.StartCheck(ctx, req.Filter)
+		err := server.Mapi.StartCheck(ctx, cancelFunc, req.Filter)
 		if errors.Is(err, api.ErrCheckInProgress) {
 			c.AbortWithStatusJSON(
 				http.StatusConflict,
