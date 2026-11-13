@@ -32,10 +32,12 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-// RequestInProgressErrorDescription is the error description for RequestInProgressError
-const RequestInProgressErrorDescription = "Another request is currently in progress"
-
-const minDurationSecsKey = "minDurationSecs"
+// RequestInProgressErrorDescription is the RequestInProgress error’s description.
+const (
+	RequestInProgressErrorDescription = "Another request is currently in progress"
+	shutdownTimeout                   = time.Minute
+	minDurationSecsKey                = "minDurationSecs"
+)
 
 // WebServer represents the HTTP server
 type WebServer struct {
@@ -61,7 +63,7 @@ func (server *WebServer) operationalAPILockMiddleware() gin.HandlerFunc {
 		// Turn the request away, but keep the server running: the request
 		// in progress is fine.
 		if !server.operationalAPILock.TryAcquire(1) {
-			errorName := "RequestInProgressError"
+			errorName := "RequestInProgress"
 			errorDescription := RequestInProgressErrorDescription
 			c.AbortWithStatusJSON(
 				http.StatusConflict,
@@ -144,8 +146,11 @@ func (server *WebServer) RequestAndResponseLogger(skipResponseBodyPaths ...strin
 	}
 }
 
-func (server *WebServer) setupRouter() *gin.Engine {
+// setupRouter sets up the Gin router with all the necessary routes and middleware.
+// The cancelFunc cancels the server context.
+func (server *WebServer) setupRouter(ctx context.Context, cancelFunc context.CancelCauseFunc) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
+
 	// This is set so that gin does not decode JSON numbers into float64.
 	// The actual BSON type conversion for JSON numbers is deferred to go-driver.
 	gin.EnableJsonDecoderUseNumber()
@@ -167,7 +172,10 @@ func (server *WebServer) setupRouter() *gin.Engine {
 	{
 		v1 := api.Group("/v1")
 		{
-			v1.POST("/check", server.operationalAPILockMiddleware(), server.checkEndPoint)
+			// This endpoint is special because it doesn’t block. Its handler
+			// thus needs both the server context and the request handle.
+			v1.POST("/check", server.operationalAPILockMiddleware(), server.makeCheckEndPoint(ctx, cancelFunc))
+
 			v1.POST("/writesOff", server.operationalAPILockMiddleware(), server.writesOffEndpoint)
 			v1.GET("/progress", server.progressEndpoint)
 			v1.GET("/summary", server.summaryEndpoint)
@@ -180,9 +188,9 @@ func (server *WebServer) setupRouter() *gin.Engine {
 	return router
 }
 
-// Run checks the web server. This is a blocking call.
+// Run starts the web server. This is a blocking call.
 // This function should only be called once during each Webserver's life time.
-func (server *WebServer) Run(ctx context.Context) error {
+func (server *WebServer) Run(ctx context.Context, startCheck bool) error {
 	addrStr := fmt.Sprintf("0.0.0.0:%d", server.port)
 	server.logger.Info().
 		Str("address", addrStr).
@@ -198,11 +206,25 @@ func (server *WebServer) Run(ctx context.Context) error {
 		Int("port", boundPort).
 		Msg("Web server started.")
 
+	webServerCtx, cancelWebServer := contextplus.WithCancelCause(ctx)
+
 	server.srv = &http.Server{
-		Handler: server.setupRouter(),
+		Handler: server.setupRouter(webServerCtx, cancelWebServer),
 	}
 
-	webServerCtx, shutDownWebServer := contextplus.WithCancelCause(ctx)
+	if startCheck {
+		err := server.Mapi.StartCheck(webServerCtx, cancelWebServer, nil)
+
+		// Since we just started the server there should be no conflict,
+		// but we might as well check anyhow.
+		if err != nil {
+			err := errors.Wrap(err, "starting check")
+
+			server.shutDown(err)
+
+			return err
+		}
+	}
 
 	go func() {
 		// Handle incoming requests. We always get a non-nil error at the end.
@@ -210,18 +232,42 @@ func (server *WebServer) Run(ctx context.Context) error {
 
 		// Shut down the server manually if needed.
 		if !errors.Is(err, http.ErrServerClosed) {
-			server.logger.Error().Err(err).Msg("Web server failed check")
-			shutDownWebServer(err)
+			server.logger.Error().Err(err).Msg("Web server failed.")
+
+			cancelWebServer(err)
 		}
 	}()
 
 	<-webServerCtx.Done()
-	if err := server.srv.Shutdown(context.Background()); err != nil {
-		// Web Server wasn't gracefully shutdown
-		server.logger.Error().Err(err).Msg("Web server forced to shutdown")
-	}
 
-	return nil
+	serverCtxErr := context.Cause(webServerCtx)
+
+	server.shutDown(serverCtxErr)
+
+	return serverCtxErr
+}
+
+func (server *WebServer) shutDown(reason error) {
+	ctx, cancel := contextplus.WithTimeoutCause(
+		context.Background(),
+		shutdownTimeout,
+		fmt.Errorf("web server shutdown timed out"),
+	)
+	defer cancel()
+
+	server.logger.Info().
+		AnErr("reason", reason).
+		Msg("Web server shutting down.")
+
+	if err := server.srv.Shutdown(ctx); err != nil {
+		// Web Server wasn't gracefully shutdown
+		server.logger.Error().
+			Err(err).
+			Msg("Web server shutdown failed.")
+	} else {
+		server.logger.Info().
+			Msg("Web server is shut down.")
+	}
 }
 
 // EmptyRequest is for request with empty body
@@ -232,17 +278,47 @@ type CheckRequest struct {
 	Filter bson.D `bson:"filter"`
 }
 
-func (server *WebServer) checkEndPoint(c *gin.Context) {
-	var req CheckRequest
+func (server *WebServer) makeCheckEndPoint(ctx context.Context, cancelFunc context.CancelCauseFunc) func(c *gin.Context) {
+	return func(c *gin.Context) {
+		var req CheckRequest
 
-	if err := c.ShouldBindWith(&req, webserver.ExtJSONBinding); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		if err := c.ShouldBindWith(&req, webserver.ExtJSONBinding); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		err := server.Mapi.StartCheck(ctx, cancelFunc, req.Filter)
+		if errors.Is(err, api.ErrCheckInProgress) {
+			c.AbortWithStatusJSON(
+				http.StatusConflict,
+				api.Response{
+					Error:            new("CheckInProgress"),
+					ErrorDescription: new(err.Error()),
+				},
+			)
+
+			return
+		} else if err != nil {
+			token := errorRef(c)
+
+			server.logger.Error().
+				Str("ref", token).
+				Err(err).
+				Msg("Failed to start check.")
+
+			c.AbortWithStatusJSON(
+				http.StatusInternalServerError,
+				api.Response{
+					Error:            new("InternalServerError"),
+					ErrorDescription: new(fmt.Sprintf("See server logs (ref: %s) for details.", token)),
+				},
+			)
+
+			return
+		}
+
+		successResponse(c)
 	}
-
-	server.Mapi.Check(context.Background(), req.Filter)
-
-	successResponse(c)
 }
 
 func (server *WebServer) writesOffEndpoint(c *gin.Context) {
@@ -424,12 +500,7 @@ func serveMismatches[T api.AnyMismatchInfo](
 	errEncoder := json.NewEncoder(c.Writer)
 
 	sendError := func(err error) {
-		// Prefer the trace ID, which should be set. Just in case, though,
-		// we create our own ID for the error.
-		errRef := cmp.Or(
-			c.Writer.Header().Get("Trace-Id"),
-			strconv.FormatUint(rand.Uint64(), 16),
-		)
+		errRef := errorRef(c)
 
 		server.logger.Error().
 			Str("request", c.Request.URL.Path).
@@ -503,6 +574,16 @@ READ:
 			sendError(err)
 		}
 	}
+}
+
+// errorRef returns an ID to report to the client in place of an internal
+// error, and to log with the error. It prefers the request’s trace ID, which
+// should be set; just in case, though, it creates an ID otherwise.
+func errorRef(c *gin.Context) string {
+	return cmp.Or(
+		c.Writer.Header().Get("Trace-Id"),
+		strconv.FormatUint(rand.Uint64(), 16),
+	)
 }
 
 func successResponse(c *gin.Context) {

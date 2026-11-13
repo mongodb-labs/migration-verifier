@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/10gen/migration-verifier/buildvar"
@@ -19,6 +21,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/main/mvflags"
+	"github.com/10gen/migration-verifier/msignal"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/mongodb-labs/migration-tools/mongotools"
@@ -79,7 +82,20 @@ func main() {
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	ctx := context.TODO()
+
+	ctx, stopCatchingSignals := msignal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM, // also handle termination signal
+	)
+
+	// Catch only the first signal. After it, signals get their default
+	// behavior again, so a second one ends the process at once even if the
+	// shutdown hangs.
+	go func() {
+		<-ctx.Done()
+		stopCatchingSignals()
+	}()
 
 	flags := []cli.Flag{
 		altsrc.NewStringFlag(cli.StringFlag{
@@ -276,18 +292,51 @@ func main() {
 
 				return verifier.CheckDriver(ctx, nil)
 			} else {
-				if cCtx.Bool(startFlag) {
-					verifier.Check(ctx, nil)
-				}
-
-				return verifier.StartServer()
+				return verifier.RunServer(ctx, cCtx.Bool(startFlag))
 			}
 		},
 	}
 
-	if err := app.Run(os.Args); err != nil {
+	err := app.Run(os.Args)
+
+	stopCatchingSignals()
+
+	// After a signal, any error most likely comes from the shutdown, so it
+	// isn’t fatal. The signal is the context’s cause: err itself rarely wraps
+	// it.
+	if sigErr, ok := stderrors.AsType[msignal.SignalError](context.Cause(ctx)); ok {
+		log.Info().
+			Stringer("signal", sigErr.Signal).
+			AnErr("error", err).
+			Msg("Shut down after signal.")
+
+		exitBySignal(sigErr.Signal)
+	}
+
+	if err != nil {
 		log.Fatal().Err(err).Stack().Msg("Fatal Error")
 	}
+}
+
+// exitBySignal ends the process by sending it sig, which must have its default
+// behavior again, so that the process exits as it would have without a signal
+// handler. If the process survives, for example because sig is ignored, it
+// exits with the status that shells report for a process that sig ended.
+func exitBySignal(sig os.Signal) {
+	if self, err := os.FindProcess(os.Getpid()); err == nil {
+		_ = self.Signal(sig)
+	}
+
+	// Delivery is asynchronous, so give the signal a moment to end the
+	// process.
+	time.Sleep(time.Second)
+
+	status := 1
+	if num, isSyscallSignal := sig.(syscall.Signal); isSyscallSignal {
+		status = 128 + int(num)
+	}
+
+	os.Exit(status)
 }
 
 func handleLogLevelArg(cCtx *cli.Context) error {

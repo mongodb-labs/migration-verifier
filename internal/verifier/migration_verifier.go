@@ -122,7 +122,7 @@ var timeFormat = time.RFC3339
 type Verifier struct {
 	writesOff          bool
 	lastGeneration     bool
-	running            bool
+	running            atomic.Bool // whether a check is running; claim with claimCheck
 	generation         int
 	port               int
 	srcURI             string
@@ -1904,9 +1904,9 @@ func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mong
 	return verifier.dstClientDatabase(dbName).Collection(collName)
 }
 
-func (verifier *Verifier) StartServer() error {
+func (verifier *Verifier) RunServer(ctx context.Context, startCheck bool) error {
 	server := NewWebServer(verifier.port, verifier, verifier.logger)
-	return server.Run(context.Background())
+	return server.Run(ctx, startCheck)
 }
 
 // Returned boolean indicates that namespaces are cached, and

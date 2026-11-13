@@ -11,7 +11,7 @@ import (
 
 // MigrationVerifierAPI represents the interaction webserver with mongosync
 type MigrationVerifierAPI interface {
-	Check(ctx context.Context, filter bson.D)
+	StartCheck(ctx context.Context, reportErr func(error), filter bson.D) error
 	WritesOff(ctx context.Context) error
 	WritesOn(ctx context.Context)
 	GetProgress(ctx context.Context) (Progress, error)

@@ -8,6 +8,7 @@ import (
 	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
+	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
@@ -16,6 +17,7 @@ import (
 	"github.com/goaux/timer"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -43,22 +45,44 @@ var (
 	)
 )
 
-// Check is the asynchronous entry point to Check, should only be called by the web server. Use
-// CheckDriver directly for synchronous run.
-// testChan is a pair of channels for coordinating generations in tests.
-// testChan[0] is a channel signalled when when a generation is complete
-// testChan[1] is a channel signalled when Check should continue with the next generation.
-func (verifier *Verifier) Check(ctx context.Context, filter bson.D) {
+// StartCheck runs a check in the background. It fails with
+// api.ErrCheckInProgress if a check is already running. If the check fails,
+// reportErr is called with the error.
+func (verifier *Verifier) StartCheck(
+	ctx context.Context,
+	reportErr func(error),
+	filter bson.D,
+) error {
+	// Claim the check before returning, so that a second call fails rather
+	// than racing this one.
+	release := verifier.claimCheck()
+
+	if release == nil {
+		return api.ErrCheckInProgress
+	}
+
+	profileCtx, stopProfile := contextplus.WithCancelCause(ctx)
+
+	verifier.MaybeStartPeriodicHeapProfileCollection(profileCtx)
+
 	go func() {
-		err := verifier.CheckDriver(ctx, filter)
-		if err != nil {
-			verifier.logger.Fatal().
+		defer release()
+
+		err := verifier.runClaimedCheck(ctx, filter)
+
+		if err != nil && ctx.Err() == nil {
+			verifier.logger.Error().
 				Int("generation", verifier.generation).
 				Err(err).
-				Msg("Fatal error.")
+				Msg("Check failed.")
+
+			reportErr(fmt.Errorf("check failed in generation %d: %w", verifier.generation, err))
 		}
+
+		stopProfile(err)
 	}()
-	verifier.MaybeStartPeriodicHeapProfileCollection(ctx)
+
+	return nil
 }
 
 func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
@@ -171,21 +195,41 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 	return nil
 }
 
+// claimCheck marks a check as running. It returns a function to release the
+// claim, or nil if a check is already running.
+func (verifier *Verifier) claimCheck() func() {
+	if verifier.running.CompareAndSwap(false, true) {
+		return func() { verifier.running.Store(false) }
+	}
+
+	return nil
+}
+
+// CheckDriver runs a check and returns when it finishes. If a check is already
+// running, it does nothing.
 func (verifier *Verifier) CheckDriver(ctx context.Context, filter bson.D, testChan ...chan struct{}) error {
-	verifier.mux.Lock()
-	if verifier.running {
-		verifier.mux.Unlock()
+	release := verifier.claimCheck()
+	if release == nil {
 		verifier.logger.Info().Msg("Verifier already checking the collections")
 		return nil
 	}
-	verifier.running = true
+
+	defer release()
+
+	return verifier.runClaimedCheck(ctx, filter, testChan...)
+}
+
+// runClaimedCheck runs a check that claimCheck has claimed.
+func (verifier *Verifier) runClaimedCheck(
+	ctx context.Context,
+	filter bson.D,
+	testChan ...chan struct{},
+) error {
+	lo.Assert(verifier.running.Load(), "must be running")
+
+	verifier.mux.Lock()
 	verifier.globalFilter = filter
 
-	defer func() {
-		verifier.mux.Lock()
-		verifier.running = false
-		verifier.mux.Unlock()
-	}()
 	var err error
 	if verifier.startClean {
 		verifier.logger.Info().Msg("Dropping old verifier metadata")
