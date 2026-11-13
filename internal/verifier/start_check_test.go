@@ -1,10 +1,10 @@
 package verifier
 
 import (
-	"context"
 	"testing"
 	"time"
 
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -55,15 +55,15 @@ func (suite *IntegrationTestSuite) TestStartCheck_ReportsFailure() {
 func (suite *IntegrationTestSuite) TestStartCheck_IgnoresFailureAfterContextEnds() {
 	verifier := suite.BuildVerifier()
 
-	ctx, cancel := context.WithCancel(suite.Context())
-	defer cancel()
+	ctx, cancel := contextplus.WithCancelCause(suite.Context())
+	defer cancel(nil)
 
 	failure := make(chan error, 1)
 	suite.Require().NoError(
 		verifier.StartCheck(ctx, func(err error) { failure <- err }, nil),
 	)
 
-	cancel()
+	cancel(nil)
 
 	suite.Require().Eventually(
 		func() bool { return !verifier.running.Load() },
