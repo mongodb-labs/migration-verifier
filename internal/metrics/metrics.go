@@ -40,8 +40,8 @@ const (
 
 // Settings configures Setup.
 type Settings struct {
-	// FileDir is the directory for the metrics file. It must already exist.
-	// If unset, no metrics file is written.
+	// FileDir is the directory for the metrics file. If it is unset, or isn’t
+	// an existing directory, no metrics file is written.
 	FileDir option.Option[string]
 }
 
@@ -75,7 +75,8 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 
 // Setup creates the verifier’s metrics pipeline. Its handler serves the
 // metrics in Prometheus text format, and if settings.FileDir is set, it
-// writes them to a rotating file in that directory.
+// writes them to a rotating file in that directory. If that directory is
+// unusable, Setup logs a warning and writes no file; the handler still works.
 //
 // The pipeline always includes the Go runtime and process metrics. Every
 // series carries the process’s resource attributes (service name and
@@ -85,24 +86,18 @@ func Setup(lgr *logger.Logger, settings Settings) (*Pipeline, error) {
 	var file option.Option[io.Closer]
 
 	if dir, has := settings.FileDir.Get(); has {
-		// lumberjack opens the file only on the first write, so check the
-		// directory now to fail at startup rather than at the first export.
-		info, err := os.Stat(dir)
-		if err != nil {
-			return nil, fmt.Errorf("checking metrics directory: %w", err)
-		}
-		if !info.IsDir() {
-			return nil, fmt.Errorf("%#q (%s) must be a directory", dir, fstools.DescribeFileType(info.Mode()))
-		}
+		if err := checkFileDir(dir); err != nil {
+			lgr.Warn().Err(err).Msg("Cannot write metrics file. Continuing without it.")
+		} else {
+			rotatingFile := &lumberjack.Logger{
+				Filename: filepath.Join(dir, FileName),
+				MaxSize:  fileMaxSizeMB,
+				Compress: true,
+			}
 
-		rotatingFile := &lumberjack.Logger{
-			Filename: filepath.Join(dir, FileName),
-			MaxSize:  fileMaxSizeMB,
-			Compress: true,
+			out = option.Some[io.Writer](rotatingFile)
+			file = option.Some[io.Closer](rotatingFile)
 		}
-
-		out = option.Some[io.Writer](rotatingFile)
-		file = option.Some[io.Closer](rotatingFile)
 	}
 
 	pipeline, err := oteltools.Setup(oteltools.Settings{
@@ -116,6 +111,21 @@ func Setup(lgr *logger.Logger, settings Settings) (*Pipeline, error) {
 	}
 
 	return &Pipeline{Pipeline: pipeline, file: file}, nil
+}
+
+// checkFileDir fails unless dir is an existing directory. lumberjack opens the
+// file only on the first write, and it creates any missing directory, so this
+// catches a bad directory at startup rather than at the first export.
+func checkFileDir(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("checking metrics directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%#q (%s) must be a directory", dir, fstools.DescribeFileType(info.Mode()))
+	}
+
+	return nil
 }
 
 // resourceLabelKeys are the resource attributes that become labels on every
