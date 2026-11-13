@@ -14,36 +14,35 @@
 // An application that counts compared documents, serves the count at
 // /metrics, and also writes it to a file:
 //
-//		pipeline, err := oteltools.Setup(oteltools.Settings{
-//			MetricsOut: option.Some[io.Writer](metricsFile),
-//		})
-//		if err != nil {
-//			return fmt.Errorf("setup otel: %w", err)
-//		}
+//	pipeline, err := oteltools.Setup(oteltools.Settings{
+//		MetricsOut: option.Some[io.Writer](metricsFile),
+//	})
+//	if err != nil {
+//		return fmt.Errorf("setup otel: %w", err)
+//	}
 //
-//		http.Handle("/metrics", pipeline.Handler())
+//	http.Handle("/metrics", pipeline.Handler())
 //
-//		meter := pipeline.MeterProvider().Meter("my-tool")
+//	meter := pipeline.MeterProvider().Meter("my-tool")
 //
-//		// This should never actually fail, so a runtime assertion would also
-//		// be appropriate here.
-//		comparedDocs, err := meter.Int64Counter("compared_docs")
-//		if err != nil {
-//			return fmt.Errorf("setup compared_docs: %w", err)
-//		}
+//	// This should never actually fail, so a runtime assertion would also
+//	// be appropriate here.
+//	comparedDocs, err := meter.Int64Counter("compared_docs")
+//	if err != nil {
+//		return fmt.Errorf("setup compared_docs: %w", err)
+//	}
 //
-//		comparedDocs.Add(ctx, 1)
+//	comparedDocs.Add(ctx, 1)
 //
-//		// … and before exiting, which writes a last export:
-//		if err := pipeline.Shutdown(ctx); err != nil {
-//	     // Do *not* close the file if the shutdown failed.
+//	// Once we’re done, shut the metrics down:
+//	if err := pipeline.Shutdown(ctx); err != nil {
+//		slog.Warn("shutdown otel", "err", err)
+//	}
 //
-//			slog.Warn("shutdown otel", "err", err)
-//		} else {
-//			// Successful shutdown
-//
-//			_ = metricsFile.Close()
-//		}
+//	// If ctx ended, a Write may still be in progress, so leave the file open.
+//	if ctx.Err() == nil {
+//		_ = metricsFile.Close()
+//	}
 //
 // Both outputs then contain a counter named compared_docs_total. They also
 // contain the Go runtime (go_*) and process (process_*) metrics that Setup
@@ -132,8 +131,9 @@ type Settings struct {
 	// format that the package documentation describes. Each export, with
 	// its EndOfExport line, is written in a single Write call.
 	//
-	// If a Write fails, the pipeline writes nothing more, and
-	// Pipeline.Shutdown returns that Write’s error.
+	// If a Write fails, the pipeline logs the error and keeps writing an
+	// export every ExportInterval. Pipeline.Shutdown returns only the last
+	// export’s error.
 	//
 	// The pipeline never closes the writer. If Pipeline.Shutdown succeeds,
 	// the pipeline writes nothing more, so the caller can close the writer
