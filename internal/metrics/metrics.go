@@ -10,13 +10,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 
 	"github.com/10gen/migration-verifier/buildvar"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/mongodb-labs/migration-tools/fstools"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/mongodb-labs/migration-tools/oteltools"
 	slogzerolog "github.com/samber/slog-zerolog/v2"
@@ -92,7 +92,7 @@ func Setup(lgr *logger.Logger, settings Settings) (*Pipeline, error) {
 			return nil, fmt.Errorf("checking metrics directory: %w", err)
 		}
 		if !info.IsDir() {
-			return nil, fmt.Errorf("%#q is %s; must be a directory", dir, describeFileType(info.Mode()))
+			return nil, fmt.Errorf("%#q (%s) must be a directory", dir, fstools.DescribeFileType(info.Mode()))
 		}
 
 		rotatingFile := &lumberjack.Logger{
@@ -144,26 +144,4 @@ func newResource(lgr *logger.Logger) *resource.Resource {
 	}
 
 	return resource.NewWithAttributes(semconv.SchemaURL, attrs...)
-}
-
-// describeFileType describes a file type for an error message.
-func describeFileType(mode fs.FileMode) string {
-	switch {
-	case mode.IsRegular():
-		return "regular file"
-	case mode.IsDir():
-		return "directory"
-	case mode&fs.ModeSymlink != 0:
-		return "symbolic link"
-	case mode&fs.ModeNamedPipe != 0:
-		return "named pipe"
-	case mode&fs.ModeSocket != 0:
-		return "socket"
-	case mode&fs.ModeCharDevice != 0:
-		return "character device"
-	case mode&fs.ModeDevice != 0:
-		return "device"
-	default:
-		return fmt.Sprintf("type %s", mode.Type())
-	}
 }
