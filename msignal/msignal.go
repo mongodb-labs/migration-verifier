@@ -15,65 +15,31 @@ import (
 //
 // When/if https://github.com/golang/go/issues/60756 is resolved,
 // replace any callers of this function with the standard library’s function.
-func NotifyContext(parent context.Context, signals ...os.Signal) (ctx context.Context, stop context.CancelFunc) {
+func NotifyContext(parent context.Context, signals ...os.Signal) (context.Context, context.CancelFunc) {
 	ctx, cancel := contextplus.WithCancelCause(parent)
-	c := &signalCtx{
-		Context: ctx,
-		cancel:  cancel,
-		signals: signals,
-	}
-	c.ch = make(chan os.Signal, 1)
-	signal.Notify(c.ch, c.signals...)
+
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, signals...)
+
 	if ctx.Err() == nil {
 		go func() {
 			select {
-			case s := <-c.ch:
-				c.cancel(SignalError{s})
-			case <-c.Done():
+			case s := <-ch:
+				cancel(SignalError{s})
+			case <-ctx.Done():
 			}
 		}()
 	}
-	return c, c.stop
-}
 
-type signalCtx struct {
-	context.Context
-
-	cancel  context.CancelCauseFunc
-	signals []os.Signal
-	ch      chan os.Signal
-}
-
-func (c *signalCtx) stop() {
-	c.cancel(nil)
-	signal.Stop(c.ch)
-}
-
-type stringer interface {
-	String() string
-}
-
-func (c *signalCtx) String() string {
-	var buf []byte
-	// We know that the type of c.Context is context.cancelCtx, and we know that the
-	// String method of cancelCtx returns a string that ends with ".WithCancel".
-	name := c.Context.(stringer).String()
-	name = name[:len(name)-len(".WithCancel")]
-	buf = append(buf, "signal.NotifyContext("+name...)
-	if len(c.signals) != 0 {
-		buf = append(buf, ", ["...)
-		for i, s := range c.signals {
-			buf = append(buf, s.String()...)
-			if i != len(c.signals)-1 {
-				buf = append(buf, ' ')
-			}
-		}
-		buf = append(buf, ']')
+	stop := func() {
+		cancel(nil)
+		signal.Stop(ch)
 	}
-	buf = append(buf, ')')
-	return string(buf)
+
+	return ctx, stop
 }
 
+// SignalError represents an error caused by receiving an OS signal.
 type SignalError struct{ os.Signal }
 
 func (s SignalError) Error() string {
