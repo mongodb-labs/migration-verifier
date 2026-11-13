@@ -69,13 +69,12 @@ const (
 	partitioningScheme    = "partitioningScheme"
 	indexSpecIgnoreFlag   = "indexSpecIgnore"
 	metricsLogPath        = "metricsLogPath"
-	disableMetricsLogging = "disableMetricsLogging"
 )
 
 // metricsNotice goes in the metrics flags’ help text, which is where users
 // find the feature.
 const metricsNotice = "Metrics are diagnostic output, not a supported interface: " +
-	"any metric, label, or name, and the file format, may change or disappear in any release without notice."
+	"anything may change or disappear in any release without notice. Metrics are never sent to any external process."
 
 // metricsShutdownTimeout bounds the meter provider’s shutdown on exit.
 const metricsShutdownTimeout = 10 * time.Second
@@ -258,13 +257,9 @@ func main() {
 			Usage: "Interval to periodically collect pprof profiles (e.g. --pprofInterval=\"5m\")",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  metricsLogPath,
-			Value: ".",
-			Usage: "`directory` for the metrics file (" + metrics.FileName + "). " + metricsNotice,
-		}),
-		altsrc.NewBoolFlag(cli.BoolFlag{
-			Name:  disableMetricsLogging,
-			Usage: "Do not write the metrics file. " + metricsNotice,
+			Name: metricsLogPath,
+			Usage: "directory for the metrics files (" + metrics.FileName + ", rotated periodically). " +
+				"If unset, no metrics file is written. " + metricsNotice,
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  mvflags.DDLHandlingFlag,
@@ -378,8 +373,8 @@ func exitBySignal(sig os.Signal) {
 // metrics never stop a verification.
 func setUpMetrics(cCtx *cli.Context, v *verifier.Verifier) option.Option[*metrics.Pipeline] {
 	settings := metrics.Settings{}
-	if !cCtx.Bool(disableMetricsLogging) {
-		settings.FileDir = option.Some(cCtx.String(metricsLogPath))
+	if dir := cCtx.String(metricsLogPath); dir != "" {
+		settings.FileDir = option.Some(dir)
 	}
 
 	pipeline, err := metrics.Setup(v.GetLogger(), settings)
