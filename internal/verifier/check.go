@@ -56,6 +56,8 @@ func (verifier *Verifier) StartCheck(ctx context.Context, filter bson.D) error {
 
 	profileCtx, stopProfile := contextplus.WithCancelCause(ctx)
 
+	verifier.MaybeStartPeriodicHeapProfileCollection(profileCtx)
+
 	go func() {
 		err := verifier.runClaimedCheck(ctx, filter)
 
@@ -68,8 +70,6 @@ func (verifier *Verifier) StartCheck(ctx context.Context, filter bson.D) error {
 
 		stopProfile(err)
 	}()
-
-	verifier.MaybeStartPeriodicHeapProfileCollection(profileCtx)
 
 	return nil
 }
