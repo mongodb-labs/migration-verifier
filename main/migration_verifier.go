@@ -48,7 +48,8 @@ const (
 	generationPauseDelay  = "generationPauseDelay"
 	workerSleepDelay      = "workerSleepDelay"
 	serverPort            = "serverPort"
-	logPath               = "logPath"
+	logDir                = "logDir"
+	logPathAlias          = "logPath" // deprecated name for logDir
 	srcNamespace          = "srcNamespace"
 	dstNamespace          = "dstNamespace"
 	srcChangeReader       = "srcChangeReader"
@@ -68,8 +69,10 @@ const (
 	startFlag             = "start"
 	partitioningScheme    = "partitioningScheme"
 	indexSpecIgnoreFlag   = "indexSpecIgnore"
-	metricsLogPath        = "metricsLogPath"
+	metricsLogDir         = "metricsLogDir"
 )
+
+const logDirDefault = "stdout"
 
 // metricsNotice goes in the metrics flags’ help text, which is where users
 // find the feature.
@@ -132,9 +135,16 @@ func main() {
 			Usage: "`port` for the control web server (0 assigns a random port)",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  logPath,
-			Value: "stdout",
-			Usage: "logging file `path`",
+			Name:  logDir,
+			Value: logDirDefault,
+			Usage: "`directory` for the log file (" + logger.LogFileName + "), or stdout or stderr",
+		}),
+		// This is a separate flag rather than an alias in logDir’s Name
+		// because altsrc doesn’t read aliased flags from the config file.
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:   logPathAlias,
+			Usage:  "deprecated name for --" + logDir,
+			Hidden: true,
 		}),
 		altsrc.NewIntFlag(cli.IntFlag{
 			Name:  numWorkers,
@@ -257,9 +267,10 @@ func main() {
 			Usage: "Interval to periodically collect pprof profiles (e.g. --pprofInterval=\"5m\")",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name: metricsLogPath,
+			Name: metricsLogDir,
 			Usage: "directory for the metrics files (" + metrics.FileName + ", rotated periodically). " +
 				"If unset, no metrics file is written. " + metricsNotice,
+			Hidden: true,
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  mvflags.DDLHandlingFlag,
@@ -373,7 +384,7 @@ func exitBySignal(sig os.Signal) {
 // metrics never stop a verification.
 func setUpMetrics(cCtx *cli.Context, v *verifier.Verifier) option.Option[*metrics.Pipeline] {
 	settings := metrics.Settings{}
-	if dir := cCtx.String(metricsLogPath); dir != "" {
+	if dir := cCtx.String(metricsLogDir); dir != "" {
 		settings.FileDir = option.Some(dir)
 	}
 
@@ -397,6 +408,31 @@ func shutDownMetrics(pipeline *metrics.Pipeline) {
 	if err := pipeline.Shutdown(ctx); err != nil {
 		log.Warn().Err(err).Msg("Failed to shut down metrics.")
 	}
+}
+
+// getLogDir returns the log directory from --logDir or its deprecated name,
+// --logPath. It fails if both are set to different values.
+//
+// This compares values rather than calling cCtx.IsSet, which misses values
+// from the config file: urfave/cli v1 caches IsSet’s answers before altsrc
+// applies the config file.
+func getLogDir(cCtx *cli.Context) (string, error) {
+	dir := cCtx.String(logPathAlias)
+	if dir == "" {
+		return cCtx.String(logDir), nil
+	}
+
+	if cCtx.String(logDir) != logDirDefault && cCtx.String(logDir) != dir {
+		return "", fmt.Errorf(
+			"--%s (%#q) conflicts with its deprecated name, --%s (%#q)",
+			logDir,
+			cCtx.String(logDir),
+			logPathAlias,
+			dir,
+		)
+	}
+
+	return dir, nil
 }
 
 func handleLogLevelArg(cCtx *cli.Context) error {
@@ -450,9 +486,12 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		return nil, fmt.Errorf("missing required parameters: %#q", missingStringArgs)
 	}
 
-	logPath := cCtx.String(logPath)
+	logDirValue, err := getLogDir(cCtx)
+	if err != nil {
+		return nil, err
+	}
 
-	v := verifier.NewVerifier(verifierSettings, logPath)
+	v := verifier.NewVerifier(verifierSettings, logDirValue)
 
 	logger := v.GetLogger()
 
@@ -473,7 +512,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 
 	logConfig(cCtx, logger)
 
-	err := v.SetReadPreference(cCtx.String(readPreference))
+	err = v.SetReadPreference(cCtx.String(readPreference))
 	if err != nil {
 		return nil, err
 	}
