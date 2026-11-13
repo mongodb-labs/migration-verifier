@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/buildvar"
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
+	"github.com/10gen/migration-verifier/internal/metrics"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/verifier"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
@@ -25,6 +27,7 @@ import (
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/mstrings"
 	"github.com/mongodb-labs/migration-tools/mongotools"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/mongodb-labs/migration-tools/sysinfo"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
@@ -45,7 +48,8 @@ const (
 	generationPauseDelay  = "generationPauseDelay"
 	workerSleepDelay      = "workerSleepDelay"
 	serverPort            = "serverPort"
-	logPath               = "logPath"
+	logDir                = "logDir"
+	logPathAlias          = "logPath" // deprecated name for logDir
 	srcNamespace          = "srcNamespace"
 	dstNamespace          = "dstNamespace"
 	srcChangeReader       = "srcChangeReader"
@@ -65,7 +69,18 @@ const (
 	startFlag             = "start"
 	partitioningScheme    = "partitioningScheme"
 	indexSpecIgnoreFlag   = "indexSpecIgnore"
+	metricsLogDir         = "metricsLogDir"
 )
+
+const logDirDefault = "stdout"
+
+// metricsNotice goes in the metrics flags’ help text, which is where users
+// find the feature.
+const metricsNotice = "Metrics are diagnostic output, not a supported interface: " +
+	"anything may change or disappear in any release without notice. Metrics are never sent to any external process."
+
+// metricsShutdownTimeout bounds the meter provider’s shutdown on exit.
+const metricsShutdownTimeout = 10 * time.Second
 
 var logLevelStrs = lo.Map(
 	mslices.Of(
@@ -120,9 +135,16 @@ func main() {
 			Usage: "`port` for the control web server (0 assigns a random port)",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
-			Name:  logPath,
-			Value: "stdout",
-			Usage: "logging file `path`",
+			Name:  logDir,
+			Value: logDirDefault,
+			Usage: "`directory` for the log file (" + logger.LogFileName + "), or stdout or stderr",
+		}),
+		// This is a separate flag rather than an alias in logDir’s Name
+		// because altsrc doesn’t read aliased flags from the config file.
+		altsrc.NewStringFlag(cli.StringFlag{
+			Name:   logPathAlias,
+			Usage:  "deprecated name for --" + logDir,
+			Hidden: true,
 		}),
 		altsrc.NewIntFlag(cli.IntFlag{
 			Name:  numWorkers,
@@ -245,6 +267,12 @@ func main() {
 			Usage: "Interval to periodically collect pprof profiles (e.g. --pprofInterval=\"5m\")",
 		}),
 		altsrc.NewStringFlag(cli.StringFlag{
+			Name: metricsLogDir,
+			Usage: "directory for the metrics files (" + metrics.FileName + ", rotated periodically). " +
+				"If unset, no metrics file is written. " + metricsNotice,
+			Hidden: true,
+		}),
+		altsrc.NewStringFlag(cli.StringFlag{
 			Name:  mvflags.DDLHandlingFlag,
 			Value: string(verifier.DDLHandlingFailAll),
 			Usage: "How to handle DDL events on the source. One of: " + strings.Join(
@@ -258,6 +286,8 @@ func main() {
 			),
 		}),
 	}
+
+	var metricsPipeline option.Option[*metrics.Pipeline]
 
 	app := &cli.App{
 		Name:    "migration-verifier",
@@ -284,6 +314,11 @@ func main() {
 				return err
 			}
 
+			if pipeline, has := setUpMetrics(cCtx, verifier).Get(); has {
+				metricsPipeline = option.Some(pipeline)
+				verifier.SetMetricsHandler(pipeline.Handler())
+			}
+
 			if cCtx.Bool(checkOnly) {
 				err := verifier.WritesOff(ctx)
 				if err != nil {
@@ -300,6 +335,12 @@ func main() {
 	err := app.Run(os.Args)
 
 	stopCatchingSignals()
+
+	// log.Fatal and exitBySignal exit without running deferred calls, so this
+	// can’t be a defer.
+	if pipeline, has := metricsPipeline.Get(); has {
+		shutDownMetrics(pipeline)
+	}
 
 	// After a signal, any error most likely comes from the shutdown, so it
 	// isn’t fatal. The signal is the context’s cause: err itself rarely wraps
@@ -337,6 +378,61 @@ func exitBySignal(sig os.Signal) {
 	}
 
 	os.Exit(status)
+}
+
+// setUpMetrics creates the metrics pipeline. A failure is only logged:
+// metrics never stop a verification.
+func setUpMetrics(cCtx *cli.Context, v *verifier.Verifier) option.Option[*metrics.Pipeline] {
+	settings := metrics.Settings{}
+	if dir := cCtx.String(metricsLogDir); dir != "" {
+		settings.FileDir = option.Some(dir)
+	}
+
+	pipeline, err := metrics.Setup(v.GetLogger(), settings)
+	if err != nil {
+		v.GetLogger().Warn().Err(err).Msg("Failed to set up metrics. Continuing without them.")
+		return option.None[*metrics.Pipeline]()
+	}
+
+	return option.Some(pipeline)
+}
+
+func shutDownMetrics(pipeline *metrics.Pipeline) {
+	ctx, cancel := contextplus.WithTimeoutCause(
+		context.Background(),
+		metricsShutdownTimeout,
+		fmt.Errorf("timed out metrics shutdown"),
+	)
+	defer cancel()
+
+	if err := pipeline.Shutdown(ctx); err != nil {
+		log.Warn().Err(err).Msg("Failed to shut down metrics.")
+	}
+}
+
+// getLogDir returns the log directory from --logDir or its deprecated name,
+// --logPath. It fails if both are set to different values.
+//
+// This compares values rather than calling cCtx.IsSet, which misses values
+// from the config file: urfave/cli v1 caches IsSet’s answers before altsrc
+// applies the config file.
+func getLogDir(cCtx *cli.Context) (string, error) {
+	dir := cCtx.String(logPathAlias)
+	if dir == "" {
+		return cCtx.String(logDir), nil
+	}
+
+	if cCtx.String(logDir) != logDirDefault && cCtx.String(logDir) != dir {
+		return "", fmt.Errorf(
+			"--%s (%#q) conflicts with its deprecated name, --%s (%#q)",
+			logDir,
+			cCtx.String(logDir),
+			logPathAlias,
+			dir,
+		)
+	}
+
+	return dir, nil
 }
 
 func handleLogLevelArg(cCtx *cli.Context) error {
@@ -390,9 +486,12 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 		return nil, fmt.Errorf("missing required parameters: %#q", missingStringArgs)
 	}
 
-	logPath := cCtx.String(logPath)
+	logDirValue, err := getLogDir(cCtx)
+	if err != nil {
+		return nil, err
+	}
 
-	v := verifier.NewVerifier(verifierSettings, logPath)
+	v := verifier.NewVerifier(verifierSettings, logDirValue)
 
 	logger := v.GetLogger()
 
@@ -413,7 +512,7 @@ func handleArgs(ctx context.Context, cCtx *cli.Context) (*verifier.Verifier, err
 
 	logConfig(cCtx, logger)
 
-	err := v.SetReadPreference(cCtx.String(readPreference))
+	err = v.SetReadPreference(cCtx.String(readPreference))
 	if err != nil {
 		return nil, err
 	}
