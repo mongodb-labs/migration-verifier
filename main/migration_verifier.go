@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/buildvar"
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/metrics"
 	"github.com/10gen/migration-verifier/internal/partitions"
@@ -391,7 +392,11 @@ func setUpMetrics(cCtx *cli.Context, v *verifier.Verifier) option.Option[*metric
 }
 
 func shutDownMetrics(pipeline *metrics.Pipeline) {
-	ctx, cancel := context.WithTimeout(context.Background(), metricsShutdownTimeout)
+	ctx, cancel := contextplus.WithTimeoutCause(
+		context.Background(),
+		metricsShutdownTimeout,
+		fmt.Errorf("timed out metrics shutdown"),
+	)
 	defer cancel()
 
 	if err := pipeline.Shutdown(ctx); err != nil {
