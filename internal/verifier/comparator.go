@@ -231,7 +231,7 @@ func (c *comparator) recordSrcMetrics(docs []compare.DocWithTS) {
 		}
 	}
 
-	c.verifier.workerTracker.SetSrcCounts(c.workerNum, c.srcDocCount, c.srcByteCount)
+	c.verifier.workerTracker.SetDocTaskSrcCounts(c.workerNum, c.srcDocCount, c.srcByteCount)
 }
 
 func (c *comparator) publishHistoryCounts() {
