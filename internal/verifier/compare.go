@@ -742,6 +742,10 @@ func (verifier *Verifier) getDocumentsCursor(
 		findOptions...,
 	)
 
+	if util.ClusterHasRawData([2]int(clusterInfo.VersionArray)) {
+		cmd = append(cmd, bson.E{"rawData", true})
+	}
+
 	if verifier.docCompareMethod == compare.ToHashedIndexKey {
 		cmd = append(
 			cmd,

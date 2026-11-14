@@ -30,7 +30,14 @@ func (verifier *Verifier) verifyShardingIfNeeded(
 		return nil, nil
 	}
 
-	srcShardOpt, err := sharding.GetShardKey(ctx, verifier.logger, srcColl)
+	srcShardOpt, err := sharding.GetShardKey(
+		ctx,
+		verifier.logger,
+		srcColl,
+		sharding.GetShardKeyOpts{
+			RawData: util.ClusterHasRawData([2]int(verifier.srcClusterInfo.VersionArray)),
+		},
+	)
 	if err != nil {
 		return nil, errors.Wrapf(
 			err,
@@ -39,7 +46,14 @@ func (verifier *Verifier) verifyShardingIfNeeded(
 		)
 	}
 
-	dstShardOpt, err := sharding.GetShardKey(ctx, verifier.logger, dstColl)
+	dstShardOpt, err := sharding.GetShardKey(
+		ctx,
+		verifier.logger,
+		dstColl,
+		sharding.GetShardKeyOpts{
+			RawData: util.ClusterHasRawData([2]int(verifier.dstClusterInfo.VersionArray)),
+		},
+	)
 	if err != nil {
 		return nil, errors.Wrapf(
 			err,

@@ -122,6 +122,7 @@ func PartitionCollectionNaturalOrder(
 	idealPartitionBytes types.ByteCount,
 	subLogger *logger.Logger,
 	srcURI string,
+	srcInfo util.ClusterInfo,
 	readPref *readpref.ReadPref,
 ) (chan mo.Result[Partition], error) {
 
@@ -152,7 +153,14 @@ func PartitionCollectionNaturalOrder(
 
 	pChan := make(chan mo.Result[Partition])
 
-	collSizeInBytes, docCount, _, err := GetSizeAndDocumentCount(ctx, subLogger, coll)
+	collSizeInBytes, docCount, _, err := GetSizeAndDocumentCount(
+		ctx,
+		subLogger,
+		coll,
+		GetSizeAndDocumentCountOptions{
+			RawData: util.ClusterHasRawData([2]int(srcInfo.VersionArray)),
+		},
+	)
 	if err != nil {
 		return nil, errors.Wrapf(err, "getting collection size & count")
 	}

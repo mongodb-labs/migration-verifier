@@ -2,6 +2,7 @@ package sharding
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/retry"
@@ -12,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/writeconcern"
+	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/xoptions"
 )
 
 const (
@@ -19,12 +21,17 @@ const (
 	collsCollName = "collections"
 )
 
+type GetShardKeyOpts struct {
+	RawData bool
+}
+
 // GetShardKey returns the collection's shard key, or an empty option
 // if the collection is unsharded.
 func GetShardKey(
 	ctx context.Context,
 	logger *logger.Logger,
 	coll *mongo.Collection,
+	opts GetShardKeyOpts,
 ) (option.Option[bson.Raw], error) {
 	namespace := coll.Database().Name() + "." + coll.Name()
 
@@ -36,10 +43,23 @@ func GetShardKey(
 		Key option.Option[bson.Raw]
 	}{}
 
+	findOpts := options.FindOne()
+
+	if opts.RawData {
+		err := xoptions.SetInternalFindOneOptions(
+			findOpts,
+			"rawData",
+			true,
+		)
+		if err != nil {
+			return option.None[bson.Raw](), fmt.Errorf("set rawData option: %w", err)
+		}
+	}
+
 	err := retry.New().WithCallback(
 		func(ctx context.Context, ri *retry.FuncInfo) error {
 			err := configCollectionsColl.
-				FindOne(ctx, bson.D{{"_id", namespace}}).
+				FindOne(ctx, bson.D{{"_id", namespace}}, findOpts).
 				Decode(&decoded)
 
 			if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
