@@ -26,6 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/mongodb-labs/migration-tools/future"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -46,6 +47,9 @@ type WebServer struct {
 	logger             *logger.Logger
 	srv                *http.Server
 	operationalAPILock *semaphore.Weighted
+
+	// metricsHandler, if set, is served at /metrics.
+	metricsHandler option.Option[http.Handler]
 }
 
 // NewWebServer creates a WebServer object
@@ -157,6 +161,13 @@ func (server *WebServer) setupRouter(ctx context.Context, cancelFunc context.Can
 
 	router := gin.New()
 	pprof.Register(router)
+
+	// Like the pprof routes, /metrics is registered before the middleware
+	// below, so scrapes aren’t logged. A typical 15-second scrape interval
+	// would otherwise fill the log.
+	if handler, has := server.metricsHandler.Get(); has {
+		router.GET("/metrics", gin.WrapH(handler))
+	}
 	router.Use(server.RequestAndResponseLogger(
 		"/api/v1/docMismatches",
 		"/api/v1/nsMismatches",
