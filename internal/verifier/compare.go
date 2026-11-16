@@ -417,10 +417,12 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			// block the compare thread unless the destination “compensates”
 			// by sending dummy values. We do that here.
 			//
-			// NOTE: This count CAN be negative if the destination has duplicate
+			// TODO: This count CAN be negative if the destination has duplicate
 			// IDs while the source has a unique one. This can happen if the
 			// destination’s chunk distribution differs from the source’s, as
-			// typically happens in mongosync-driven migrations.
+			// typically happens in mongosync-driven migrations. In a very
+			// obscure edge case that could, after 1,000s of repeated dupes in
+			// the same source cursor, deadlock. REP-8267 will fix that.
 			missingDocsCount := len(docIDs) - dstDocsFound
 
 			if missingDocsCount > 0 {

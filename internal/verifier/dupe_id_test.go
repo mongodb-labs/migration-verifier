@@ -17,11 +17,186 @@ import (
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/samber/lo"
-	"github.com/samber/lo/mutable"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
+
+// TestVerifier_DuplicateIDOnShardedDestination confirms that, when a
+// replica-set source’s document appears on multiple destination shards,
+// the verifier reports the extra copy rather than silently discarding it.
+func (suite *IntegrationTestSuite) TestVerifier_DuplicateIDOnShardedDestination() {
+	suite.skipUnlessReplsetSrcAndShardedDst()
+
+	ctx := suite.T().Context()
+	require := require.New(suite.T())
+
+	dbName := suite.DBNameForTest()
+	collName := "coll"
+	namespace := dbName + "." + collName
+
+	dstColl := suite.shardDstCollAcrossTwoShards(ctx, dbName, collName)
+
+	// The comparator interleaves source & destination documents in _id
+	// order. Source docs 1 & 2, which the destination lacks, ensure that
+	// both destination copies of doc 3 reach the comparator before the
+	// source’s doc 3 does.
+	_, err := suite.srcMongoClient.Database(dbName).Collection(collName).InsertMany(
+		ctx,
+		[]bson.D{
+			{{"_id", 1}, {"sk", -1}},
+			{{"_id", 2}, {"sk", -1}},
+			{{"_id", 3}, {"sk", -1}},
+		},
+	)
+	require.NoError(err, "should insert on source")
+
+	// These land on different shards, so mongos accepts both.
+	_, err = dstColl.InsertMany(
+		ctx,
+		[]bson.D{
+			{{"_id", 3}, {"sk", -1}},
+			{{"_id", 3}, {"sk", 1}},
+		},
+	)
+	require.NoError(err, "should insert duplicate _id on destination")
+
+	task := &tasks.Task{
+		PrimaryKey: bson.NewObjectID(),
+		QueryFilter: tasks.QueryFilter{
+			Namespace: namespace,
+			To:        namespace,
+			Partition: &partitions.Partition{
+				Key: partitions.PartitionKey{
+					Lower: bsontools.ToRawValue(bson.MinKey{}),
+				},
+				Upper: bsontools.ToRawValue(bson.MaxKey{}),
+			},
+		},
+	}
+
+	verifier := suite.BuildVerifier()
+	require.NoError(verifier.startChangeHandling(ctx))
+
+	results, docCount, _, err := runFetchAndCompareDocuments(ctx, verifier, task)
+	require.NoError(err, "should fetch & compare")
+	suite.Assert().EqualValues(3, docCount, "should count source docs")
+
+	resultsByID := lo.GroupBy(
+		results,
+		func(r compare.Result) int {
+			return lo.Must(bsontools.RawValueTo[int](r.ID))
+		},
+	)
+
+	for _, id := range mslices.Of(1, 2) {
+		if suite.Assert().Len(resultsByID[id], 1, "doc %d should have 1 result", id) {
+			suite.Assert().True(resultsByID[id][0].DocumentIsMissing(), "doc %d should be missing", id)
+			suite.Assert().Equal(constants.ClusterTarget, resultsByID[id][0].Cluster)
+		}
+	}
+
+	suite.assertDuplicateIDReported(resultsByID[3])
+
+	suite.Assert().Len(
+		results,
+		2+len(resultsByID[3]),
+		"should have no results for unexpected doc IDs: %+v",
+		results,
+	)
+}
+
+// TestNaturalPartitionDuplicateIDOnShardedDestination confirms that a
+// natural-partition comparison handles a destination query that returns
+// more documents than the source sent, as happens when an _id appears on
+// multiple destination shards.
+func (suite *IntegrationTestSuite) TestNaturalPartitionDuplicateIDOnShardedDestination() {
+	suite.skipUnlessReplsetSrcAndShardedDst()
+
+	ctx := suite.T().Context()
+	require := require.New(suite.T())
+
+	dbName := suite.DBNameForTest()
+	collName := "coll"
+
+	dstColl := suite.shardDstCollAcrossTwoShards(ctx, dbName, collName)
+
+	// The source’s natural-order cursor returns these in a single batch,
+	// so the destination runs a single query for all of them. That query
+	// returns one document more than ToComparatorBatchSize, so the
+	// destination sends the comparator more messages than the source does.
+	const docsCount = compare.ToComparatorBatchSize
+
+	// Insert in descending _id order so that the source’s natural order is
+	// the reverse of the destination’s _id order. That way both destination
+	// copies of doc 0 reach the comparator before the source’s doc 0 does.
+	srcDocs := lo.RepeatBy(
+		docsCount,
+		func(i int) bson.D {
+			return bson.D{{"_id", i}, {"sk", -1}}
+		},
+	)
+	slices.Reverse(srcDocs)
+
+	srcColl := suite.srcMongoClient.Database(dbName).Collection(collName)
+	_, err := srcColl.InsertMany(ctx, srcDocs)
+	require.NoError(err, "should insert on source")
+
+	// The extra doc 0 lands on a different shard from the rest, so mongos
+	// accepts it.
+	dstDocs := append(
+		slices.Clone(srcDocs),
+		bson.D{{"_id", 0}, {"sk", 1}},
+	)
+	_, err = dstColl.InsertMany(ctx, dstDocs)
+	require.NoError(err, "should insert on destination")
+
+	verifier := suite.BuildVerifier()
+	verifier.SetPartitioningScheme(partitions.SchemeNatural)
+
+	require.NoError(verifier.startChangeHandling(ctx))
+
+	_, hostname := getDirectClientAndHostname(
+		ctx,
+		suite.T(),
+		suite.srcMongoClient,
+		suite.srcConnStr,
+	)
+
+	task := &tasks.Task{
+		PrimaryKey: bson.NewObjectID(),
+		Type:       tasks.VerifyCollection,
+		QueryFilter: tasks.QueryFilter{
+			Namespace: FullName(srcColl),
+			To:        FullName(srcColl),
+			Partition: &partitions.Partition{
+				Natural:         true,
+				HostnameAndPort: option.Some(hostname),
+				Upper:           bsontools.ToRawValue(math.MaxInt64),
+			},
+		},
+	}
+
+	results, docCount, _, err := runFetchAndCompareDocuments(ctx, verifier, task)
+	require.NoError(err, "should fetch & compare")
+	suite.Assert().EqualValues(docsCount, docCount, "should count source docs")
+
+	resultsByID := lo.GroupBy(
+		results,
+		func(r compare.Result) int {
+			return lo.Must(bsontools.RawValueTo[int](r.ID))
+		},
+	)
+
+	suite.assertDuplicateIDReported(resultsByID[0])
+
+	suite.Assert().Len(
+		results,
+		len(resultsByID[0]),
+		"only doc 0 should have results: %+v",
+		results,
+	)
+}
 
 // skipUnlessReplsetSrcAndShardedDst skips the test unless the source is a
 // replica set and the destination is a sharded cluster.
@@ -137,180 +312,4 @@ func (suite *IntegrationTestSuite) assertDuplicateIDReported(idResults []compare
 	}
 
 	suite.Assert().LessOrEqual(len(idResults), 2, "at most a duplicate and a content mismatch")
-}
-
-// TestVerifier_DuplicateIDOnShardedDestination confirms that, when a
-// replica-set source’s document appears on multiple destination shards,
-// the verifier reports the extra copy rather than silently discarding it.
-func (suite *IntegrationTestSuite) TestVerifier_DuplicateIDOnShardedDestination() {
-	suite.skipUnlessReplsetSrcAndShardedDst()
-
-	ctx := suite.T().Context()
-	require := require.New(suite.T())
-
-	dbName := suite.DBNameForTest()
-	collName := "coll"
-	namespace := dbName + "." + collName
-
-	dstColl := suite.shardDstCollAcrossTwoShards(ctx, dbName, collName)
-
-	// The comparator interleaves source & destination documents in _id
-	// order. Source docs 1 & 2, which the destination lacks, ensure that
-	// both destination copies of doc 3 reach the comparator before the
-	// source’s doc 3 does.
-	_, err := suite.srcMongoClient.Database(dbName).Collection(collName).InsertMany(
-		ctx,
-		lo.ToAnySlice(mslices.Of(
-			bson.D{{"_id", 1}, {"sk", -1}},
-			bson.D{{"_id", 2}, {"sk", -1}},
-			bson.D{{"_id", 3}, {"sk", -1}},
-		)),
-	)
-	require.NoError(err, "should insert on source")
-
-	// These land on different shards, so mongos accepts both.
-	_, err = dstColl.InsertMany(
-		ctx,
-		lo.ToAnySlice(mslices.Of(
-			bson.D{{"_id", 3}, {"sk", -1}},
-			bson.D{{"_id", 3}, {"sk", 1}},
-		)),
-	)
-	require.NoError(err, "should insert duplicate _id on destination")
-
-	task := &tasks.Task{
-		PrimaryKey: bson.NewObjectID(),
-		QueryFilter: tasks.QueryFilter{
-			Namespace: namespace,
-			To:        namespace,
-			Partition: &partitions.Partition{
-				Key: partitions.PartitionKey{
-					Lower: bsontools.ToRawValue(bson.MinKey{}),
-				},
-				Upper: bsontools.ToRawValue(bson.MaxKey{}),
-			},
-		},
-	}
-
-	verifier := suite.BuildVerifier()
-	require.NoError(verifier.startChangeHandling(ctx))
-
-	results, docCount, _, err := runFetchAndCompareDocuments(ctx, verifier, task)
-	require.NoError(err, "should fetch & compare")
-	suite.Assert().EqualValues(3, docCount, "should count source docs")
-
-	resultsByID := lo.GroupBy(
-		results,
-		func(r compare.Result) int {
-			return lo.Must(bsontools.RawValueTo[int](r.ID))
-		},
-	)
-
-	for _, id := range mslices.Of(1, 2) {
-		if suite.Assert().Len(resultsByID[id], 1, "doc %d should have 1 result", id) {
-			suite.Assert().True(resultsByID[id][0].DocumentIsMissing(), "doc %d should be missing", id)
-			suite.Assert().Equal(constants.ClusterTarget, resultsByID[id][0].Cluster)
-		}
-	}
-
-	suite.assertDuplicateIDReported(resultsByID[3])
-
-	suite.Assert().Len(
-		results,
-		2+len(resultsByID[3]),
-		"should have no results for unexpected doc IDs: %+v",
-		results,
-	)
-}
-
-// TestNaturalPartitionDuplicateIDOnShardedDestination confirms that a
-// natural-partition comparison handles a destination query that returns
-// more documents than the source sent, as happens when an _id appears on
-// multiple destination shards.
-func (suite *IntegrationTestSuite) TestNaturalPartitionDuplicateIDOnShardedDestination() {
-	suite.skipUnlessReplsetSrcAndShardedDst()
-
-	ctx := suite.T().Context()
-	require := require.New(suite.T())
-
-	dbName := suite.DBNameForTest()
-	collName := "coll"
-
-	dstColl := suite.shardDstCollAcrossTwoShards(ctx, dbName, collName)
-
-	// The source’s natural-order cursor returns these in a single batch,
-	// so the destination runs a single query for all of them. That query
-	// returns one document more than ToComparatorBatchSize, so the
-	// destination sends the comparator more messages than the source does.
-	const docsCount = compare.ToComparatorBatchSize
-
-	// Insert in descending _id order so that the source’s natural order is
-	// the reverse of the destination’s _id order. That way both destination
-	// copies of doc 0 reach the comparator before the source’s doc 0 does.
-	srcDocs := lo.RepeatBy(
-		docsCount,
-		func(i int) bson.D {
-			return bson.D{{"_id", i}, {"sk", -1}}
-		},
-	)
-	mutable.Reverse(srcDocs)
-
-	srcColl := suite.srcMongoClient.Database(dbName).Collection(collName)
-	_, err := srcColl.InsertMany(ctx, lo.ToAnySlice(srcDocs))
-	require.NoError(err, "should insert on source")
-
-	// The extra doc 0 lands on a different shard from the rest, so mongos
-	// accepts it.
-	dstDocs := append(
-		slices.Clone(srcDocs),
-		bson.D{{"_id", 0}, {"sk", 1}},
-	)
-	_, err = dstColl.InsertMany(ctx, lo.ToAnySlice(dstDocs))
-	require.NoError(err, "should insert on destination")
-
-	verifier := suite.BuildVerifier()
-	verifier.SetPartitioningScheme(partitions.SchemeNatural)
-
-	require.NoError(verifier.startChangeHandling(ctx))
-
-	_, hostname := getDirectClientAndHostname(
-		ctx,
-		suite.T(),
-		suite.srcMongoClient,
-		suite.srcConnStr,
-	)
-
-	task := &tasks.Task{
-		PrimaryKey: bson.NewObjectID(),
-		Type:       tasks.VerifyCollection,
-		QueryFilter: tasks.QueryFilter{
-			Namespace: FullName(srcColl),
-			To:        FullName(srcColl),
-			Partition: &partitions.Partition{
-				Natural:         true,
-				HostnameAndPort: option.Some(hostname),
-				Upper:           bsontools.ToRawValue(math.MaxInt64),
-			},
-		},
-	}
-
-	results, docCount, _, err := runFetchAndCompareDocuments(ctx, verifier, task)
-	require.NoError(err, "should fetch & compare")
-	suite.Assert().EqualValues(docsCount, docCount, "should count source docs")
-
-	resultsByID := lo.GroupBy(
-		results,
-		func(r compare.Result) int {
-			return lo.Must(bsontools.RawValueTo[int](r.ID))
-		},
-	)
-
-	suite.assertDuplicateIDReported(resultsByID[0])
-
-	suite.Assert().Len(
-		results,
-		len(resultsByID[0]),
-		"only doc 0 should have results: %+v",
-		results,
-	)
 }
