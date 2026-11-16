@@ -49,7 +49,7 @@ func ReadNaturalPartitionFromSource(
 	docFilter option.Option[bson.D],
 	compareMethod Method,
 	toCompare chan<- ToComparatorMsg,
-	toDst chan<- []DocID,
+	toDst chan<- SrcToDstMsg,
 ) error {
 	defer close(toCompare)
 	defer close(toDst)
@@ -236,10 +236,12 @@ func processCursor(
 	startRecordID option.Option[bson.RawValue],
 	upperRecordID bson.RawValue,
 	toCompare chan<- ToComparatorMsg,
-	toDst chan<- []DocID,
+	toDst chan<- SrcToDstMsg,
 ) error {
 	var batch []DocWithTS
 	var batchDocIDs []DocID
+
+	var batchCount uint64
 
 cursorLoop:
 	for {
@@ -311,7 +313,7 @@ cursorLoop:
 		batchDocIDs = append(batchDocIDs, NewDocIDFromPool(docID))
 
 		if cursor.RemainingBatchLength() == 0 {
-			if err := flushSourceBatch(ctx, logger, retryState, task, &batch, &batchDocIDs, toCompare, toDst); err != nil {
+			if err := flushSourceBatch(ctx, logger, retryState, task, &batch, &batchDocIDs, &batchCount, toCompare, toDst); err != nil {
 				return errors.Wrapf(err, "flushing docs")
 			}
 		}
@@ -320,7 +322,7 @@ cursorLoop:
 	retryState.NoteSuccess("reached end of cursor")
 
 	if len(batch) > 0 {
-		if err := flushSourceBatch(ctx, logger, retryState, task, &batch, &batchDocIDs, toCompare, toDst); err != nil {
+		if err := flushSourceBatch(ctx, logger, retryState, task, &batch, &batchDocIDs, &batchCount, toCompare, toDst); err != nil {
 			return errors.Wrapf(err, "flushing final docs")
 		}
 	}
@@ -335,8 +337,9 @@ func flushSourceBatch(
 	task *tasks.Task,
 	batch *[]DocWithTS,
 	batchDocIDs *[]DocID,
+	batchCount *uint64,
 	toCompare chan<- ToComparatorMsg,
-	toDst chan<- []DocID,
+	toDst chan<- SrcToDstMsg,
 ) error {
 	logger.Trace().
 		Any("task", task.PrimaryKey).
@@ -344,12 +347,20 @@ func flushSourceBatch(
 		Int("count", len(*batchDocIDs)).
 		Msg("Flushing source document IDs to dst.")
 
-	err := chanutil.WriteWithDoneCheck(ctx, toDst, slices.Clone(*batchDocIDs))
+	err := chanutil.WriteWithDoneCheck(
+		ctx,
+		toDst,
+		SrcToDstMsg{
+			DocIDs:  slices.Clone(*batchDocIDs),
+			BatchID: *batchCount,
+		},
+	)
 	if err != nil {
 		return errors.Wrapf(err, "sending %d doc IDs to dst", len(*batchDocIDs))
 	}
 
 	retryState.NoteSuccess("sent %d-doc batch to dst", len(*batch))
+	*batchCount++
 	*batchDocIDs = (*batchDocIDs)[:0]
 
 	logger.Trace().
@@ -365,7 +376,8 @@ func flushSourceBatch(
 			ctx,
 			toCompare,
 			ToComparatorMsg{
-				DocsWithTS: chunk,
+				Docs:    chunk,
+				BatchID: option.Some(*batchCount),
 			},
 		)
 		if err != nil {

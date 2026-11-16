@@ -4,15 +4,19 @@ import (
 	"math"
 
 	pool "github.com/libp2p/go-buffer-pool"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-type ComparatorMsgType byte
-
 type ToComparatorMsg struct {
-	DocsWithTS []DocWithTS
-	Type       ComparatorMsgType
+	Docs    []DocWithTS
+	BatchID option.Option[uint64]
+}
+
+type SrcToDstMsg struct {
+	DocIDs  []DocID
+	BatchID uint64
 }
 
 const (
@@ -23,19 +27,6 @@ const (
 	// ToComparatorByteLimit is the max # of bytes that readers send to the
 	// comparator thread at once. This value is somewhat arbitrarily chosen.
 	ToComparatorByteLimit = 32 << 20
-
-	// The default (i.e., zero-value) message type. Indicates a payload of
-	// fetched documents.
-	MsgTypeDocs ComparatorMsgType = 0
-
-	// Indicates no documents; this is used in natural partitioning to ensure
-	// that the destination reader sends the same # of messages as the source
-	// reader, even if there are missing documents on the destination.
-	MsgTypePadding ComparatorMsgType = 1
-
-	// Indicates completion of a destination cursor. Used for flushing
-	// mismatches in natural partitioning.
-	MsgTypeCursorDone ComparatorMsgType = 2
 )
 
 func ToComparatorBatchCount(totalDocs int) int {

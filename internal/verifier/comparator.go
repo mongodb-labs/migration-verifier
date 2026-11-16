@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
-	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
@@ -48,6 +47,10 @@ type comparator struct {
 	srcByteCount        types.ByteCount
 	curHistoryDocCount  types.DocumentCount
 	curHistoryByteCount types.ByteCount
+
+	// Used in natural partitioning to synchronize src & dst readers.
+	srcFinishedNaturalBatch bool
+	dstFinishedNaturalBatch bool
 
 	// We may flush the comparator’s caches when len(problems) or this value
 	// exceed predefined limits.
@@ -108,104 +111,98 @@ func (c *comparator) readBatches(
 	simpleTimerReset(c.readTimer, readTimeout)
 
 	var srcBatch, dstBatch []compare.DocWithTS
-	var dstCursorDone bool
 
-	eg, egCtx := contextplus.ErrGroup(ctx)
-
-	if !c.srcClosed {
-		eg.Go(func() error {
-			select {
-			case <-egCtx.Done():
-				return egCtx.Err()
-			case <-c.readTimer.C:
-				return errors.Errorf("failed to read from source after %s", readTimeout)
-			case msg, alive := <-srcChannel:
-				if !alive {
-					c.srcClosed = true
-					return nil
-				}
-
-				c.fi.NoteSuccess("received message from source reader")
-
+	// Skip reading from the source if either:
+	// 1. The source is already closed.
+	// 2. Natural scan: We’re waiting for the destination reader to catch up.
+	if !c.srcClosed && !c.srcFinishedNaturalBatch {
+		select {
+		case <-ctx.Done():
+			return nil, nil, false, ctx.Err()
+		case <-c.readTimer.C:
+			return nil, nil, false, errors.Errorf("failed to read from source within %s", readTimeout)
+		case msg, alive := <-srcChannel:
+			if !alive {
 				lo.Assertf(
-					msg.Type == compare.MsgTypeDocs,
-					"source reader must send only docs (got: %v)",
-					msg.Type,
+					!c.srcFinishedNaturalBatch && !c.dstFinishedNaturalBatch,
+					"expect natural batches done when source closes (src: %t; dst: %t)",
+					c.srcFinishedNaturalBatch,
+					c.dstFinishedNaturalBatch,
 				)
 
+				c.srcClosed = true
+
+				break
+			}
+
+			c.fi.NoteSuccess("received message from source reader")
+
+			lo.Assertf(
+				len(msg.Docs) <= compare.ToComparatorBatchSize,
+				"src reader should send <= %d docs but sent %d",
+				compare.ToComparatorBatchSize,
+				len(msg.Docs),
+			)
+
+			c.recordSrcMetrics(msg.Docs)
+
+			srcBatch = msg.Docs
+
+			if _, has := msg.BatchID.Get(); has {
+				c.srcFinishedNaturalBatch = true
+			}
+		}
+	}
+
+	// Skip reading from the destination if either:
+	// 1. The destination is already closed.
+	// 2. Natural scan: We’re waiting for the source reader to catch up.
+	if !c.dstClosed && !c.dstFinishedNaturalBatch {
+		select {
+		case <-ctx.Done():
+			return nil, nil, false, ctx.Err()
+		case <-c.readTimer.C:
+			return nil, nil, false, errors.Errorf("failed to read from destination within %s", readTimeout)
+		case msg, alive := <-dstChannel:
+			if !alive {
 				lo.Assertf(
-					len(msg.DocsWithTS) <= compare.ToComparatorBatchSize,
-					"src reader should send <= %d docs but sent %d",
-					compare.ToComparatorBatchSize,
-					len(msg.DocsWithTS),
+					!c.srcFinishedNaturalBatch && !c.dstFinishedNaturalBatch,
+					"expect natural batches done when destination closes (src: %t; dst: %t)",
+					c.srcFinishedNaturalBatch,
+					c.dstFinishedNaturalBatch,
 				)
 
-				c.recordSrcMetrics(msg.DocsWithTS)
+				c.dstClosed = true
 
-				srcBatch = msg.DocsWithTS
+				break
 			}
-			return nil
-		})
-	}
 
-	if !c.dstClosed {
-		eg.Go(func() error {
-			// Reading from the destination reader is trickier than reading
-			// from the source reader because the messages can contain flags.
-			for {
-				select {
-				case <-egCtx.Done():
-					return egCtx.Err()
-				case <-c.readTimer.C:
-					return errors.Errorf("failed to read from destination after %s", readTimeout)
-				case msg, alive := <-dstChannel:
-					if !alive {
-						c.dstClosed = true
-						return nil
-					}
+			c.fi.NoteSuccess("received message from destination reader")
 
-					c.fi.NoteSuccess("received message (type=%v) from destination reader", msg.Type)
+			lo.Assertf(
+				len(msg.Docs) <= compare.ToComparatorBatchSize,
+				"dst reader should send <= %d docs but sent %d",
+				compare.ToComparatorBatchSize,
+				len(msg.Docs),
+			)
 
-					switch msg.Type {
-					case compare.MsgTypePadding:
-						lo.Assertf(
-							len(msg.DocsWithTS) == 0,
-							"expect no documents (found: %d)",
-							len(msg.DocsWithTS),
-						)
+			dstBatch = msg.Docs
 
-						return nil
-					case compare.MsgTypeDocs:
-						lo.Assertf(
-							len(msg.DocsWithTS) <= compare.ToComparatorBatchSize,
-							"dst reader should send <= %d docs but sent %d",
-							compare.ToComparatorBatchSize,
-							len(msg.DocsWithTS),
-						)
-
-						dstBatch = msg.DocsWithTS
-						return nil
-					case compare.MsgTypeCursorDone:
-						lo.Assertf(
-							len(msg.DocsWithTS) == 0,
-							"expect no documents (found: %d)",
-							len(msg.DocsWithTS),
-						)
-
-						dstCursorDone = true
-					default:
-						lo.Assertf(false, "unknown msg type: %v", msg.Type)
-					}
-				}
+			if _, has := msg.BatchID.Get(); has {
+				c.dstFinishedNaturalBatch = true
 			}
-		})
+		}
 	}
 
-	if err := eg.Wait(); err != nil {
-		return nil, nil, false, errors.Wrap(err, "failed to read documents")
+	var naturalBatchDone bool
+
+	if c.srcFinishedNaturalBatch && c.dstFinishedNaturalBatch {
+		naturalBatchDone = true
+		c.srcFinishedNaturalBatch = false
+		c.dstFinishedNaturalBatch = false
 	}
 
-	return srcBatch, dstBatch, dstCursorDone, nil
+	return srcBatch, dstBatch, naturalBatchDone, nil
 }
 
 func simpleTimerReset(t *time.Timer, dur time.Duration) {
