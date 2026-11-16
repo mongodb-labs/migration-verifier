@@ -595,7 +595,11 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 }
 
 // iterateCursorToComparator reads the given cursor & sends its payloads to
-// the comparator. If a batch ID is given it will be sent in a final message.
+// the comparator.
+//
+// The optional batch ID is for natural partitioning. It represents an
+// individual batch of source documents (i.e., a `getMore` response). This lets
+// the comparator synchronize
 // TODO: Just send as a final message, not in this function.
 //
 // This returns the # of documents sent to the channel.
