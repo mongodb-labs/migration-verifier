@@ -272,12 +272,18 @@ func (c *comparator) processSingleDoc(curDocWithTS compare.DocWithTS, isSrc bool
 
 			firstMismatchTime := c.firstMismatchTimeLookup.get(curDocWithTS.Doc)
 
+			docID := lo.Must(c.verifier.docCompareMethod.ClonedDocIDForComparison(curDocWithTS.Doc))
+
 			mismatch := compare.Result{
-				ID:              lo.Must(c.verifier.docCompareMethod.ClonedDocIDForComparison(curDocWithTS.Doc)),
-				NameSpace:       c.namespace,
-				Details:         compare.DuplicateID,
-				DataSize:        int32(len(curDocWithTS.Doc)),
-				Cluster:         lo.Ternary(isSrc, constants.ClusterSource, constants.ClusterTarget),
+				ID:        docID,
+				NameSpace: c.namespace,
+				Details:   compare.DuplicateID,
+				DataSize:  int32(len(curDocWithTS.Doc)),
+				Cluster: lo.Ternary(
+					isSrc,
+					constants.ClusterSource,
+					constants.ClusterTarget,
+				),
 				MismatchHistory: createMismatchTimes(firstMismatchTime),
 			}
 
