@@ -98,6 +98,9 @@ type ChangeReaderCommon struct {
 	logger     *logger.Logger
 	namespaces []string
 
+	// getMetrics returns the verifier’s current instruments.
+	getMetrics func() *verifierMetrics
+
 	metaDB        *mongo.Database
 	watcherClient *mongo.Client
 	clusterInfo   util.ClusterInfo
@@ -164,6 +167,12 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 		batchSizeHistory:      history.New[int](time.Minute),
 		cumulativeEventCounts: msync.NewDataGuard(api.ChangeEventCounts{}),
 	}
+}
+
+// recordRead records a read of a batch of events: how long it took and the
+// events’ total size.
+func (rc *ChangeReaderCommon) recordRead(ctx context.Context, elapsed time.Duration, size int) {
+	rc.getMetrics().recordChangeRead(ctx, rc.readerType, elapsed, size)
 }
 
 func (rc *ChangeReaderCommon) getWhichCluster() whichCluster {

@@ -202,9 +202,7 @@ type Verifier struct {
 	// metricsHandler, if set, serves metrics at the web server’s /metrics.
 	metricsHandler option.Option[http.Handler]
 
-	// metrics is atomic because the clients’ command monitors read it, and
-	// they start before SetMeterProvider replaces it.
-	metrics atomic.Pointer[verifierMetrics]
+	metrics *verifierMetrics
 
 	workerTracker        *WorkerTracker
 	docsComparedHistory  *history.History[types.DocumentCount]
@@ -268,14 +266,27 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		dstLastRecheckedTS: msync.NewDataGuard(bson.Timestamp{}),
 	}
 
-	verifier.metrics.Store(newVerifierMetrics(noop.NewMeterProvider()))
+	verifier.metrics = newVerifierMetrics(noop.NewMeterProvider())
 
 	return verifier
 }
 
 // getMetrics returns the verifier’s current instruments.
 func (verifier *Verifier) getMetrics() *verifierMetrics {
-	return verifier.metrics.Load()
+	return verifier.metrics
+}
+
+// collectionReadRecorder returns a recorder for reads of coll’s documents
+// from the given cluster.
+func (verifier *Verifier) collectionReadRecorder(
+	cluster whichCluster,
+	coll *mongo.Collection,
+) compare.BatchReadRecorder {
+	namespace := coll.Database().Name() + "." + coll.Name()
+
+	return func(ctx context.Context, elapsed time.Duration, bytes int) {
+		verifier.getMetrics().recordCollectionRead(ctx, cluster, namespace, elapsed, bytes)
+	}
 }
 
 // ConfigureReadConcern
@@ -321,16 +332,12 @@ func (verifier *Verifier) buildClientOpts(
 	return opts
 }
 
-// getClient connects to a cluster. cluster is the cluster label for the
-// client’s getMore metrics.
 func (verifier *Verifier) getClient(
 	ctx context.Context,
 	uri string,
 	rp *readpref.ReadPref,
-	cluster string,
 ) (*mongo.Client, *options.ClientOptions, error) {
 	opts := verifier.buildClientOpts(uri, rp)
-	opts.SetMonitor(verifier.newGetMoreMonitor(cluster))
 
 	client, err := mongo.Connect(opts)
 	if err != nil {
@@ -447,7 +454,7 @@ func (verifier *Verifier) GetDstReplSetName() option.Option[string] {
 
 func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 	var err error
-	verifier.metaClient, _, err = verifier.getClient(ctx, uri, readpref.Primary(), metricClusterMeta)
+	verifier.metaClient, _, err = verifier.getClient(ctx, uri, readpref.Primary())
 	if err != nil {
 		return errors.Wrapf(err, "connect to metadata")
 	}
@@ -524,9 +531,8 @@ func (verifier *Verifier) SetMetricsHandler(handler http.Handler) {
 // instruments. Without it, the verifier records to no-op instruments. Call it
 // before starting a check.
 func (verifier *Verifier) SetMeterProvider(provider otelmetric.MeterProvider) {
-	metrics := newVerifierMetrics(provider)
-	metrics.recordPhase(context.Background(), Idle)
-	verifier.metrics.Store(metrics)
+	verifier.metrics = newVerifierMetrics(provider)
+	verifier.metrics.recordPhase(context.Background(), Idle)
 }
 
 func (verifier *Verifier) SetNumWorkers(arg int) error {

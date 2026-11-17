@@ -10,7 +10,7 @@ import (
 )
 
 func (verifier *Verifier) SetSrcURI(ctx context.Context, uri string) error {
-	client, clientOpts, err := verifier.getClient(ctx, uri, verifier.readPreference, string(src))
+	client, clientOpts, err := verifier.getClient(ctx, uri, verifier.readPreference)
 	if err != nil {
 		return errors.Wrapf(err, "connect to source")
 	}
@@ -60,7 +60,7 @@ func isVersionSupported(version []int) bool {
 }
 
 func (verifier *Verifier) SetDstURI(ctx context.Context, uri string) error {
-	client, clientOpts, err := verifier.getClient(ctx, uri, verifier.readPreference, string(dst))
+	client, clientOpts, err := verifier.getClient(ctx, uri, verifier.readPreference)
 	if err != nil {
 		return errors.Wrapf(err, "connect to destination")
 	}

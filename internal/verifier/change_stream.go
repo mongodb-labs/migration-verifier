@@ -78,6 +78,7 @@ func (v *Verifier) newChangeStreamReader(
 	common.clusterInfo = clusterInfo
 
 	common.logger = v.logger
+	common.getMetrics = v.getMetrics
 	common.metaDB = v.metaClient.Database(v.metaDBName)
 
 	common.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
@@ -180,8 +181,17 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	latestEvent := option.None[ParsedEvent]()
 
 	var batchTotalBytes int
+
+	// The first TryNext reads the batch; the rest iterate it.
+	var readDuration time.Duration
+	readStart := time.Now()
+
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
 		gotEvent := cs.TryNext(sctx)
+
+		if eventsRead == 0 {
+			readDuration = time.Since(readStart)
+		}
 
 		if cs.Err() != nil {
 			return errors.Wrap(cs.Err(), "change stream iteration failed")
@@ -243,6 +253,8 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 		eventsRead++
 	}
+
+	csr.recordRead(sctx, readDuration, batchTotalBytes)
 
 	sess := mongo.SessionFromContext(sctx)
 	csr.updateLastSeenClusterTime(sess)
