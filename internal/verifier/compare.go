@@ -58,6 +58,34 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	workerNum int,
 	task *tasks.Task,
 ) <-chan mo.Result[DocCompareReport] {
+	return verifier.fetchAndCompareDocuments(
+		givenCtx,
+		workerNum,
+		task,
+		verifier.getFetcherChannelsAndCallbacks,
+		func() {},
+	)
+}
+
+type fetchersGetter func(*tasks.Task) (
+	<-chan compare.ToComparatorMsg,
+	<-chan compare.ToComparatorMsg,
+	func(context.Context, retry.SuccessNotifier) error,
+	func(context.Context, retry.SuccessNotifier) error,
+	error,
+)
+
+// fetchAndCompareDocuments implements FetchAndCompareDocuments. Tests use it
+// to inject readers. onComparatorExit runs at the end of each attempt’s
+// comparator callback, after any reports it sent have reached the results
+// channel.
+func (verifier *Verifier) fetchAndCompareDocuments(
+	givenCtx context.Context,
+	workerNum int,
+	task *tasks.Task,
+	getFetchers fetchersGetter,
+	onComparatorExit func(),
+) <-chan mo.Result[DocCompareReport] {
 	var srcChannel, dstChannel <-chan compare.ToComparatorMsg
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
@@ -84,7 +112,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 
 				finalReport = option.None[DocCompareReport]()
 
-				srcChannel, dstChannel, readSrcCallback, readDstCallback, err = verifier.getFetcherChannelsAndCallbacks(task)
+				srcChannel, dstChannel, readSrcCallback, readDstCallback, err = getFetchers(task)
 
 				return err
 			}).
@@ -103,6 +131,10 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 			).
 			WithCallback(
 				func(ctx context.Context, fi *retry.FuncInfo) error {
+					// NB: This defer must precede the canceler’s so that it
+					// runs after the canceler has drained the reports.
+					defer onComparatorExit()
+
 					reportChan, canceler := chanutil.StartIngestMap(
 						ctx,
 						resultsChan,
