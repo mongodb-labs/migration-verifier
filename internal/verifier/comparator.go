@@ -330,26 +330,30 @@ func (c *comparator) flushIfNeeded(
 	return whyFlush, c.flush(ctx, reportChan)
 }
 
-// Returns the # of problems flushed. Always flushes.
+// flush sends a report of the comparator’s current state. It always flushes.
 func (c *comparator) flush(
 	ctx context.Context,
 	reportChan chan<- DocCompareReport,
 ) error {
+	report := c.takeReport()
+
+	err := chanutil.WriteWithDoneCheck(ctx, reportChan, report)
+	if err != nil {
+		return errors.Wrapf(err, "flushing %d problems", len(report.Problems))
+	}
+
+	return nil
+}
+
+// takeReport sweeps unpaired documents into the problems list, then returns
+// a report of the comparator’s current state & resets that state.
+func (c *comparator) takeReport() DocCompareReport {
 	c.sweepMissingDocs()
 
-	probsToFlush := c.problems
-
-	err := chanutil.WriteWithDoneCheck(
-		ctx,
-		reportChan,
-		DocCompareReport{
-			Problems:  probsToFlush,
-			DocCount:  c.srcDocCount,
-			ByteCount: c.srcByteCount,
-		},
-	)
-	if err != nil {
-		return errors.Wrapf(err, "flushing %d problems", len(probsToFlush))
+	report := DocCompareReport{
+		Problems:  c.problems,
+		DocCount:  c.srcDocCount,
+		ByteCount: c.srcByteCount,
 	}
 
 	c.problems = nil
@@ -362,7 +366,7 @@ func (c *comparator) flush(
 
 	c.publishHistoryCounts()
 
-	return nil
+	return report
 }
 
 func (c *comparator) countUnpairedDocs() int {

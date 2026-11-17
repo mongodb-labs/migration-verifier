@@ -8,7 +8,7 @@ import (
 	"slices"
 
 	"github.com/ccoveille/go-safecast/v2"
-	mapset "github.com/deckarep/golang-set/v2"
+	mapset "github.com/deckarep/golang-set/v3"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/samber/lo"

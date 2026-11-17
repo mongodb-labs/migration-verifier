@@ -3,7 +3,7 @@
 // See the `bsontools` package for BSON-related tools.
 package mongotools
 
-import mapset "github.com/deckarep/golang-set/v2"
+import mapset "github.com/deckarep/golang-set/v3"
 
 // Taken from:
 // https://github.com/mongodb/mongo/blob/master/src/mongo/db/index/index_descriptor.h

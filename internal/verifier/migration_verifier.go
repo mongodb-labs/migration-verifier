@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"slices"
@@ -42,6 +43,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/mongodb-labs/migration-tools/mongotools/index"
+	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -194,6 +196,9 @@ type Verifier struct {
 	globalFilter bson.D
 
 	pprofInterval time.Duration
+
+	// metricsHandler, if set, serves metrics at the web server’s /metrics.
+	metricsHandler option.Option[http.Handler]
 
 	workerTracker        *WorkerTracker
 	docsComparedHistory  *history.History[types.DocumentCount]
@@ -477,6 +482,11 @@ func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 
 func (verifier *Verifier) SetServerPort(port int) {
 	verifier.port = port
+}
+
+// SetMetricsHandler makes the web server serve handler at /metrics.
+func (verifier *Verifier) SetMetricsHandler(handler http.Handler) {
+	verifier.metricsHandler = option.Some(handler)
 }
 
 func (verifier *Verifier) SetNumWorkers(arg int) error {
@@ -1906,6 +1916,8 @@ func (verifier *Verifier) dstClientCollectionByNameSpace(namespace string) *mong
 
 func (verifier *Verifier) RunServer(ctx context.Context, startCheck bool) error {
 	server := NewWebServer(verifier.port, verifier, verifier.logger)
+	server.metricsHandler = verifier.metricsHandler
+
 	return server.Run(ctx, startCheck)
 }
 
