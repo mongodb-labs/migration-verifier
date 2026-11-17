@@ -183,6 +183,8 @@ func (verifier *Verifier) NoteCompareOfOptime(
 	})
 }
 
+// This returns its final report. The caller MUST send it to the channel
+// once all channels have finished successfully.
 func (verifier *Verifier) compareDocsFromChannels(
 	ctx context.Context,
 	workerNum int,
