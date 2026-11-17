@@ -124,12 +124,9 @@ func (c *comparator) readBatches(
 			return nil, nil, false, errors.Errorf("failed to read from source within %s", readTimeout)
 		case msg, alive := <-srcChannel:
 			if !alive {
-				lo.Assertf(
-					!c.srcFinishedNaturalBatch && !c.dstFinishedNaturalBatch,
-					"expect natural batches done when source closes (src: %t; dst: %t)",
-					c.srcFinishedNaturalBatch,
-					c.dstFinishedNaturalBatch,
-				)
+				if c.srcFinishedNaturalBatch || c.dstFinishedNaturalBatch {
+					return nil, nil, false, fmt.Errorf("src closed before reaching batch checkpoint")
+				}
 
 				c.srcClosed = true
 
@@ -166,15 +163,12 @@ func (c *comparator) readBatches(
 		case <-ctx.Done():
 			return nil, nil, false, ctx.Err()
 		case <-c.readTimer.C:
-			return nil, nil, false, errors.Errorf("failed to read from destination within %s", readTimeout)
+			return nil, nil, false, fmt.Errorf("failed to read from destination within %s", readTimeout)
 		case msg, alive := <-dstChannel:
 			if !alive {
-				lo.Assertf(
-					!c.srcFinishedNaturalBatch && !c.dstFinishedNaturalBatch,
-					"expect natural batches done when destination closes (src: %t; dst: %t)",
-					c.srcFinishedNaturalBatch,
-					c.dstFinishedNaturalBatch,
-				)
+				if c.srcFinishedNaturalBatch || c.dstFinishedNaturalBatch {
+					return nil, nil, false, fmt.Errorf("dst closed before readching batch checkpoint")
+				}
 
 				c.dstClosed = true
 
