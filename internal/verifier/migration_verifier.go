@@ -284,8 +284,8 @@ func (verifier *Verifier) collectionReadRecorder(
 ) compare.BatchReadRecorder {
 	namespace := coll.Database().Name() + "." + coll.Name()
 
-	return func(ctx context.Context, elapsed time.Duration, bytes int) {
-		verifier.getMetrics().recordCollectionRead(ctx, cluster, namespace, elapsed, bytes)
+	return func(ctx context.Context, read compare.BatchRead) {
+		verifier.getMetrics().recordCollectionRead(ctx, cluster, namespace, read)
 	}
 }
 

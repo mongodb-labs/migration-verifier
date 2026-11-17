@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/main/mvflags"
 	"github.com/10gen/migration-verifier/mbson"
@@ -254,7 +255,11 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
-	csr.recordRead(sctx, readDuration, batchTotalBytes)
+	csr.recordRead(sctx, compare.BatchRead{
+		Duration: readDuration,
+		Docs:     eventsRead,
+		Bytes:    batchTotalBytes,
+	})
 
 	sess := mongo.SessionFromContext(sctx)
 	csr.updateLastSeenClusterTime(sess)

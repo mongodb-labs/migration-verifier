@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/attribute"
@@ -54,6 +55,12 @@ var (
 		0, 512, 1 << 10, 4 << 10, 16 << 10, 64 << 10, 256 << 10,
 		1 << 20, 2 << 20, 4 << 20, 8 << 20, 16 << 20,
 	}
+
+	// Documents or events per batch. An idle change reader’s batches are
+	// empty; a full batch of small documents can hold over 100,000.
+	batchCountBuckets = []float64{
+		0, 1, 10, 100, 1000, 10_000, 100_000,
+	}
 )
 
 // verifierMetrics holds the verifier’s OTel instruments.
@@ -79,9 +86,11 @@ type verifierMetrics struct {
 	recheckPersistDuration otelmetric.Float64Histogram
 
 	changeReadDuration otelmetric.Float64Histogram
+	changeReadCount    otelmetric.Int64Histogram
 	changeReadSize     otelmetric.Int64Histogram
 
 	collectionReadDuration otelmetric.Float64Histogram
+	collectionReadCount    otelmetric.Int64Histogram
 	collectionReadSize     otelmetric.Int64Histogram
 }
 
@@ -155,6 +164,12 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 			otelmetric.WithDescription("How long each change reader’s read of a batch of change events took, by cluster. This includes the time spent waiting for events."),
 			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
 		)),
+		changeReadCount: lo.Must(meter.Int64Histogram(
+			"migration_verifier_change_read_count",
+			otelmetric.WithUnit("{event}"),
+			otelmetric.WithDescription("The number of change events in each batch that a change reader read, by cluster."),
+			otelmetric.WithExplicitBucketBoundaries(batchCountBuckets...),
+		)),
 		changeReadSize: lo.Must(meter.Int64Histogram(
 			"migration_verifier_change_read_size",
 			otelmetric.WithUnit("By"),
@@ -167,6 +182,12 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 			otelmetric.WithUnit("s"),
 			otelmetric.WithDescription("How long each getMore of documents to compare took, by cluster and namespace. A cursor’s first batch, which comes with the query, isn’t counted."),
 			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
+		)),
+		collectionReadCount: lo.Must(meter.Int64Histogram(
+			"migration_verifier_collection_read_count",
+			otelmetric.WithUnit("{document}"),
+			otelmetric.WithDescription("The number of documents to compare in each batch that a getMore returned, by cluster and namespace."),
+			otelmetric.WithExplicitBucketBoundaries(batchCountBuckets...),
 		)),
 		collectionReadSize: lo.Must(meter.Int64Histogram(
 			"migration_verifier_collection_read_size",
@@ -247,13 +268,13 @@ func (m *verifierMetrics) recordRecheckPersistDuration(ctx context.Context, elap
 func (m *verifierMetrics) recordChangeRead(
 	ctx context.Context,
 	cluster whichCluster,
-	elapsed time.Duration,
-	bytes int,
+	read compare.BatchRead,
 ) {
 	opt := otelmetric.WithAttributes(metricLabelCluster.String(string(cluster)))
 
-	m.changeReadDuration.Record(ctx, elapsed.Seconds(), opt)
-	m.changeReadSize.Record(ctx, int64(bytes), opt)
+	m.changeReadDuration.Record(ctx, read.Duration.Seconds(), opt)
+	m.changeReadCount.Record(ctx, int64(read.Docs), opt)
+	m.changeReadSize.Record(ctx, int64(read.Bytes), opt)
 }
 
 // recordCollectionRead records a getMore of documents to compare.
@@ -261,16 +282,16 @@ func (m *verifierMetrics) recordCollectionRead(
 	ctx context.Context,
 	cluster whichCluster,
 	namespace string,
-	elapsed time.Duration,
-	bytes int,
+	read compare.BatchRead,
 ) {
 	opt := otelmetric.WithAttributes(
 		metricLabelCluster.String(string(cluster)),
 		metricLabelNamespace.String(namespace),
 	)
 
-	m.collectionReadDuration.Record(ctx, elapsed.Seconds(), opt)
-	m.collectionReadSize.Record(ctx, int64(bytes), opt)
+	m.collectionReadDuration.Record(ctx, read.Duration.Seconds(), opt)
+	m.collectionReadCount.Record(ctx, int64(read.Docs), opt)
+	m.collectionReadSize.Record(ctx, int64(read.Bytes), opt)
 }
 
 // changeReaderGaugeSource is what the change reader gauges read. Its methods

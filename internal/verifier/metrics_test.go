@@ -58,8 +58,8 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 	m.recordChangeEvents(ctx, src, map[string]int64{"insert": 4, "someNewOpType": 1})
 	m.recordFindTaskDuration(ctx, 20*time.Millisecond)
 	m.recordRecheckPersistDuration(ctx, 200*time.Millisecond)
-	m.recordCollectionRead(ctx, src, "mydb.coll", 30*time.Millisecond, 3000)
-	m.recordChangeRead(ctx, dst, time.Second, 200)
+	m.recordCollectionRead(ctx, src, "mydb.coll", compare.BatchRead{Duration: 30 * time.Millisecond, Docs: 30, Bytes: 3000})
+	m.recordChangeRead(ctx, dst, compare.BatchRead{Duration: time.Second, Docs: 2, Bytes: 200})
 
 	require.NoError(t, m.observeChangeReaders(
 		fakeChangeReaderGaugeSource{
@@ -87,8 +87,10 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 		"migration_verifier_find_task_duration_seconds":            prometheusclient.MetricType_HISTOGRAM,
 		"migration_verifier_recheck_persist_duration_seconds":      prometheusclient.MetricType_HISTOGRAM,
 		"migration_verifier_change_read_duration_seconds":          prometheusclient.MetricType_HISTOGRAM,
+		"migration_verifier_change_read_count":                     prometheusclient.MetricType_HISTOGRAM,
 		"migration_verifier_change_read_size_bytes":                prometheusclient.MetricType_HISTOGRAM,
 		"migration_verifier_collection_read_duration_seconds":      prometheusclient.MetricType_HISTOGRAM,
+		"migration_verifier_collection_read_count":                 prometheusclient.MetricType_HISTOGRAM,
 		"migration_verifier_collection_read_size_bytes":            prometheusclient.MetricType_HISTOGRAM,
 	}
 	for name, metricType := range expectedTypes {
@@ -146,6 +148,18 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 		t,
 		map[string]float64{"source": 3000},
 		histogramSumByLabel(families["migration_verifier_collection_read_size_bytes"], "cluster"),
+	)
+
+	assert.Equal(
+		t,
+		map[string]float64{"source": 30},
+		histogramSumByLabel(families["migration_verifier_collection_read_count"], "cluster"),
+	)
+
+	assert.Equal(
+		t,
+		map[string]float64{"destination": 2},
+		histogramSumByLabel(families["migration_verifier_change_read_count"], "cluster"),
 	)
 }
 
@@ -307,6 +321,7 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CheckAndRecheck() {
 
 				for _, name := range mslices.Of(
 					"migration_verifier_change_read_duration_seconds",
+					"migration_verifier_change_read_count",
 					"migration_verifier_change_read_size_bytes",
 				) {
 					assert.Contains(
@@ -355,6 +370,7 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CollectionRead() {
 
 	for _, name := range mslices.Of(
 		"migration_verifier_collection_read_duration_seconds",
+		"migration_verifier_collection_read_count",
 		"migration_verifier_collection_read_size_bytes",
 	) {
 		suite.Assert().ElementsMatch(
@@ -383,10 +399,10 @@ func (suite *IntegrationTestSuite) TestBatchReadTimer() {
 	cursor, err := coll.Find(ctx, bson.D{}, options.Find().SetBatchSize(2).SetSort(bson.D{{"_id", 1}}))
 	suite.Require().NoError(err)
 
-	var batchSizes []int
-	timer := compare.NewBatchReadTimer(func(_ context.Context, elapsed time.Duration, bytes int) {
-		suite.Assert().Positive(elapsed)
-		batchSizes = append(batchSizes, bytes)
+	var reads []compare.BatchRead
+	timer := compare.NewBatchReadTimer(func(_ context.Context, read compare.BatchRead) {
+		suite.Assert().Positive(read.Duration)
+		reads = append(reads, read)
 	})
 
 	count := 0
@@ -397,8 +413,11 @@ func (suite *IntegrationTestSuite) TestBatchReadTimer() {
 	suite.Require().Equal(5, count)
 
 	suite.Assert().Equal(
-		[]int{2 * docSize, docSize},
-		batchSizes,
+		[]compare.BatchRead{{Docs: 2, Bytes: 2 * docSize}, {Docs: 1, Bytes: docSize}},
+		lo.Map(reads, func(r compare.BatchRead, _ int) compare.BatchRead {
+			r.Duration = 0
+			return r
+		}),
 		"the batches after the first (2 documents, then 1) are recorded",
 	)
 }

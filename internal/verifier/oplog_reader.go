@@ -23,6 +23,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/internal/verifier/oplog"
 	"github.com/10gen/migration-verifier/mbson"
@@ -407,7 +408,11 @@ func (o *OplogReader) readAndHandleOneBatch(
 		return errors.Wrap(err, "reading cursor")
 	}
 
-	o.recordRead(sctx, time.Since(readStart), len(o.scratch))
+	o.recordRead(sctx, compare.BatchRead{
+		Duration: time.Since(readStart),
+		Docs:     len(o.curDocs),
+		Bytes:    len(o.scratch),
+	})
 
 	sess := mongo.SessionFromContext(sctx)
 	o.updateLastSeenClusterTime(sess)

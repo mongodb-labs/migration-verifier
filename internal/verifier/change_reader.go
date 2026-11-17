@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/msync"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/mongodb-labs/migration-tools/option"
@@ -169,10 +170,9 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 	}
 }
 
-// recordRead records a read of a batch of events: how long it took and the
-// events’ total size.
-func (rc *ChangeReaderCommon) recordRead(ctx context.Context, elapsed time.Duration, size int) {
-	rc.getMetrics().recordChangeRead(ctx, rc.readerType, elapsed, size)
+// recordRead records a read of a batch of events.
+func (rc *ChangeReaderCommon) recordRead(ctx context.Context, read compare.BatchRead) {
+	rc.getMetrics().recordChangeRead(ctx, rc.readerType, read)
 }
 
 func (rc *ChangeReaderCommon) getWhichCluster() whichCluster {

@@ -7,9 +7,20 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-// BatchReadRecorder receives each batch that a BatchReadTimer measures: how
-// long the cursor took to fetch it and the total size of its documents.
-type BatchReadRecorder func(ctx context.Context, elapsed time.Duration, bytes int)
+// BatchRead describes a read of one batch of documents.
+type BatchRead struct {
+	// Duration is how long the read took.
+	Duration time.Duration
+
+	// Docs is the number of documents in the batch.
+	Docs int
+
+	// Bytes is the documents’ total size.
+	Bytes int
+}
+
+// BatchReadRecorder receives each batch that a BatchReadTimer measures.
+type BatchReadRecorder func(ctx context.Context, read BatchRead)
 
 // BatchReadTimer measures the batches that a cursor fetches with getMore. It
 // skips the cursor’s first batch, which comes with the command that opened
@@ -17,11 +28,10 @@ type BatchReadRecorder func(ctx context.Context, elapsed time.Duration, bytes in
 type BatchReadTimer struct {
 	record BatchReadRecorder
 
-	// inFetchedBatch indicates that the current batch came from a getMore,
-	// whose duration is elapsed. bytes totals the batch’s documents so far.
+	// inFetchedBatch indicates that the current batch came from a getMore.
+	// read describes that batch, with its documents so far.
 	inFetchedBatch bool
-	elapsed        time.Duration
-	bytes          int
+	read           BatchRead
 }
 
 // NewBatchReadTimer returns a BatchReadTimer that sends each batch to record.
@@ -49,15 +59,15 @@ func (t *BatchReadTimer) Next(ctx context.Context, cursor *mongo.Cursor) bool {
 		}
 
 		t.inFetchedBatch = true
-		t.elapsed = time.Since(start)
-		t.bytes = 0
+		t.read = BatchRead{Duration: time.Since(start)}
 	}
 
 	if t.inFetchedBatch {
-		t.bytes += len(cursor.Current)
+		t.read.Docs++
+		t.read.Bytes += len(cursor.Current)
 
 		if cursor.RemainingBatchLength() == 0 {
-			t.record(ctx, t.elapsed, t.bytes)
+			t.record(ctx, t.read)
 			t.inFetchedBatch = false
 		}
 	}
