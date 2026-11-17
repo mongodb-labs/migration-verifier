@@ -276,19 +276,6 @@ func (verifier *Verifier) getMetrics() *verifierMetrics {
 	return verifier.metrics
 }
 
-// collectionReadRecorder returns a recorder for reads of coll’s documents
-// from the given cluster.
-func (verifier *Verifier) collectionReadRecorder(
-	cluster whichCluster,
-	coll *mongo.Collection,
-) compare.BatchReadRecorder {
-	namespace := coll.Database().Name() + "." + coll.Name()
-
-	return func(ctx context.Context, read compare.BatchRead) {
-		verifier.getMetrics().recordCollectionRead(ctx, cluster, namespace, read)
-	}
-}
-
 // ConfigureReadConcern
 func (verifier *Verifier) ConfigureReadConcern(setting ReadConcernSetting) {
 	verifier.readConcernSetting = setting
@@ -438,18 +425,6 @@ func (verifier *Verifier) WritesOn(ctx context.Context) {
 
 func (verifier *Verifier) GetLogger() *logger.Logger {
 	return verifier.logger
-}
-
-// GetSrcReplSetName returns the source’s replica set name, if the source is
-// a replica set. Call it after SetSrcURI.
-func (verifier *Verifier) GetSrcReplSetName() option.Option[string] {
-	return option.IfNotZero(verifier.srcClusterInfo.SetName)
-}
-
-// GetDstReplSetName returns the destination’s replica set name, if the
-// destination is a replica set. Call it after SetDstURI.
-func (verifier *Verifier) GetDstReplSetName() option.Option[string] {
-	return option.IfNotZero(verifier.dstClusterInfo.SetName)
 }
 
 func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {

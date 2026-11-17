@@ -307,7 +307,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			verifier.docCompareMethod,
 			srcToCompareChannel,
 			srcToDstChannel,
-			verifier.collectionReadRecorder(src, verifier.srcClientCollection(task)),
 		)
 	}
 
@@ -393,7 +392,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				state,
 				theCursor,
 				dstToCompareChannel,
-				verifier.collectionReadRecorder(dst, coll),
 			)
 			if err != nil {
 				return errors.Wrap(
@@ -527,7 +525,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				srcChannel,
-				verifier.collectionReadRecorder(src, verifier.srcClientCollection(task)),
 			)
 
 			err = errors.Wrap(
@@ -571,7 +568,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				dstChannel,
-				verifier.collectionReadRecorder(dst, verifier.dstClientCollection(task)),
 			)
 			err = errors.Wrap(
 				err,
@@ -600,10 +596,8 @@ func iterateCursorToChannel(
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
 	writer chan<- compare.ToComparatorMsg,
-	recordRead compare.BatchReadRecorder,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
-	readTimer := compare.NewBatchReadTimer(recordRead)
 	if sess == nil {
 		panic("need a session")
 	}
@@ -642,7 +636,7 @@ func iterateCursorToChannel(
 		return nil
 	}
 
-	for readTimer.Next(sctx, cursor) {
+	for cursor.Next(sctx) {
 		state.NoteSuccess("received a document")
 
 		docsCount++

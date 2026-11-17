@@ -281,7 +281,6 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 						compare.Binary,
 						toCompare,
 						toDst,
-						nil,
 					)
 					require.NoError(t, err, "should read")
 
@@ -578,7 +577,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								compareMethod,
 								toCompare,
 								toDst,
-								nil,
 							)
 							suite.Require().NoError(err, "should read")
 
@@ -680,7 +678,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								compareMethod,
 								toCompare,
 								toDst,
-								nil,
 							)
 							suite.Require().NoError(err, "should read")
 
@@ -784,7 +781,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								compareMethod,
 								toCompare,
 								toDst,
-								nil,
 							)
 							suite.Require().NoError(err, "should read")
 
@@ -891,7 +887,6 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 								compareMethod,
 								toCompare,
 								toDst,
-								nil,
 							)
 							suite.Require().NoError(err, "should read")
 
