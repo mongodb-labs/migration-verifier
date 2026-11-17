@@ -61,6 +61,12 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 	var srcChannel, dstChannel <-chan compare.ToComparatorMsg
 	var readSrcCallback, readDstCallback func(context.Context, retry.SuccessNotifier) error
 
+	// The final report goes to the consumer only once the retryer succeeds.
+	// If it went out from within a retried attempt, a failed attempt (e.g.,
+	// one whose reader closed its channel after a transient error) could send
+	// a final report that the consumer would mistake for the task’s completion.
+	var finalReport option.Option[DocCompareReport]
+
 	retryer := retry.New().WithDescription(
 		"comparing task %v's documents (namespace: %s)",
 		task.PrimaryKey,
@@ -75,6 +81,8 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 		err := retryer.
 			WithBefore(func() error {
 				var err error
+
+				finalReport = option.None[DocCompareReport]()
 
 				srcChannel, dstChannel, readSrcCallback, readDstCallback, err = verifier.getFetcherChannelsAndCallbacks(task)
 
@@ -105,7 +113,7 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 						_ = canceler(ctx)
 					}()
 
-					return verifier.compareDocsFromChannels(
+					report, err := verifier.compareDocsFromChannels(
 						ctx,
 						workerNum,
 						fi,
@@ -114,9 +122,17 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 						dstChannel,
 						reportChan,
 					)
+					if err != nil {
+						return err
+					}
+
+					finalReport = option.Some(report)
+
+					return nil
 				},
 				"comparing documents",
 			).Run(givenCtx, verifier.logger)
+
 		if err != nil {
 			writeErr := chanutil.WriteWithDoneCheck(
 				givenCtx,
@@ -132,6 +148,13 @@ func (verifier *Verifier) FetchAndCompareDocuments(
 
 			return
 		}
+
+		report, has := finalReport.Get()
+		lo.Assertf(has, "successful comparison should yield a final report")
+
+		// This fails only if givenCtx is done, in which case nothing is
+		// reading the report anyway.
+		_ = chanutil.WriteWithDoneCheck(givenCtx, resultsChan, mo.Ok(report))
 	}()
 
 	return resultsChan
@@ -167,7 +190,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	task *tasks.Task,
 	srcChannel, dstChannel <-chan compare.ToComparatorMsg,
 	reportsChan chan<- DocCompareReport,
-) error {
+) (DocCompareReport, error) {
 	// 1. Initialize State
 	c := newComparator(verifier, workerNum, fi, task)
 	defer func() {
@@ -183,7 +206,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	for c.stillReading() {
 		srcBatch, dstBatch, dstCursorDone, err := c.readBatches(ctx, srcChannel, dstChannel)
 		if err != nil {
-			return err
+			return DocCompareReport{}, err
 		}
 
 		// NB: This MUST precede the actual comparison because any dst documents
@@ -191,7 +214,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 		if dstCursorDone {
 			whyFlush, err := c.flushIfNeeded(ctx, reportsChan)
 			if err != nil {
-				return errors.Wrapf(err, "flushing problems")
+				return DocCompareReport{}, errors.Wrapf(err, "flushing problems")
 			}
 
 			if reason, has := whyFlush.Get(); has {
@@ -211,7 +234,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 				srcBatch = srcBatch[1:]
 
 				if err := c.processSingleDoc(doc, true); err != nil {
-					return errors.Wrapf(
+					return DocCompareReport{}, errors.Wrapf(
 						err, "comparer thread failed to handle %#q's source doc (task: %s) with ID %v",
 						c.namespace, task.PrimaryKey, doc.Doc.Lookup("_id"),
 					)
@@ -223,7 +246,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 				dstBatch = dstBatch[1:]
 
 				if err := c.processSingleDoc(doc, false); err != nil {
-					return errors.Wrapf(
+					return DocCompareReport{}, errors.Wrapf(
 						err, "comparer thread failed to handle %#q's destination doc (task: %s) with ID %v",
 						c.namespace, task.PrimaryKey, doc.Doc.Lookup("_id"),
 					)
@@ -232,7 +255,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 		}
 	}
 
-	return c.flush(ctx, reportsChan)
+	return c.takeReport(), nil
 }
 
 func createMismatchTimes(firstDateTime option.Option[bson.DateTime]) recheck.MismatchHistory {

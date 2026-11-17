@@ -1649,12 +1649,10 @@ func TestVerifierCompareDocs(t *testing.T) {
 
 						err := retry.New().WithCallback(
 							func(ctx context.Context, fi *retry.FuncInfo) error {
-								var err error
-
 								// This has to fit all of the reports.
 								reportsChan := make(chan DocCompareReport, 1_000)
 
-								err = verifier.compareDocsFromChannels(
+								finalReport, err := verifier.compareDocsFromChannels(
 									ctx,
 									0,
 									fi,
@@ -1672,6 +1670,10 @@ func TestVerifierCompareDocs(t *testing.T) {
 										docCount += report.DocCount
 										byteCount += report.ByteCount
 									}
+
+									results = append(results, finalReport.Problems...)
+									docCount += finalReport.DocCount
+									byteCount += finalReport.ByteCount
 								}
 
 								return err
