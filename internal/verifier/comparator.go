@@ -94,8 +94,12 @@ func newComparator(v *Verifier, workerNum int, fi retry.SuccessNotifier, task *t
 	}
 }
 
-func (c *comparator) stillReading() bool {
-	return !c.srcClosed || !c.dstClosed
+func (c *comparator) stillReadingSrc() bool {
+	return !c.srcClosed && !c.srcFinishedNaturalBatch
+}
+
+func (c *comparator) stillReadingDst() bool {
+	return !c.dstClosed && !c.dstFinishedNaturalBatch
 }
 
 // readBatches handles the concurrent errgroup I/O and timeout logic.
@@ -124,10 +128,6 @@ func (c *comparator) readBatches(
 			return nil, nil, false, errors.Errorf("failed to read from source within %s", readTimeout)
 		case msg, alive := <-srcChannel:
 			if !alive {
-				if c.srcFinishedNaturalBatch || c.dstFinishedNaturalBatch {
-					return nil, nil, false, fmt.Errorf("src closed before reaching batch checkpoint")
-				}
-
 				c.srcClosed = true
 
 				break
@@ -163,13 +163,9 @@ func (c *comparator) readBatches(
 		case <-ctx.Done():
 			return nil, nil, false, ctx.Err()
 		case <-c.readTimer.C:
-			return nil, nil, false, fmt.Errorf("failed to read from destination within %s", readTimeout)
+			return nil, nil, false, errors.Errorf("failed to read from destination within %s", readTimeout)
 		case msg, alive := <-dstChannel:
 			if !alive {
-				if c.srcFinishedNaturalBatch || c.dstFinishedNaturalBatch {
-					return nil, nil, false, fmt.Errorf("dst closed before readching batch checkpoint")
-				}
-
 				c.dstClosed = true
 
 				break
