@@ -4,20 +4,21 @@ import (
 	"math"
 
 	pool "github.com/libp2p/go-buffer-pool"
-	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-type ToComparatorMsg struct {
-	Docs    []DocWithTS
-	BatchID option.Option[uint64]
+type ToComparatorMsg interface {
+	_isToComparatorMsg()
 }
 
-type SrcToDstMsg struct {
-	DocIDs  []DocID
-	BatchID uint64
-}
+type DocsToComparatorMsg []DocWithTS
+
+func (DocsToComparatorMsg) _isToComparatorMsg() {}
+
+type BatchDoneComparatorMsg struct{}
+
+func (BatchDoneComparatorMsg) _isToComparatorMsg() {}
 
 const (
 	// ToComparatorBatchSize is the max # of docs that readers send

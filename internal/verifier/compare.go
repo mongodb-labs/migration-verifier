@@ -286,7 +286,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	srcToCompareChannel := make(chan compare.ToComparatorMsg)
 	dstToCompareChannel := make(chan compare.ToComparatorMsg)
 
-	srcToDstChannel := make(chan compare.SrcToDstMsg, 1_000)
+	srcToDstChannel := make(chan []compare.DocID, 1_000)
 
 	// Read documents between the lower & upper bounds. Since we can’t actually
 	// query the server that way, though, we subtract the record IDs & set that
@@ -335,17 +335,15 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 		coll := verifier.dstClientCollection(task)
 
 		for {
-			msgOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
+			docIDsOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
 			if err != nil {
 				return err
 			}
-			msg, isOpen := msgOpt.Get()
+			docIDs, isOpen := docIDsOpt.Get()
 			if !isOpen {
 				state.NoteSuccess("saw channel from source closed")
 				break
 			}
-
-			docIDs := msg.DocIDs
 
 			state.NoteSuccess("received %d doc IDs from source to fetch", len(docIDs))
 
@@ -393,13 +391,21 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				state,
 				theCursor,
 				dstToCompareChannel,
-				option.Some(msg.BatchID),
 			)
 			if err != nil {
 				return errors.Wrap(
 					err,
 					"failed to send documents from destination to compare",
 				)
+			}
+
+			err = chanutil.WriteWithDoneCheck(
+				sctx,
+				dstToCompareChannel,
+				compare.ToComparatorMsg(compare.BatchDoneComparatorMsg{}),
+			)
+			if err != nil {
+				return errors.Wrapf(err, "sending batch-done message to compare thread")
 			}
 
 			verifier.logger.Trace().
@@ -529,7 +535,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				srcChannel,
-				option.None[uint64](),
 			)
 
 			err = errors.Wrap(
@@ -573,7 +578,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				dstChannel,
-				option.None[uint64](),
 			)
 			err = errors.Wrap(
 				err,
@@ -610,7 +614,6 @@ func iterateCursorToComparator(
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
 	writer chan<- compare.ToComparatorMsg,
-	batchID option.Option[uint64],
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
 	if sess == nil {
@@ -622,14 +625,11 @@ func iterateCursorToComparator(
 
 	var docsWithTSCache []compare.DocWithTS
 
-	flush := func(batchID option.Option[uint64]) error {
+	flush := func() error {
 		err := chanutil.WriteWithDoneCheck(
 			sctx,
 			writer,
-			compare.ToComparatorMsg{
-				Docs:    slices.Clone(docsWithTSCache),
-				BatchID: batchID,
-			},
+			compare.ToComparatorMsg(compare.DocsToComparatorMsg(slices.Clone(docsWithTSCache))),
 		)
 		if err != nil {
 			return errors.Wrapf(
@@ -668,7 +668,7 @@ func iterateCursorToComparator(
 		)
 
 		if needFlush {
-			if err := flush(option.None[uint64]()); err != nil {
+			if err := flush(); err != nil {
 				return 0, err
 			}
 		}
@@ -687,9 +687,8 @@ func iterateCursorToComparator(
 
 	state.NoteSuccess("exhausted cursor")
 
-	needFinalFlush := len(docsWithTSCache) > 0 || batchID.IsSome()
-	if needFinalFlush {
-		if err := flush(batchID); err != nil {
+	if len(docsWithTSCache) > 0 {
+		if err := flush(); err != nil {
 			return 0, err
 		}
 	}

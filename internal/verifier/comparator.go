@@ -137,18 +137,19 @@ func (c *comparator) readBatches(
 
 			c.fi.NoteSuccess("received message from source reader")
 
-			lo.Assertf(
-				len(msg.Docs) <= compare.ToComparatorBatchSize,
-				"src reader should send <= %d docs but sent %d",
-				compare.ToComparatorBatchSize,
-				len(msg.Docs),
-			)
+			switch payload := msg.(type) {
+			case compare.DocsToComparatorMsg:
+				lo.Assertf(
+					len(payload) <= compare.ToComparatorBatchSize,
+					"src reader should send <= %d docs but sent %d",
+					compare.ToComparatorBatchSize,
+					len(payload),
+				)
 
-			c.recordSrcMetrics(msg.Docs)
+				c.recordSrcMetrics(payload)
 
-			srcBatch = msg.Docs
-
-			if _, has := msg.BatchID.Get(); has {
+				srcBatch = payload
+			case compare.BatchDoneComparatorMsg:
 				c.srcFinishedNaturalBatch = true
 			}
 		}
@@ -179,16 +180,17 @@ func (c *comparator) readBatches(
 
 			c.fi.NoteSuccess("received message from destination reader")
 
-			lo.Assertf(
-				len(msg.Docs) <= compare.ToComparatorBatchSize,
-				"dst reader should send <= %d docs but sent %d",
-				compare.ToComparatorBatchSize,
-				len(msg.Docs),
-			)
+			switch payload := msg.(type) {
+			case compare.DocsToComparatorMsg:
+				lo.Assertf(
+					len(payload) <= compare.ToComparatorBatchSize,
+					"dst reader should send <= %d docs but sent %d",
+					compare.ToComparatorBatchSize,
+					len(payload),
+				)
 
-			dstBatch = msg.Docs
-
-			if _, has := msg.BatchID.Get(); has {
+				dstBatch = payload
+			case compare.BatchDoneComparatorMsg:
 				c.dstFinishedNaturalBatch = true
 			}
 		}
