@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -151,6 +152,8 @@ func (c *comparator) readBatches(
 				srcBatch = payload
 			case compare.BatchDoneComparatorMsg:
 				c.srcFinishedNaturalBatch = true
+			default:
+				panic(fmt.Sprintf("bad message (%T) from src reader", msg))
 			}
 		}
 	}
@@ -192,6 +195,8 @@ func (c *comparator) readBatches(
 				dstBatch = payload
 			case compare.BatchDoneComparatorMsg:
 				c.dstFinishedNaturalBatch = true
+			default:
+				panic(fmt.Sprintf("bad message (%T) from dst reader", msg))
 			}
 		}
 	}
