@@ -278,7 +278,7 @@ func (csr *ChangeStreamReader) iterateChangeStream(
 	ri retry.SuccessNotifier,
 	sess *mongo.Session,
 ) error {
-	sctx := mongo.NewSessionContext(ctx, sess)
+	sctx := mongo.NewSessionContext(withChangeStreamGetMores(ctx), sess)
 
 	cs := csr.changeStream
 
@@ -430,7 +430,7 @@ func (csr *ChangeStreamReader) createChangeStream(
 		// there are events right away. We can discard those events because
 		// they’ve already happened, and our initial scan is yet to come.
 		if len(changeStream.ResumeToken()) == 0 {
-			_, _, err := mmongo.GetBatch(ctx, changeStream, nil, nil)
+			_, _, err := mmongo.GetBatch(withChangeStreamGetMores(ctx), changeStream, nil, nil)
 			if err != nil {
 				return bson.Timestamp{}, errors.Wrap(err, "discarding change stream’s initial events")
 			}

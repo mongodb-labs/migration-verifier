@@ -14,12 +14,29 @@ import (
 // meterName names the verifier’s meter.
 const meterName = "github.com/10gen/migration-verifier/internal/verifier"
 
-// Metric label keys. Every label has a small, fixed set of values.
+// Metric label keys. Every label except metricLabelNamespace has a small,
+// fixed set of values.
 const (
-	metricLabelPhase   = attribute.Key("phase")
-	metricLabelStage   = attribute.Key("stage")
-	metricLabelCluster = attribute.Key("cluster")
-	metricLabelOpType  = attribute.Key("op_type")
+	metricLabelPhase      = attribute.Key("phase")
+	metricLabelStage      = attribute.Key("stage")
+	metricLabelCluster    = attribute.Key("cluster")
+	metricLabelOpType     = attribute.Key("op_type")
+	metricLabelCursorType = attribute.Key("cursor_type")
+
+	// metricLabelNamespace is a collection’s namespace (database.collection).
+	// Unlike the other labels, its values are customer data, and there can be
+	// many of them.
+	metricLabelNamespace = attribute.Key("namespace")
+)
+
+// metricClusterMeta is the cluster label for the metadata cluster. The
+// source and destination use their whichCluster values.
+const metricClusterMeta = "metadata"
+
+// Values of the cursor_type label.
+const (
+	metricCursorTypeCollection   = "collection"
+	metricCursorTypeChangeStream = "change_stream"
 )
 
 // Values of the stage label.
@@ -57,9 +74,10 @@ var (
 		1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600, 7200, 14400, 28800, 86400,
 	}
 
-	// Metadata queries and writes normally take milliseconds. The verifier
-	// warns once finding a task takes more than findTaskTimeWarnThreshold.
-	metadataDurationBuckets = []float64{
+	// Database commands normally take milliseconds. The verifier warns once
+	// finding a task takes more than findTaskTimeWarnThreshold. A getMore can
+	// take seconds, whether to fill a large batch or to await change events.
+	commandDurationBuckets = []float64{
 		0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60,
 	}
 )
@@ -85,6 +103,8 @@ type verifierMetrics struct {
 
 	findTaskDuration       otelmetric.Float64Histogram
 	recheckPersistDuration otelmetric.Float64Histogram
+
+	getMoreDuration otelmetric.Float64Histogram
 }
 
 // newVerifierMetrics creates the verifier’s instruments. Creating an
@@ -142,13 +162,20 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 			"migration_verifier_find_task_duration",
 			otelmetric.WithUnit("s"),
 			otelmetric.WithDescription("How long a worker’s query for its next task took. Slow queries suggest that the metadata database is overloaded."),
-			otelmetric.WithExplicitBucketBoundaries(metadataDurationBuckets...),
+			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
 		)),
 		recheckPersistDuration: lo.Must(meter.Float64Histogram(
 			"migration_verifier_recheck_persist_duration",
 			otelmetric.WithUnit("s"),
 			otelmetric.WithDescription("How long persisting a set of rechecks took."),
-			otelmetric.WithExplicitBucketBoundaries(metadataDurationBuckets...),
+			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
+		)),
+
+		getMoreDuration: lo.Must(meter.Float64Histogram(
+			"migration_verifier_get_more_duration",
+			otelmetric.WithUnit("s"),
+			otelmetric.WithDescription("How long each successful getMore took, by cluster and cursor type (collection or change_stream). Collection cursors’ getMores also have the collection’s namespace. A change stream’s getMore includes the time it waits for events."),
+			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
 		)),
 	}
 }
@@ -221,6 +248,39 @@ func (m *verifierMetrics) recordFindTaskDuration(ctx context.Context, elapsed ti
 
 func (m *verifierMetrics) recordRecheckPersistDuration(ctx context.Context, elapsed time.Duration) {
 	m.recheckPersistDuration.Record(ctx, elapsed.Seconds())
+}
+
+// recordCollectionGetMore records a getMore on a collection’s cursor.
+func (m *verifierMetrics) recordCollectionGetMore(
+	ctx context.Context,
+	cluster, namespace string,
+	elapsed time.Duration,
+) {
+	m.getMoreDuration.Record(
+		ctx,
+		elapsed.Seconds(),
+		otelmetric.WithAttributes(
+			metricLabelCluster.String(cluster),
+			metricLabelCursorType.String(metricCursorTypeCollection),
+			metricLabelNamespace.String(namespace),
+		),
+	)
+}
+
+// recordChangeStreamGetMore records a getMore on a change stream.
+func (m *verifierMetrics) recordChangeStreamGetMore(
+	ctx context.Context,
+	cluster string,
+	elapsed time.Duration,
+) {
+	m.getMoreDuration.Record(
+		ctx,
+		elapsed.Seconds(),
+		otelmetric.WithAttributes(
+			metricLabelCluster.String(cluster),
+			metricLabelCursorType.String(metricCursorTypeChangeStream),
+		),
+	)
 }
 
 // changeReaderGaugeSource is what the change reader gauges read. Its methods

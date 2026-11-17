@@ -197,7 +197,7 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 		dataSizes = append(dataSizes, dataSize)
 	}
 
-	verifier.metrics.recordChangeEvents(ctx, eventOrigin, eventCountByOpType)
+	verifier.getMetrics().recordChangeEvents(ctx, eventOrigin, eventCountByOpType)
 
 	// This can happen if all change events were DDL events.
 	if len(docIDs) == 0 {

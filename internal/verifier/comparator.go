@@ -237,7 +237,7 @@ func (c *comparator) recordSrcMetrics(ctx context.Context, docs []compare.DocWit
 	c.verifier.workerTracker.SetSrcCounts(c.workerNum, c.srcDocCount, c.srcByteCount)
 
 	// Record once per batch: this runs for every batch of source documents.
-	c.verifier.metrics.recordCompared(ctx, c.task.Generation, int64(len(docs)), int64(batchBytes))
+	c.verifier.getMetrics().recordCompared(ctx, c.task.Generation, int64(len(docs)), int64(batchBytes))
 }
 
 func (c *comparator) publishHistoryCounts() {

@@ -4,19 +4,24 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/internal/metrics"
+	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/mongodb-labs/migration-tools/option"
 	prometheusclient "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/event"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type fakeChangeReaderGaugeSource struct {
@@ -53,6 +58,8 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 	m.recordChangeEvents(ctx, src, map[string]int64{"insert": 4, "someNewOpType": 1})
 	m.recordFindTaskDuration(ctx, 20*time.Millisecond)
 	m.recordRecheckPersistDuration(ctx, 200*time.Millisecond)
+	m.recordCollectionGetMore(ctx, string(src), "mydb.coll", 30*time.Millisecond)
+	m.recordChangeStreamGetMore(ctx, string(dst), time.Second)
 
 	require.NoError(t, m.observeChangeReaders(
 		fakeChangeReaderGaugeSource{
@@ -79,6 +86,7 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 		"migration_verifier_change_reader_buffer_saturation_ratio": prometheusclient.MetricType_GAUGE,
 		"migration_verifier_find_task_duration_seconds":            prometheusclient.MetricType_HISTOGRAM,
 		"migration_verifier_recheck_persist_duration_seconds":      prometheusclient.MetricType_HISTOGRAM,
+		"migration_verifier_get_more_duration_seconds":             prometheusclient.MetricType_HISTOGRAM,
 	}
 	for name, metricType := range expectedTypes {
 		if assert.Contains(t, families, name) {
@@ -116,6 +124,73 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 		t,
 		map[string]float64{"source": 0.25, "destination": 0},
 		valuesByLabel(families["migration_verifier_change_reader_buffer_saturation_ratio"], "cluster"),
+	)
+
+	assert.ElementsMatch(
+		t,
+		[]map[string]string{
+			{"cluster": "destination", "cursor_type": "change_stream"},
+			{"cluster": "source", "cursor_type": "collection", "namespace": "mydb.coll"},
+		},
+		histogramLabelSets(families["migration_verifier_get_more_duration_seconds"], "cluster", "cursor_type", "namespace"),
+		"only collection cursors’ getMores name a namespace",
+	)
+}
+
+// The getMore monitor times only getMores. It labels each with the reply’s
+// cursor namespace unless the context marks the getMore as a change stream’s.
+func TestGetMoreMonitor(t *testing.T) {
+	pipeline, err := metrics.Setup(logger.NewDebugLogger(), metrics.Settings{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pipeline.Shutdown(t.Context())) })
+
+	verifier := &Verifier{}
+	verifier.SetMeterProvider(pipeline.MeterProvider())
+
+	monitor := verifier.newGetMoreMonitor(metricClusterMeta)
+	assert.Nil(t, monitor.Started, "a Started callback would make the driver copy every command")
+
+	reply := lo.Must(bson.Marshal(bson.D{
+		{"cursor", bson.D{
+			{"nextBatch", bson.A{}},
+			{"id", int64(123)},
+			{"ns", "mydb.my.coll"},
+		}},
+		{"ok", 1},
+	}))
+
+	succeeded := func(commandName string) *event.CommandSucceededEvent {
+		return &event.CommandSucceededEvent{
+			CommandFinishedEvent: event.CommandFinishedEvent{
+				CommandName: commandName,
+				Duration:    50 * time.Millisecond,
+			},
+			Reply: reply,
+		}
+	}
+
+	monitor.Succeeded(t.Context(), succeeded("getMore"))
+	monitor.Succeeded(withChangeStreamGetMores(t.Context()), succeeded("getMore"))
+	monitor.Succeeded(withChangeStreamGetMores(t.Context()), succeeded("getMore"))
+	monitor.Succeeded(t.Context(), succeeded("find"))
+
+	family := scrapeFamilies(t, pipeline.Handler())["migration_verifier_get_more_duration_seconds"]
+	require.NotNil(t, family)
+
+	assert.ElementsMatch(
+		t,
+		[]map[string]string{
+			{"cluster": "metadata", "cursor_type": "change_stream"},
+			{"cluster": "metadata", "cursor_type": "collection", "namespace": "mydb.my.coll"},
+		},
+		histogramLabelSets(family, "cluster", "cursor_type", "namespace"),
+	)
+
+	assert.Equal(
+		t,
+		map[string]uint64{"change_stream": 2, "collection": 1},
+		histogramCountByLabel(family, "cursor_type"),
+		"other commands aren’t counted",
 	)
 }
 
@@ -267,6 +342,110 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CheckAndRecheck() {
 	suite.Assert().Positive(
 		histogramCountByLabel(families["migration_verifier_recheck_persist_duration_seconds"], "")[""],
 	)
+
+	for cluster, method := range map[whichCluster]string{
+		src: verifier.srcChangeReaderMethod,
+		dst: verifier.dstChangeReaderMethod,
+	} {
+		if method != ChangeReaderOptChangeStream {
+			continue
+		}
+
+		// Without events, a change stream’s getMore returns only once its
+		// await time passes.
+		suite.Assert().EventuallyWithT(
+			func(c *assert.CollectT) {
+				getMores := scrapeFamilies(suite.T(), pipeline.Handler())["migration_verifier_get_more_duration_seconds"]
+
+				assert.Contains(
+					c,
+					histogramLabelSets(getMores, "cluster", "cursor_type"),
+					map[string]string{"cluster": string(cluster), "cursor_type": metricCursorTypeChangeStream},
+					"%s change stream’s getMores are timed",
+					cluster,
+				)
+			},
+			10*maxChangeStreamAwaitTime,
+			100*time.Millisecond,
+		)
+	}
+}
+
+// The verifier’s clients time collection cursors’ getMores, by namespace.
+func (suite *IntegrationTestSuite) TestVerifierMetrics_CollectionGetMore() {
+	ctx := suite.Context()
+	dbName := suite.DBNameForTest()
+
+	pipeline, err := metrics.Setup(logger.NewDebugLogger(), metrics.Settings{})
+	suite.Require().NoError(err)
+	defer func() { suite.Require().NoError(pipeline.Shutdown(context.Background())) }()
+
+	verifier := suite.BuildVerifier()
+	verifier.SetMeterProvider(pipeline.MeterProvider())
+
+	coll := verifier.srcClient.Database(dbName).Collection("getMoreColl")
+	_, err = coll.InsertMany(ctx, []any{bson.D{{"_id", 1}}, bson.D{{"_id", 2}}, bson.D{{"_id", 3}}})
+	suite.Require().NoError(err)
+
+	// A batch size of 1 makes the cursor need getMores for the later documents.
+	cursor, err := coll.Find(ctx, bson.D{}, options.Find().SetBatchSize(1))
+	suite.Require().NoError(err)
+
+	var docs []bson.Raw
+	suite.Require().NoError(cursor.All(ctx, &docs))
+	suite.Require().Len(docs, 3)
+
+	families := scrapeFamilies(suite.T(), pipeline.Handler())
+
+	suite.Assert().Contains(
+		histogramLabelSets(
+			families["migration_verifier_get_more_duration_seconds"],
+			"cluster", "cursor_type", "namespace",
+		),
+		map[string]string{
+			"cluster":     string(src),
+			"cursor_type": metricCursorTypeCollection,
+			"namespace":   dbName + ".getMoreColl",
+		},
+	)
+}
+
+// The verifier learns each replica set’s name from its cluster info.
+func (suite *IntegrationTestSuite) TestVerifierReplSetNames() {
+	verifier := suite.BuildVerifier()
+
+	for _, tc := range []struct {
+		info *util.ClusterInfo
+		name option.Option[string]
+	}{
+		{verifier.srcClusterInfo, verifier.GetSrcReplSetName()},
+		{verifier.dstClusterInfo, verifier.GetDstReplSetName()},
+	} {
+		if tc.info.Topology == util.TopologyReplset {
+			suite.Assert().NotEmpty(tc.name.OrZero(), "a replica set has a name")
+		} else {
+			suite.Assert().Equal(option.None[string](), tc.name, "only a replica set has a name")
+		}
+	}
+}
+
+// histogramLabelSets returns each histogram sample’s values for labels. A
+// sample that lacks a label has no entry for it.
+func histogramLabelSets(family *prometheusclient.MetricFamily, labels ...string) []map[string]string {
+	var sets []map[string]string
+
+	for _, m := range family.GetMetric() {
+		set := map[string]string{}
+		for _, pair := range m.GetLabel() {
+			if slices.Contains(labels, pair.GetName()) {
+				set[pair.GetName()] = pair.GetValue()
+			}
+		}
+
+		sets = append(sets, set)
+	}
+
+	return sets
 }
 
 // sampleValue returns the value of the gauge or counter sample with all of

@@ -231,7 +231,7 @@ func (verifier *Verifier) insertRecheckDocs(
 		)
 	}
 
-	verifier.metrics.recordRecheckPersistDuration(ctx, time.Since(start))
+	verifier.getMetrics().recordRecheckPersistDuration(ctx, time.Since(start))
 
 	if time.Since(start) > time.Second {
 		verifier.logger.Warn().

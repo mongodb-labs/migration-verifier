@@ -202,7 +202,9 @@ type Verifier struct {
 	// metricsHandler, if set, serves metrics at the web server’s /metrics.
 	metricsHandler option.Option[http.Handler]
 
-	metrics *verifierMetrics
+	// metrics is atomic because the clients’ command monitors read it, and
+	// they start before SetMeterProvider replaces it.
+	metrics atomic.Pointer[verifierMetrics]
 
 	workerTracker        *WorkerTracker
 	docsComparedHistory  *history.History[types.DocumentCount]
@@ -238,7 +240,7 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 
 	logger, logWriter := getLoggerAndWriter(logPath)
 
-	return &Verifier{
+	verifier := &Verifier{
 		logger: logger,
 		writer: logWriter,
 
@@ -262,11 +264,18 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 
 		changeHandlingErr: util.NewEventual[error](),
 
-		metrics: newVerifierMetrics(noop.NewMeterProvider()),
-
 		srcLastRecheckedTS: msync.NewDataGuard(bson.Timestamp{}),
 		dstLastRecheckedTS: msync.NewDataGuard(bson.Timestamp{}),
 	}
+
+	verifier.metrics.Store(newVerifierMetrics(noop.NewMeterProvider()))
+
+	return verifier
+}
+
+// getMetrics returns the verifier’s current instruments.
+func (verifier *Verifier) getMetrics() *verifierMetrics {
+	return verifier.metrics.Load()
 }
 
 // ConfigureReadConcern
@@ -312,12 +321,16 @@ func (verifier *Verifier) buildClientOpts(
 	return opts
 }
 
+// getClient connects to a cluster. cluster is the cluster label for the
+// client’s getMore metrics.
 func (verifier *Verifier) getClient(
 	ctx context.Context,
 	uri string,
 	rp *readpref.ReadPref,
+	cluster string,
 ) (*mongo.Client, *options.ClientOptions, error) {
 	opts := verifier.buildClientOpts(uri, rp)
+	opts.SetMonitor(verifier.newGetMoreMonitor(cluster))
 
 	client, err := mongo.Connect(opts)
 	if err != nil {
@@ -420,9 +433,21 @@ func (verifier *Verifier) GetLogger() *logger.Logger {
 	return verifier.logger
 }
 
+// GetSrcReplSetName returns the source’s replica set name, if the source is
+// a replica set. Call it after SetSrcURI.
+func (verifier *Verifier) GetSrcReplSetName() option.Option[string] {
+	return option.IfNotZero(verifier.srcClusterInfo.SetName)
+}
+
+// GetDstReplSetName returns the destination’s replica set name, if the
+// destination is a replica set. Call it after SetDstURI.
+func (verifier *Verifier) GetDstReplSetName() option.Option[string] {
+	return option.IfNotZero(verifier.dstClusterInfo.SetName)
+}
+
 func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 	var err error
-	verifier.metaClient, _, err = verifier.getClient(ctx, uri, readpref.Primary())
+	verifier.metaClient, _, err = verifier.getClient(ctx, uri, readpref.Primary(), metricClusterMeta)
 	if err != nil {
 		return errors.Wrapf(err, "connect to metadata")
 	}
@@ -499,8 +524,9 @@ func (verifier *Verifier) SetMetricsHandler(handler http.Handler) {
 // instruments. Without it, the verifier records to no-op instruments. Call it
 // before starting a check.
 func (verifier *Verifier) SetMeterProvider(provider otelmetric.MeterProvider) {
-	verifier.metrics = newVerifierMetrics(provider)
-	verifier.metrics.recordPhase(context.Background(), Idle)
+	metrics := newVerifierMetrics(provider)
+	metrics.recordPhase(context.Background(), Idle)
+	verifier.metrics.Store(metrics)
 }
 
 func (verifier *Verifier) SetNumWorkers(arg int) error {
