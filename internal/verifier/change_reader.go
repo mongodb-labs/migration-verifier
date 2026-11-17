@@ -10,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/api"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/msync"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/mongodb-labs/migration-tools/option"
@@ -98,6 +99,9 @@ type ChangeReaderCommon struct {
 	logger     *logger.Logger
 	namespaces []string
 
+	// getMetrics returns the verifier’s current instruments.
+	getMetrics func() *verifierMetrics
+
 	metaDB        *mongo.Database
 	watcherClient *mongo.Client
 	clusterInfo   util.ClusterInfo
@@ -164,6 +168,11 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 		batchSizeHistory:      history.New[int](time.Minute),
 		cumulativeEventCounts: msync.NewDataGuard(api.ChangeEventCounts{}),
 	}
+}
+
+// recordRead records a read of a batch of events.
+func (rc *ChangeReaderCommon) recordRead(ctx context.Context, read compare.BatchRead) {
+	rc.getMetrics().recordChangeRead(ctx, rc.readerType, read)
 }
 
 func (rc *ChangeReaderCommon) getWhichCluster() whichCluster {

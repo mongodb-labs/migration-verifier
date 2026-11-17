@@ -11,6 +11,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/keystring"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/main/mvflags"
 	"github.com/10gen/migration-verifier/mbson"
@@ -78,6 +79,7 @@ func (v *Verifier) newChangeStreamReader(
 	common.clusterInfo = clusterInfo
 
 	common.logger = v.logger
+	common.getMetrics = v.getMetrics
 	common.metaDB = v.metaClient.Database(v.metaDBName)
 
 	common.resumeTokenTSExtractor = extractTSFromChangeStreamResumeToken
@@ -180,8 +182,17 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 	latestEvent := option.None[ParsedEvent]()
 
 	var batchTotalBytes int
+
+	// The first TryNext reads the batch; the rest iterate it.
+	var readDuration time.Duration
+	readStart := time.Now()
+
 	for hasEventInBatch := true; hasEventInBatch; hasEventInBatch = cs.RemainingBatchLength() > 0 {
 		gotEvent := cs.TryNext(sctx)
+
+		if eventsRead == 0 {
+			readDuration = time.Since(readStart)
+		}
 
 		if cs.Err() != nil {
 			return errors.Wrap(cs.Err(), "change stream iteration failed")
@@ -243,6 +254,12 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 
 		eventsRead++
 	}
+
+	csr.recordRead(sctx, compare.BatchRead{
+		Duration: readDuration,
+		Docs:     eventsRead,
+		Bytes:    batchTotalBytes,
+	})
 
 	sess := mongo.SessionFromContext(sctx)
 	csr.updateLastSeenClusterTime(sess)
