@@ -138,7 +138,8 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 }
 
 // The getMore monitor times only getMores. It labels each with the reply’s
-// cursor namespace unless the context marks the getMore as a change stream’s.
+// cursor namespace, except that a cluster-wide change stream’s getMores have
+// no namespace.
 func TestGetMoreMonitor(t *testing.T) {
 	pipeline, err := metrics.Setup(logger.NewDebugLogger(), metrics.Settings{})
 	require.NoError(t, err)
@@ -150,29 +151,27 @@ func TestGetMoreMonitor(t *testing.T) {
 	monitor := verifier.newGetMoreMonitor(metricClusterMeta)
 	assert.Nil(t, monitor.Started, "a Started callback would make the driver copy every command")
 
-	reply := lo.Must(bson.Marshal(bson.D{
-		{"cursor", bson.D{
-			{"nextBatch", bson.A{}},
-			{"id", int64(123)},
-			{"ns", "mydb.my.coll"},
-		}},
-		{"ok", 1},
-	}))
-
-	succeeded := func(commandName string) *event.CommandSucceededEvent {
+	succeeded := func(commandName, ns string) *event.CommandSucceededEvent {
 		return &event.CommandSucceededEvent{
 			CommandFinishedEvent: event.CommandFinishedEvent{
 				CommandName: commandName,
 				Duration:    50 * time.Millisecond,
 			},
-			Reply: reply,
+			Reply: lo.Must(bson.Marshal(bson.D{
+				{"cursor", bson.D{
+					{"nextBatch", bson.A{}},
+					{"id", int64(123)},
+					{"ns", ns},
+				}},
+				{"ok", 1},
+			})),
 		}
 	}
 
-	monitor.Succeeded(t.Context(), succeeded("getMore"))
-	monitor.Succeeded(withChangeStreamGetMores(t.Context()), succeeded("getMore"))
-	monitor.Succeeded(withChangeStreamGetMores(t.Context()), succeeded("getMore"))
-	monitor.Succeeded(t.Context(), succeeded("find"))
+	monitor.Succeeded(t.Context(), succeeded("getMore", "mydb.my.coll"))
+	monitor.Succeeded(t.Context(), succeeded("getMore", "admin.$cmd.aggregate"))
+	monitor.Succeeded(t.Context(), succeeded("getMore", "admin.$cmd.aggregate"))
+	monitor.Succeeded(t.Context(), succeeded("find", "mydb.my.coll"))
 
 	family := scrapeFamilies(t, pipeline.Handler())["migration_verifier_get_more_duration_seconds"]
 	require.NotNil(t, family)
