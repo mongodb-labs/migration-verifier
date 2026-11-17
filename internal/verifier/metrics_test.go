@@ -267,6 +267,25 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CheckAndRecheck() {
 	suite.Assert().Positive(
 		histogramCountByLabel(families["migration_verifier_recheck_persist_duration_seconds"], "")[""],
 	)
+
+	// Finish the verification.
+	suite.Require().NoError(verifier.WritesOff(ctx))
+	suite.Require().NoError(runner.Await())
+
+	families = scrapeFamilies(suite.T(), pipeline.Handler())
+
+	durationCounts := histogramCountByLabel(families["migration_verifier_generation_duration_seconds"], "stage")
+	suite.Assert().EqualValues(
+		verifier.generation+1,
+		durationCounts["initial"]+durationCounts["recheck"],
+		"each generation, including the final one, records its duration once",
+	)
+
+	suite.Assert().Equal(
+		map[string]float64{"check": 0, "recheck": 0, "idle": 1},
+		valuesByLabel(families["migration_verifier_phase"], "phase"),
+		"a finished verification is idle",
+	)
 }
 
 // sampleValue returns the value of the gauge or counter sample with all of
