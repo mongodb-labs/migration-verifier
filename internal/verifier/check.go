@@ -200,8 +200,10 @@ func (verifier *Verifier) CheckWorker(ctxIn context.Context) error {
 func (verifier *Verifier) claimCheck() func() {
 	if verifier.running.CompareAndSwap(false, true) {
 		return func() {
-			verifier.running.Store(false)
+			// Record idle while still holding the claim. Otherwise a new
+			// check could claim the verifier and record its phase first.
 			verifier.getMetrics().recordPhase(context.Background(), Idle)
+			verifier.running.Store(false)
 		}
 	}
 
@@ -350,6 +352,12 @@ func (verifier *Verifier) runClaimedCheck(
 		time.Sleep(verifier.generationPauseDelay)
 		verifier.mux.Lock()
 		if verifier.lastGeneration {
+			verifier.getMetrics().recordGenerationDuration(
+				ctx,
+				verifier.generation,
+				time.Since(verifier.generationStartTime),
+			)
+
 			verifier.mux.Unlock()
 
 			verifier.logger.Debug().
