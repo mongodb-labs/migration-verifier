@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	Missing = "Missing"
+	Missing     = "Missing"
+	DuplicateID = "DuplicateID"
 
 	SrcTimestampField = "srctimestamp"
 	DstTimestampField = "dsttimestamp"

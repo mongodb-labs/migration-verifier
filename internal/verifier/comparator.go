@@ -269,8 +269,44 @@ func (c *comparator) processSingleDoc(curDocWithTS compare.DocWithTS, isSrc bool
 		ourMap, theirMap = c.dstCache, c.srcCache
 	}
 
-	theirDocWithTS, exists := theirMap[mapKey]
-	if !exists {
+	theirDocWithTS, theyHaveDoc := theirMap[mapKey]
+
+	if !theyHaveDoc {
+		if _, alreadySaw := ourMap[mapKey]; alreadySaw {
+			// This can happen in RS->SC migrations where the destination holds
+			// the same _id on multiple shards.
+
+			firstMismatchTime := c.firstMismatchTimeLookup.get(curDocWithTS.Doc)
+
+			docID := lo.Must(c.verifier.docCompareMethod.ClonedDocIDForComparison(curDocWithTS.Doc))
+
+			mismatch := compare.Result{
+				ID:        docID,
+				NameSpace: c.namespace,
+				Details:   compare.DuplicateID,
+				DataSize:  int32(len(curDocWithTS.Doc)),
+				Cluster: lo.Ternary(
+					isSrc,
+					constants.ClusterSource,
+					constants.ClusterTarget,
+				),
+				MismatchHistory: createMismatchTimes(firstMismatchTime),
+			}
+
+			if isSrc {
+				mismatch.SrcTimestamp = option.Some(curDocWithTS.TS)
+			} else {
+				mismatch.DstTimestamp = option.Some(curDocWithTS.TS)
+			}
+
+			c.problems = append(c.problems, mismatch)
+			c.cachedVariableBytes += types.ByteCount(len(mismatch.ID.Value))
+
+			curDocWithTS.PutInPool()
+
+			return nil
+		}
+
 		// The other map lacks this document. Cache it, and we’re done for now.
 		ourMap[mapKey] = curDocWithTS
 		c.cachedVariableBytes += types.ByteCount(len(mapKey) + len(curDocWithTS.Doc))
@@ -342,26 +378,30 @@ func (c *comparator) flushIfNeeded(
 	return whyFlush, c.flush(ctx, reportChan)
 }
 
-// Returns the # of problems flushed. Always flushes.
+// flush sends a report of the comparator’s current state. It always flushes.
 func (c *comparator) flush(
 	ctx context.Context,
 	reportChan chan<- DocCompareReport,
 ) error {
+	report := c.takeReport()
+
+	err := chanutil.WriteWithDoneCheck(ctx, reportChan, report)
+	if err != nil {
+		return errors.Wrapf(err, "flushing %d problems", len(report.Problems))
+	}
+
+	return nil
+}
+
+// takeReport sweeps unpaired documents into the problems list, then returns
+// a report of the comparator’s current state & resets that state.
+func (c *comparator) takeReport() DocCompareReport {
 	c.sweepMissingDocs()
 
-	probsToFlush := c.problems
-
-	err := chanutil.WriteWithDoneCheck(
-		ctx,
-		reportChan,
-		DocCompareReport{
-			Problems:  probsToFlush,
-			DocCount:  c.srcDocCount,
-			ByteCount: c.srcByteCount,
-		},
-	)
-	if err != nil {
-		return errors.Wrapf(err, "flushing %d problems", len(probsToFlush))
+	report := DocCompareReport{
+		Problems:  c.problems,
+		DocCount:  c.srcDocCount,
+		ByteCount: c.srcByteCount,
 	}
 
 	c.problems = nil
@@ -374,7 +414,7 @@ func (c *comparator) flush(
 
 	c.publishHistoryCounts()
 
-	return nil
+	return report
 }
 
 func (c *comparator) countUnpairedDocs() int {
