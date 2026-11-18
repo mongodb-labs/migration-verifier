@@ -233,7 +233,7 @@ func (verifier *Verifier) compareDocsFromChannels(
 	verifier.bytesComparedHistory.Add(0)
 
 	// 2. Stream Processing Loop
-	for c.src.stillReading() || c.dst.stillReading() {
+	for c.stillReading() {
 		srcBatch, dstBatch, naturalBatchDone, err := c.readBatches(ctx, srcChannel, dstChannel)
 		if err != nil {
 			return DocCompareReport{}, err
