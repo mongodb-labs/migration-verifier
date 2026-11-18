@@ -23,7 +23,6 @@ import (
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -474,14 +473,14 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			// So if there are missing documents on the destination, we’ll
 			// block the compare thread unless the destination “compensates”
 			// by sending dummy values. We do that here.
+			//
+			// TODO: This count CAN be negative if the destination has duplicate
+			// IDs while the source has a unique one. This can happen if the
+			// destination’s chunk distribution differs from the source’s, as
+			// typically happens in mongosync-driven migrations. In a very
+			// obscure edge case that could, after 1,000s of repeated dupes in
+			// the same source cursor, deadlock. REP-8267 will fix that.
 			missingDocsCount := len(docIDs) - dstDocsFound
-
-			lo.Assertf(
-				missingDocsCount >= 0,
-				"dest docs (%d) must be <= source docs (%d)",
-				dstDocsFound,
-				len(docIDs),
-			)
 
 			if missingDocsCount > 0 {
 				verifier.logger.Trace().
