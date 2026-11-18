@@ -263,8 +263,44 @@ func (c *comparator) processSingleDoc(curDocWithTS compare.DocWithTS, isSrc bool
 		ourMap, theirMap = c.dstCache, c.srcCache
 	}
 
-	theirDocWithTS, exists := theirMap[mapKey]
-	if !exists {
+	theirDocWithTS, theyHaveDoc := theirMap[mapKey]
+
+	if !theyHaveDoc {
+		if _, alreadySaw := ourMap[mapKey]; alreadySaw {
+			// This can happen in RS->SC migrations where the destination holds
+			// the same _id on multiple shards.
+
+			firstMismatchTime := c.firstMismatchTimeLookup.get(curDocWithTS.Doc)
+
+			docID := lo.Must(c.verifier.docCompareMethod.ClonedDocIDForComparison(curDocWithTS.Doc))
+
+			mismatch := compare.Result{
+				ID:        docID,
+				NameSpace: c.namespace,
+				Details:   compare.DuplicateID,
+				DataSize:  int32(len(curDocWithTS.Doc)),
+				Cluster: lo.Ternary(
+					isSrc,
+					constants.ClusterSource,
+					constants.ClusterTarget,
+				),
+				MismatchHistory: createMismatchTimes(firstMismatchTime),
+			}
+
+			if isSrc {
+				mismatch.SrcTimestamp = option.Some(curDocWithTS.TS)
+			} else {
+				mismatch.DstTimestamp = option.Some(curDocWithTS.TS)
+			}
+
+			c.problems = append(c.problems, mismatch)
+			c.cachedVariableBytes += types.ByteCount(len(mismatch.ID.Value))
+
+			curDocWithTS.PutInPool()
+
+			return nil
+		}
+
 		// The other map lacks this document. Cache it, and we’re done for now.
 		ourMap[mapKey] = curDocWithTS
 		c.cachedVariableBytes += types.ByteCount(len(mapKey) + len(curDocWithTS.Doc))
