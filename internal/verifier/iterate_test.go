@@ -86,7 +86,7 @@ func docsFromComparatorMsg(t *testing.T, msg compare.ToComparatorMsg) []compare.
 	case compare.BatchDoneComparatorMsg:
 		return nil
 	default:
-		require.Failf(t, "unexpected message to comparator", "type: %T", msg)
+		require.Fail(t, "unexpected message to comparator", "type: %T", msg)
 
 		return nil
 	}
