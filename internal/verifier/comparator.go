@@ -197,15 +197,15 @@ func (c *comparator) readBatches(
 
 	var naturalBatchDone bool
 
-	srcBatchNum, srcDone := c.srcFinishedNaturalBatch.Get()
-	dstBatchNum, dstDone := c.dstFinishedNaturalBatch.Get()
+	batchNumFromSrc, srcFinishedNaturalBatch := c.srcFinishedNaturalBatch.Get()
+	batchNumFromDst, dstFinishedNaturalBatch := c.dstFinishedNaturalBatch.Get()
 
-	if srcDone && dstDone {
+	if srcFinishedNaturalBatch && dstFinishedNaturalBatch {
 		lo.Assertf(
-			srcBatchNum == dstBatchNum,
+			batchNumFromSrc == batchNumFromDst,
 			"src finished natural batch %d, but dst finished batch %d",
-			srcBatchNum,
-			dstBatchNum,
+			batchNumFromSrc,
+			batchNumFromDst,
 		)
 
 		naturalBatchDone = true
