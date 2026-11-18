@@ -67,7 +67,7 @@ func TestCompareDocsFromChannels_NaturalBatchNumbers(t *testing.T) {
 		assert.Panics(
 			t,
 			func() { _, _ = compareDocs(0, 1) },
-			"the sides finished different batches",
+			"the sides finished different batches, so we expect a panic",
 		)
 	})
 }
