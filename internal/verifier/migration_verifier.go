@@ -54,6 +54,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"go.mongodb.org/mongo-driver/v2/mongo/writeconcern"
+	otelmetric "go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
 // DDLHandling describes how the verifier responds to DDL events on the source.
@@ -200,6 +202,8 @@ type Verifier struct {
 	// metricsHandler, if set, serves metrics at the web server’s /metrics.
 	metricsHandler option.Option[http.Handler]
 
+	metrics *verifierMetrics
+
 	workerTracker        *WorkerTracker
 	docsComparedHistory  *history.History[types.DocumentCount]
 	bytesComparedHistory *history.History[types.ByteCount]
@@ -234,7 +238,7 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 
 	logger, logWriter := getLoggerAndWriter(logPath)
 
-	return &Verifier{
+	verifier := &Verifier{
 		logger: logger,
 		writer: logWriter,
 
@@ -261,6 +265,15 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		srcLastRecheckedTS: msync.NewDataGuard(bson.Timestamp{}),
 		dstLastRecheckedTS: msync.NewDataGuard(bson.Timestamp{}),
 	}
+
+	verifier.metrics = newVerifierMetrics(noop.NewMeterProvider())
+
+	return verifier
+}
+
+// getMetrics returns the verifier’s current instruments.
+func (verifier *Verifier) getMetrics() *verifierMetrics {
+	return verifier.metrics
 }
 
 // ConfigureReadConcern
@@ -487,6 +500,14 @@ func (verifier *Verifier) SetServerPort(port int) {
 // SetMetricsHandler makes the web server serve handler at /metrics.
 func (verifier *Verifier) SetMetricsHandler(handler http.Handler) {
 	verifier.metricsHandler = option.Some(handler)
+}
+
+// SetMeterProvider makes the verifier record its metrics with provider’s
+// instruments. Without it, the verifier records to no-op instruments. Call it
+// before starting a check.
+func (verifier *Verifier) SetMeterProvider(provider otelmetric.MeterProvider) {
+	verifier.metrics = newVerifierMetrics(provider)
+	verifier.metrics.recordPhase(context.Background(), Idle)
 }
 
 func (verifier *Verifier) SetNumWorkers(arg int) error {

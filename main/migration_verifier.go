@@ -317,6 +317,7 @@ func main() {
 			if pipeline, has := setUpMetrics(cCtx, verifier).Get(); has {
 				metricsPipeline = option.Some(pipeline)
 				verifier.SetMetricsHandler(pipeline.Handler())
+				verifier.SetMeterProvider(pipeline.MeterProvider())
 			}
 
 			if cCtx.Bool(checkOnly) {

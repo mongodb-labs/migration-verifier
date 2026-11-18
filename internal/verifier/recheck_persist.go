@@ -111,8 +111,11 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 	eventOrigin := reader.getWhichCluster()
 
+	eventCountByOpType := map[string]int64{}
+
 	for _, changeEvent := range batch.events {
 		reader.addToEventCounts(changeEvent.OpType)
+		eventCountByOpType[changeEvent.OpType]++
 
 		docID, ok := changeEvent.DocID.Get()
 		if !ok {
@@ -193,6 +196,8 @@ func (verifier *Verifier) PersistChangeEvents(ctx context.Context, batch eventBa
 
 		dataSizes = append(dataSizes, dataSize)
 	}
+
+	verifier.getMetrics().recordChangeEvents(ctx, eventOrigin, eventCountByOpType)
 
 	// This can happen if all change events were DDL events.
 	if len(docIDs) == 0 {

@@ -140,7 +140,7 @@ func (c *comparator) readBatches(
 					len(msg.DocsWithTS),
 				)
 
-				c.recordSrcMetrics(msg.DocsWithTS)
+				c.recordSrcMetrics(ctx, msg.DocsWithTS)
 
 				srcBatch = msg.DocsWithTS
 			}
@@ -217,12 +217,15 @@ func simpleTimerReset(t *time.Timer, dur time.Duration) {
 }
 
 // recordSrcMetrics isolates the noise of tracking business metrics.
-func (c *comparator) recordSrcMetrics(docs []compare.DocWithTS) {
+func (c *comparator) recordSrcMetrics(ctx context.Context, docs []compare.DocWithTS) {
 	c.srcDocCount += types.DocumentCount(len(docs))
 	c.curHistoryDocCount += types.DocumentCount(len(docs))
 
+	var batchBytes types.ByteCount
+
 	for _, docWithTS := range docs {
 		docSize := c.verifier.docCompareMethod.DocSize(docWithTS.Doc)
+		batchBytes += docSize
 		c.srcByteCount += docSize
 		c.curHistoryByteCount += docSize
 
@@ -232,6 +235,9 @@ func (c *comparator) recordSrcMetrics(docs []compare.DocWithTS) {
 	}
 
 	c.verifier.workerTracker.SetSrcCounts(c.workerNum, c.srcDocCount, c.srcByteCount)
+
+	// Record once per batch: this runs for every batch of source documents.
+	c.verifier.getMetrics().recordCompared(ctx, c.task.Generation, int64(len(docs)), int64(batchBytes))
 }
 
 func (c *comparator) publishHistoryCounts() {
