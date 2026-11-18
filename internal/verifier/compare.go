@@ -344,7 +344,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	srcToCompareChannel := make(chan compare.ToComparatorMsg)
 	dstToCompareChannel := make(chan compare.ToComparatorMsg)
 
-	srcToDstChannel := make(chan []compare.DocID, 1_000)
+	srcToDstChannel := make(chan compare.NaturalSrcToDstMsg, 1_000)
 
 	// Read documents between the lower & upper bounds. Since we can’t actually
 	// query the server that way, though, we subtract the record IDs & set that
@@ -393,15 +393,17 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 		coll := verifier.dstClientCollection(task)
 
 		for {
-			docIDsOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
+			idBatchOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
 			if err != nil {
 				return err
 			}
-			docIDs, isOpen := docIDsOpt.Get()
+			idBatch, isOpen := idBatchOpt.Get()
 			if !isOpen {
 				state.NoteSuccess("saw channel from source closed")
 				break
 			}
+
+			docIDs := idBatch.IDs
 
 			state.NoteSuccess("received %d doc IDs from source to fetch", len(docIDs))
 
@@ -460,10 +462,12 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			err = chanutil.WriteWithDoneCheck(
 				sctx,
 				dstToCompareChannel,
-				compare.ToComparatorMsg(compare.BatchDoneComparatorMsg{}),
+				// Echo the source’s batch number so the comparator can check
+				// that both sides finished the same batch.
+				compare.ToComparatorMsg(compare.BatchDoneComparatorMsg(idBatch.BatchNum)),
 			)
 			if err != nil {
-				return errors.Wrapf(err, "sending batch-done message to compare thread")
+				return errors.Wrapf(err, "sending batch-done message (batch %d) to compare thread", idBatch.BatchNum)
 			}
 
 			verifier.logger.Trace().

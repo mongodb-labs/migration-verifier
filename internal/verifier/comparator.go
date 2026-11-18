@@ -49,13 +49,14 @@ type comparator struct {
 	curHistoryDocCount  types.DocumentCount
 	curHistoryByteCount types.ByteCount
 
-	// Indicates that the last item from the source channel was a batch-end
-	// message. When this happens, the comparator reads from the destination
-	// channel until it also receives a batch-end message.
-	srcFinishedNaturalBatch bool
+	// The source reader’s last-sent batch-end message. When this is set,
+	// the comparator reads from the destination channel exclusively until it
+	// also receives a batch-end message. The comparator asserts that the two
+	// messages match.
+	srcFinishedNaturalBatch option.Option[compare.BatchDoneComparatorMsg]
 
 	// The counterpart to srcFinishedNaturalBatch.
-	dstFinishedNaturalBatch bool
+	dstFinishedNaturalBatch option.Option[compare.BatchDoneComparatorMsg]
 
 	// We may flush the comparator’s caches when len(problems) or this value
 	// exceed predefined limits.
@@ -99,11 +100,11 @@ func newComparator(v *Verifier, workerNum int, fi retry.SuccessNotifier, task *t
 }
 
 func (c *comparator) stillReadingSrc() bool {
-	return !c.srcClosed && !c.srcFinishedNaturalBatch
+	return !c.srcClosed && c.srcFinishedNaturalBatch.IsNone()
 }
 
 func (c *comparator) stillReadingDst() bool {
-	return !c.dstClosed && !c.dstFinishedNaturalBatch
+	return !c.dstClosed && c.dstFinishedNaturalBatch.IsNone()
 }
 
 // readBatches reads up to 1 batch from both src & dst channels. It returns
@@ -120,7 +121,7 @@ func (c *comparator) readBatches(
 	// Skip reading from the source if either:
 	// 1. The source is already closed.
 	// 2. Natural scan: We’re waiting for the destination reader to catch up.
-	if !c.srcClosed && !c.srcFinishedNaturalBatch {
+	if c.stillReadingSrc() {
 		select {
 		case <-ctx.Done():
 			return nil, nil, false, ctx.Err()
@@ -148,7 +149,7 @@ func (c *comparator) readBatches(
 
 				srcBatch = payload
 			case compare.BatchDoneComparatorMsg:
-				c.srcFinishedNaturalBatch = true
+				c.srcFinishedNaturalBatch = option.Some(payload)
 			default:
 				panic(fmt.Sprintf("bad message (%T) from src reader", msg))
 			}
@@ -158,7 +159,7 @@ func (c *comparator) readBatches(
 	// Skip reading from the destination if either:
 	// 1. The destination is already closed.
 	// 2. Natural scan: We’re waiting for the source reader to catch up.
-	if !c.dstClosed && !c.dstFinishedNaturalBatch {
+	if c.stillReadingDst() {
 		select {
 		case <-ctx.Done():
 			return nil, nil, false, ctx.Err()
@@ -184,7 +185,7 @@ func (c *comparator) readBatches(
 
 				dstBatch = payload
 			case compare.BatchDoneComparatorMsg:
-				c.dstFinishedNaturalBatch = true
+				c.dstFinishedNaturalBatch = option.Some(payload)
 			default:
 				panic(fmt.Sprintf("bad message (%T) from dst reader", msg))
 			}
@@ -193,10 +194,20 @@ func (c *comparator) readBatches(
 
 	var naturalBatchDone bool
 
-	if c.srcFinishedNaturalBatch && c.dstFinishedNaturalBatch {
+	srcBatchNum, srcDone := c.srcFinishedNaturalBatch.Get()
+	dstBatchNum, dstDone := c.dstFinishedNaturalBatch.Get()
+
+	if srcDone && dstDone {
+		lo.Assertf(
+			srcBatchNum == dstBatchNum,
+			"src finished natural batch %d, but dst finished batch %d",
+			srcBatchNum,
+			dstBatchNum,
+		)
+
 		naturalBatchDone = true
-		c.srcFinishedNaturalBatch = false
-		c.dstFinishedNaturalBatch = false
+		c.srcFinishedNaturalBatch = option.None[compare.BatchDoneComparatorMsg]()
+		c.dstFinishedNaturalBatch = option.None[compare.BatchDoneComparatorMsg]()
 	}
 
 	return srcBatch, dstBatch, naturalBatchDone, nil

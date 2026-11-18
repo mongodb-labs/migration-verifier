@@ -16,14 +16,29 @@ type DocsToComparatorMsg []DocWithTS
 
 func (DocsToComparatorMsg) _isToComparatorMsg() {}
 
-type BatchDoneComparatorMsg struct{}
+// BatchDoneComparatorMsg ends one source cursor batch in natural partitioning.
+// The source reader sends it after the batch’s documents, and the destination
+// reader sends it after the documents from its query for that batch’s IDs.
+// Its value is the batch’s number, which the comparator checks matches on
+// both sides.
+type BatchDoneComparatorMsg uint64
 
 func (BatchDoneComparatorMsg) _isToComparatorMsg() {}
 
 var (
 	_ ToComparatorMsg = DocsToComparatorMsg(nil)
-	_ ToComparatorMsg = BatchDoneComparatorMsg{}
+	_ ToComparatorMsg = BatchDoneComparatorMsg(0)
 )
+
+// NaturalSrcToDstMsg is one source cursor batch’s document IDs, which natural
+// partitioning sends from the source reader to the destination reader.
+type NaturalSrcToDstMsg struct {
+	// BatchNum is the batch’s number, which the destination reader echoes
+	// in its BatchDoneComparatorMsg.
+	BatchNum uint64
+
+	IDs []DocID
+}
 
 const (
 	// ToComparatorBatchSize is the max # of docs that readers send
