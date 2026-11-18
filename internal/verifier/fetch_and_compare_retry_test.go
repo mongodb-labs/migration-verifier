@@ -100,7 +100,7 @@ func TestFetchAndCompareDocuments_FinalReportOnlyFromSuccessfulAttempt(t *testin
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case ch <- compare.ToComparatorMsg{DocsWithTS: docs}:
+			case ch <- compare.DocsToComparatorMsg(docs):
 				return nil
 			}
 		}
