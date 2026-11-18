@@ -94,7 +94,9 @@ practice this should be extremely rare since duplicate `_id`s will be transient
 artifacts of change event replication.)
 
 In either case, a batch-end from one reader causes the comparator to stop
-reading from that reader until it receives the other reader’s batch-end.
+reading from that reader until it receives the other reader’s batch-end. The
+batch-end message itself is an incrementing u64; the comparator asserts that
+the source & destination messages match.
 
 ### Direct connection requirement
 

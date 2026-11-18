@@ -1,8 +1,6 @@
 package compare
 
 import (
-	"math"
-
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -49,10 +47,6 @@ const (
 	// comparator thread at once. This value is somewhat arbitrarily chosen.
 	ToComparatorByteLimit = 32 << 20
 )
-
-func ToComparatorBatchCount(totalDocs int) int {
-	return int(math.Ceil(float64(totalDocs) / ToComparatorBatchSize))
-}
 
 // DocID is how natural partitioning sends document IDs from the
 // source-reader thread to the destination. This wraps a document ID
