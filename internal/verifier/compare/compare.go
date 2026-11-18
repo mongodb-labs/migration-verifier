@@ -20,6 +20,11 @@ type BatchDoneComparatorMsg struct{}
 
 func (BatchDoneComparatorMsg) _isToComparatorMsg() {}
 
+var (
+	_ ToComparatorMsg = DocsToComparatorMsg(nil)
+	_ ToComparatorMsg = BatchDoneComparatorMsg{}
+)
+
 const (
 	// ToComparatorBatchSize is the max # of docs that readers send
 	// to the comparator thread at once.

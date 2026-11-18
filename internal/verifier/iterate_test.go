@@ -10,7 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-func (s *IntegrationTestSuite) TestIterateCursorToChannel() {
+func (s *IntegrationTestSuite) TestIterateCursorToComparator() {
 	ctx := s.Context()
 
 	coll := s.srcMongoClient.Database(s.DBNameForTest()).Collection("stuff")

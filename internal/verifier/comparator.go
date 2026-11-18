@@ -49,8 +49,12 @@ type comparator struct {
 	curHistoryDocCount  types.DocumentCount
 	curHistoryByteCount types.ByteCount
 
-	// Used in natural partitioning to synchronize src & dst readers.
+	// Indicates that the last item from the source channel was a batch-end
+	// message. When this happens, the comparator reads from the destination
+	// channel until it also receives a batch-end message.
 	srcFinishedNaturalBatch bool
+
+	// The counterpart to srcFinishedNaturalBatch.
 	dstFinishedNaturalBatch bool
 
 	// We may flush the comparator’s caches when len(problems) or this value
@@ -102,13 +106,9 @@ func (c *comparator) stillReadingDst() bool {
 	return !c.dstClosed && !c.dstFinishedNaturalBatch
 }
 
-// readBatches handles the concurrent errgroup I/O and timeout logic.
-// It returns: a batch of src docs, a batch of dst docs, a flag to indicate
-// reception of cursor-done from the destination, and an error.
-//
-// NB: The cursor-done flag means that the cursor finished *before* reading
-// the dst docs. Thus, the caller MUST process that flag before
-// processing the returned dst docs.
+// readBatches reads up to 1 batch from both src & dst channels. It returns
+// those batches plus a flag to indicate whether a natural batch boundary is
+// reached.
 func (c *comparator) readBatches(
 	ctx context.Context,
 	srcChannel, dstChannel <-chan compare.ToComparatorMsg,
