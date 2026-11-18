@@ -101,7 +101,7 @@ type comparatorInput struct {
 	closed bool
 
 	// The reader’s last-sent batch-end message. When this is set, the
-	// comparator reads only from the other reader until it also receives a
+	// comparator reads only from the other channel until it also yields a
 	// batch-end message. The comparator asserts that the two messages match.
 	finishedNaturalBatch option.Option[compare.BatchDoneComparatorMsg]
 }
@@ -113,31 +113,97 @@ func (in *comparatorInput) stillReading() bool {
 	return !in.closed && in.finishedNaturalBatch.IsNone()
 }
 
-// readBatches reads up to 1 batch from both src & dst channels. It returns
+func (in *comparatorInput) handleMessage(msg compare.ToComparatorMsg) []compare.DocWithTS {
+	switch payload := msg.(type) {
+	case compare.DocsToComparatorMsg:
+		lo.Assertf(
+			len(payload) <= compare.ToComparatorBatchSize,
+			"%s reader should send <= %d docs but sent %d",
+			in.cluster,
+			compare.ToComparatorBatchSize,
+			len(payload),
+		)
+
+		return payload
+	case compare.BatchDoneComparatorMsg:
+		in.finishedNaturalBatch = option.Some(payload)
+
+		return nil
+	default:
+		panic(fmt.Sprintf("bad message (%T) from %s reader", msg, in.cluster))
+	}
+}
+
+// readBatches reads up to 1 message from both src & dst channels. It returns
 // those batches plus a flag to indicate whether a natural batch boundary is
 // reached.
 func (c *comparator) readBatches(
 	ctx context.Context,
 	srcChannel, dstChannel <-chan compare.ToComparatorMsg,
 ) ([]compare.DocWithTS, []compare.DocWithTS, bool, error) {
-	srcBatch, err := c.readOne(ctx, &c.src, srcChannel)
-	if err != nil {
-		return nil, nil, false, err
+	if !c.src.stillReading() {
+		srcChannel = nil
+	}
+	if !c.dst.stillReading() {
+		dstChannel = nil
+	}
+
+	lo.Assert(
+		srcChannel != nil || dstChannel != nil,
+		"need >=1 channel to read",
+	)
+
+	var srcBatch, dstBatch []compare.DocWithTS
+
+	for srcChannel != nil || dstChannel != nil {
+		c.readTimer.Reset(readTimeout)
+
+		select {
+		case <-ctx.Done():
+			return nil, nil, false, ctx.Err()
+		case <-c.readTimer.C:
+			readers := []string{}
+			if srcChannel != nil {
+				readers = append(readers, "src")
+			}
+			if dstChannel != nil {
+				readers = append(readers, "dst")
+			}
+
+			return nil, nil, false, errors.Errorf("read from %v timed out", readers)
+		case msg, alive := <-srcChannel:
+			srcChannel = nil
+
+			if !alive {
+				c.src.closed = true
+				continue
+			}
+
+			c.fi.NoteSuccess("received message from %s reader", src)
+
+			srcBatch = c.src.handleMessage(msg)
+		case msg, alive := <-dstChannel:
+			dstChannel = nil
+
+			if !alive {
+				c.dst.closed = true
+				continue
+			}
+
+			c.fi.NoteSuccess("received message from %s reader", dst)
+
+			dstBatch = c.dst.handleMessage(msg)
+		}
 	}
 
 	if srcBatch != nil {
 		c.recordSrcMetrics(srcBatch)
 	}
 
-	dstBatch, err := c.readOne(ctx, &c.dst, dstChannel)
-	if err != nil {
-		return nil, nil, false, err
-	}
-
-	var naturalBatchDone bool
-
 	srcBatchNum, srcDone := c.src.finishedNaturalBatch.Get()
 	dstBatchNum, dstDone := c.dst.finishedNaturalBatch.Get()
+
+	var naturalBatchDone bool
 
 	if srcDone && dstDone {
 		lo.Assertf(
@@ -153,58 +219,6 @@ func (c *comparator) readBatches(
 	}
 
 	return srcBatch, dstBatch, naturalBatchDone, nil
-}
-
-// readOne reads one message from ch, unless the input is closed or waiting
-// for the other reader to finish a natural batch. It returns the message’s
-// documents, if any.
-//
-// Each read gets the full read timeout, so a slow read from one reader
-// doesn’t shorten the wait for the other.
-func (c *comparator) readOne(
-	ctx context.Context,
-	in *comparatorInput,
-	ch <-chan compare.ToComparatorMsg,
-) ([]compare.DocWithTS, error) {
-	if !in.stillReading() {
-		return nil, nil
-	}
-
-	c.readTimer.Reset(readTimeout)
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-c.readTimer.C:
-		return nil, errors.Errorf("failed to read from %s within %s", in.cluster, readTimeout)
-	case msg, alive := <-ch:
-		if !alive {
-			in.closed = true
-
-			return nil, nil
-		}
-
-		c.fi.NoteSuccess("received message from %s reader", in.cluster)
-
-		switch payload := msg.(type) {
-		case compare.DocsToComparatorMsg:
-			lo.Assertf(
-				len(payload) <= compare.ToComparatorBatchSize,
-				"%s reader should send <= %d docs but sent %d",
-				in.cluster,
-				compare.ToComparatorBatchSize,
-				len(payload),
-			)
-
-			return payload, nil
-		case compare.BatchDoneComparatorMsg:
-			in.finishedNaturalBatch = option.Some(payload)
-
-			return nil, nil
-		default:
-			panic(fmt.Sprintf("bad message (%T) from %s reader", msg, in.cluster))
-		}
-	}
 }
 
 // recordSrcMetrics isolates the noise of tracking business metrics.
