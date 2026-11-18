@@ -227,17 +227,13 @@ func (verifier *Verifier) compareDocsFromChannels(
 ) (DocCompareReport, error) {
 	// 1. Initialize State
 	c := newComparator(verifier, workerNum, fi, task)
-	defer func() {
-		if !c.readTimer.Stop() {
-			<-c.readTimer.C
-		}
-	}()
+	defer c.readTimer.Stop()
 
 	verifier.docsComparedHistory.Add(0)
 	verifier.bytesComparedHistory.Add(0)
 
 	// 2. Stream Processing Loop
-	for c.stillReadingSrc() || c.stillReadingDst() {
+	for c.src.stillReading() || c.dst.stillReading() {
 		srcBatch, dstBatch, naturalBatchDone, err := c.readBatches(ctx, srcChannel, dstChannel)
 		if err != nil {
 			return DocCompareReport{}, err
