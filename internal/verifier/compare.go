@@ -238,14 +238,12 @@ func (verifier *Verifier) compareDocsFromChannels(
 
 	// 2. Stream Processing Loop
 	for c.stillReadingSrc() || c.stillReadingDst() {
-		srcBatch, dstBatch, dstCursorDone, err := c.readBatches(ctx, srcChannel, dstChannel)
+		srcBatch, dstBatch, naturalBatchDone, err := c.readBatches(ctx, srcChannel, dstChannel)
 		if err != nil {
 			return DocCompareReport{}, err
 		}
 
-		// NB: This MUST precede the actual comparison because any dst documents
-		// will be from the next dst cursor.
-		if dstCursorDone {
+		if naturalBatchDone {
 			whyFlush, err := c.flushIfNeeded(ctx, reportsChan)
 			if err != nil {
 				return DocCompareReport{}, errors.Wrapf(err, "flushing problems")
@@ -475,79 +473,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				Int("docsFound", dstDocsFound).
 				Stringer("elapsed", time.Since(cursorStartTime)).
 				Msg("Done iterating dst cursor.")
-
-			/*
-				// The compare thread, to prevent OOMs, always reads documents
-				// from the src & dst together. It only stops listening on one
-				// side or the other when the channel closes. This is fine for
-				// ID-partitioned verification because there is exactly 1 query
-				// per partition & cluster.
-				//
-				// With natural partitioning, though, the destination runs
-				// a separate query for each document batch from the source.
-				// So if there are missing documents on the destination, we’ll
-				// block the compare thread unless the destination “compensates”
-				// by sending dummy values. We do that here.
-				missingDocsCount := len(docIDs) - dstDocsFound
-
-				lo.Assertf(
-					missingDocsCount >= 0,
-					"dest docs (%d) must be <= source docs (%d)",
-					dstDocsFound,
-					len(docIDs),
-				)
-
-				if missingDocsCount > 0 {
-					verifier.logger.Trace().
-						Any("task", task.PrimaryKey).
-						Int("count", missingDocsCount).
-						Msg("Sending dummy dst docs to compare thread.")
-				}
-
-				// Reader threads send documents to the comparator in slices rather
-				// than individually. We could send 1 slice per document, but if
-				// there are 1,000 documents missing then we’re sending 1,000
-				// messages, which is a bit unideal. We thus optimize by sending
-				// only as many dummy messages as we need to unblock the comparator.
-				srcBatchesSent := compare.ToComparatorBatchCount(len(docIDs))
-				dstBatchesSent := compare.ToComparatorBatchCount(dstDocsFound)
-
-				for i := range srcBatchesSent - dstBatchesSent {
-					err := chanutil.WriteWithDoneCheck(
-						ctx,
-						dstToCompareChannel,
-						compare.ToComparatorMsg{
-							Type: compare.MsgTypePadding,
-						},
-					)
-					if err != nil {
-						return errors.Wrapf(err, "sending dummy doc %d of %d dst->compare", 1+i, missingDocsCount)
-					}
-
-					state.NoteSuccess(
-						"sent dummy doc #%d of %d to compare thread",
-						1+i,
-						missingDocsCount,
-					)
-				}
-
-				// We send one more to tell the comparator that any mismatches
-				// seen heretofore are “real” and should trigger persistence.
-				//
-				// NB: This has to be a dedicated message rather than a flag
-				// attached to documents. This is because because there might be
-				// no documents.
-				err = chanutil.WriteWithDoneCheck(
-					ctx,
-					dstToCompareChannel,
-					compare.ToComparatorMsg{
-						Type: compare.MsgTypeCursorDone,
-					},
-				)
-				if err != nil {
-					return errors.Wrap(err, "sending cursor-done msg dst->compare")
-				}
-			*/
 		}
 
 		return nil
@@ -662,11 +587,6 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 
 // iterateCursorToComparator reads the given cursor & sends its payloads to
 // the comparator.
-//
-// The optional batch ID is for natural partitioning. It represents an
-// individual batch of source documents (i.e., a `getMore` response). This lets
-// the comparator synchronize
-// TODO: Just send as a final message, not in this function.
 //
 // This returns the # of documents sent to the channel.
 //
