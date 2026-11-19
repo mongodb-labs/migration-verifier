@@ -101,11 +101,15 @@ func ReadNaturalPartitionFromSource(
 		)
 	}
 
+	openStart := time.Now()
+
 	cursor, err := openSourceCursor(sctx, logger, coll, tasksColl, task, createCmd, resumeTokenOpt, startRecordID)
 	if err != nil {
 		return err
 	}
 	defer cursor.Close(ctx)
+
+	readTimer := NewBatchReadTimer(recordRead, time.Since(openStart))
 
 	retryState.NoteSuccess("opened cursor")
 
@@ -113,7 +117,7 @@ func ReadNaturalPartitionFromSource(
 		ctx, sess, logger, retryState, cursor, task, compareMethod,
 		docProjection != nil,
 		startRecordID, task.QueryFilter.Partition.Upper, toCompare, toDst,
-		NewBatchReadTimer(recordRead),
+		readTimer,
 	)
 }
 

@@ -59,6 +59,7 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 	m.recordFindTaskDuration(ctx, 20*time.Millisecond)
 	m.recordRecheckPersistDuration(ctx, 200*time.Millisecond)
 	m.recordCollectionRead(ctx, src, "mydb.coll", compare.BatchReadStats{Duration: 30 * time.Millisecond, Docs: 30, Bytes: 3000})
+	m.recordCollectionRead(ctx, src, "mydb.coll", compare.BatchReadStats{First: true, Duration: 10 * time.Millisecond, Docs: 101, Bytes: 10100})
 	m.recordChangeRead(ctx, dst, compare.BatchReadStats{Duration: time.Second, Docs: 2, Bytes: 200})
 
 	require.NoError(t, m.observeChangeReaders(
@@ -138,22 +139,25 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 		"change reads have no namespace",
 	)
 
-	assert.Equal(
+	assert.ElementsMatch(
 		t,
-		[]map[string]string{{"cluster": "source", "namespace": "mydb.coll"}},
-		histogramLabelSets(families["migration_verifier_collection_read_duration_seconds"], "cluster", "namespace"),
+		[]map[string]string{
+			{"cluster": "source", "namespace": "mydb.coll", "batch": "first"},
+			{"cluster": "source", "namespace": "mydb.coll", "batch": "getMore"},
+		},
+		histogramLabelSets(families["migration_verifier_collection_read_duration_seconds"], "cluster", "namespace", "batch"),
 	)
 
 	assert.Equal(
 		t,
-		map[string]float64{"source": 3000},
-		histogramSumByLabel(families["migration_verifier_collection_read_size_bytes"], "cluster"),
+		map[string]float64{"first": 10100, "getMore": 3000},
+		histogramSumByLabel(families["migration_verifier_collection_read_size_bytes"], "batch"),
 	)
 
 	assert.Equal(
 		t,
-		map[string]float64{"source": 30},
-		histogramSumByLabel(families["migration_verifier_collection_read_count"], "cluster"),
+		map[string]float64{"first": 101, "getMore": 30},
+		histogramSumByLabel(families["migration_verifier_collection_read_count"], "batch"),
 	)
 
 	assert.Equal(
@@ -359,7 +363,8 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CheckAndRecheck() {
 	)
 }
 
-// A check records its reads of each cluster’s documents, by namespace.
+// A check records its reads of each cluster’s documents, by namespace and
+// batch.
 func (suite *IntegrationTestSuite) TestVerifierMetrics_CollectionRead() {
 	ctx := suite.Context()
 	dbName := suite.DBNameForTest()
@@ -394,10 +399,12 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CollectionRead() {
 	) {
 		suite.Assert().ElementsMatch(
 			[]map[string]string{
-				{"cluster": string(src), "namespace": dbName + ".coll"},
-				{"cluster": string(dst), "namespace": dbName + ".coll"},
+				{"cluster": string(src), "namespace": dbName + ".coll", "batch": "first"},
+				{"cluster": string(src), "namespace": dbName + ".coll", "batch": "getMore"},
+				{"cluster": string(dst), "namespace": dbName + ".coll", "batch": "first"},
+				{"cluster": string(dst), "namespace": dbName + ".coll", "batch": "getMore"},
 			},
-			histogramLabelSets(families[name], "cluster", "namespace"),
+			histogramLabelSets(families[name], "cluster", "namespace", "batch"),
 			name,
 		)
 	}
@@ -406,8 +413,8 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CollectionRead() {
 	suite.Require().NoError(runner.Await())
 }
 
-// BatchReadTimer records each batch that a getMore fetches, but not the
-// cursor’s first batch.
+// BatchReadTimer records each batch that a cursor returns. The first batch’s
+// duration is that of the command that opened the cursor.
 func (suite *IntegrationTestSuite) TestBatchReadTimer() {
 	ctx := suite.Context()
 	coll := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("coll")
@@ -418,29 +425,54 @@ func (suite *IntegrationTestSuite) TestBatchReadTimer() {
 
 	docSize := len(lo.Must(bson.Marshal(docs[0])))
 
-	cursor, err := coll.Find(ctx, bson.D{}, options.Find().SetBatchSize(2).SetSort(bson.D{{"_id", 1}}))
-	suite.Require().NoError(err)
+	// readAll reads the documents that filter matches, in batches of 2, and
+	// returns the recorded reads.
+	readAll := func(filter bson.D, expectedCount int) []compare.BatchReadStats {
+		cursor, err := coll.Find(ctx, filter, options.Find().SetBatchSize(2).SetSort(bson.D{{"_id", 1}}))
+		suite.Require().NoError(err)
 
-	var reads []compare.BatchReadStats
-	timer := compare.NewBatchReadTimer(func(_ context.Context, read compare.BatchReadStats) {
-		suite.Assert().Positive(read.Duration)
-		reads = append(reads, read)
-	})
+		var reads []compare.BatchReadStats
+		timer := compare.NewBatchReadTimer(
+			func(_ context.Context, read compare.BatchReadStats) {
+				reads = append(reads, read)
+			},
+			time.Hour,
+		)
 
-	count := 0
-	for timer.Next(ctx, cursor) {
-		count++
+		count := 0
+		for timer.Next(ctx, cursor) {
+			count++
+		}
+		suite.Require().NoError(cursor.Err())
+		suite.Require().Equal(expectedCount, count)
+
+		for _, read := range reads[1:] {
+			suite.Assert().Positive(read.Duration)
+			suite.Assert().Less(read.Duration, time.Hour, "a getMore is timed")
+		}
+
+		return reads
 	}
-	suite.Require().NoError(cursor.Err())
-	suite.Require().Equal(5, count)
 
 	suite.Assert().Equal(
-		[]compare.BatchReadStats{{Docs: 2, Bytes: 2 * docSize}, {Docs: 1, Bytes: docSize}},
-		lo.Map(reads, func(r compare.BatchReadStats, _ int) compare.BatchReadStats {
-			r.Duration = 0
+		[]compare.BatchReadStats{
+			{First: true, Duration: time.Hour, Docs: 2, Bytes: 2 * docSize},
+			{Docs: 2, Bytes: 2 * docSize},
+			{Docs: 1, Bytes: docSize},
+		},
+		lo.Map(readAll(bson.D{}, 5), func(r compare.BatchReadStats, i int) compare.BatchReadStats {
+			if i > 0 {
+				r.Duration = 0
+			}
 			return r
 		}),
-		"the batches after the first (2 documents, then 1) are recorded",
+		"each batch is recorded; the first has the opening command’s duration",
+	)
+
+	suite.Assert().Equal(
+		[]compare.BatchReadStats{{First: true, Duration: time.Hour}},
+		readAll(bson.D{{"_id", "nonexistent"}}, 0),
+		"an empty first batch is recorded",
 	)
 }
 

@@ -52,6 +52,7 @@ func (s *IntegrationTestSuite) TestIterateCursorToChannel() {
 		theCursor,
 		receiver,
 		nil,
+		0,
 	)
 	s.Require().NoError(err)
 

@@ -21,6 +21,7 @@ const (
 	metricLabelStage   = attribute.Key("stage")
 	metricLabelCluster = attribute.Key("cluster")
 	metricLabelOpType  = attribute.Key("op_type")
+	metricLabelBatch   = attribute.Key("batch")
 
 	// metricLabelNamespace is a collection’s namespace (database.collection).
 	// Unlike the other labels, its values are customer data, and there can be
@@ -32,6 +33,12 @@ const (
 const (
 	metricStageInitial = "initial"
 	metricStageRecheck = "recheck"
+)
+
+// Values of the batch label.
+const (
+	metricBatchFirst   = "first"
+	metricBatchGetMore = "getMore"
 )
 
 var metricPhases = []string{Check, Recheck, Idle}
@@ -180,19 +187,19 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 		collectionReadDuration: lo.Must(meter.Float64Histogram(
 			"migration_verifier_collection_read_duration",
 			otelmetric.WithUnit("s"),
-			otelmetric.WithDescription("How long each getMore of documents to compare took, by cluster and namespace. A cursor’s first batch, which comes with the query, isn’t counted."),
+			otelmetric.WithDescription("How long each read of a batch of documents to compare took, by cluster, namespace, and batch (first or getMore). A first batch’s duration is that of the command that opened the cursor."),
 			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
 		)),
 		collectionReadCount: lo.Must(meter.Int64Histogram(
 			"migration_verifier_collection_read_count",
 			otelmetric.WithUnit("{document}"),
-			otelmetric.WithDescription("The number of documents to compare in each batch that a getMore returned, by cluster and namespace."),
+			otelmetric.WithDescription("The number of documents to compare in each batch read, by cluster, namespace, and batch (first or getMore)."),
 			otelmetric.WithExplicitBucketBoundaries(batchCountBuckets...),
 		)),
 		collectionReadSize: lo.Must(meter.Int64Histogram(
 			"migration_verifier_collection_read_size",
 			otelmetric.WithUnit("By"),
-			otelmetric.WithDescription("The total size of each batch of documents to compare that a getMore returned, by cluster and namespace."),
+			otelmetric.WithDescription("The total size of each batch of documents to compare, by cluster, namespace, and batch (first or getMore)."),
 			otelmetric.WithExplicitBucketBoundaries(batchSizeBuckets...),
 		)),
 	}
@@ -277,7 +284,7 @@ func (m *verifierMetrics) recordChangeRead(
 	m.changeReadSize.Record(ctx, int64(read.Bytes), opt)
 }
 
-// recordCollectionRead records a getMore of documents to compare.
+// recordCollectionRead records a read of a batch of documents to compare.
 func (m *verifierMetrics) recordCollectionRead(
 	ctx context.Context,
 	cluster whichCluster,
@@ -287,6 +294,7 @@ func (m *verifierMetrics) recordCollectionRead(
 	opt := otelmetric.WithAttributes(
 		metricLabelCluster.String(string(cluster)),
 		metricLabelNamespace.String(namespace),
+		metricLabelBatch.String(lo.Ternary(read.First, metricBatchFirst, metricBatchGetMore)),
 	)
 
 	m.collectionReadDuration.Record(ctx, read.Duration.Seconds(), opt)
