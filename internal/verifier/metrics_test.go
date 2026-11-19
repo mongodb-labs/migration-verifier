@@ -58,8 +58,8 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 	m.recordChangeEvents(ctx, src, map[string]int64{"insert": 4, "someNewOpType": 1})
 	m.recordFindTaskDuration(ctx, 20*time.Millisecond)
 	m.recordRecheckPersistDuration(ctx, 200*time.Millisecond)
-	m.recordCollectionRead(ctx, src, "mydb.coll", compare.BatchRead{Duration: 30 * time.Millisecond, Docs: 30, Bytes: 3000})
-	m.recordChangeRead(ctx, dst, compare.BatchRead{Duration: time.Second, Docs: 2, Bytes: 200})
+	m.recordCollectionRead(ctx, src, "mydb.coll", compare.BatchReadStats{Duration: 30 * time.Millisecond, Docs: 30, Bytes: 3000})
+	m.recordChangeRead(ctx, dst, compare.BatchReadStats{Duration: time.Second, Docs: 2, Bytes: 200})
 
 	require.NoError(t, m.observeChangeReaders(
 		fakeChangeReaderGaugeSource{
@@ -421,8 +421,8 @@ func (suite *IntegrationTestSuite) TestBatchReadTimer() {
 	cursor, err := coll.Find(ctx, bson.D{}, options.Find().SetBatchSize(2).SetSort(bson.D{{"_id", 1}}))
 	suite.Require().NoError(err)
 
-	var reads []compare.BatchRead
-	timer := compare.NewBatchReadTimer(func(_ context.Context, read compare.BatchRead) {
+	var reads []compare.BatchReadStats
+	timer := compare.NewBatchReadTimer(func(_ context.Context, read compare.BatchReadStats) {
 		suite.Assert().Positive(read.Duration)
 		reads = append(reads, read)
 	})
@@ -435,8 +435,8 @@ func (suite *IntegrationTestSuite) TestBatchReadTimer() {
 	suite.Require().Equal(5, count)
 
 	suite.Assert().Equal(
-		[]compare.BatchRead{{Docs: 2, Bytes: 2 * docSize}, {Docs: 1, Bytes: docSize}},
-		lo.Map(reads, func(r compare.BatchRead, _ int) compare.BatchRead {
+		[]compare.BatchReadStats{{Docs: 2, Bytes: 2 * docSize}, {Docs: 1, Bytes: docSize}},
+		lo.Map(reads, func(r compare.BatchReadStats, _ int) compare.BatchReadStats {
 			r.Duration = 0
 			return r
 		}),

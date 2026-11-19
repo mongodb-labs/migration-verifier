@@ -50,7 +50,7 @@ func ReadNaturalPartitionFromSource(
 	compareMethod Method,
 	toCompare chan<- ToComparatorMsg,
 	toDst chan<- []DocID,
-	recordRead BatchReadRecorder,
+	recordRead BatchReadStatsRecorder,
 ) error {
 	defer close(toCompare)
 	defer close(toDst)

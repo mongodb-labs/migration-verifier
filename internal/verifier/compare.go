@@ -364,7 +364,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			verifier.docCompareMethod,
 			srcToCompareChannel,
 			srcToDstChannel,
-			verifier.collectionReadRecorder(src, verifier.srcClientCollection(task)),
+			verifier.createCollectionReadRecorder(src, verifier.srcClientCollection(task)),
 		)
 	}
 
@@ -450,7 +450,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				state,
 				theCursor,
 				dstToCompareChannel,
-				verifier.collectionReadRecorder(dst, coll),
+				verifier.createCollectionReadRecorder(dst, coll),
 			)
 			if err != nil {
 				return errors.Wrap(
@@ -584,7 +584,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				srcChannel,
-				verifier.collectionReadRecorder(src, verifier.srcClientCollection(task)),
+				verifier.createCollectionReadRecorder(src, verifier.srcClientCollection(task)),
 			)
 
 			err = errors.Wrap(
@@ -628,7 +628,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				dstChannel,
-				verifier.collectionReadRecorder(dst, verifier.dstClientCollection(task)),
+				verifier.createCollectionReadRecorder(dst, verifier.dstClientCollection(task)),
 			)
 			err = errors.Wrap(
 				err,
@@ -657,7 +657,7 @@ func iterateCursorToChannel(
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
 	writer chan<- compare.ToComparatorMsg,
-	recordRead compare.BatchReadRecorder,
+	recordRead compare.BatchReadStatsRecorder,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
 	readTimer := compare.NewBatchReadTimer(recordRead)

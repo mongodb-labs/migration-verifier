@@ -7,8 +7,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-// BatchRead describes a read of one batch of documents.
-type BatchRead struct {
+// BatchReadStats describes a read of one batch of documents.
+type BatchReadStats struct {
 	// Duration is how long the read took.
 	Duration time.Duration
 
@@ -19,24 +19,25 @@ type BatchRead struct {
 	Bytes int
 }
 
-// BatchReadRecorder receives each batch that a BatchReadTimer measures.
-type BatchReadRecorder func(ctx context.Context, read BatchRead)
+// BatchReadStatsRecorder receives the stats for each batch that a
+// BatchReadTimer measures.
+type BatchReadStatsRecorder func(ctx context.Context, read BatchReadStats)
 
 // BatchReadTimer measures the batches that a cursor fetches with getMore. It
 // skips the cursor’s first batch, which comes with the command that opened
 // the cursor.
 type BatchReadTimer struct {
-	record BatchReadRecorder
+	record BatchReadStatsRecorder
 
 	// inFetchedBatch indicates that the current batch came from a getMore.
 	// read describes that batch, with its documents so far.
 	inFetchedBatch bool
-	read           BatchRead
+	read           BatchReadStats
 }
 
 // NewBatchReadTimer returns a BatchReadTimer that sends each batch to record.
 // If record is nil, the timer measures nothing.
-func NewBatchReadTimer(record BatchReadRecorder) *BatchReadTimer {
+func NewBatchReadTimer(record BatchReadStatsRecorder) *BatchReadTimer {
 	return &BatchReadTimer{record: record}
 }
 
@@ -59,7 +60,7 @@ func (t *BatchReadTimer) Next(ctx context.Context, cursor *mongo.Cursor) bool {
 		}
 
 		t.inFetchedBatch = true
-		t.read = BatchRead{Duration: time.Since(start)}
+		t.read = BatchReadStats{Duration: time.Since(start)}
 	}
 
 	if t.inFetchedBatch {

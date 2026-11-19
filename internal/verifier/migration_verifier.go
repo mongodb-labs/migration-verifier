@@ -276,15 +276,15 @@ func (verifier *Verifier) getMetrics() *verifierMetrics {
 	return verifier.metrics
 }
 
-// collectionReadRecorder returns a recorder for reads of coll’s documents
+// createCollectionReadRecorder returns a recorder for reads of coll’s documents
 // from the given cluster.
-func (verifier *Verifier) collectionReadRecorder(
+func (verifier *Verifier) createCollectionReadRecorder(
 	cluster whichCluster,
 	coll *mongo.Collection,
-) compare.BatchReadRecorder {
+) compare.BatchReadStatsRecorder {
 	namespace := coll.Database().Name() + "." + coll.Name()
 
-	return func(ctx context.Context, read compare.BatchRead) {
+	return func(ctx context.Context, read compare.BatchReadStats) {
 		verifier.getMetrics().recordCollectionRead(ctx, cluster, namespace, read)
 	}
 }

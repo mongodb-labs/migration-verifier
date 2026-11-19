@@ -171,7 +171,7 @@ func newChangeReaderCommon(clusterName whichCluster) ChangeReaderCommon {
 }
 
 // recordRead records a read of a batch of events.
-func (rc *ChangeReaderCommon) recordRead(ctx context.Context, read compare.BatchRead) {
+func (rc *ChangeReaderCommon) recordRead(ctx context.Context, read compare.BatchReadStats) {
 	rc.getMetrics().recordChangeRead(ctx, rc.readerType, read)
 }
 
