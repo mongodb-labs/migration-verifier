@@ -401,6 +401,9 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CollectionRead() {
 			name,
 		)
 	}
+
+	suite.Require().NoError(verifier.WritesOff(ctx))
+	suite.Require().NoError(runner.Await())
 }
 
 // BatchReadTimer records each batch that a getMore fetches, but not the
