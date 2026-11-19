@@ -255,7 +255,7 @@ func (csr *ChangeStreamReader) readAndHandleOneChangeEventBatch(
 		eventsRead++
 	}
 
-	csr.recordRead(sctx, compare.BatchRead{
+	csr.recordRead(sctx, compare.BatchReadStats{
 		Duration: readDuration,
 		Docs:     eventsRead,
 		Bytes:    batchTotalBytes,

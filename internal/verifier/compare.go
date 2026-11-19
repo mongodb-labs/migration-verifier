@@ -368,7 +368,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			verifier.docCompareMethod,
 			srcToCompareChannel,
 			srcToDstChannel,
-			verifier.readerMetrics(src, verifier.srcClientCollection(task)),
+			verifier.createReaderMetrics(src, verifier.srcClientCollection(task)),
 		)
 	}
 
@@ -396,7 +396,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 		sctx := mongo.NewSessionContext(ctx, sess)
 
 		coll := verifier.dstClientCollection(task)
-		readerMetrics := verifier.readerMetrics(dst, coll)
+		readerMetrics := verifier.createReaderMetrics(dst, coll)
 
 		for {
 			docIDsOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
@@ -596,7 +596,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				srcChannel,
-				verifier.readerMetrics(src, verifier.srcClientCollection(task)),
+				verifier.createReaderMetrics(src, verifier.srcClientCollection(task)),
 				openDuration,
 			)
 
@@ -644,7 +644,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				dstChannel,
-				verifier.readerMetrics(dst, verifier.dstClientCollection(task)),
+				verifier.createReaderMetrics(dst, verifier.dstClientCollection(task)),
 				openDuration,
 			)
 			err = errors.Wrap(

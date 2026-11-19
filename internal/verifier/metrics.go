@@ -353,7 +353,7 @@ func (m *verifierMetrics) recordRecheckPersistDuration(ctx context.Context, elap
 func (m *verifierMetrics) recordChangeRead(
 	ctx context.Context,
 	cluster whichCluster,
-	read compare.BatchRead,
+	read compare.BatchReadStats,
 ) {
 	opt := otelmetric.WithAttributes(metricLabelCluster.String(string(cluster)))
 
@@ -367,7 +367,7 @@ func (m *verifierMetrics) recordCollectionRead(
 	ctx context.Context,
 	cluster whichCluster,
 	namespace string,
-	read compare.BatchRead,
+	read compare.BatchReadStats,
 ) {
 	opt := otelmetric.WithAttributes(
 		metricLabelCluster.String(string(cluster)),

@@ -298,9 +298,9 @@ type collectionReaderMetrics struct {
 
 var _ compare.ReaderMetrics = collectionReaderMetrics{}
 
-// readerMetrics returns the metrics for a reader of coll’s documents from the
-// given cluster.
-func (verifier *Verifier) readerMetrics(
+// createReaderMetrics returns the metrics for a reader of coll’s documents
+// from the given cluster.
+func (verifier *Verifier) createReaderMetrics(
 	cluster whichCluster,
 	coll *mongo.Collection,
 ) collectionReaderMetrics {
@@ -311,7 +311,7 @@ func (verifier *Verifier) readerMetrics(
 	}
 }
 
-func (m collectionReaderMetrics) RecordBatchRead(ctx context.Context, read compare.BatchRead) {
+func (m collectionReaderMetrics) RecordBatchRead(ctx context.Context, read compare.BatchReadStats) {
 	m.verifier.getMetrics().recordCollectionRead(ctx, m.cluster, m.namespace, read)
 }
 

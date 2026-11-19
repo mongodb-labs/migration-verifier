@@ -53,12 +53,12 @@ func (f fakePoolGaugeSource) getPoolCounts() map[string]poolCounts { return f.co
 
 // batchReadCollector collects a reader’s batch reads.
 type batchReadCollector struct {
-	reads []compare.BatchRead
+	reads []compare.BatchReadStats
 }
 
 var _ compare.ReaderMetrics = &batchReadCollector{}
 
-func (c *batchReadCollector) RecordBatchRead(_ context.Context, read compare.BatchRead) {
+func (c *batchReadCollector) RecordBatchRead(_ context.Context, read compare.BatchReadStats) {
 	c.reads = append(c.reads, read)
 }
 
@@ -82,8 +82,8 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 	m.recordChangeEvents(ctx, src, map[string]int64{"insert": 4, "someNewOpType": 1})
 	m.recordFindTaskDuration(ctx, 20*time.Millisecond)
 	m.recordRecheckPersistDuration(ctx, 200*time.Millisecond)
-	m.recordCollectionRead(ctx, src, "mydb.coll", compare.BatchRead{Duration: 30 * time.Millisecond, Docs: 30, Bytes: 3000})
-	m.recordCollectionRead(ctx, src, "mydb.coll", compare.BatchRead{First: true, Duration: 10 * time.Millisecond, Docs: 101, Bytes: 10100})
+	m.recordCollectionRead(ctx, src, "mydb.coll", compare.BatchReadStats{Duration: 30 * time.Millisecond, Docs: 30, Bytes: 3000})
+	m.recordCollectionRead(ctx, src, "mydb.coll", compare.BatchReadStats{First: true, Duration: 10 * time.Millisecond, Docs: 101, Bytes: 10100})
 	m.recordReaderSendWait(ctx, src, 2*time.Second)
 	m.recordReaderSendWait(ctx, src, time.Second)
 	m.recordComparatorReadWait(ctx, dst, 4*time.Second)
@@ -102,7 +102,7 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 			},
 		},
 	))
-	m.recordChangeRead(ctx, dst, compare.BatchRead{Duration: time.Second, Docs: 2, Bytes: 200})
+	m.recordChangeRead(ctx, dst, compare.BatchReadStats{Duration: time.Second, Docs: 2, Bytes: 200})
 
 	require.NoError(t, m.observeChangeReaders(
 		fakeChangeReaderGaugeSource{
@@ -493,7 +493,8 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CheckAndRecheck() {
 	)
 }
 
-// A check records its reads of each cluster’s documents, by namespace.
+// A check records its reads of each cluster’s documents, by namespace and
+// batch.
 func (suite *IntegrationTestSuite) TestVerifierMetrics_CollectionRead() {
 	ctx := suite.Context()
 	dbName := suite.DBNameForTest()
@@ -556,7 +557,7 @@ func (suite *IntegrationTestSuite) TestBatchReadTimer() {
 
 	// readAll reads the documents that filter matches, in batches of 2, and
 	// returns the recorded reads.
-	readAll := func(filter bson.D, expectedCount int) []compare.BatchRead {
+	readAll := func(filter bson.D, expectedCount int) []compare.BatchReadStats {
 		cursor, err := coll.Find(ctx, filter, options.Find().SetBatchSize(2).SetSort(bson.D{{"_id", 1}}))
 		suite.Require().NoError(err)
 
@@ -579,12 +580,12 @@ func (suite *IntegrationTestSuite) TestBatchReadTimer() {
 	}
 
 	suite.Assert().Equal(
-		[]compare.BatchRead{
+		[]compare.BatchReadStats{
 			{First: true, Duration: time.Hour, Docs: 2, Bytes: 2 * docSize},
 			{Docs: 2, Bytes: 2 * docSize},
 			{Docs: 1, Bytes: docSize},
 		},
-		lo.Map(readAll(bson.D{}, 5), func(r compare.BatchRead, i int) compare.BatchRead {
+		lo.Map(readAll(bson.D{}, 5), func(r compare.BatchReadStats, i int) compare.BatchReadStats {
 			if i > 0 {
 				r.Duration = 0
 			}
@@ -594,7 +595,7 @@ func (suite *IntegrationTestSuite) TestBatchReadTimer() {
 	)
 
 	suite.Assert().Equal(
-		[]compare.BatchRead{{First: true, Duration: time.Hour}},
+		[]compare.BatchReadStats{{First: true, Duration: time.Hour}},
 		readAll(bson.D{{"_id", "nonexistent"}}, 0),
 		"an empty first batch is recorded",
 	)

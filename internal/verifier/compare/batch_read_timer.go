@@ -8,8 +8,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-// BatchRead describes a read of one batch of documents.
-type BatchRead struct {
+// BatchReadStats describes a read of one batch of documents.
+type BatchReadStats struct {
 	// First indicates the cursor’s first batch, which comes with the command
 	// that opened the cursor. Later batches come from getMores.
 	First bool
@@ -27,7 +27,7 @@ type BatchRead struct {
 // ReaderMetrics receives a document reader’s measurements.
 type ReaderMetrics interface {
 	// RecordBatchRead receives each batch that a BatchReadTimer measures.
-	RecordBatchRead(ctx context.Context, read BatchRead)
+	RecordBatchRead(ctx context.Context, read BatchReadStats)
 
 	// RecordSendWait receives how long a send to the comparator waited.
 	RecordSendWait(ctx context.Context, wait time.Duration)
@@ -60,7 +60,7 @@ type BatchReadTimer struct {
 	started bool
 
 	// read describes the current batch, with its documents so far.
-	read BatchRead
+	read BatchReadStats
 }
 
 // NewBatchReadTimer returns a BatchReadTimer that sends each batch to
@@ -70,7 +70,7 @@ type BatchReadTimer struct {
 func NewBatchReadTimer(metrics ReaderMetrics, openDuration time.Duration) *BatchReadTimer {
 	return &BatchReadTimer{
 		metrics: metrics,
-		read:    BatchRead{First: true, Duration: openDuration},
+		read:    BatchReadStats{First: true, Duration: openDuration},
 	}
 }
 
@@ -101,7 +101,7 @@ func (t *BatchReadTimer) Next(ctx context.Context, cursor *mongo.Cursor) bool {
 			return false
 		}
 
-		t.read = BatchRead{Duration: time.Since(start)}
+		t.read = BatchReadStats{Duration: time.Since(start)}
 	}
 
 	t.read.Docs++

@@ -408,7 +408,7 @@ func (o *OplogReader) readAndHandleOneBatch(
 		return errors.Wrap(err, "reading cursor")
 	}
 
-	o.recordRead(sctx, compare.BatchRead{
+	o.recordRead(sctx, compare.BatchReadStats{
 		Duration: time.Since(readStart),
 		Docs:     len(o.curDocs),
 		Bytes:    len(o.scratch),
