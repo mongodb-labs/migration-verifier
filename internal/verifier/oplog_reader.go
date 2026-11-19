@@ -16,12 +16,14 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/helpers"
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/namespaces"
 	"github.com/10gen/migration-verifier/internal/verifier/oplog"
 	"github.com/10gen/migration-verifier/mbson"
@@ -95,6 +97,7 @@ func (v *Verifier) newOplogReader(
 	common.clusterInfo = clusterInfo
 
 	common.logger = v.logger
+	common.getMetrics = v.getMetrics
 	common.metaDB = v.metaClient.Database(v.metaDBName)
 
 	common.resumeTokenTSExtractor = oplog.GetRawResumeTokenTimestamp
@@ -398,10 +401,18 @@ func (o *OplogReader) readAndHandleOneBatch(
 	o.curDocs = o.curDocs[:0]
 	o.scratch = o.scratch[:0]
 
+	readStart := time.Now()
+
 	o.curDocs, o.scratch, err = mmongo.GetBatch(sctx, cursor, o.curDocs, o.scratch)
 	if err != nil {
 		return errors.Wrap(err, "reading cursor")
 	}
+
+	o.recordRead(sctx, compare.BatchRead{
+		Duration: time.Since(readStart),
+		Docs:     len(o.curDocs),
+		Bytes:    len(o.scratch),
+	})
 
 	sess := mongo.SessionFromContext(sctx)
 	o.updateLastSeenClusterTime(sess)
