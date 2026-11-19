@@ -8,7 +8,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/logger"
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
-	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -16,7 +15,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
-	"go.mongodb.org/mongo-driver/v2/x/bsonx/bsoncore"
 )
 
 type ClusterTopology string
@@ -24,10 +22,6 @@ type ClusterTopology string
 type ClusterInfo struct {
 	VersionArray []int
 	Topology     ClusterTopology
-
-	// SetName is the replica set’s name, from `hello`’s setName. It is empty
-	// unless Topology is TopologyReplset.
-	SetName string
 }
 
 // ClusterHasBSONSize indicates whether a cluster with the given
@@ -70,7 +64,7 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 		return ClusterInfo{}, errors.Wrap(err, "failed to fetch version array")
 	}
 
-	topology, setName, err := getTopology(ctx, client)
+	topology, err := getTopology(ctx, client)
 	if err != nil {
 		return ClusterInfo{}, errors.Wrapf(err, "failed to learn topology")
 	}
@@ -78,39 +72,16 @@ func GetClusterInfo(ctx context.Context, logger *logger.Logger, client *mongo.Cl
 	return ClusterInfo{
 		VersionArray: va[:],
 		Topology:     topology,
-		SetName:      setName,
 	}, nil
 }
 
-// getTopology returns the cluster’s topology and, for a replica set, its name.
-func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, string, error) {
+func getTopology(ctx context.Context, client *mongo.Client) (ClusterTopology, error) {
 	// The topology won’t vary amongst the nodes.
 	raw, err := GetHelloRaw(ctx, client, option.None[*readpref.ReadPref]())
 	if err != nil {
-		return "", "", errors.Wrapf(err, "failed learn topology")
+		return "", errors.Wrapf(err, "failed learn topology")
 	}
 
-	topology, err := getTopologyFromHello(raw)
-	if err != nil {
-		return "", "", err
-	}
-
-	if topology != TopologyReplset {
-		return topology, "", nil
-	}
-
-	// Only metrics use the name, so its absence is no reason to fail.
-	setName, err := bsontools.RawLookup[string](raw, "setName")
-	if errors.Is(err, bsoncore.ErrElementNotFound) {
-		return topology, "", nil
-	} else if err != nil {
-		return "", "", errors.Wrapf(err, "reading hello response (%v)", raw)
-	}
-
-	return topology, setName, nil
-}
-
-func getTopologyFromHello(raw bson.Raw) (ClusterTopology, error) {
 	hasMsg, err := mbson.RawContains(raw, "msg")
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to check for %#q in hello response (%v)", "msg", raw)

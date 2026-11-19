@@ -384,10 +384,7 @@ func exitBySignal(sig os.Signal) {
 // setUpMetrics creates the metrics pipeline. A failure is only logged:
 // metrics never stop a verification.
 func setUpMetrics(cCtx *cli.Context, v *verifier.Verifier) option.Option[*metrics.Pipeline] {
-	settings := metrics.Settings{
-		SrcReplSetName: v.GetSrcReplSetName(),
-		DstReplSetName: v.GetDstReplSetName(),
-	}
+	settings := metrics.Settings{}
 	if dir := cCtx.String(metricsLogDir); dir != "" {
 		settings.FileDir = option.Some(dir)
 	}
