@@ -336,7 +336,11 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 		"hostname/port missing; this is required for natural partitions",
 	)
 
-	client, err := mmongo.GetDirectClient(verifier.srcURI, hostnameAndPort)
+	client, err := mmongo.GetDirectClient(
+		verifier.srcURI,
+		hostnameAndPort,
+		options.Client().SetPoolMonitor(verifier.poolMonitors[src].driverMonitor()),
+	)
 	if err != nil {
 		return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
 	}
@@ -364,7 +368,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			verifier.docCompareMethod,
 			srcToCompareChannel,
 			srcToDstChannel,
-			verifier.collectionReadRecorder(src, verifier.srcClientCollection(task)),
+			verifier.readerMetrics(src, verifier.srcClientCollection(task)),
 		)
 	}
 
@@ -392,6 +396,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 		sctx := mongo.NewSessionContext(ctx, sess)
 
 		coll := verifier.dstClientCollection(task)
+		readerMetrics := verifier.readerMetrics(dst, coll)
 
 		for {
 			docIDsOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
@@ -429,6 +434,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				&dupeTask,
 				option.None[*readpref.ReadPref](),
 			)
+			openDuration := time.Since(cursorStartTime)
 
 			for _, id := range docIDs {
 				id.PutInPool()
@@ -450,7 +456,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				state,
 				theCursor,
 				dstToCompareChannel,
-				verifier.collectionReadRecorder(dst, coll),
+				readerMetrics,
+				openDuration,
 			)
 			if err != nil {
 				return errors.Wrap(
@@ -501,8 +508,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			dstBatchesSent := compare.ToComparatorBatchCount(dstDocsFound)
 
 			for i := range srcBatchesSent - dstBatchesSent {
-				err := chanutil.WriteWithDoneCheck(
+				err := compare.SendToComparator(
 					ctx,
+					readerMetrics,
 					dstToCompareChannel,
 					compare.ToComparatorMsg{
 						Type: compare.MsgTypePadding,
@@ -525,8 +533,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			// NB: This has to be a dedicated message rather than a flag
 			// attached to documents. This is because because there might be
 			// no documents.
-			err = chanutil.WriteWithDoneCheck(
+			err = compare.SendToComparator(
 				ctx,
+				readerMetrics,
 				dstToCompareChannel,
 				compare.ToComparatorMsg{
 					Type: compare.MsgTypeCursorDone,
@@ -567,6 +576,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 
 		sctx := mongo.NewSessionContext(ctx, sess)
 
+		openStart := time.Now()
+
 		theCursor, err := verifier.getDocumentsCursor(
 			sctx,
 			verifier.srcClientCollection(task),
@@ -575,6 +586,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			task,
 			option.IfNotZero(verifier.readPreference),
 		)
+		openDuration := time.Since(openStart)
 
 		if err == nil {
 			state.NoteSuccess("opened src find cursor")
@@ -584,7 +596,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				srcChannel,
-				verifier.collectionReadRecorder(src, verifier.srcClientCollection(task)),
+				verifier.readerMetrics(src, verifier.srcClientCollection(task)),
+				openDuration,
 			)
 
 			err = errors.Wrap(
@@ -611,6 +624,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 
 		sctx := mongo.NewSessionContext(ctx, sess)
 
+		openStart := time.Now()
+
 		theCursor, err := verifier.getDocumentsCursor(
 			sctx,
 			verifier.dstClientCollection(task),
@@ -619,6 +634,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			task,
 			option.None[*readpref.ReadPref](),
 		)
+		openDuration := time.Since(openStart)
 
 		if err == nil {
 			state.NoteSuccess("opened dst find cursor")
@@ -628,7 +644,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				dstChannel,
-				verifier.collectionReadRecorder(dst, verifier.dstClientCollection(task)),
+				verifier.readerMetrics(dst, verifier.dstClientCollection(task)),
+				openDuration,
 			)
 			err = errors.Wrap(
 				err,
@@ -650,6 +667,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 }
 
 // iterateCursorToChannel returns the # of documents sent to the channel.
+// openDuration is how long the command that opened the cursor took. If
+// metrics is nil, nothing is measured.
 //
 // NB: This DOES NOT close the given channel.
 func iterateCursorToChannel(
@@ -657,10 +676,11 @@ func iterateCursorToChannel(
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
 	writer chan<- compare.ToComparatorMsg,
-	recordRead compare.BatchReadRecorder,
+	metrics compare.ReaderMetrics,
+	openDuration time.Duration,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
-	readTimer := compare.NewBatchReadTimer(recordRead)
+	readTimer := compare.NewBatchReadTimer(metrics, openDuration)
 	if sess == nil {
 		panic("need a session")
 	}
@@ -671,8 +691,9 @@ func iterateCursorToChannel(
 	var docsWithTSCache []compare.DocWithTS
 
 	flush := func() error {
-		err := chanutil.WriteWithDoneCheck(
+		err := compare.SendToComparator(
 			sctx,
+			metrics,
 			writer,
 			compare.ToComparatorMsg{
 				DocsWithTS: slices.Clone(docsWithTSCache),

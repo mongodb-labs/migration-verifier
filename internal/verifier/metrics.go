@@ -21,6 +21,12 @@ const (
 	metricLabelStage   = attribute.Key("stage")
 	metricLabelCluster = attribute.Key("cluster")
 	metricLabelOpType  = attribute.Key("op_type")
+	metricLabelBatch   = attribute.Key("batch")
+	metricLabelReason  = attribute.Key("reason")
+
+	// metricLabelAddress is a server’s host and port. It has one value per
+	// server that the verifier connects to.
+	metricLabelAddress = attribute.Key("address")
 
 	// metricLabelNamespace is a collection’s namespace (database.collection).
 	// Unlike the other labels, its values are customer data, and there can be
@@ -32,6 +38,12 @@ const (
 const (
 	metricStageInitial = "initial"
 	metricStageRecheck = "recheck"
+)
+
+// Values of the batch label.
+const (
+	metricBatchFirst   = "first"
+	metricBatchGetMore = "getMore"
 )
 
 var metricPhases = []string{Check, Recheck, Idle}
@@ -54,6 +66,13 @@ var (
 	batchSizeBuckets = []float64{
 		0, 512, 1 << 10, 4 << 10, 16 << 10, 64 << 10, 256 << 10,
 		1 << 20, 2 << 20, 4 << 20, 8 << 20, 16 << 20,
+	}
+
+	// Checking out a pooled connection normally takes microseconds. It takes
+	// longer when the verifier must open a connection, or when the pool is
+	// full and the checkout waits for another operation to finish.
+	connectionCheckoutBuckets = []float64{
+		0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30,
 	}
 
 	// Documents or events per batch. An idle change reader’s batches are
@@ -92,6 +111,21 @@ type verifierMetrics struct {
 	collectionReadDuration otelmetric.Float64Histogram
 	collectionReadCount    otelmetric.Int64Histogram
 	collectionReadSize     otelmetric.Int64Histogram
+
+	readerSendWait     otelmetric.Float64Counter
+	comparatorReadWait otelmetric.Float64Counter
+
+	mismatchPersistDuration otelmetric.Float64Histogram
+	taskUpdateDuration      otelmetric.Float64Histogram
+
+	connectionCheckoutDuration otelmetric.Float64Histogram
+	connectionCheckoutFailures otelmetric.Int64Counter
+	connectionPoolClears       otelmetric.Int64Counter
+	connectionsOpen            otelmetric.Int64ObservableGauge
+	connectionsInUse           otelmetric.Int64ObservableGauge
+
+	// poolCallback observes the connection pools.
+	poolCallback option.Option[otelmetric.Registration]
 }
 
 // newVerifierMetrics creates the verifier’s instruments. Creating an
@@ -180,20 +214,71 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 		collectionReadDuration: lo.Must(meter.Float64Histogram(
 			"migration_verifier_collection_read_duration",
 			otelmetric.WithUnit("s"),
-			otelmetric.WithDescription("How long each getMore of documents to compare took, by cluster and namespace. A cursor’s first batch, which comes with the query, isn’t counted."),
+			otelmetric.WithDescription("How long each read of a batch of documents to compare took, by cluster, namespace, and batch (first or getMore). A first batch’s duration is that of the command that opened the cursor."),
 			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
 		)),
 		collectionReadCount: lo.Must(meter.Int64Histogram(
 			"migration_verifier_collection_read_count",
 			otelmetric.WithUnit("{document}"),
-			otelmetric.WithDescription("The number of documents to compare in each batch that a getMore returned, by cluster and namespace."),
+			otelmetric.WithDescription("The number of documents to compare in each batch read, by cluster, namespace, and batch (first or getMore)."),
 			otelmetric.WithExplicitBucketBoundaries(batchCountBuckets...),
 		)),
 		collectionReadSize: lo.Must(meter.Int64Histogram(
 			"migration_verifier_collection_read_size",
 			otelmetric.WithUnit("By"),
-			otelmetric.WithDescription("The total size of each batch of documents to compare that a getMore returned, by cluster and namespace."),
+			otelmetric.WithDescription("The total size of each batch of documents to compare, by cluster, namespace, and batch (first or getMore)."),
 			otelmetric.WithExplicitBucketBoundaries(batchSizeBuckets...),
+		)),
+
+		readerSendWait: lo.Must(meter.Float64Counter(
+			"migration_verifier_reader_send_wait",
+			otelmetric.WithUnit("s"),
+			otelmetric.WithDescription("Time that document readers spent waiting for comparators to take documents, by cluster. If this grows faster than the comparators’ read wait, comparison is the bottleneck."),
+		)),
+		comparatorReadWait: lo.Must(meter.Float64Counter(
+			"migration_verifier_comparator_read_wait",
+			otelmetric.WithUnit("s"),
+			otelmetric.WithDescription("Time that comparators spent waiting for documents from each cluster’s readers. If this grows faster than the readers’ send wait, reading is the bottleneck."),
+		)),
+
+		mismatchPersistDuration: lo.Must(meter.Float64Histogram(
+			"migration_verifier_mismatch_persist_duration",
+			otelmetric.WithUnit("s"),
+			otelmetric.WithDescription("How long writing a task’s mismatches to the metadata database took."),
+			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
+		)),
+		taskUpdateDuration: lo.Must(meter.Float64Histogram(
+			"migration_verifier_task_update_duration",
+			otelmetric.WithUnit("s"),
+			otelmetric.WithDescription("How long updating a task’s status in the metadata database took, including any retries."),
+			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
+		)),
+
+		connectionCheckoutDuration: lo.Must(meter.Float64Histogram(
+			"migration_verifier_connection_checkout_duration",
+			otelmetric.WithUnit("s"),
+			otelmetric.WithDescription("How long each checkout of a pooled connection took, by cluster and server address. Long checkouts suggest that the connection pool is too small for the workload."),
+			otelmetric.WithExplicitBucketBoundaries(connectionCheckoutBuckets...),
+		)),
+		connectionCheckoutFailures: lo.Must(meter.Int64Counter(
+			"migration_verifier_connection_checkout_failures",
+			otelmetric.WithUnit("{failure}"),
+			otelmetric.WithDescription("Failed checkouts of pooled connections, by cluster, server address, and reason."),
+		)),
+		connectionPoolClears: lo.Must(meter.Int64Counter(
+			"migration_verifier_connection_pool_clears",
+			otelmetric.WithUnit("{clear}"),
+			otelmetric.WithDescription("Clears of a connection pool, by cluster and server address. The driver clears a pool after network errors and failovers."),
+		)),
+		connectionsOpen: lo.Must(meter.Int64ObservableGauge(
+			"migration_verifier_connections_open",
+			otelmetric.WithUnit("{connection}"),
+			otelmetric.WithDescription("Open connections, by cluster and server address."),
+		)),
+		connectionsInUse: lo.Must(meter.Int64ObservableGauge(
+			"migration_verifier_connections_in_use",
+			otelmetric.WithUnit("{connection}"),
+			otelmetric.WithDescription("Connections checked out for operations, by cluster and server address."),
 		)),
 	}
 }
@@ -277,7 +362,7 @@ func (m *verifierMetrics) recordChangeRead(
 	m.changeReadSize.Record(ctx, int64(read.Bytes), opt)
 }
 
-// recordCollectionRead records a getMore of documents to compare.
+// recordCollectionRead records a read of a batch of documents to compare.
 func (m *verifierMetrics) recordCollectionRead(
 	ctx context.Context,
 	cluster whichCluster,
@@ -287,11 +372,113 @@ func (m *verifierMetrics) recordCollectionRead(
 	opt := otelmetric.WithAttributes(
 		metricLabelCluster.String(string(cluster)),
 		metricLabelNamespace.String(namespace),
+		metricLabelBatch.String(lo.Ternary(read.First, metricBatchFirst, metricBatchGetMore)),
 	)
 
 	m.collectionReadDuration.Record(ctx, read.Duration.Seconds(), opt)
 	m.collectionReadCount.Record(ctx, int64(read.Docs), opt)
 	m.collectionReadSize.Record(ctx, int64(read.Bytes), opt)
+}
+
+// recordReaderSendWait adds time that a document reader waited for a
+// comparator to take documents.
+func (m *verifierMetrics) recordReaderSendWait(ctx context.Context, cluster whichCluster, wait time.Duration) {
+	m.readerSendWait.Add(
+		ctx,
+		wait.Seconds(),
+		otelmetric.WithAttributes(metricLabelCluster.String(string(cluster))),
+	)
+}
+
+// recordComparatorReadWait adds time that a comparator waited for documents
+// from a cluster’s reader.
+func (m *verifierMetrics) recordComparatorReadWait(ctx context.Context, cluster whichCluster, wait time.Duration) {
+	m.comparatorReadWait.Add(
+		ctx,
+		wait.Seconds(),
+		otelmetric.WithAttributes(metricLabelCluster.String(string(cluster))),
+	)
+}
+
+func (m *verifierMetrics) recordMismatchPersistDuration(ctx context.Context, elapsed time.Duration) {
+	m.mismatchPersistDuration.Record(ctx, elapsed.Seconds())
+}
+
+func (m *verifierMetrics) recordTaskUpdateDuration(ctx context.Context, elapsed time.Duration) {
+	m.taskUpdateDuration.Record(ctx, elapsed.Seconds())
+}
+
+func poolMetricOption(cluster whichCluster, address string) otelmetric.MeasurementOption {
+	return otelmetric.WithAttributes(
+		metricLabelCluster.String(string(cluster)),
+		metricLabelAddress.String(address),
+	)
+}
+
+func (m *verifierMetrics) recordConnectionCheckout(
+	ctx context.Context,
+	cluster whichCluster,
+	address string,
+	elapsed time.Duration,
+) {
+	m.connectionCheckoutDuration.Record(ctx, elapsed.Seconds(), poolMetricOption(cluster, address))
+}
+
+func (m *verifierMetrics) recordConnectionCheckoutFailure(
+	ctx context.Context,
+	cluster whichCluster,
+	address string,
+	reason string,
+) {
+	m.connectionCheckoutFailures.Add(
+		ctx,
+		1,
+		otelmetric.WithAttributes(
+			metricLabelCluster.String(string(cluster)),
+			metricLabelAddress.String(address),
+			metricLabelReason.String(reason),
+		),
+	)
+}
+
+func (m *verifierMetrics) recordConnectionPoolClear(ctx context.Context, cluster whichCluster, address string) {
+	m.connectionPoolClears.Add(ctx, 1, poolMetricOption(cluster, address))
+}
+
+// poolGaugeSource is what the connection pool gauges read.
+type poolGaugeSource interface {
+	getWhichCluster() whichCluster
+	getPoolCounts() map[string]poolCounts
+}
+
+// observePools makes the connection pool gauges observe pools. It may be
+// called only once.
+func (m *verifierMetrics) observePools(pools ...poolGaugeSource) error {
+	lo.Assertf(m.poolCallback.IsNone(), "pools are already observed")
+
+	registration, err := m.meter.RegisterCallback(
+		func(_ context.Context, observer otelmetric.Observer) error {
+			for _, pool := range pools {
+				for address, counts := range pool.getPoolCounts() {
+					opt := poolMetricOption(pool.getWhichCluster(), address)
+
+					observer.ObserveInt64(m.connectionsOpen, counts.open, opt)
+					observer.ObserveInt64(m.connectionsInUse, counts.inUse, opt)
+				}
+			}
+
+			return nil
+		},
+		m.connectionsOpen,
+		m.connectionsInUse,
+	)
+	if err != nil {
+		return err
+	}
+
+	m.poolCallback = option.Some(registration)
+
+	return nil
 }
 
 // changeReaderGaugeSource is what the change reader gauges read. Its methods
