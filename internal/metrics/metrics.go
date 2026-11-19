@@ -38,11 +38,23 @@ const (
 	fileMaxSizeMB = 200
 )
 
+// Resource attributes that semconv lacks. Like a host name, a replica set’s
+// name describes infrastructure, not the data being verified.
+const (
+	SrcReplSetNameKey = attribute.Key("src_replset_name")
+	DstReplSetNameKey = attribute.Key("dst_replset_name")
+)
+
 // Settings configures Setup.
 type Settings struct {
 	// FileDir is the directory for the metrics file. If it is unset, or isn’t
 	// an existing directory, no metrics file is written.
 	FileDir option.Option[string]
+
+	// SrcReplSetName and DstReplSetName are the source’s and destination’s
+	// replica set names. Leave one unset if that cluster isn’t a replica set.
+	SrcReplSetName option.Option[string]
+	DstReplSetName option.Option[string]
 }
 
 // Pipeline is the verifier’s metrics pipeline. It owns the metrics file, if
@@ -79,8 +91,9 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 // unusable, Setup logs a warning and writes no file; the handler still works.
 //
 // The pipeline always includes the Go runtime and process metrics. Every
-// series carries the process’s resource attributes (service name and
-// version, host name, and process ID) as labels.
+// series, including those, carries the process’s resource attributes
+// (service name and version, host name, process ID, and any replica set
+// names) as labels.
 func Setup(lgr *logger.Logger, settings Settings) (*Pipeline, error) {
 	var out option.Option[io.Writer]
 	var file option.Option[io.Closer]
@@ -102,7 +115,7 @@ func Setup(lgr *logger.Logger, settings Settings) (*Pipeline, error) {
 
 	pipeline, err := oteltools.Setup(oteltools.Settings{
 		Logger:         slog.New(slogzerolog.Option{Logger: lgr.Logger}.NewZerologHandler()),
-		Resource:       newResource(lgr),
+		Resource:       newResource(lgr, settings),
 		ResourceLabels: attribute.NewAllowKeysFilter(resourceLabelKeys()...),
 		MetricsOut:     out,
 	})
@@ -137,10 +150,12 @@ func resourceLabelKeys() []attribute.Key {
 		semconv.ServiceVersionKey,
 		semconv.HostNameKey,
 		semconv.ProcessPIDKey,
+		SrcReplSetNameKey,
+		DstReplSetNameKey,
 	}
 }
 
-func newResource(lgr *logger.Logger) *resource.Resource {
+func newResource(lgr *logger.Logger, settings Settings) *resource.Resource {
 	attrs := []attribute.KeyValue{
 		semconv.ServiceName(ServiceName),
 		semconv.ServiceVersion(buildvar.Revision),
@@ -151,6 +166,14 @@ func newResource(lgr *logger.Logger) *resource.Resource {
 		lgr.Warn().Err(err).Msg("Failed to get host name for metrics; omitting it.")
 	} else {
 		attrs = append(attrs, semconv.HostName(hostname))
+	}
+
+	if name, has := settings.SrcReplSetName.Get(); has {
+		attrs = append(attrs, SrcReplSetNameKey.String(name))
+	}
+
+	if name, has := settings.DstReplSetName.Get(); has {
+		attrs = append(attrs, DstReplSetNameKey.String(name))
 	}
 
 	return resource.NewWithAttributes(semconv.SchemaURL, attrs...)
