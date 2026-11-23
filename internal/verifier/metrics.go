@@ -42,7 +42,7 @@ const (
 
 // Values of the batch label.
 const (
-	metricBatchFirst   = "first"
+	metricBatchOpen    = "open"
 	metricBatchGetMore = "getMore"
 )
 
@@ -64,8 +64,26 @@ var (
 
 	// Batch sizes, in bytes, up to a full batch (16 MiB).
 	batchSizeBuckets = []float64{
-		0, 512, 1 << 10, 4 << 10, 16 << 10, 64 << 10, 256 << 10,
-		1 << 20, 2 << 20, 4 << 20, 8 << 20, 16 << 20,
+		0,
+		512,
+
+		// KiB:
+		1 << 10,
+		2 << 10,
+		4 << 10,
+		8 << 10,
+		16 << 10,
+		32 << 10,
+		64 << 10,
+		128 << 10,
+		256 << 10,
+
+		// MiB:
+		1 << 20,
+		2 << 20,
+		4 << 20,
+		8 << 20,
+		16 << 20,
 	}
 
 	// Checking out a pooled connection normally takes microseconds. It takes
@@ -214,7 +232,7 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 		collectionReadDuration: lo.Must(meter.Float64Histogram(
 			"migration_verifier_collection_read_duration",
 			otelmetric.WithUnit("s"),
-			otelmetric.WithDescription("How long each read of a batch of documents to compare took, by cluster, namespace, and batch (first or getMore). A first batch’s duration is that of the command that opened the cursor."),
+			otelmetric.WithDescription("How long each read of a batch of documents to compare took, by cluster, namespace, and batch (open or getMore). An open batch’s duration is that of the command that opened the cursor."),
 			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
 		)),
 		collectionReadCount: lo.Must(meter.Int64Histogram(
@@ -372,7 +390,7 @@ func (m *verifierMetrics) recordCollectionRead(
 	opt := otelmetric.WithAttributes(
 		metricLabelCluster.String(string(cluster)),
 		metricLabelNamespace.String(namespace),
-		metricLabelBatch.String(lo.Ternary(read.First, metricBatchFirst, metricBatchGetMore)),
+		metricLabelBatch.String(lo.Ternary(read.First, metricBatchOpen, metricBatchGetMore)),
 	)
 
 	m.collectionReadDuration.Record(ctx, read.Duration.Seconds(), opt)

@@ -193,7 +193,7 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 	assert.ElementsMatch(
 		t,
 		[]map[string]string{
-			{"cluster": "source", "namespace": "mydb.coll", "batch": "first"},
+			{"cluster": "source", "namespace": "mydb.coll", "batch": "open"},
 			{"cluster": "source", "namespace": "mydb.coll", "batch": "getMore"},
 		},
 		histogramLabelSets(families["migration_verifier_collection_read_duration_seconds"], "cluster", "namespace", "batch"),
@@ -201,13 +201,13 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 
 	assert.Equal(
 		t,
-		map[string]float64{"first": 10100, "getMore": 3000},
+		map[string]float64{"open": 10100, "getMore": 3000},
 		histogramSumByLabel(families["migration_verifier_collection_read_size_bytes"], "batch"),
 	)
 
 	assert.Equal(
 		t,
-		map[string]float64{"first": 101, "getMore": 30},
+		map[string]float64{"open": 101, "getMore": 30},
 		histogramSumByLabel(families["migration_verifier_collection_read_count"], "batch"),
 	)
 
@@ -529,9 +529,9 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CollectionRead() {
 	) {
 		suite.Assert().ElementsMatch(
 			[]map[string]string{
-				{"cluster": string(src), "namespace": dbName + ".coll", "batch": "first"},
+				{"cluster": string(src), "namespace": dbName + ".coll", "batch": "open"},
 				{"cluster": string(src), "namespace": dbName + ".coll", "batch": "getMore"},
-				{"cluster": string(dst), "namespace": dbName + ".coll", "batch": "first"},
+				{"cluster": string(dst), "namespace": dbName + ".coll", "batch": "open"},
 				{"cluster": string(dst), "namespace": dbName + ".coll", "batch": "getMore"},
 			},
 			histogramLabelSets(families[name], "cluster", "namespace", "batch"),
@@ -579,19 +579,36 @@ func (suite *IntegrationTestSuite) TestBatchReadTimer() {
 		return collector.reads
 	}
 
+	// zeroGetMoreDurations zeroes the getMores’ durations, which vary.
+	zeroGetMoreDurations := func(reads []compare.BatchReadStats) []compare.BatchReadStats {
+		return lo.Map(reads, func(r compare.BatchReadStats, i int) compare.BatchReadStats {
+			if i > 0 {
+				r.Duration = 0
+			}
+			return r
+		})
+	}
+
 	suite.Assert().Equal(
 		[]compare.BatchReadStats{
 			{First: true, Duration: time.Hour, Docs: 2, Bytes: 2 * docSize},
 			{Docs: 2, Bytes: 2 * docSize},
 			{Docs: 1, Bytes: docSize},
 		},
-		lo.Map(readAll(bson.D{}, 5), func(r compare.BatchReadStats, i int) compare.BatchReadStats {
-			if i > 0 {
-				r.Duration = 0
-			}
-			return r
-		}),
+		zeroGetMoreDurations(readAll(bson.D{}, 5)),
 		"each batch is recorded; the first has the opening command’s duration",
+	)
+
+	// When the documents fill whole batches, the server only learns that the
+	// cursor is exhausted on a final getMore, which returns no documents.
+	suite.Assert().Equal(
+		[]compare.BatchReadStats{
+			{First: true, Duration: time.Hour, Docs: 2, Bytes: 2 * docSize},
+			{Docs: 2, Bytes: 2 * docSize},
+			{},
+		},
+		zeroGetMoreDurations(readAll(bson.D{{"_id", bson.D{{"$lt", 4}}}}, 4)),
+		"an empty final getMore is recorded",
 	)
 
 	suite.Assert().Equal(
