@@ -41,6 +41,35 @@ func TestSetup_ServesRuntimeMetricsWithResourceLabels(t *testing.T) {
 		assert.Contains(t, series, `process_pid="`+strconv.Itoa(os.Getpid())+`"`)
 		assert.Contains(t, series, "service_version=")
 		assert.Contains(t, series, "host_name=")
+		assert.NotContains(t, series, string(SrcReplSetNameKey), "no replica set name was given")
+		assert.NotContains(t, series, string(DstReplSetNameKey), "no replica set name was given")
+	}
+}
+
+func TestSetup_ReplSetNameLabels(t *testing.T) {
+	pipeline, err := Setup(logger.NewDebugLogger(), Settings{
+		SrcReplSetName: option.Some("srcRS"),
+		DstReplSetName: option.Some("dstRS"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pipeline.Shutdown(t.Context())) })
+
+	counter, err := pipeline.MeterProvider().Meter("test").Int64Counter("test_events")
+	require.NoError(t, err)
+	counter.Add(t.Context(), 1)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	pipeline.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+
+	// Both the runtime series and the OTel instruments’ series carry the names.
+	for _, prefix := range []string{"go_goroutines{", "process_cpu_seconds_total{", "test_events_total{"} {
+		series := findLine(t, body, prefix)
+		assert.Contains(t, series, `src_replset_name="srcRS"`)
+		assert.Contains(t, series, `dst_replset_name="dstRS"`)
 	}
 }
 

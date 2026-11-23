@@ -440,6 +440,18 @@ func (verifier *Verifier) GetLogger() *logger.Logger {
 	return verifier.logger
 }
 
+// GetSrcReplSetName returns the source’s replica set name, if the source is
+// a replica set. Call it after SetSrcURI.
+func (verifier *Verifier) GetSrcReplSetName() option.Option[string] {
+	return option.IfNotZero(verifier.srcClusterInfo.SetName)
+}
+
+// GetDstReplSetName returns the destination’s replica set name, if the
+// destination is a replica set. Call it after SetDstURI.
+func (verifier *Verifier) GetDstReplSetName() option.Option[string] {
+	return option.IfNotZero(verifier.dstClusterInfo.SetName)
+}
+
 func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 	var err error
 	verifier.metaClient, _, err = verifier.getClient(ctx, uri, readpref.Primary())
