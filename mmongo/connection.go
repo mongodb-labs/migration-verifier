@@ -16,12 +16,9 @@ import (
 //
 // This is useful if, e.g., you need to pin requests to a particular node
 // in a replica set.
-//
-// Any extraOpts are applied after the connection string.
 func GetDirectClient(
 	baseConnstr string,
 	hostnameAndPort string,
-	extraOpts ...*options.ClientOptions,
 ) (*mongo.Client, error) {
 	connstr, err := setDirectHostInConnectionString(
 		baseConnstr,
@@ -31,15 +28,9 @@ func GetDirectClient(
 		return nil, errors.Wrapf(err, "setting source connstr to connect directly to %#q", hostnameAndPort)
 	}
 
-	client, err := mongo.Connect(
-		append(
-			[]*options.ClientOptions{
-				options.Client().
-					ApplyURI(connstr).
-					SetAppName(buildvar.GetClientAppName()),
-			},
-			extraOpts...,
-		)...,
+	client, err := mongo.Connect(options.Client().
+		ApplyURI(connstr).
+		SetAppName(buildvar.GetClientAppName()),
 	)
 	if err != nil {
 		return nil, errors.Wrapf(err, "connecting directly to source %#q", hostnameAndPort)

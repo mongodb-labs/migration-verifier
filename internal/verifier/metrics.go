@@ -22,11 +22,6 @@ const (
 	metricLabelCluster = attribute.Key("cluster")
 	metricLabelOpType  = attribute.Key("op_type")
 	metricLabelBatch   = attribute.Key("batch")
-	metricLabelReason  = attribute.Key("reason")
-
-	// metricLabelAddress is a server’s host and port. It has one value per
-	// server that the verifier connects to.
-	metricLabelAddress = attribute.Key("address")
 
 	// metricLabelNamespace is a collection’s namespace (database.collection).
 	// Unlike the other labels, its values are customer data, and there can be
@@ -86,13 +81,6 @@ var (
 		16 << 20,
 	}
 
-	// Checking out a pooled connection normally takes microseconds. It takes
-	// longer when the verifier must open a connection, or when the pool is
-	// full and the checkout waits for another operation to finish.
-	connectionCheckoutBuckets = []float64{
-		0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30,
-	}
-
 	// Documents or events per batch. An idle change reader’s batches are
 	// empty; a full batch of small documents can hold over 100,000.
 	batchCountBuckets = []float64{
@@ -135,15 +123,6 @@ type verifierMetrics struct {
 
 	mismatchPersistDuration otelmetric.Float64Histogram
 	taskUpdateDuration      otelmetric.Float64Histogram
-
-	connectionCheckoutDuration otelmetric.Float64Histogram
-	connectionCheckoutFailures otelmetric.Int64Counter
-	connectionPoolClears       otelmetric.Int64Counter
-	connectionsOpen            otelmetric.Int64ObservableGauge
-	connectionsInUse           otelmetric.Int64ObservableGauge
-
-	// poolCallback observes the connection pools.
-	poolCallback option.Option[otelmetric.Registration]
 }
 
 // newVerifierMetrics creates the verifier’s instruments. Creating an
@@ -271,33 +250,6 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 			otelmetric.WithDescription("How long updating a task’s status in the metadata database took, including any retries."),
 			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
 		)),
-
-		connectionCheckoutDuration: lo.Must(meter.Float64Histogram(
-			"migration_verifier_connection_checkout_duration",
-			otelmetric.WithUnit("s"),
-			otelmetric.WithDescription("How long each checkout of a pooled connection took, by cluster and server address. Long checkouts suggest that the connection pool is too small for the workload."),
-			otelmetric.WithExplicitBucketBoundaries(connectionCheckoutBuckets...),
-		)),
-		connectionCheckoutFailures: lo.Must(meter.Int64Counter(
-			"migration_verifier_connection_checkout_failures",
-			otelmetric.WithUnit("{failure}"),
-			otelmetric.WithDescription("Failed checkouts of pooled connections, by cluster, server address, and reason."),
-		)),
-		connectionPoolClears: lo.Must(meter.Int64Counter(
-			"migration_verifier_connection_pool_clears",
-			otelmetric.WithUnit("{clear}"),
-			otelmetric.WithDescription("Clears of a connection pool, by cluster and server address. The driver clears a pool after network errors and failovers."),
-		)),
-		connectionsOpen: lo.Must(meter.Int64ObservableGauge(
-			"migration_verifier_connections_open",
-			otelmetric.WithUnit("{connection}"),
-			otelmetric.WithDescription("Open connections, by cluster and server address."),
-		)),
-		connectionsInUse: lo.Must(meter.Int64ObservableGauge(
-			"migration_verifier_connections_in_use",
-			otelmetric.WithUnit("{connection}"),
-			otelmetric.WithDescription("Connections checked out for operations, by cluster and server address."),
-		)),
 	}
 }
 
@@ -424,79 +376,6 @@ func (m *verifierMetrics) recordMismatchPersistDuration(ctx context.Context, ela
 
 func (m *verifierMetrics) recordTaskUpdateDuration(ctx context.Context, elapsed time.Duration) {
 	m.taskUpdateDuration.Record(ctx, elapsed.Seconds())
-}
-
-func poolMetricOption(cluster whichCluster, address string) otelmetric.MeasurementOption {
-	return otelmetric.WithAttributes(
-		metricLabelCluster.String(string(cluster)),
-		metricLabelAddress.String(address),
-	)
-}
-
-func (m *verifierMetrics) recordConnectionCheckout(
-	ctx context.Context,
-	cluster whichCluster,
-	address string,
-	elapsed time.Duration,
-) {
-	m.connectionCheckoutDuration.Record(ctx, elapsed.Seconds(), poolMetricOption(cluster, address))
-}
-
-func (m *verifierMetrics) recordConnectionCheckoutFailure(
-	ctx context.Context,
-	cluster whichCluster,
-	address string,
-	reason string,
-) {
-	m.connectionCheckoutFailures.Add(
-		ctx,
-		1,
-		otelmetric.WithAttributes(
-			metricLabelCluster.String(string(cluster)),
-			metricLabelAddress.String(address),
-			metricLabelReason.String(reason),
-		),
-	)
-}
-
-func (m *verifierMetrics) recordConnectionPoolClear(ctx context.Context, cluster whichCluster, address string) {
-	m.connectionPoolClears.Add(ctx, 1, poolMetricOption(cluster, address))
-}
-
-// poolGaugeSource is what the connection pool gauges read.
-type poolGaugeSource interface {
-	getWhichCluster() whichCluster
-	getPoolCounts() map[string]poolCounts
-}
-
-// observePools makes the connection pool gauges observe pools. It may be
-// called only once.
-func (m *verifierMetrics) observePools(pools ...poolGaugeSource) error {
-	lo.Assertf(m.poolCallback.IsNone(), "pools are already observed")
-
-	registration, err := m.meter.RegisterCallback(
-		func(_ context.Context, observer otelmetric.Observer) error {
-			for _, pool := range pools {
-				for address, counts := range pool.getPoolCounts() {
-					opt := poolMetricOption(pool.getWhichCluster(), address)
-
-					observer.ObserveInt64(m.connectionsOpen, counts.open, opt)
-					observer.ObserveInt64(m.connectionsInUse, counts.inUse, opt)
-				}
-			}
-
-			return nil
-		},
-		m.connectionsOpen,
-		m.connectionsInUse,
-	)
-	if err != nil {
-		return err
-	}
-
-	m.poolCallback = option.Some(registration)
-
-	return nil
 }
 
 // changeReaderGaugeSource is what the change reader gauges read. Its methods

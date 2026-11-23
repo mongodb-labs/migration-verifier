@@ -38,7 +38,6 @@ import (
 	"github.com/10gen/migration-verifier/mbson"
 	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mring"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/10gen/migration-verifier/msync"
 	"github.com/10gen/migration-verifier/timeseries"
 	"github.com/dustin/go-humanize"
@@ -117,9 +116,8 @@ const (
 type whichCluster string
 
 const (
-	src  whichCluster = "source"
-	dst  whichCluster = "destination"
-	meta whichCluster = "metadata"
+	src whichCluster = "source"
+	dst whichCluster = "destination"
 )
 
 var timeFormat = time.RFC3339
@@ -204,12 +202,7 @@ type Verifier struct {
 	// metricsHandler, if set, serves metrics at the web server’s /metrics.
 	metricsHandler option.Option[http.Handler]
 
-	// metrics holds the current instruments. It is atomic because the driver
-	// records pool metrics from its own goroutines.
-	metrics atomic.Pointer[verifierMetrics]
-
-	// poolMonitors turn each cluster’s connection pool events into metrics.
-	poolMonitors map[whichCluster]*poolMonitor
+	metrics *verifierMetrics
 
 	workerTracker        *WorkerTracker
 	docsComparedHistory  *history.History[types.DocumentCount]
@@ -273,19 +266,14 @@ func NewVerifier(settings VerifierSettings, logPath string) *Verifier {
 		dstLastRecheckedTS: msync.NewDataGuard(bson.Timestamp{}),
 	}
 
-	verifier.metrics.Store(newVerifierMetrics(noop.NewMeterProvider()))
-
-	verifier.poolMonitors = map[whichCluster]*poolMonitor{}
-	for _, cluster := range mslices.Of(src, dst, meta) {
-		verifier.poolMonitors[cluster] = newPoolMonitor(cluster, verifier.getMetrics)
-	}
+	verifier.metrics = newVerifierMetrics(noop.NewMeterProvider())
 
 	return verifier
 }
 
 // getMetrics returns the verifier’s current instruments.
 func (verifier *Verifier) getMetrics() *verifierMetrics {
-	return verifier.metrics.Load()
+	return verifier.metrics
 }
 
 // collectionReaderMetrics records the measurements of a reader of a
@@ -364,12 +352,10 @@ func (verifier *Verifier) buildClientOpts(
 
 func (verifier *Verifier) getClient(
 	ctx context.Context,
-	cluster whichCluster,
 	uri string,
 	rp *readpref.ReadPref,
 ) (*mongo.Client, *options.ClientOptions, error) {
 	opts := verifier.buildClientOpts(uri, rp)
-	opts.SetPoolMonitor(verifier.poolMonitors[cluster].driverMonitor())
 
 	client, err := mongo.Connect(opts)
 	if err != nil {
@@ -486,7 +472,7 @@ func (verifier *Verifier) GetDstReplSetName() option.Option[string] {
 
 func (verifier *Verifier) SetMetaURI(ctx context.Context, uri string) error {
 	var err error
-	verifier.metaClient, _, err = verifier.getClient(ctx, meta, uri, readpref.Primary())
+	verifier.metaClient, _, err = verifier.getClient(ctx, uri, readpref.Primary())
 	if err != nil {
 		return errors.Wrapf(err, "connect to metadata")
 	}
@@ -563,19 +549,8 @@ func (verifier *Verifier) SetMetricsHandler(handler http.Handler) {
 // instruments. Without it, the verifier records to no-op instruments. Call it
 // before starting a check.
 func (verifier *Verifier) SetMeterProvider(provider otelmetric.MeterProvider) {
-	metrics := newVerifierMetrics(provider)
-	metrics.recordPhase(context.Background(), Idle)
-
-	// This fails only if the instruments come from a different meter, which
-	// would be a bug.
-	lo.Must0(metrics.observePools(
-		lo.Map(
-			lo.Values(verifier.poolMonitors),
-			func(pm *poolMonitor, _ int) poolGaugeSource { return pm },
-		)...,
-	))
-
-	verifier.metrics.Store(metrics)
+	verifier.metrics = newVerifierMetrics(provider)
+	verifier.metrics.recordPhase(context.Background(), Idle)
 }
 
 func (verifier *Verifier) SetNumWorkers(arg int) error {

@@ -40,17 +40,6 @@ func (f fakeChangeReaderGaugeSource) getCurrentTimestamps() option.Option[reader
 
 func (f fakeChangeReaderGaugeSource) getBufferSaturation() float64 { return f.saturation }
 
-type fakePoolGaugeSource struct {
-	cluster whichCluster
-	counts  map[string]poolCounts
-}
-
-var _ poolGaugeSource = fakePoolGaugeSource{}
-
-func (f fakePoolGaugeSource) getWhichCluster() whichCluster { return f.cluster }
-
-func (f fakePoolGaugeSource) getPoolCounts() map[string]poolCounts { return f.counts }
-
 // batchReadCollector collects a reader’s batch reads.
 type batchReadCollector struct {
 	reads []compare.BatchReadStats
@@ -89,19 +78,6 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 	m.recordComparatorReadWait(ctx, dst, 4*time.Second)
 	m.recordMismatchPersistDuration(ctx, 5*time.Millisecond)
 	m.recordTaskUpdateDuration(ctx, 3*time.Millisecond)
-	m.recordConnectionCheckout(ctx, meta, "host1:27017", 100*time.Microsecond)
-	m.recordConnectionCheckoutFailure(ctx, src, "host2:27017", "timeout")
-	m.recordConnectionPoolClear(ctx, dst, "host3:27017")
-
-	require.NoError(t, m.observePools(
-		fakePoolGaugeSource{
-			cluster: src,
-			counts: map[string]poolCounts{
-				"host1:27017": {open: 5, inUse: 2},
-				"host2:27017": {open: 1},
-			},
-		},
-	))
 	m.recordChangeRead(ctx, dst, compare.BatchReadStats{Duration: time.Second, Docs: 2, Bytes: 200})
 
 	require.NoError(t, m.observeChangeReaders(
@@ -139,11 +115,6 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 		"migration_verifier_comparator_read_wait_seconds_total":    prometheusclient.MetricType_COUNTER,
 		"migration_verifier_mismatch_persist_duration_seconds":     prometheusclient.MetricType_HISTOGRAM,
 		"migration_verifier_task_update_duration_seconds":          prometheusclient.MetricType_HISTOGRAM,
-		"migration_verifier_connection_checkout_duration_seconds":  prometheusclient.MetricType_HISTOGRAM,
-		"migration_verifier_connection_checkout_failures_total":    prometheusclient.MetricType_COUNTER,
-		"migration_verifier_connection_pool_clears_total":          prometheusclient.MetricType_COUNTER,
-		"migration_verifier_connections_open":                      prometheusclient.MetricType_GAUGE,
-		"migration_verifier_connections_in_use":                    prometheusclient.MetricType_GAUGE,
 	}
 	for name, metricType := range expectedTypes {
 		if assert.Contains(t, families, name) {
@@ -222,39 +193,6 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 		t,
 		map[string]float64{"destination": 4},
 		valuesByLabel(families["migration_verifier_comparator_read_wait_seconds_total"], "cluster"),
-	)
-
-	assert.Equal(
-		t,
-		[]map[string]string{{"cluster": "metadata", "address": "host1:27017"}},
-		histogramLabelSets(families["migration_verifier_connection_checkout_duration_seconds"], "cluster", "address"),
-	)
-
-	assert.Equal(
-		t,
-		1.0,
-		sampleValue(
-			families["migration_verifier_connection_checkout_failures_total"],
-			map[string]string{"cluster": "source", "address": "host2:27017", "reason": "timeout"},
-		),
-	)
-
-	assert.Equal(
-		t,
-		map[string]float64{"host3:27017": 1},
-		valuesByLabel(families["migration_verifier_connection_pool_clears_total"], "address"),
-	)
-
-	assert.Equal(
-		t,
-		map[string]float64{"host1:27017": 5, "host2:27017": 1},
-		valuesByLabel(families["migration_verifier_connections_open"], "address"),
-	)
-
-	assert.Equal(
-		t,
-		map[string]float64{"host1:27017": 2, "host2:27017": 0},
-		valuesByLabel(families["migration_verifier_connections_in_use"], "address"),
 	)
 
 	assert.Equal(
@@ -427,21 +365,6 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CheckAndRecheck() {
 		suite.Assert().ElementsMatch(
 			mslices.Of(string(src), string(dst)),
 			lo.Keys(valuesByLabel(families[name], "cluster")),
-			name,
-		)
-	}
-
-	for _, name := range mslices.Of(
-		"migration_verifier_connections_open",
-		"migration_verifier_connection_checkout_duration_seconds",
-	) {
-		suite.Assert().Subset(
-			lo.Map(
-				histogramLabelSets(families[name], "cluster"),
-				func(labels map[string]string, _ int) string { return labels["cluster"] },
-			),
-			mslices.Of(string(src), string(dst), string(meta)),
-			"%s covers each cluster",
 			name,
 		)
 	}
