@@ -103,7 +103,7 @@ func (t *BatchReadTimer) Next(ctx context.Context, cursor *mongo.Cursor) bool {
 		if !cursor.Next(ctx) {
 			// A getMore that exhausts the cursor can return an empty batch.
 			if fetches && cursor.Err() == nil {
-				t.record(ctx, BatchReadStats{Duration: time.Since(start)})
+				t.metrics.RecordBatchRead(ctx, BatchReadStats{Duration: time.Since(start)})
 			}
 
 			return false

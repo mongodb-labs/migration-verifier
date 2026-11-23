@@ -435,7 +435,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				option.None[*readpref.ReadPref](),
 			)
 			readTimer := compare.NewBatchReadTimer(
-				verifier.createCollectionReadRecorder(dst, coll),
+				readerMetrics,
 				time.Since(cursorStartTime),
 			)
 
@@ -460,6 +460,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				theCursor,
 				dstToCompareChannel,
 				readTimer,
+				readerMetrics,
 			)
 			if err != nil {
 				return errors.Wrap(
@@ -588,8 +589,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			task,
 			option.IfNotZero(verifier.readPreference),
 		)
+		readerMetrics := verifier.createReaderMetrics(src, verifier.srcClientCollection(task))
 		readTimer := compare.NewBatchReadTimer(
-			verifier.createCollectionReadRecorder(src, verifier.srcClientCollection(task)),
+			readerMetrics,
 			time.Since(openStart),
 		)
 
@@ -602,6 +604,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				theCursor,
 				srcChannel,
 				readTimer,
+				readerMetrics,
 			)
 
 			err = errors.Wrap(
@@ -638,8 +641,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			task,
 			option.None[*readpref.ReadPref](),
 		)
+		readerMetrics := verifier.createReaderMetrics(dst, verifier.dstClientCollection(task))
 		readTimer := compare.NewBatchReadTimer(
-			verifier.createCollectionReadRecorder(dst, verifier.dstClientCollection(task)),
+			readerMetrics,
 			time.Since(openStart),
 		)
 
@@ -652,6 +656,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				theCursor,
 				dstChannel,
 				readTimer,
+				readerMetrics,
 			)
 			err = errors.Wrap(
 				err,
@@ -673,7 +678,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 }
 
 // iterateCursorToChannel returns the # of documents sent to the channel.
-// readTimer advances the cursor and measures its batches.
+// readTimer advances the cursor and measures its batches. If metrics is
+// non-nil, it receives how long each send to writer waited.
 //
 // NB: This DOES NOT close the given channel.
 func iterateCursorToChannel(
@@ -682,6 +688,7 @@ func iterateCursorToChannel(
 	cursor *mongo.Cursor,
 	writer chan<- compare.ToComparatorMsg,
 	readTimer *compare.BatchReadTimer,
+	metrics compare.ReaderMetrics,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
 	if sess == nil {
