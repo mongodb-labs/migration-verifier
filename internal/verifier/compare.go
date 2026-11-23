@@ -336,7 +336,11 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 		"hostname/port missing; this is required for natural partitions",
 	)
 
-	client, err := mmongo.GetDirectClient(verifier.srcURI, hostnameAndPort)
+	client, err := mmongo.GetDirectClient(
+		verifier.srcURI,
+		hostnameAndPort,
+		options.Client().SetPoolMonitor(verifier.poolMonitors[src].driverMonitor()),
+	)
 	if err != nil {
 		return nil, nil, nil, nil, errors.Wrapf(err, "connecting to client for natural read")
 	}
