@@ -429,7 +429,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				&dupeTask,
 				option.None[*readpref.ReadPref](),
 			)
-			openDuration := time.Since(cursorStartTime)
+			readTimer := compare.NewBatchReadTimer(
+				verifier.createCollectionReadRecorder(dst, coll),
+				time.Since(cursorStartTime),
+			)
 
 			for _, id := range docIDs {
 				id.PutInPool()
@@ -451,8 +454,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				state,
 				theCursor,
 				dstToCompareChannel,
-				verifier.createCollectionReadRecorder(dst, coll),
-				openDuration,
+				readTimer,
 			)
 			if err != nil {
 				return errors.Wrap(
@@ -579,7 +581,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			task,
 			option.IfNotZero(verifier.readPreference),
 		)
-		openDuration := time.Since(openStart)
+		readTimer := compare.NewBatchReadTimer(
+			verifier.createCollectionReadRecorder(src, verifier.srcClientCollection(task)),
+			time.Since(openStart),
+		)
 
 		if err == nil {
 			state.NoteSuccess("opened src find cursor")
@@ -589,8 +594,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				srcChannel,
-				verifier.createCollectionReadRecorder(src, verifier.srcClientCollection(task)),
-				openDuration,
+				readTimer,
 			)
 
 			err = errors.Wrap(
@@ -627,7 +631,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			task,
 			option.None[*readpref.ReadPref](),
 		)
-		openDuration := time.Since(openStart)
+		readTimer := compare.NewBatchReadTimer(
+			verifier.createCollectionReadRecorder(dst, verifier.dstClientCollection(task)),
+			time.Since(openStart),
+		)
 
 		if err == nil {
 			state.NoteSuccess("opened dst find cursor")
@@ -637,8 +644,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				dstChannel,
-				verifier.createCollectionReadRecorder(dst, verifier.dstClientCollection(task)),
-				openDuration,
+				readTimer,
 			)
 			err = errors.Wrap(
 				err,
@@ -660,8 +666,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 }
 
 // iterateCursorToChannel returns the # of documents sent to the channel.
-// openDuration is how long the command that opened the cursor took. If
-// recordRead is nil, nothing is measured.
+// readTimer advances the cursor and measures its batches.
 //
 // NB: This DOES NOT close the given channel.
 func iterateCursorToChannel(
@@ -669,11 +674,9 @@ func iterateCursorToChannel(
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
 	writer chan<- compare.ToComparatorMsg,
-	recordRead compare.BatchReadStatsRecorder,
-	openDuration time.Duration,
+	readTimer *compare.BatchReadTimer,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
-	readTimer := compare.NewBatchReadTimer(recordRead, openDuration)
 	if sess == nil {
 		panic("need a session")
 	}
