@@ -142,7 +142,7 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 	assert.ElementsMatch(
 		t,
 		[]map[string]string{
-			{"cluster": "source", "namespace": "mydb.coll", "batch": "first"},
+			{"cluster": "source", "namespace": "mydb.coll", "batch": "open"},
 			{"cluster": "source", "namespace": "mydb.coll", "batch": "getMore"},
 		},
 		histogramLabelSets(families["migration_verifier_collection_read_duration_seconds"], "cluster", "namespace", "batch"),
@@ -150,13 +150,13 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 
 	assert.Equal(
 		t,
-		map[string]float64{"first": 10100, "getMore": 3000},
+		map[string]float64{"open": 10100, "getMore": 3000},
 		histogramSumByLabel(families["migration_verifier_collection_read_size_bytes"], "batch"),
 	)
 
 	assert.Equal(
 		t,
-		map[string]float64{"first": 101, "getMore": 30},
+		map[string]float64{"open": 101, "getMore": 30},
 		histogramSumByLabel(families["migration_verifier_collection_read_count"], "batch"),
 	)
 
@@ -399,9 +399,9 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CollectionRead() {
 	) {
 		suite.Assert().ElementsMatch(
 			[]map[string]string{
-				{"cluster": string(src), "namespace": dbName + ".coll", "batch": "first"},
+				{"cluster": string(src), "namespace": dbName + ".coll", "batch": "open"},
 				{"cluster": string(src), "namespace": dbName + ".coll", "batch": "getMore"},
-				{"cluster": string(dst), "namespace": dbName + ".coll", "batch": "first"},
+				{"cluster": string(dst), "namespace": dbName + ".coll", "batch": "open"},
 				{"cluster": string(dst), "namespace": dbName + ".coll", "batch": "getMore"},
 			},
 			histogramLabelSets(families[name], "cluster", "namespace", "batch"),
