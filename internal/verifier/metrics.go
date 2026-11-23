@@ -211,13 +211,13 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 		collectionReadCount: lo.Must(meter.Int64Histogram(
 			"migration_verifier_collection_read_count",
 			otelmetric.WithUnit("{document}"),
-			otelmetric.WithDescription("The number of documents to compare in each batch read, by cluster, namespace, and batch (first or getMore)."),
+			otelmetric.WithDescription("The number of documents to compare in each batch read, by cluster, namespace, and batch (open or getMore)."),
 			otelmetric.WithExplicitBucketBoundaries(batchCountBuckets...),
 		)),
 		collectionReadSize: lo.Must(meter.Int64Histogram(
 			"migration_verifier_collection_read_size",
 			otelmetric.WithUnit("By"),
-			otelmetric.WithDescription("The total size of each batch of documents to compare, by cluster, namespace, and batch (first or getMore)."),
+			otelmetric.WithDescription("The total size of each batch of documents to compare, by cluster, namespace, and batch (open or getMore)."),
 			otelmetric.WithExplicitBucketBoundaries(batchSizeBuckets...),
 		)),
 	}
