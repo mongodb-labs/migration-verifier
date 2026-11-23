@@ -695,3 +695,22 @@ func histogramCountByLabel(family *prometheusclient.MetricFamily, label string) 
 
 	return counts
 }
+
+// The verifier learns each replica set’s name from its cluster info.
+func (suite *IntegrationTestSuite) TestVerifierReplSetNames() {
+	verifier := suite.BuildVerifier()
+
+	for _, tc := range []struct {
+		info *util.ClusterInfo
+		name option.Option[string]
+	}{
+		{verifier.srcClusterInfo, verifier.GetSrcReplSetName()},
+		{verifier.dstClusterInfo, verifier.GetDstReplSetName()},
+	} {
+		if tc.info.Topology == util.TopologyReplset {
+			suite.Assert().NotEmpty(tc.name.OrZero(), "a replica set has a name")
+		} else {
+			suite.Assert().Equal(option.None[string](), tc.name, "only a replica set has a name")
+		}
+	}
+}
