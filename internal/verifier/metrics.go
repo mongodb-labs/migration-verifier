@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/attribute"
@@ -53,9 +54,32 @@ var (
 	// Database commands normally take milliseconds. The verifier warns once
 	// finding a task takes more than findTaskTimeWarnThreshold. Reading a batch
 	// can take seconds, whether to fill a large batch or to await change events.
-	commandDurationBuckets = []float64{
-		0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60,
-	}
+	commandDurationBuckets = mslices.Map1(
+		mslices.Of(
+			1*time.Millisecond,
+			5*time.Millisecond,
+			10*time.Millisecond,
+			25*time.Millisecond,
+			50*time.Millisecond,
+			100*time.Millisecond,
+			250*time.Millisecond,
+			500*time.Millisecond,
+
+			1*time.Second,
+			timetools.ToDuration(2.5, time.Second),
+			5*time.Second,
+			10*time.Second,
+			30*time.Second,
+
+			1*time.Minute,
+			timetools.ToDuration(2.5, time.Minute),
+			5*time.Minute,
+			10*time.Minute,
+		),
+		time.Duration.Seconds,
+	)
+	//	0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60,
+	//}
 
 	// Batch sizes, in bytes, up to a full batch (16 MiB).
 	batchSizeBuckets = []float64{
