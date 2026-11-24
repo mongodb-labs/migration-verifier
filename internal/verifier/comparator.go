@@ -154,6 +154,9 @@ func (c *comparator) readBatches(
 
 	if !c.dstClosed {
 		eg.Go(func() error {
+			// This loop can receive several messages, so it times each
+			// receive from the previous one.
+			dstWaitStart := waitStart
 
 			// Reading from the destination reader is trickier than reading
 			// from the source reader because the messages can contain flags.
@@ -169,7 +172,8 @@ func (c *comparator) readBatches(
 						return nil
 					}
 
-					c.recordReadWait(ctx, dst, waitStart)
+					c.recordReadWait(ctx, dst, dstWaitStart)
+					dstWaitStart = time.Now()
 
 					c.fi.NoteSuccess("received message (type=%v) from destination reader", msg.Type)
 
