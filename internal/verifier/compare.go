@@ -364,6 +364,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			verifier.docCompareMethod,
 			srcToCompareChannel,
 			srcToDstChannel,
+			verifier.createCollectionReadRecorder(src, verifier.srcClientCollection(task)),
 		)
 	}
 
@@ -428,6 +429,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				&dupeTask,
 				option.None[*readpref.ReadPref](),
 			)
+			readTimer := compare.NewBatchReadTimer(
+				verifier.createCollectionReadRecorder(dst, coll),
+				time.Since(cursorStartTime),
+			)
 
 			for _, id := range docIDs {
 				id.PutInPool()
@@ -449,6 +454,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				state,
 				theCursor,
 				dstToCompareChannel,
+				readTimer,
 			)
 			if err != nil {
 				return errors.Wrap(
@@ -565,6 +571,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 
 		sctx := mongo.NewSessionContext(ctx, sess)
 
+		openStart := time.Now()
+
 		theCursor, err := verifier.getDocumentsCursor(
 			sctx,
 			verifier.srcClientCollection(task),
@@ -572,6 +580,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			verifier.srcChangeReader.getReadConcernTimestamp(),
 			task,
 			option.IfNotZero(verifier.readPreference),
+		)
+		readTimer := compare.NewBatchReadTimer(
+			verifier.createCollectionReadRecorder(src, verifier.srcClientCollection(task)),
+			time.Since(openStart),
 		)
 
 		if err == nil {
@@ -582,6 +594,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				srcChannel,
+				readTimer,
 			)
 
 			err = errors.Wrap(
@@ -608,6 +621,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 
 		sctx := mongo.NewSessionContext(ctx, sess)
 
+		openStart := time.Now()
+
 		theCursor, err := verifier.getDocumentsCursor(
 			sctx,
 			verifier.dstClientCollection(task),
@@ -615,6 +630,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			verifier.dstChangeReader.getReadConcernTimestamp(),
 			task,
 			option.None[*readpref.ReadPref](),
+		)
+		readTimer := compare.NewBatchReadTimer(
+			verifier.createCollectionReadRecorder(dst, verifier.dstClientCollection(task)),
+			time.Since(openStart),
 		)
 
 		if err == nil {
@@ -625,6 +644,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				dstChannel,
+				readTimer,
 			)
 			err = errors.Wrap(
 				err,
@@ -646,6 +666,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 }
 
 // iterateCursorToChannel returns the # of documents sent to the channel.
+// readTimer advances the cursor and measures its batches.
 //
 // NB: This DOES NOT close the given channel.
 func iterateCursorToChannel(
@@ -653,6 +674,7 @@ func iterateCursorToChannel(
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
 	writer chan<- compare.ToComparatorMsg,
+	readTimer *compare.BatchReadTimer,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
 	if sess == nil {
@@ -693,7 +715,7 @@ func iterateCursorToChannel(
 		return nil
 	}
 
-	for cursor.Next(sctx) {
+	for readTimer.Next(sctx, cursor) {
 		state.NoteSuccess("received a document")
 
 		docsCount++

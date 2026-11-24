@@ -50,6 +50,7 @@ func ReadNaturalPartitionFromSource(
 	compareMethod Method,
 	toCompare chan<- ToComparatorMsg,
 	toDst chan<- []DocID,
+	recordRead BatchReadStatsRecorder,
 ) error {
 	defer close(toCompare)
 	defer close(toDst)
@@ -100,11 +101,15 @@ func ReadNaturalPartitionFromSource(
 		)
 	}
 
+	openStart := time.Now()
+
 	cursor, err := openSourceCursor(sctx, logger, coll, tasksColl, task, createCmd, resumeTokenOpt, startRecordID)
 	if err != nil {
 		return err
 	}
 	defer cursor.Close(ctx)
+
+	readTimer := NewBatchReadTimer(recordRead, time.Since(openStart))
 
 	retryState.NoteSuccess("opened cursor")
 
@@ -112,6 +117,7 @@ func ReadNaturalPartitionFromSource(
 		ctx, sess, logger, retryState, cursor, task, compareMethod,
 		docProjection != nil,
 		startRecordID, task.QueryFilter.Partition.Upper, toCompare, toDst,
+		readTimer,
 	)
 }
 
@@ -237,13 +243,14 @@ func processCursor(
 	upperRecordID bson.RawValue,
 	toCompare chan<- ToComparatorMsg,
 	toDst chan<- []DocID,
+	readTimer *BatchReadTimer,
 ) error {
 	var batch []DocWithTS
 	var batchDocIDs []DocID
 
 cursorLoop:
 	for {
-		if !cursor.Next(ctx) {
+		if !readTimer.Next(ctx, cursor) {
 			if cursor.Err() != nil {
 				return errors.Wrapf(cursor.Err(), "reading documents")
 			}

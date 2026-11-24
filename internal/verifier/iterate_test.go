@@ -51,6 +51,7 @@ func (s *IntegrationTestSuite) TestIterateCursorToChannel() {
 		&testutil.MockSuccessNotifier{T: s.T()},
 		theCursor,
 		receiver,
+		compare.NewBatchReadTimer(nil, 0),
 	)
 	s.Require().NoError(err)
 
