@@ -242,7 +242,6 @@ github.com/mongodb-labs/migration-tools/oteltools
 github.com/mongodb-labs/migration-tools/ringbuf
 github.com/mongodb-labs/migration-tools/synctools
 github.com/mongodb-labs/migration-tools/sysinfo
-github.com/mongodb-labs/migration-tools/timetools
 # github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
 ## explicit
 github.com/munnerz/goautoneg
