@@ -121,8 +121,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 
 		srcChangeStats = api.ProgressChangeStats{
 			EventsPerSecond: verifier.srcChangeReader.getEventsPerSecond(),
-			LagSecs: option.Map(
-				srcLag,
+			LagSecs: srcLag.Map(
 				chain(
 					time.Duration.Seconds,
 					safecast.MustConvert[int, float64],
@@ -140,8 +139,7 @@ func (verifier *Verifier) GetProgress(ctx context.Context) (api.Progress, error)
 
 		dstChangeStats = api.ProgressChangeStats{
 			EventsPerSecond: verifier.dstChangeReader.getEventsPerSecond(),
-			LagSecs: option.Map(
-				dstLag,
+			LagSecs: dstLag.Map(
 				chain(
 					time.Duration.Seconds,
 					safecast.MustConvert[int, float64],
