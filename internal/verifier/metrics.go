@@ -237,7 +237,7 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 		readerSendWait: lo.Must(meter.Float64Counter(
 			"migration_verifier_reader_send_wait",
 			otelmetric.WithUnit("s"),
-			otelmetric.WithDescription("Time that document readers spent waiting for comparators to take documents, by cluster. If this grows faster than the comparators’ read wait, comparison is the bottleneck."),
+			otelmetric.WithDescription("Time that document readers spent waiting for comparators to take documents, by cluster. This wait can reflect comparison work or waiting for the other cluster’s reader; its rate alone does not identify the bottleneck."),
 		)),
 		comparatorReadWait: lo.Must(meter.Float64Counter(
 			"migration_verifier_comparator_read_wait",
