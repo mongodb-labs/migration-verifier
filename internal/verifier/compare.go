@@ -364,7 +364,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			verifier.docCompareMethod,
 			srcToCompareChannel,
 			srcToDstChannel,
-			verifier.createCollectionReadRecorder(src, verifier.srcClientCollection(task)),
+			verifier.createReaderMetrics(src, verifier.srcClientCollection(task)),
 		)
 	}
 
@@ -392,6 +392,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 		sctx := mongo.NewSessionContext(ctx, sess)
 
 		coll := verifier.dstClientCollection(task)
+		readerMetrics := verifier.createReaderMetrics(dst, coll)
 
 		for {
 			docIDsOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
@@ -430,7 +431,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				option.None[*readpref.ReadPref](),
 			)
 			readTimer := compare.NewBatchReadTimer(
-				verifier.createCollectionReadRecorder(dst, coll),
+				readerMetrics,
 				time.Since(cursorStartTime),
 			)
 
@@ -455,6 +456,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				theCursor,
 				dstToCompareChannel,
 				readTimer,
+				readerMetrics,
 			)
 			if err != nil {
 				return errors.Wrap(
@@ -505,8 +507,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			dstBatchesSent := compare.ToComparatorBatchCount(dstDocsFound)
 
 			for i := range srcBatchesSent - dstBatchesSent {
-				err := chanutil.WriteWithDoneCheck(
+				err := compare.SendToComparator(
 					ctx,
+					readerMetrics,
 					dstToCompareChannel,
 					compare.ToComparatorMsg{
 						Type: compare.MsgTypePadding,
@@ -529,8 +532,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			// NB: This has to be a dedicated message rather than a flag
 			// attached to documents. This is because because there might be
 			// no documents.
-			err = chanutil.WriteWithDoneCheck(
+			err = compare.SendToComparator(
 				ctx,
+				readerMetrics,
 				dstToCompareChannel,
 				compare.ToComparatorMsg{
 					Type: compare.MsgTypeCursorDone,
@@ -581,8 +585,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			task,
 			option.IfNotZero(verifier.readPreference),
 		)
+		readerMetrics := verifier.createReaderMetrics(src, verifier.srcClientCollection(task))
 		readTimer := compare.NewBatchReadTimer(
-			verifier.createCollectionReadRecorder(src, verifier.srcClientCollection(task)),
+			readerMetrics,
 			time.Since(openStart),
 		)
 
@@ -595,6 +600,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				theCursor,
 				srcChannel,
 				readTimer,
+				readerMetrics,
 			)
 
 			err = errors.Wrap(
@@ -631,8 +637,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			task,
 			option.None[*readpref.ReadPref](),
 		)
+		readerMetrics := verifier.createReaderMetrics(dst, verifier.dstClientCollection(task))
 		readTimer := compare.NewBatchReadTimer(
-			verifier.createCollectionReadRecorder(dst, verifier.dstClientCollection(task)),
+			readerMetrics,
 			time.Since(openStart),
 		)
 
@@ -645,6 +652,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				theCursor,
 				dstChannel,
 				readTimer,
+				readerMetrics,
 			)
 			err = errors.Wrap(
 				err,
@@ -666,7 +674,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 }
 
 // iterateCursorToChannel returns the # of documents sent to the channel.
-// readTimer advances the cursor and measures its batches.
+// readTimer advances the cursor and measures its batches. If metrics is
+// non-nil, it receives how long each send to writer waited.
 //
 // NB: This DOES NOT close the given channel.
 func iterateCursorToChannel(
@@ -675,6 +684,7 @@ func iterateCursorToChannel(
 	cursor *mongo.Cursor,
 	writer chan<- compare.ToComparatorMsg,
 	readTimer *compare.BatchReadTimer,
+	metrics compare.ReaderMetrics,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
 	if sess == nil {
@@ -687,8 +697,9 @@ func iterateCursorToChannel(
 	var docsWithTSCache []compare.DocWithTS
 
 	flush := func() error {
-		err := chanutil.WriteWithDoneCheck(
+		err := compare.SendToComparator(
 			sctx,
+			metrics,
 			writer,
 			compare.ToComparatorMsg{
 				DocsWithTS: slices.Clone(docsWithTSCache),

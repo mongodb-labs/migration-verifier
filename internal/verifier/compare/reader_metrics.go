@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/10gen/migration-verifier/chanutil"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
@@ -23,13 +24,37 @@ type BatchReadStats struct {
 	Bytes int
 }
 
-// BatchReadStatsRecorder receives the stats for each batch that a
-// BatchReadTimer measures.
-type BatchReadStatsRecorder func(ctx context.Context, read BatchReadStats)
+// ReaderMetrics receives a document reader’s measurements.
+type ReaderMetrics interface {
+	// RecordBatchRead receives each batch that a BatchReadTimer measures.
+	RecordBatchRead(ctx context.Context, read BatchReadStats)
+
+	// RecordSendWait receives how long a send to the comparator waited.
+	RecordSendWait(ctx context.Context, wait time.Duration)
+}
+
+// SendToComparator sends msg to the comparator and, if metrics is non-nil,
+// records how long the send waited.
+func SendToComparator(
+	ctx context.Context,
+	metrics ReaderMetrics,
+	toCompare chan<- ToComparatorMsg,
+	msg ToComparatorMsg,
+) error {
+	if metrics == nil {
+		return chanutil.WriteWithDoneCheck(ctx, toCompare, msg)
+	}
+
+	start := time.Now()
+	err := chanutil.WriteWithDoneCheck(ctx, toCompare, msg)
+	metrics.RecordSendWait(ctx, time.Since(start))
+
+	return err
+}
 
 // BatchReadTimer measures each batch that a cursor returns.
 type BatchReadTimer struct {
-	record BatchReadStatsRecorder
+	metrics ReaderMetrics
 
 	// started indicates that Next has been called.
 	started bool
@@ -38,19 +63,20 @@ type BatchReadTimer struct {
 	read BatchReadStats
 }
 
-// NewBatchReadTimer returns a BatchReadTimer that sends each batch to record.
-// openDuration is how long the command that opened the cursor took; it is the
-// first batch’s duration. If record is nil, the timer measures nothing.
-func NewBatchReadTimer(record BatchReadStatsRecorder, openDuration time.Duration) *BatchReadTimer {
+// NewBatchReadTimer returns a BatchReadTimer that sends each batch to
+// metrics. openDuration is how long the command that opened the cursor took;
+// it is the first batch’s duration. If metrics is nil, the timer measures
+// nothing.
+func NewBatchReadTimer(metrics ReaderMetrics, openDuration time.Duration) *BatchReadTimer {
 	return &BatchReadTimer{
-		record: record,
-		read:   BatchReadStats{First: true, Duration: openDuration},
+		metrics: metrics,
+		read:    BatchReadStats{First: true, Duration: openDuration},
 	}
 }
 
 // Next calls cursor.Next. If that call needs a getMore, Next times it.
 func (t *BatchReadTimer) Next(ctx context.Context, cursor *mongo.Cursor) bool {
-	if t.record == nil {
+	if t.metrics == nil {
 		return cursor.Next(ctx)
 	}
 
@@ -59,7 +85,7 @@ func (t *BatchReadTimer) Next(ctx context.Context, cursor *mongo.Cursor) bool {
 
 		// An empty first batch is still a read.
 		if cursor.RemainingBatchLength() == 0 {
-			t.record(ctx, t.read)
+			t.metrics.RecordBatchRead(ctx, t.read)
 		}
 	}
 
@@ -77,7 +103,7 @@ func (t *BatchReadTimer) Next(ctx context.Context, cursor *mongo.Cursor) bool {
 		if !cursor.Next(ctx) {
 			// A getMore that exhausts the cursor can return an empty batch.
 			if fetches && cursor.Err() == nil {
-				t.record(ctx, BatchReadStats{Duration: time.Since(start)})
+				t.metrics.RecordBatchRead(ctx, BatchReadStats{Duration: time.Since(start)})
 			}
 
 			return false
@@ -90,7 +116,7 @@ func (t *BatchReadTimer) Next(ctx context.Context, cursor *mongo.Cursor) bool {
 	t.read.Bytes += len(cursor.Current)
 
 	if cursor.RemainingBatchLength() == 0 {
-		t.record(ctx, t.read)
+		t.metrics.RecordBatchRead(ctx, t.read)
 	}
 
 	return true

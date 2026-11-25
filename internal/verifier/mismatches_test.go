@@ -575,7 +575,7 @@ func (suite *IntegrationTestSuite) TestRecordAndClearMismatches() {
 		Generation: verifier.generation,
 	}
 
-	err := recordMismatches(
+	err := verifier.recordMismatches(
 		suite.Context(),
 		verifier.verificationDatabase(),
 		&task,

@@ -276,17 +276,35 @@ func (verifier *Verifier) getMetrics() *verifierMetrics {
 	return verifier.metrics
 }
 
-// createCollectionReadRecorder returns a recorder for reads of coll’s documents
+// collectionReaderMetrics records the measurements of a reader of a
+// cluster’s documents to compare.
+type collectionReaderMetrics struct {
+	verifier  *Verifier
+	cluster   whichCluster
+	namespace string
+}
+
+var _ compare.ReaderMetrics = collectionReaderMetrics{}
+
+// createReaderMetrics returns the metrics for a reader of coll’s documents
 // from the given cluster.
-func (verifier *Verifier) createCollectionReadRecorder(
+func (verifier *Verifier) createReaderMetrics(
 	cluster whichCluster,
 	coll *mongo.Collection,
-) compare.BatchReadStatsRecorder {
-	namespace := coll.Database().Name() + "." + coll.Name()
-
-	return func(ctx context.Context, read compare.BatchReadStats) {
-		verifier.getMetrics().recordCollectionRead(ctx, cluster, namespace, read)
+) collectionReaderMetrics {
+	return collectionReaderMetrics{
+		verifier:  verifier,
+		cluster:   cluster,
+		namespace: coll.Database().Name() + "." + coll.Name(),
 	}
+}
+
+func (m collectionReaderMetrics) RecordBatchRead(ctx context.Context, read compare.BatchReadStats) {
+	m.verifier.getMetrics().recordCollectionRead(ctx, m.cluster, m.namespace, read)
+}
+
+func (m collectionReaderMetrics) RecordSendWait(ctx context.Context, wait time.Duration) {
+	m.verifier.getMetrics().recordReaderSendWait(ctx, m.cluster, wait)
 }
 
 // ConfigureReadConcern
@@ -894,7 +912,7 @@ REPORTS:
 
 			eg.Go(
 				func() error {
-					err := recordMismatches(
+					err := verifier.recordMismatches(
 						egCtx,
 						verifier.metaClient.Database(verifier.metaDBName),
 						&task,
@@ -1426,7 +1444,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 		)
 	}
 	if specificationProblems != nil {
-		err := recordMismatches(
+		err := verifier.recordMismatches(
 			ctx,
 			verifier.verificationDatabase(),
 			task,
@@ -1474,7 +1492,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			}
 		}
 
-		err := recordMismatches(
+		err := verifier.recordMismatches(
 			ctx,
 			verifier.verificationDatabase(),
 			task,
@@ -1504,7 +1522,7 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			}
 		}
 
-		err := recordMismatches(
+		err := verifier.recordMismatches(
 			ctx,
 			verifier.verificationDatabase(),
 			task,

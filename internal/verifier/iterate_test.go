@@ -52,6 +52,7 @@ func (s *IntegrationTestSuite) TestIterateCursorToChannel() {
 		theCursor,
 		receiver,
 		compare.NewBatchReadTimer(nil, 0),
+		nil,
 	)
 	s.Require().NoError(err)
 

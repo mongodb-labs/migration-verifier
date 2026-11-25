@@ -124,6 +124,12 @@ type verifierMetrics struct {
 	collectionReadDuration otelmetric.Float64Histogram
 	collectionReadCount    otelmetric.Int64Histogram
 	collectionReadSize     otelmetric.Int64Histogram
+
+	readerSendWait     otelmetric.Float64Counter
+	comparatorReadWait otelmetric.Float64Counter
+
+	mismatchPersistDuration otelmetric.Float64Histogram
+	taskUpdateDuration      otelmetric.Float64Histogram
 }
 
 // newVerifierMetrics creates the verifier’s instruments. Creating an
@@ -227,6 +233,30 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 			otelmetric.WithDescription("The total size of each batch of documents to compare, by cluster, namespace, and batch (open or getMore)."),
 			otelmetric.WithExplicitBucketBoundaries(batchSizeBuckets...),
 		)),
+
+		readerSendWait: lo.Must(meter.Float64Counter(
+			"migration_verifier_reader_send_wait",
+			otelmetric.WithUnit("s"),
+			otelmetric.WithDescription("Time that document readers spent waiting for comparators to take documents, by cluster. This wait can reflect comparison work or waiting for the other cluster’s reader; its rate alone does not identify the bottleneck."),
+		)),
+		comparatorReadWait: lo.Must(meter.Float64Counter(
+			"migration_verifier_comparator_read_wait",
+			otelmetric.WithUnit("s"),
+			otelmetric.WithDescription("Time that comparators spent waiting for documents from each cluster’s readers. If this grows faster than the readers’ send wait, reading is the bottleneck."),
+		)),
+
+		mismatchPersistDuration: lo.Must(meter.Float64Histogram(
+			"migration_verifier_mismatch_persist_duration",
+			otelmetric.WithUnit("s"),
+			otelmetric.WithDescription("How long writing a task’s mismatches to the metadata database took."),
+			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
+		)),
+		taskUpdateDuration: lo.Must(meter.Float64Histogram(
+			"migration_verifier_task_update_duration",
+			otelmetric.WithUnit("s"),
+			otelmetric.WithDescription("How long updating a task’s status in the metadata database took, including any retries."),
+			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
+		)),
 	}
 }
 
@@ -325,6 +355,34 @@ func (m *verifierMetrics) recordCollectionRead(
 	m.collectionReadDuration.Record(ctx, read.Duration.Seconds(), opt)
 	m.collectionReadCount.Record(ctx, int64(read.Docs), opt)
 	m.collectionReadSize.Record(ctx, int64(read.Bytes), opt)
+}
+
+// recordReaderSendWait adds time that a document reader waited for a
+// comparator to take documents.
+func (m *verifierMetrics) recordReaderSendWait(ctx context.Context, cluster whichCluster, wait time.Duration) {
+	m.readerSendWait.Add(
+		ctx,
+		wait.Seconds(),
+		otelmetric.WithAttributes(metricLabelCluster.String(string(cluster))),
+	)
+}
+
+// recordComparatorReadWait adds time that a comparator waited for documents
+// from a cluster’s reader.
+func (m *verifierMetrics) recordComparatorReadWait(ctx context.Context, cluster whichCluster, wait time.Duration) {
+	m.comparatorReadWait.Add(
+		ctx,
+		wait.Seconds(),
+		otelmetric.WithAttributes(metricLabelCluster.String(string(cluster))),
+	)
+}
+
+func (m *verifierMetrics) recordMismatchPersistDuration(ctx context.Context, elapsed time.Duration) {
+	m.mismatchPersistDuration.Record(ctx, elapsed.Seconds())
+}
+
+func (m *verifierMetrics) recordTaskUpdateDuration(ctx context.Context, elapsed time.Duration) {
+	m.taskUpdateDuration.Record(ctx, elapsed.Seconds())
 }
 
 // changeReaderGaugeSource is what the change reader gauges read. Its methods

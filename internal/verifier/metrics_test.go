@@ -40,6 +40,19 @@ func (f fakeChangeReaderGaugeSource) getCurrentTimestamps() option.Option[reader
 
 func (f fakeChangeReaderGaugeSource) getBufferSaturation() float64 { return f.saturation }
 
+// batchReadCollector collects a reader’s batch reads.
+type batchReadCollector struct {
+	reads []compare.BatchReadStats
+}
+
+var _ compare.ReaderMetrics = &batchReadCollector{}
+
+func (c *batchReadCollector) RecordBatchRead(_ context.Context, read compare.BatchReadStats) {
+	c.reads = append(c.reads, read)
+}
+
+func (c *batchReadCollector) RecordSendWait(context.Context, time.Duration) {}
+
 // The verifier’s instruments are valid, and they reach /metrics with the
 // Prometheus names, types, and labels that dashboards rely on.
 func TestVerifierMetrics_Exported(t *testing.T) {
@@ -60,6 +73,11 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 	m.recordRecheckPersistDuration(ctx, 200*time.Millisecond)
 	m.recordCollectionRead(ctx, src, "mydb.coll", compare.BatchReadStats{Duration: 30 * time.Millisecond, Docs: 30, Bytes: 3000})
 	m.recordCollectionRead(ctx, src, "mydb.coll", compare.BatchReadStats{First: true, Duration: 10 * time.Millisecond, Docs: 101, Bytes: 10100})
+	m.recordReaderSendWait(ctx, src, 2*time.Second)
+	m.recordReaderSendWait(ctx, src, time.Second)
+	m.recordComparatorReadWait(ctx, dst, 4*time.Second)
+	m.recordMismatchPersistDuration(ctx, 5*time.Millisecond)
+	m.recordTaskUpdateDuration(ctx, 3*time.Millisecond)
 	m.recordChangeRead(ctx, dst, compare.BatchReadStats{Duration: time.Second, Docs: 2, Bytes: 200})
 
 	require.NoError(t, m.observeChangeReaders(
@@ -93,6 +111,10 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 		"migration_verifier_collection_read_duration_seconds":      prometheusclient.MetricType_HISTOGRAM,
 		"migration_verifier_collection_read_count":                 prometheusclient.MetricType_HISTOGRAM,
 		"migration_verifier_collection_read_size_bytes":            prometheusclient.MetricType_HISTOGRAM,
+		"migration_verifier_reader_send_wait_seconds_total":        prometheusclient.MetricType_COUNTER,
+		"migration_verifier_comparator_read_wait_seconds_total":    prometheusclient.MetricType_COUNTER,
+		"migration_verifier_mismatch_persist_duration_seconds":     prometheusclient.MetricType_HISTOGRAM,
+		"migration_verifier_task_update_duration_seconds":          prometheusclient.MetricType_HISTOGRAM,
 	}
 	for name, metricType := range expectedTypes {
 		if assert.Contains(t, families, name) {
@@ -158,6 +180,19 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 		t,
 		map[string]float64{"open": 101, "getMore": 30},
 		histogramSumByLabel(families["migration_verifier_collection_read_count"], "batch"),
+	)
+
+	assert.Equal(
+		t,
+		map[string]float64{"source": 3},
+		valuesByLabel(families["migration_verifier_reader_send_wait_seconds_total"], "cluster"),
+		"send waits accumulate",
+	)
+
+	assert.Equal(
+		t,
+		map[string]float64{"destination": 4},
+		valuesByLabel(families["migration_verifier_comparator_read_wait_seconds_total"], "cluster"),
 	)
 
 	assert.Equal(
@@ -315,6 +350,24 @@ func (suite *IntegrationTestSuite) TestVerifierMetrics_CheckAndRecheck() {
 	suite.Assert().Positive(
 		histogramCountByLabel(families["migration_verifier_recheck_persist_duration_seconds"], "")[""],
 	)
+	suite.Assert().Positive(
+		histogramCountByLabel(families["migration_verifier_mismatch_persist_duration_seconds"], "")[""],
+		"the document missing from the destination is persisted",
+	)
+	suite.Assert().Positive(
+		histogramCountByLabel(families["migration_verifier_task_update_duration_seconds"], "")[""],
+	)
+
+	for _, name := range mslices.Of(
+		"migration_verifier_reader_send_wait_seconds_total",
+		"migration_verifier_comparator_read_wait_seconds_total",
+	) {
+		suite.Assert().ElementsMatch(
+			mslices.Of(string(src), string(dst)),
+			lo.Keys(valuesByLabel(families[name], "cluster")),
+			name,
+		)
+	}
 
 	for _, cluster := range mslices.Of(src, dst) {
 		// Without events, a change reader’s read returns only once its
@@ -431,13 +484,8 @@ func (suite *IntegrationTestSuite) TestBatchReadTimer() {
 		cursor, err := coll.Find(ctx, filter, options.Find().SetBatchSize(2).SetSort(bson.D{{"_id", 1}}))
 		suite.Require().NoError(err)
 
-		var reads []compare.BatchReadStats
-		timer := compare.NewBatchReadTimer(
-			func(_ context.Context, read compare.BatchReadStats) {
-				reads = append(reads, read)
-			},
-			time.Hour,
-		)
+		collector := &batchReadCollector{}
+		timer := compare.NewBatchReadTimer(collector, time.Hour)
 
 		count := 0
 		for timer.Next(ctx, cursor) {
@@ -446,12 +494,12 @@ func (suite *IntegrationTestSuite) TestBatchReadTimer() {
 		suite.Require().NoError(cursor.Err())
 		suite.Require().Equal(expectedCount, count)
 
-		for _, read := range reads[1:] {
+		for _, read := range collector.reads[1:] {
 			suite.Assert().Positive(read.Duration)
 			suite.Assert().Less(read.Duration, time.Hour, "a getMore is timed")
 		}
 
-		return reads
+		return collector.reads
 	}
 
 	// zeroGetMoreDurations zeroes the getMores’ durations, which vary.

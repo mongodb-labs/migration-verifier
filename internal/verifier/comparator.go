@@ -110,6 +110,8 @@ func (c *comparator) readBatches(
 	var srcBatch, dstBatch []compare.DocWithTS
 	var dstCursorDone bool
 
+	waitStart := time.Now()
+
 	eg, egCtx := contextplus.ErrGroup(ctx)
 
 	if !c.srcClosed {
@@ -124,6 +126,8 @@ func (c *comparator) readBatches(
 					c.srcClosed = true
 					return nil
 				}
+
+				c.recordReadWait(ctx, src, waitStart)
 
 				c.fi.NoteSuccess("received message from source reader")
 
@@ -150,6 +154,10 @@ func (c *comparator) readBatches(
 
 	if !c.dstClosed {
 		eg.Go(func() error {
+			// This loop can receive several messages, so it times each
+			// receive from the previous one.
+			dstWaitStart := waitStart
+
 			// Reading from the destination reader is trickier than reading
 			// from the source reader because the messages can contain flags.
 			for {
@@ -163,6 +171,9 @@ func (c *comparator) readBatches(
 						c.dstClosed = true
 						return nil
 					}
+
+					c.recordReadWait(ctx, dst, dstWaitStart)
+					dstWaitStart = time.Now()
 
 					c.fi.NoteSuccess("received message (type=%v) from destination reader", msg.Type)
 
@@ -214,6 +225,12 @@ func simpleTimerReset(t *time.Timer, dur time.Duration) {
 	}
 
 	t.Reset(dur)
+}
+
+// recordReadWait records how long the comparator waited for a reader’s
+// message.
+func (c *comparator) recordReadWait(ctx context.Context, cluster whichCluster, start time.Time) {
+	c.verifier.getMetrics().recordComparatorReadWait(ctx, cluster, time.Since(start))
 }
 
 // recordSrcMetrics isolates the noise of tracking business metrics.
