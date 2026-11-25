@@ -12,6 +12,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/metrics"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
+	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/mongodb-labs/migration-tools/option"
 	prometheusclient "github.com/prometheus/client_model/go"
@@ -102,6 +103,12 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 			},
 		},
 	))
+
+	workers := NewWorkerTracker(3)
+	workers.Set(0, tasks.Task{PrimaryKey: bson.NewObjectID()})
+	workers.Set(2, tasks.Task{PrimaryKey: bson.NewObjectID()})
+	require.NoError(t, m.observeWorkers(workers))
+
 	m.recordChangeRead(ctx, dst, compare.BatchReadStats{Duration: time.Second, Docs: 2, Bytes: 200})
 
 	require.NoError(t, m.observeChangeReaders(
@@ -144,6 +151,7 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 		"migration_verifier_connection_pool_clears_total":          prometheusclient.MetricType_COUNTER,
 		"migration_verifier_connections_open":                      prometheusclient.MetricType_GAUGE,
 		"migration_verifier_connections_in_use":                    prometheusclient.MetricType_GAUGE,
+		"migration_verifier_active_workers":                        prometheusclient.MetricType_GAUGE,
 	}
 	for name, metricType := range expectedTypes {
 		if assert.Contains(t, families, name) {
@@ -255,6 +263,13 @@ func TestVerifierMetrics_Exported(t *testing.T) {
 		t,
 		map[string]float64{"host1:27017": 2, "host2:27017": 0},
 		valuesByLabel(families["migration_verifier_connections_in_use"], "address"),
+	)
+
+	assert.Equal(
+		t,
+		2.0,
+		sampleValue(families["migration_verifier_active_workers"], map[string]string{}),
+		"only workers with a task are active",
 	)
 
 	assert.Equal(

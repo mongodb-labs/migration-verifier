@@ -151,6 +151,11 @@ type verifierMetrics struct {
 
 	// poolCallback observes the connection pools.
 	poolCallback option.Option[otelmetric.Registration]
+
+	activeWorkers otelmetric.Int64ObservableGauge
+
+	// workerCallback observes the workers.
+	workerCallback option.Option[otelmetric.Registration]
 }
 
 // newVerifierMetrics creates the verifier’s instruments. Creating an
@@ -304,6 +309,12 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 			"migration_verifier_connections_in_use",
 			otelmetric.WithUnit("{connection}"),
 			otelmetric.WithDescription("Connections checked out for operations, by cluster and server address."),
+		)),
+
+		activeWorkers: lo.Must(meter.Int64ObservableGauge(
+			"migration_verifier_active_workers",
+			otelmetric.WithUnit("{worker}"),
+			otelmetric.WithDescription("Workers that are processing a task."),
 		)),
 	}
 }
@@ -502,6 +513,35 @@ func (m *verifierMetrics) observePools(pools ...poolGaugeSource) error {
 	}
 
 	m.poolCallback = option.Some(registration)
+
+	return nil
+}
+
+// workerGaugeSource is what the active-workers gauge reads.
+type workerGaugeSource interface {
+	CountActive() int
+}
+
+var _ workerGaugeSource = &WorkerTracker{}
+
+// observeWorkers makes the active-workers gauge observe workers. It may be
+// called only once.
+func (m *verifierMetrics) observeWorkers(workers workerGaugeSource) error {
+	lo.Assertf(m.workerCallback.IsNone(), "workers are already observed")
+
+	registration, err := m.meter.RegisterCallback(
+		func(_ context.Context, observer otelmetric.Observer) error {
+			observer.ObserveInt64(m.activeWorkers, int64(workers.CountActive()))
+
+			return nil
+		},
+		m.activeWorkers,
+	)
+	if err != nil {
+		return err
+	}
+
+	m.workerCallback = option.Some(registration)
 
 	return nil
 }

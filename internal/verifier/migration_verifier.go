@@ -574,6 +574,7 @@ func (verifier *Verifier) SetMeterProvider(provider otelmetric.MeterProvider) {
 			func(pm *poolMonitor, _ int) poolGaugeSource { return pm },
 		)...,
 	))
+	lo.Must0(metrics.observeWorkers(verifier.workerTracker))
 
 	verifier.metrics.Store(metrics)
 }
