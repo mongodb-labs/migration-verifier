@@ -25,7 +25,13 @@ func (o *Option[T]) UnmarshalJSON(b []byte) error {
 	} else {
 		val := *new(T)
 
-		err := json.Unmarshal(b, &val)
+		// Reject unrecognized keys, as callers that decode into an Option have
+		// no other way to ask for that: encoding/json's own setting does not
+		// reach inside a custom unmarshaler.
+		dec := json.NewDecoder(bytes.NewReader(b))
+		dec.DisallowUnknownFields()
+
+		err := dec.Decode(&val)
 		if err != nil {
 			return err
 		}

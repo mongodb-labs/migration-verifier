@@ -116,8 +116,6 @@ func (c *comparator) readBatches(
 
 	if !c.srcClosed {
 		eg.Go(func() error {
-			defer c.recordReadWait(ctx, src, waitStart)
-
 			select {
 			case <-egCtx.Done():
 				return egCtx.Err()
@@ -128,6 +126,8 @@ func (c *comparator) readBatches(
 					c.srcClosed = true
 					return nil
 				}
+
+				c.recordReadWait(ctx, src, waitStart)
 
 				c.fi.NoteSuccess("received message from source reader")
 
@@ -154,7 +154,9 @@ func (c *comparator) readBatches(
 
 	if !c.dstClosed {
 		eg.Go(func() error {
-			defer c.recordReadWait(ctx, dst, waitStart)
+			// This loop can receive several messages, so it times each
+			// receive from the previous one.
+			dstWaitStart := waitStart
 
 			// Reading from the destination reader is trickier than reading
 			// from the source reader because the messages can contain flags.
@@ -169,6 +171,9 @@ func (c *comparator) readBatches(
 						c.dstClosed = true
 						return nil
 					}
+
+					c.recordReadWait(ctx, dst, dstWaitStart)
+					dstWaitStart = time.Now()
 
 					c.fi.NoteSuccess("received message (type=%v) from destination reader", msg.Type)
 

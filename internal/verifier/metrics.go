@@ -59,7 +59,14 @@ var (
 	// finding a task takes more than findTaskTimeWarnThreshold. Reading a batch
 	// can take seconds, whether to fill a large batch or to await change events.
 	commandDurationBuckets = []float64{
-		0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60,
+		// < 1s
+		0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,
+
+		// seconds
+		1, 2.5, 5, 10, 30,
+
+		// >= 1 min
+		60, 150, 300, 600,
 	}
 
 	// Batch sizes, in bytes, up to a full batch (16 MiB).
@@ -238,20 +245,20 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 		collectionReadCount: lo.Must(meter.Int64Histogram(
 			"migration_verifier_collection_read_count",
 			otelmetric.WithUnit("{document}"),
-			otelmetric.WithDescription("The number of documents to compare in each batch read, by cluster, namespace, and batch (first or getMore)."),
+			otelmetric.WithDescription("The number of documents to compare in each batch read, by cluster, namespace, and batch (open or getMore)."),
 			otelmetric.WithExplicitBucketBoundaries(batchCountBuckets...),
 		)),
 		collectionReadSize: lo.Must(meter.Int64Histogram(
 			"migration_verifier_collection_read_size",
 			otelmetric.WithUnit("By"),
-			otelmetric.WithDescription("The total size of each batch of documents to compare, by cluster, namespace, and batch (first or getMore)."),
+			otelmetric.WithDescription("The total size of each batch of documents to compare, by cluster, namespace, and batch (open or getMore)."),
 			otelmetric.WithExplicitBucketBoundaries(batchSizeBuckets...),
 		)),
 
 		readerSendWait: lo.Must(meter.Float64Counter(
 			"migration_verifier_reader_send_wait",
 			otelmetric.WithUnit("s"),
-			otelmetric.WithDescription("Time that document readers spent waiting for comparators to take documents, by cluster. If this grows faster than the comparators’ read wait, comparison is the bottleneck."),
+			otelmetric.WithDescription("Time that document readers spent waiting for comparators to take documents, by cluster. This wait can reflect comparison work or waiting for the other cluster’s reader; its rate alone does not identify the bottleneck."),
 		)),
 		comparatorReadWait: lo.Must(meter.Float64Counter(
 			"migration_verifier_comparator_read_wait",

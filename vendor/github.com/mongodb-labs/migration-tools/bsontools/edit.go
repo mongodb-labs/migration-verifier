@@ -191,8 +191,7 @@ func recurseIntoSubDoc[T ~[]byte](
 
 	curDoc, found, err := replaceOrRemoveInRaw(curDoc, replacement, pointer[1:])
 	if err != nil {
-		var pe PointerTooDeepError
-		if errors.As(err, &pe) {
+		if pe, isTooDeep := errors.AsType[PointerTooDeepError](err); isTooDeep {
 			pe.givenPointer = append(slices.Clone(pointer[:1]), pe.givenPointer...)
 			pe.elementPointer = append(slices.Clone(pointer[:1]), pe.elementPointer...)
 			return subDocResult[T]{}, pe
