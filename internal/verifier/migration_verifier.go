@@ -510,6 +510,18 @@ func (verifier *Verifier) AddMetaIndexes(ctx context.Context) error {
 				},
 			},
 
+			// This is here so that _id-partitioning tasks can quickly
+			// find where to resume.
+			{
+				Keys: bson.D{
+					{"parent_task_id", 1},
+					{"query_filter.partition.upperBound", -1},
+				},
+				Options: options.Index().SetPartialFilterExpression(
+					bson.D{{"parent_task_id", bson.D{{"$exists", true}}}},
+				),
+			},
+
 			// These are here so we can quickly recall last-rechecked
 			// optimes on restart.
 			{
@@ -1700,34 +1712,47 @@ func (verifier *Verifier) partitionCollection(
 	switch schemeToUse {
 	case partitions.SchemeID:
 		if verifier.srcHasSampleRate() {
-			var err error
-			partitionsCount, err = verifier.createPartitionTasksWithSampleRate(ctx, task, shardKeyFields)
+			rangesCount, err := verifier.createPartitionIDRangeTasks(
+				ctx,
+				task,
+				shardKeyFields,
+				isCapped,
+			)
 			if err != nil {
-				return errors.Wrapf(err, "partitioning %#q via $sampleRate", srcNs)
-			}
-		} else {
-			verifier.logger.Warn().
-				Msg("Source MongoDB version lacks $sampleRate. Using legacy partitioning logic. This may cause imbalanced partitions, which will impede performance.")
-
-			var partitions []*partitions.Partition
-			var shardKeys []string
-
-			partitions, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
-			if err != nil {
-				return errors.Wrapf(err, "partitioning %#q via $sample", srcNs)
+				return errors.Wrapf(err, "creating %#q’s _id-partitioning tasks", srcNs)
 			}
 
-			partitionsCount = len(partitions)
+			verifier.logger.Debug().
+				Int("workerNum", workerNum).
+				Any("task", task.PrimaryKey).
+				Str("namespace", srcNs).
+				Int("rangesCount", rangesCount).
+				Msgf("Created %#q tasks.", tasks.PartitionIDRange)
 
-			for _, partition := range partitions {
-				_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeys, dstNs)
-				if err != nil {
-					return errors.Wrapf(
-						err,
-						"failed to insert a partition task for namespace %#q",
-						srcNs,
-					)
-				}
+			return nil
+		}
+
+		verifier.logger.Warn().
+			Msg("Source MongoDB version lacks $sampleRate. Using legacy partitioning logic. This may cause imbalanced partitions, which will impede performance.")
+
+		var partitions []*partitions.Partition
+		var shardKeys []string
+
+		partitions, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
+		if err != nil {
+			return errors.Wrapf(err, "partitioning %#q via $sample", srcNs)
+		}
+
+		partitionsCount = len(partitions)
+
+		for _, partition := range partitions {
+			_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeys, dstNs)
+			if err != nil {
+				return errors.Wrapf(
+					err,
+					"failed to insert a partition task for namespace %#q",
+					srcNs,
+				)
 			}
 		}
 	case partitions.SchemeNatural:

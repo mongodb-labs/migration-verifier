@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mmongo"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
@@ -18,16 +20,144 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
+// idPartitionRanges returns the _id ranges into which a collection’s
+// generation-0 partitioning is split. Each range gets its own
+// partitionIDRange task, which lets multiple workers partition the
+// collection concurrently.
+//
+// The ranges are:
+//   - MinKey to the lowest possible ObjectID
+//   - the lowest possible ObjectID to the highest possible ObjectID
+//   - the highest possible ObjectID to MaxKey
+//
+// Note that, as with any adjacent partitions, adjacent ranges share a
+// boundary value.
+func idPartitionRanges() [][2]bson.RawValue {
+	minOID := bsontools.ToRawValue(bson.ObjectID{})
+	maxOID := bsontools.ToRawValue(bson.ObjectID(bytes.Repeat([]byte{0xff}, len(bson.ObjectID{}))))
+
+	return mslices.Of(
+		[2]bson.RawValue{bsontools.ToRawValue(bson.MinKey{}), minOID},
+		[2]bson.RawValue{minOID, maxOID},
+		[2]bson.RawValue{maxOID, bsontools.ToRawValue(bson.MaxKey{})},
+	)
+}
+
+// createPartitionIDRangeTasks creates the partitionIDRange tasks that
+// partition the given collection task’s namespace.
+func (verifier *Verifier) createPartitionIDRangeTasks(
+	ctx context.Context,
+	task *tasks.Task,
+	shardKeyFields []string,
+	isCapped bool,
+) (int, error) {
+	srcColl := verifier.srcClientCollection(task)
+	dstNs := FullName(verifier.dstClientCollection(task))
+
+	ranges := idPartitionRanges()
+
+	// Capped collections’ partitions disregard _id bounds, so there’s no
+	// point in splitting them.
+	if isCapped {
+		ranges = mslices.Of([2]bson.RawValue{
+			bsontools.ToRawValue(bson.MinKey{}),
+			bsontools.ToRawValue(bson.MaxKey{}),
+		})
+	}
+
+	for _, idRange := range ranges {
+		err := verifier.ensurePartitionIDRangeTask(
+			ctx,
+			&partitions.Partition{
+				Key: partitions.PartitionKey{
+					Lower: idRange[0],
+				},
+				Ns: &partitions.Namespace{
+					srcColl.Database().Name(),
+					srcColl.Name(),
+				},
+				Upper:    idRange[1],
+				IsCapped: isCapped,
+			},
+			shardKeyFields,
+			dstNs,
+		)
+		if err != nil {
+			return 0, errors.Wrapf(
+				err,
+				"creating %#q task for %#q (%v to %v)",
+				tasks.PartitionIDRange,
+				FullName(srcColl),
+				idRange[0],
+				idRange[1],
+			)
+		}
+	}
+
+	return len(ranges), nil
+}
+
+// ProcessPartitionIDRangeTask processes a partitionIDRange task.
+func (verifier *Verifier) ProcessPartitionIDRangeTask(
+	ctx context.Context,
+	workerNum int,
+	task tasks.Task,
+) error {
+	lo.Assertf(
+		task.Type == tasks.PartitionIDRange,
+		"task %v type should be %#q but is %#q",
+		task.PrimaryKey,
+		tasks.PartitionIDRange,
+		task.Type,
+	)
+
+	verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Any("task", task.PrimaryKey).
+		Str("namespace", task.QueryFilter.Namespace).
+		Stringer("lowerBound", task.QueryFilter.Partition.Key.Lower).
+		Stringer("upperBound", task.QueryFilter.Partition.Upper).
+		Msg("Partitioning _id range.")
+
+	partitionsCount, err := verifier.createPartitionTasksWithSampleRate(ctx, &task)
+	if err != nil {
+		return errors.Wrapf(
+			err,
+			"partitioning %#q’s _id range (%v to %v)",
+			task.QueryFilter.Namespace,
+			task.QueryFilter.Partition.Key.Lower,
+			task.QueryFilter.Partition.Upper,
+		)
+	}
+
+	verifier.logger.Debug().
+		Int("workerNum", workerNum).
+		Any("task", task.PrimaryKey).
+		Str("namespace", task.QueryFilter.Namespace).
+		Stringer("lowerBound", task.QueryFilter.Partition.Key.Lower).
+		Stringer("upperBound", task.QueryFilter.Partition.Upper).
+		Int("partitionsCount", partitionsCount).
+		Msg("Done partitioning _id range.")
+
+	task.Status = tasks.Completed
+
+	return errors.Wrapf(
+		verifier.UpdateVerificationTask(ctx, &task),
+		"updating task %v’s status",
+		task.PrimaryKey,
+	)
+}
+
+// findLatestPartitionUpperBound returns the highest upper bound among
+// the verify-documents tasks that the given partitionIDRange task created.
 func (verifier *Verifier) findLatestPartitionUpperBound(
 	ctx context.Context,
-	srcNs string,
+	parentTaskID bson.ObjectID,
 ) (option.Option[bson.RawValue], error) {
 	result := verifier.verificationTaskCollection().FindOne(
 		ctx,
 		bson.D{
-			{"generation", 0},
-			{"type", tasks.VerifyDocuments},
-			{"query_filter.namespace", srcNs},
+			{"parent_task_id", parentTaskID},
 		},
 		options.FindOne().
 			SetSort(bson.D{
@@ -54,15 +184,11 @@ func (verifier *Verifier) findLatestPartitionUpperBound(
 func (verifier *Verifier) createPartitionTasksWithSampleRate(
 	ctx context.Context,
 	task *tasks.Task,
-	shardFields []string,
 ) (int, error) {
 	lo.Assertf(
 		verifier.srcHasSampleRate(),
 		"$sampleRate support required",
 	)
-
-	srcColl := verifier.srcClientCollection(task)
-	srcNs := FullName(srcColl)
 
 	var partitionsCount int
 
@@ -74,13 +200,14 @@ func (verifier *Verifier) createPartitionTasksWithSampleRate(
 				ctx,
 				fi,
 				task,
-				shardFields,
 			)
 
 			return err
 		},
-		"partitioning %#q",
-		srcNs,
+		"partitioning %#q (%v to %v)",
+		task.QueryFilter.Namespace,
+		task.QueryFilter.Partition.Key.Lower,
+		task.QueryFilter.Partition.Upper,
 	).Run(ctx, verifier.logger)
 
 	return partitionsCount, err
@@ -90,10 +217,13 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	ctx context.Context,
 	fi *retry.FuncInfo,
 	task *tasks.Task,
-	shardFields []string,
 ) (int, error) {
 	srcColl := verifier.srcClientCollection(task)
 	srcNs := FullName(srcColl)
+	shardFields := task.QueryFilter.ShardKeys
+
+	rangeLower := task.QueryFilter.Partition.Key.Lower
+	rangeUpper := task.QueryFilter.Partition.Upper
 
 	pipeline := mongo.Pipeline{
 		// NB: $sort MUST precede $project in order to avoid a blocking sort
@@ -102,23 +232,38 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		{{"$project", bson.D{{"_id", 1}}}},
 	}
 
-	lowerBoundOpt, err := verifier.findLatestPartitionUpperBound(ctx, srcNs)
+	resumeFromOpt, err := verifier.findLatestPartitionUpperBound(ctx, task.PrimaryKey)
 	if err != nil {
 		return 0, err
 	}
 
-	if lowerBound, has := lowerBoundOpt.Get(); has {
-		verifier.logger.Info().
-			Any("resumeFrom", lowerBound).
-			Msg("Resuming partitioning from last-created partition’s upper bound.")
+	if resumeFrom, has := resumeFromOpt.Get(); has {
+		// If the range’s final partition already exists, then there’s
+		// nothing more to do.
+		if resumeFrom.Equal(rangeUpper) {
+			return 0, nil
+		}
 
+		verifier.logger.Info().
+			Any("task", task.PrimaryKey).
+			Str("namespace", srcNs).
+			Any("resumeFrom", resumeFrom).
+			Msg("Resuming partitioning from last-created partition’s upper bound.")
+	}
+
+	// We want to create partitions starting where we left off. So use
+	// the last-created partition’s upper bound, if there is one, as our
+	// new lower bound.
+	lowerBound := resumeFromOpt.OrElse(rangeLower)
+
+	if lowerBound.Type != bson.TypeMinKey || rangeUpper.Type != bson.TypeMaxKey {
 		predicates, err := partitions.FilterIdBounds(
 			verifier.srcClusterInfo,
 			lowerBound,
-			bson.MaxKey{},
+			rangeUpper,
 		)
 		if err != nil {
-			return 0, errors.Wrapf(err, "getting lower-bound filter predicate (%v)", lowerBound)
+			return 0, errors.Wrapf(err, "getting _id filter predicates (%v to %v)", lowerBound, rangeUpper)
 		}
 
 		var filter bson.D
@@ -131,8 +276,6 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 			panic("no filter predicates??")
 		}
 
-		// We want to create partitions starting where we left off. So use
-		// the last-created partition’s upper bound as our new lower bound.
 		pipeline = append(
 			pipeline,
 			bson.D{{"$match", filter}},
@@ -154,8 +297,6 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 	partitionsCount := 0
 
-	lowerBound := lowerBoundOpt.OrElse(bsontools.ToRawValue(bson.MinKey{}))
-
 	createAndInsertPartition := func(lowerBound, upperBound bson.RawValue) error {
 		partition := partitions.Partition{
 			Key: partitions.PartitionKey{
@@ -169,11 +310,12 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 			IsCapped: isCapped,
 		}
 
-		_, err = verifier.InsertPartitionVerificationTask(
+		_, err := verifier.insertPartitionVerificationTask(
 			ctx,
 			&partition,
 			shardFields,
 			dstNs,
+			option.Some(task.PrimaryKey),
 		)
 		if err != nil {
 			return errors.Wrapf(
@@ -236,10 +378,10 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	}
 
 	if cursor.Err() != nil {
-		return 0, errors.Wrapf(err, "iterating %#q’s sampling cursor", srcNs)
+		return 0, errors.Wrapf(cursor.Err(), "iterating %#q’s sampling cursor", srcNs)
 	}
 
-	err = createAndInsertPartition(lowerBound, bsontools.ToRawValue(bson.MaxKey{}))
+	err = createAndInsertPartition(lowerBound, rangeUpper)
 	if err != nil {
 		return 0, err
 	}

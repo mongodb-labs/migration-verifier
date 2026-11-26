@@ -20,6 +20,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -162,6 +163,22 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 	shardKeys []string,
 	dstNamespace string,
 ) (*tasks.Task, error) {
+	return verifier.insertPartitionVerificationTask(
+		ctx,
+		partition,
+		shardKeys,
+		dstNamespace,
+		option.None[bson.ObjectID](),
+	)
+}
+
+func (verifier *Verifier) insertPartitionVerificationTask(
+	ctx context.Context,
+	partition *partitions.Partition,
+	shardKeys []string,
+	dstNamespace string,
+	parentTaskID option.Option[bson.ObjectID],
+) (*tasks.Task, error) {
 	srcNamespace := strings.Join([]string{partition.Ns.DB, partition.Ns.Coll}, ".")
 
 	task := tasks.Task{
@@ -175,6 +192,7 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 			Namespace: srcNamespace,
 			To:        dstNamespace,
 		},
+		ParentTaskID: parentTaskID,
 	}
 
 	err := retry.New().WithCallback(
@@ -190,6 +208,65 @@ func (verifier *Verifier) InsertPartitionVerificationTask(
 	).Run(ctx, verifier.logger)
 
 	return &task, err
+}
+
+// ensurePartitionIDRangeTask creates a generation-0 task to partition the
+// given namespace’s _id range. The range is stored in the task’s
+// partition. If a task for the same namespace & lower bound already
+// exists, this does nothing. That makes it safe to call this more than
+// once for the same range (e.g., if a collection task is retried).
+func (verifier *Verifier) ensurePartitionIDRangeTask(
+	ctx context.Context,
+	idRange *partitions.Partition,
+	shardKeys []string,
+	dstNamespace string,
+) error {
+	lo.Assertf(
+		verifier.generation == 0,
+		"%#q tasks are only for generation 0, not %d",
+		tasks.PartitionIDRange,
+		verifier.generation,
+	)
+
+	srcNamespace := strings.Join([]string{idRange.Ns.DB, idRange.Ns.Coll}, ".")
+
+	task := tasks.Task{
+		PrimaryKey: bson.NewObjectID(),
+		Generation: verifier.generation,
+		Status:     tasks.Added,
+		Type:       tasks.PartitionIDRange,
+		QueryFilter: tasks.QueryFilter{
+			Partition: idRange,
+			ShardKeys: shardKeys,
+			Namespace: srcNamespace,
+			To:        dstNamespace,
+		},
+	}
+
+	return retry.New().WithCallback(
+		func(ctx context.Context, _ *retry.FuncInfo) error {
+			_, err := verifier.verificationTaskCollection().UpdateOne(
+				ctx,
+				bson.D{
+					{"generation", task.Generation},
+					{"type", task.Type},
+					{"query_filter.namespace", srcNamespace},
+					{"query_filter.partition._id.lowerBound", idRange.Key.Lower},
+				},
+				bson.D{
+					{"$setOnInsert", task},
+				},
+				options.UpdateOne().SetUpsert(true),
+			)
+
+			return err
+		},
+		"persisting %#q task for %#q (%v to %v)",
+		task.Type,
+		srcNamespace,
+		idRange.Key.Lower,
+		idRange.Upper,
+	).Run(ctx, verifier.logger)
 }
 
 func (verifier *Verifier) createDocumentRecheckTask(

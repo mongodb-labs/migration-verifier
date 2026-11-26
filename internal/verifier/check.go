@@ -739,6 +739,8 @@ func (verifier *Verifier) processAnyTask(
 				switch task.Type {
 				case tasks.VerifyCollection:
 					return verifier.ProcessCollectionVerificationTask(ctx, workerNum, task)
+				case tasks.PartitionIDRange:
+					return verifier.ProcessPartitionIDRangeTask(ctx, workerNum, task)
 				case tasks.VerifyDocuments:
 					_, err := verifier.ProcessVerifyTask(ctx, workerNum, task)
 					return err

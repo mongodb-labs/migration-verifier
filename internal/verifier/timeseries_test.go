@@ -101,6 +101,8 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 	)
 	suite.Require().NoError(err)
 
+	suite.processPartitionIDRangeTasks(verifier, task.QueryFilter.Namespace)
+
 	cursor, err := verifier.verificationTaskCollection().Find(
 		ctx,
 		bson.D{
@@ -109,18 +111,28 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 	)
 	suite.Require().NoError(err)
 
-	var tasks []tasks.Task
-	suite.Require().NoError(cursor.All(ctx, &tasks), "must read")
+	var docTasks []tasks.Task
+	suite.Require().NoError(cursor.All(ctx, &docTasks), "must read")
 
-	suite.Require().NotEmpty(tasks, "need tasks")
+	suite.Require().NotEmpty(docTasks, "need tasks")
 
-	suite.Assert().Greater(len(tasks), 1, "expect multiple tasks")
-	for _, task := range tasks {
+	suite.Assert().Greater(len(docTasks), 1, "expect multiple tasks")
+	for _, task := range docTasks {
 		suite.Assert().False(
 			task.QueryFilter.Partition.Natural,
 			"must be ID-partitioned",
 		)
 	}
+
+	// Buckets’ _ids are ObjectIDs, so compare a partition in that range.
+	objectIDTask, found := lo.Find(
+		docTasks,
+		func(t tasks.Task) bool {
+			return t.QueryFilter.Partition.Key.Lower.Type == bson.TypeObjectID &&
+				t.QueryFilter.Partition.Upper.Type == bson.TypeObjectID
+		},
+	)
+	suite.Require().True(found, "need a task whose bounds are ObjectIDs")
 
 	// Needed to compare docs:
 	suite.Require().NoError(verifier.startChangeHandling(ctx))
@@ -128,7 +140,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 	problems, srcDocs, srcBytes, err := runFetchAndCompareDocuments(
 		ctx,
 		verifier,
-		&tasks[0],
+		&objectIDTask,
 	)
 	suite.Require().NoError(err, "must compare OK")
 	suite.Require().NotEmpty(problems, "must find a problem")
