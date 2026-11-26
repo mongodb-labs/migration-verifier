@@ -236,7 +236,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	}
 
 	if cursor.Err() != nil {
-		return 0, errors.Wrapf(err, "iterating %#q’s sampling cursor", srcNs)
+		return 0, errors.Wrapf(cursor.Err(), "iterating %#q’s sampling cursor", srcNs)
 	}
 
 	err = createAndInsertPartition(lowerBound, bsontools.ToRawValue(bson.MaxKey{}))
