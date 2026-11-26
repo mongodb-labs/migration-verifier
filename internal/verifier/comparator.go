@@ -117,6 +117,8 @@ func (c *comparator) readBatches(
 
 	var srcBatch, dstBatch []compare.DocWithTS
 
+	waitStart := time.Now()
+
 	eg, egCtx := contextplus.ErrGroup(ctx)
 
 	if !c.srcClosed && c.srcFinishedNaturalBatch.IsNone() {
@@ -132,6 +134,8 @@ func (c *comparator) readBatches(
 					return nil
 				}
 
+				c.recordReadWait(ctx, src, waitStart)
+
 				c.fi.NoteSuccess("received message from source reader")
 
 				switch payload := msg.(type) {
@@ -143,7 +147,7 @@ func (c *comparator) readBatches(
 						len(payload),
 					)
 
-					c.recordSrcMetrics(payload)
+					c.recordSrcMetrics(ctx, payload)
 
 					srcBatch = payload
 				case compare.BatchDoneComparatorMsg:
@@ -168,6 +172,8 @@ func (c *comparator) readBatches(
 					c.dstClosed = true
 					return nil
 				}
+
+				c.recordReadWait(ctx, dst, waitStart)
 
 				c.fi.NoteSuccess("received message from destination reader")
 
@@ -216,13 +222,22 @@ func (c *comparator) readBatches(
 	return srcBatch, dstBatch, naturalBatchDone, nil
 }
 
+// recordReadWait records how long the comparator waited for a reader’s
+// message.
+func (c *comparator) recordReadWait(ctx context.Context, cluster whichCluster, start time.Time) {
+	c.verifier.getMetrics().recordComparatorReadWait(ctx, cluster, time.Since(start))
+}
+
 // recordSrcMetrics isolates the noise of tracking business metrics.
-func (c *comparator) recordSrcMetrics(docs []compare.DocWithTS) {
+func (c *comparator) recordSrcMetrics(ctx context.Context, docs []compare.DocWithTS) {
 	c.srcDocCount += types.DocumentCount(len(docs))
 	c.curHistoryDocCount += types.DocumentCount(len(docs))
 
+	var batchBytes types.ByteCount
+
 	for _, docWithTS := range docs {
 		docSize := c.verifier.docCompareMethod.DocSize(docWithTS.Doc)
+		batchBytes += docSize
 		c.srcByteCount += docSize
 		c.curHistoryByteCount += docSize
 
@@ -232,6 +247,9 @@ func (c *comparator) recordSrcMetrics(docs []compare.DocWithTS) {
 	}
 
 	c.verifier.workerTracker.SetSrcCounts(c.workerNum, c.srcDocCount, c.srcByteCount)
+
+	// Record once per batch: this runs for every batch of source documents.
+	c.verifier.getMetrics().recordCompared(ctx, c.task.Generation, int64(len(docs)), int64(batchBytes))
 }
 
 func (c *comparator) publishHistoryCounts() {

@@ -285,7 +285,9 @@ func (verifier *Verifier) FindNextVerifyTaskAndUpdate(
 }
 
 func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *tasks.Task) error {
-	return retry.New().WithCallback(
+	start := time.Now()
+
+	err := retry.New().WithCallback(
 		func(ctx context.Context, _ *retry.FuncInfo) error {
 			result, err := verifier.verificationTaskCollection().UpdateOne(
 				ctx,
@@ -315,6 +317,13 @@ func (verifier *Verifier) UpdateVerificationTask(ctx context.Context, task *task
 		task.PrimaryKey,
 		task.QueryFilter.Namespace,
 	).Run(ctx, verifier.logger)
+	if err != nil {
+		return err
+	}
+
+	verifier.getMetrics().recordTaskUpdateDuration(ctx, time.Since(start))
+
+	return nil
 }
 
 func (verifier *Verifier) CreatePrimaryTaskIfNeeded(ctx context.Context) (bool, error) {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/10gen/migration-verifier/agg"
 	"github.com/10gen/migration-verifier/agg/accum"
@@ -310,7 +311,7 @@ func getDocumentMismatchReportData(
 	return reportData, nil
 }
 
-func recordMismatches(
+func (verifier *Verifier) recordMismatches(
 	ctx context.Context,
 	db *mongo.Database,
 	task *tasks.Task,
@@ -330,12 +331,19 @@ func recordMismatches(
 		},
 	)
 
+	start := time.Now()
+
 	_, err := db.Collection(mismatchesCollectionName).BulkWrite(
 		ctx,
 		models,
 	)
+	if err != nil {
+		return errors.Wrapf(err, "recording %d mismatches", len(models))
+	}
 
-	return errors.Wrapf(err, "recording %d mismatches", len(models))
+	verifier.getMetrics().recordMismatchPersistDuration(ctx, time.Since(start))
+
+	return nil
 }
 
 func getLongestLivedDocumentMismatch(

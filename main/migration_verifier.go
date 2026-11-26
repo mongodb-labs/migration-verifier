@@ -317,6 +317,7 @@ func main() {
 			if pipeline, has := setUpMetrics(cCtx, verifier).Get(); has {
 				metricsPipeline = option.Some(pipeline)
 				verifier.SetMetricsHandler(pipeline.Handler())
+				verifier.SetMeterProvider(pipeline.MeterProvider())
 			}
 
 			if cCtx.Bool(checkOnly) {
@@ -383,7 +384,10 @@ func exitBySignal(sig os.Signal) {
 // setUpMetrics creates the metrics pipeline. A failure is only logged:
 // metrics never stop a verification.
 func setUpMetrics(cCtx *cli.Context, v *verifier.Verifier) option.Option[*metrics.Pipeline] {
-	settings := metrics.Settings{}
+	settings := metrics.Settings{
+		SrcReplSetName: v.GetSrcReplSetName(),
+		DstReplSetName: v.GetDstReplSetName(),
+	}
 	if dir := cCtx.String(metricsLogDir); dir != "" {
 		settings.FileDir = option.Some(dir)
 	}

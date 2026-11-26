@@ -1,8 +1,9 @@
 module github.com/10gen/migration-verifier
 
-go 1.26.0
+go 1.27
 
 require (
+	github.com/ccoveille/go-safecast/v2 v2.0.1
 	github.com/cespare/permute/v2 v2.0.0-beta2
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/dustin/go-humanize v1.0.1
@@ -12,29 +13,28 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/huandu/go-clone/generic v1.7.2
 	github.com/libp2p/go-buffer-pool v0.1.0
+	github.com/mongodb-labs/migration-tools v0.0.0-20261123193034-df4eb8d8b502
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/pkg/errors v0.9.1
+	github.com/prometheus/client_model v0.6.3
+	github.com/prometheus/common v0.72.1
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/rs/zerolog v1.34.0
 	github.com/samber/lo v1.53.0
 	github.com/samber/mo v1.13.0
+	github.com/samber/slog-zerolog/v2 v2.9.2
 	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli v1.22.9
+	github.com/wI2L/jsondiff v0.7.0
 
 	// NB: This is the last driver version that supported 4.0.
 	go.mongodb.org/mongo-driver/v2 v2.9.3
+	go.opentelemetry.io/otel v1.47.0
+	go.opentelemetry.io/otel/metric v1.47.0
+	go.opentelemetry.io/otel/sdk v1.47.0
 	golang.org/x/exp v0.0.0-20260211191109-2735e65f0518
 	golang.org/x/sync v0.24.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
-)
-
-require (
-	github.com/ccoveille/go-safecast/v2 v2.0.1
-	github.com/mongodb-labs/migration-tools v0.0.0-20261113161246-af6b0c09c0a6
-	github.com/samber/slog-zerolog/v2 v2.9.2
-	github.com/wI2L/jsondiff v0.7.0
-	go.opentelemetry.io/otel v1.47.0
-	go.opentelemetry.io/otel/sdk v1.47.0
 )
 
 require (
@@ -56,6 +56,7 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.26.0 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
+	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/huandu/go-clone v1.6.0 // indirect
 	github.com/jaypipes/ghw v0.24.0 // indirect
 	github.com/jaypipes/pcidb v1.1.1 // indirect
@@ -73,8 +74,6 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/prometheus/client_golang v1.25.0 // indirect
-	github.com/prometheus/client_model v0.6.3 // indirect
-	github.com/prometheus/common v0.72.1 // indirect
 	github.com/prometheus/otlptranslator v1.0.0 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
@@ -96,7 +95,6 @@ require (
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/exporters/prometheus v0.69.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
-	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect

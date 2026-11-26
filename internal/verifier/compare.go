@@ -358,6 +358,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 			verifier.docCompareMethod,
 			srcToCompareChannel,
 			srcToDstChannel,
+			verifier.createReaderMetrics(src, verifier.srcClientCollection(task)),
 		)
 	}
 
@@ -385,6 +386,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 		sctx := mongo.NewSessionContext(ctx, sess)
 
 		coll := verifier.dstClientCollection(task)
+		readerMetrics := verifier.createReaderMetrics(dst, coll)
 
 		for {
 			idBatchOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
@@ -424,6 +426,10 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				&dupeTask,
 				option.None[*readpref.ReadPref](),
 			)
+			readTimer := compare.NewBatchReadTimer(
+				readerMetrics,
+				time.Since(cursorStartTime),
+			)
 
 			for _, id := range docIDs {
 				id.PutInPool()
@@ -445,6 +451,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				state,
 				theCursor,
 				dstToCompareChannel,
+				readTimer,
+				readerMetrics,
 			)
 			if err != nil {
 				return errors.Wrap(
@@ -501,6 +509,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 
 		sctx := mongo.NewSessionContext(ctx, sess)
 
+		openStart := time.Now()
+
 		theCursor, err := verifier.getDocumentsCursor(
 			sctx,
 			verifier.srcClientCollection(task),
@@ -508,6 +518,11 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			verifier.srcChangeReader.getReadConcernTimestamp(),
 			task,
 			option.IfNotZero(verifier.readPreference),
+		)
+		readerMetrics := verifier.createReaderMetrics(src, verifier.srcClientCollection(task))
+		readTimer := compare.NewBatchReadTimer(
+			readerMetrics,
+			time.Since(openStart),
 		)
 
 		if err == nil {
@@ -518,6 +533,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				srcChannel,
+				readTimer,
+				readerMetrics,
 			)
 
 			err = errors.Wrap(
@@ -544,6 +561,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 
 		sctx := mongo.NewSessionContext(ctx, sess)
 
+		openStart := time.Now()
+
 		theCursor, err := verifier.getDocumentsCursor(
 			sctx,
 			verifier.dstClientCollection(task),
@@ -551,6 +570,11 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 			verifier.dstChangeReader.getReadConcernTimestamp(),
 			task,
 			option.None[*readpref.ReadPref](),
+		)
+		readerMetrics := verifier.createReaderMetrics(dst, verifier.dstClientCollection(task))
+		readTimer := compare.NewBatchReadTimer(
+			readerMetrics,
+			time.Since(openStart),
 		)
 
 		if err == nil {
@@ -561,6 +585,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 				state,
 				theCursor,
 				dstChannel,
+				readTimer,
+				readerMetrics,
 			)
 			err = errors.Wrap(
 				err,
@@ -585,6 +611,8 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 // the comparator.
 //
 // This returns the # of documents sent to the channel.
+// readTimer advances the cursor and measures its batches. If metrics is
+// non-nil, it receives how long each send to writer waited.
 //
 // NB: This DOES NOT close the given channel.
 func iterateCursorToComparator(
@@ -592,6 +620,8 @@ func iterateCursorToComparator(
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
 	writer chan<- compare.ToComparatorMsg,
+	readTimer *compare.BatchReadTimer,
+	metrics compare.ReaderMetrics,
 ) (int, error) {
 	sess := mongo.SessionFromContext(sctx)
 	if sess == nil {
@@ -604,8 +634,9 @@ func iterateCursorToComparator(
 	var docsWithTSCache []compare.DocWithTS
 
 	flush := func() error {
-		err := chanutil.WriteWithDoneCheck(
+		err := compare.SendToComparator(
 			sctx,
+			metrics,
 			writer,
 			compare.ToComparatorMsg(compare.DocsToComparatorMsg(slices.Clone(docsWithTSCache))),
 		)
@@ -630,7 +661,7 @@ func iterateCursorToComparator(
 		return nil
 	}
 
-	for cursor.Next(sctx) {
+	for readTimer.Next(sctx, cursor) {
 		state.NoteSuccess("received a document")
 
 		docsCount++

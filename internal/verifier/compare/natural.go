@@ -50,6 +50,7 @@ func ReadNaturalPartitionFromSource(
 	compareMethod Method,
 	toCompare chan<- ToComparatorMsg,
 	toDst chan<- NaturalSrcToDstMsg,
+	metrics ReaderMetrics,
 ) error {
 	defer close(toCompare)
 	defer close(toDst)
@@ -100,11 +101,15 @@ func ReadNaturalPartitionFromSource(
 		)
 	}
 
+	openStart := time.Now()
+
 	cursor, err := openSourceCursor(sctx, logger, coll, tasksColl, task, createCmd, resumeTokenOpt, startRecordID)
 	if err != nil {
 		return err
 	}
 	defer cursor.Close(ctx)
+
+	readTimer := NewBatchReadTimer(metrics, time.Since(openStart))
 
 	retryState.NoteSuccess("opened cursor")
 
@@ -112,6 +117,7 @@ func ReadNaturalPartitionFromSource(
 		ctx, sess, logger, retryState, cursor, task, compareMethod,
 		docProjection != nil,
 		startRecordID, task.QueryFilter.Partition.Upper, toCompare, toDst,
+		readTimer, metrics,
 	)
 }
 
@@ -237,6 +243,8 @@ func processCursor(
 	upperRecordID bson.RawValue,
 	toCompare chan<- ToComparatorMsg,
 	toDst chan<- NaturalSrcToDstMsg,
+	readTimer *BatchReadTimer,
+	metrics ReaderMetrics,
 ) error {
 	var batch []DocWithTS
 	var batchDocIDs []DocID
@@ -247,7 +255,7 @@ func processCursor(
 
 cursorLoop:
 	for {
-		if !cursor.Next(ctx) {
+		if !readTimer.Next(ctx, cursor) {
 			if cursor.Err() != nil {
 				return errors.Wrapf(cursor.Err(), "reading documents")
 			}
@@ -315,7 +323,7 @@ cursorLoop:
 		batchDocIDs = append(batchDocIDs, NewDocIDFromPool(docID))
 
 		if cursor.RemainingBatchLength() == 0 {
-			if err := flushSourceBatch(ctx, logger, retryState, task, batchNum, &batch, &batchDocIDs, toCompare, toDst); err != nil {
+			if err := flushSourceBatch(ctx, logger, retryState, task, batchNum, &batch, &batchDocIDs, toCompare, toDst, metrics); err != nil {
 				return errors.Wrapf(err, "flushing docs")
 			}
 
@@ -326,7 +334,7 @@ cursorLoop:
 	retryState.NoteSuccess("reached end of cursor")
 
 	if len(batch) > 0 {
-		if err := flushSourceBatch(ctx, logger, retryState, task, batchNum, &batch, &batchDocIDs, toCompare, toDst); err != nil {
+		if err := flushSourceBatch(ctx, logger, retryState, task, batchNum, &batch, &batchDocIDs, toCompare, toDst, metrics); err != nil {
 			return errors.Wrapf(err, "flushing final docs")
 		}
 	}
@@ -344,6 +352,7 @@ func flushSourceBatch(
 	batchDocIDs *[]DocID,
 	toCompare chan<- ToComparatorMsg,
 	toDst chan<- NaturalSrcToDstMsg,
+	metrics ReaderMetrics,
 ) error {
 	logger.Trace().
 		Any("task", task.PrimaryKey).
@@ -375,8 +384,9 @@ func flushSourceBatch(
 	toCompareStart := time.Now()
 
 	for chunk := range mslices.Chunk(slices.Clone(*batch), ToComparatorBatchSize) {
-		err = chanutil.WriteWithDoneCheck(
+		err = SendToComparator(
 			ctx,
+			metrics,
 			toCompare,
 			ToComparatorMsg(DocsToComparatorMsg(chunk)),
 		)

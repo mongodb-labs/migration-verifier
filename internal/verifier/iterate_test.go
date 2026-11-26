@@ -53,6 +53,8 @@ func (s *IntegrationTestSuite) TestIterateCursorToComparator() {
 		&testutil.MockSuccessNotifier{T: s.T()},
 		theCursor,
 		receiver,
+		compare.NewBatchReadTimer(nil, 0),
+		nil,
 	)
 	s.Require().NoError(err)
 
