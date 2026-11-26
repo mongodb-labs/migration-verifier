@@ -115,7 +115,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 		predicates, err := partitions.FilterIdBounds(
 			verifier.srcClusterInfo,
 			lowerBound,
-			bson.MaxKey{},
+			bsontools.ToRawValue(bson.MaxKey{}),
 		)
 		if err != nil {
 			return 0, errors.Wrapf(err, "getting lower-bound filter predicate (%v)", lowerBound)
