@@ -198,6 +198,7 @@ func (verifier *Verifier) createDocumentRecheckTask(
 	srcTimestamp option.Option[bson.Timestamp],
 	dstTimestamp option.Option[bson.Timestamp],
 	srcNamespace string,
+	shardKeys []string,
 ) (*tasks.Task, error) {
 	dstNamespace := srcNamespace
 	if verifier.nsMap.Len() != 0 {
@@ -217,6 +218,7 @@ func (verifier *Verifier) createDocumentRecheckTask(
 		QueryFilter: tasks.QueryFilter{
 			Namespace: srcNamespace,
 			To:        dstNamespace,
+			ShardKeys: shardKeys,
 		},
 		DocumentsCount:    types.DocumentCount(len(ids)),
 		FirstMismatchTime: firstMismatchTime,

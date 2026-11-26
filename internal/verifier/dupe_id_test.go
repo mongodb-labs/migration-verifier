@@ -35,7 +35,7 @@ func (suite *IntegrationTestSuite) TestVerifier_DuplicateIDOnShardedDestination(
 	collName := "coll"
 	namespace := dbName + "." + collName
 
-	dstColl := suite.shardDstCollAcrossTwoShards(ctx, dbName, collName)
+	dstColl := suite.shardCollAcrossTwoShards(ctx, suite.dstMongoClient, dbName, collName)
 
 	// The comparator interleaves source & destination documents in _id
 	// order. Source docs 1 & 2, which the destination lacks, ensure that
@@ -119,7 +119,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionDuplicateIDOnShardedDesti
 	dbName := suite.DBNameForTest()
 	collName := "coll"
 
-	dstColl := suite.shardDstCollAcrossTwoShards(ctx, dbName, collName)
+	dstColl := suite.shardCollAcrossTwoShards(ctx, suite.dstMongoClient, dbName, collName)
 
 	// The source’s natural-order cursor returns these in a single batch,
 	// so the destination runs a single query for all of them. That query
@@ -210,22 +210,23 @@ func (suite *IntegrationTestSuite) skipUnlessReplsetSrcAndShardedDst() {
 	}
 }
 
-// shardDstCollAcrossTwoShards shards the given destination collection on
-// `sk`, with negative `sk` values on one shard and nonnegative ones on
-// another. This lets tests put the same _id on multiple shards.
-func (suite *IntegrationTestSuite) shardDstCollAcrossTwoShards(
+// shardCollAcrossTwoShards shards the given collection on `sk`, with
+// negative `sk` values on one shard and nonnegative ones on another. This
+// lets tests put the same _id on multiple shards.
+func (suite *IntegrationTestSuite) shardCollAcrossTwoShards(
 	ctx context.Context,
+	client *mongo.Client,
 	dbName, collName string,
 ) *mongo.Collection {
 	require := require.New(suite.T())
 
 	namespace := dbName + "." + collName
-	dstColl := suite.dstMongoClient.Database(dbName).Collection(collName)
+	coll := client.Database(dbName).Collection(collName)
 
-	shardIds := getShardIds(suite.T(), suite.dstMongoClient)
+	shardIds := getShardIds(suite.T(), client)
 	require.Greater(len(shardIds), 1, "need multiple shards; got: %+v", shardIds)
 
-	admin := suite.dstMongoClient.Database("admin")
+	admin := client.Database("admin")
 
 	require.NoError(admin.RunCommand(ctx, bson.D{{"enableSharding", dbName}}).Err())
 
@@ -240,7 +241,7 @@ func (suite *IntegrationTestSuite) shardDstCollAcrossTwoShards(
 		"should shard collection",
 	)
 
-	require.NoError(sharding.DisableBalancing(ctx, dstColl), "should disable balancing")
+	require.NoError(sharding.DisableBalancing(ctx, coll), "should disable balancing")
 
 	require.NoError(
 		admin.RunCommand(ctx, bson.D{
@@ -274,7 +275,7 @@ func (suite *IntegrationTestSuite) shardDstCollAcrossTwoShards(
 		)
 	}
 
-	return dstColl
+	return coll
 }
 
 // assertDuplicateIDReported checks the results for a document whose _id
@@ -312,4 +313,237 @@ func (suite *IntegrationTestSuite) assertDuplicateIDReported(idResults []compare
 	}
 
 	suite.Assert().LessOrEqual(len(idResults), 2, "at most a duplicate and a content mismatch")
+}
+
+// TestDuplicateIDOnShardedSource confirms that, when a sharded source holds
+// the same _id on multiple shards, the verifier compares each copy with its
+// destination counterpart. It checks this both in generation 0 and in
+// rechecks.
+func (suite *IntegrationTestSuite) TestDuplicateIDOnShardedSource() {
+	suite.skipUnlessShardedSrcAndDst()
+
+	ctx := suite.T().Context()
+
+	dbName := suite.DBNameForTest()
+	collName := "coll"
+	namespace := dbName + "." + collName
+
+	srcColl := suite.shardCollAcrossTwoShards(ctx, suite.srcMongoClient, dbName, collName)
+	dstColl := suite.shardCollAcrossTwoShards(ctx, suite.dstMongoClient, dbName, collName)
+
+	// _ids 2 & 4 exist on both shards. The other documents ensure that the
+	// duplicates reach the comparator amid other documents.
+	docs := []bson.D{
+		{{"_id", 1}, {"sk", -1}, {"v", "a"}},
+		{{"_id", 2}, {"sk", -1}, {"v", "a"}},
+		{{"_id", 2}, {"sk", 1}, {"v", "b"}},
+		{{"_id", 3}, {"sk", -1}, {"v", "a"}},
+		{{"_id", 4}, {"sk", -1}, {"v", "a"}},
+		{{"_id", 4}, {"sk", 1}, {"v", "b"}},
+		{{"_id", 5}, {"sk", 1}, {"v", "b"}},
+	}
+
+	for i, coll := range mslices.Of(srcColl, dstColl) {
+		_, err := coll.InsertMany(ctx, lo.ToAnySlice(docs))
+		suite.Require().NoError(err, "should insert into %s", lo.Ternary(i == 0, "source", "destination"))
+	}
+
+	// The comparator alternates between source & destination documents.
+	// This destination-only document puts the destination one document
+	// ahead, so both source copies of a duplicated _id reach the
+	// comparator before their destination counterparts. A comparator that
+	// distinguishes documents only by _id would then misreport the second
+	// source copy as a duplicate.
+	_, err := dstColl.InsertOne(ctx, bson.D{{"_id", 0}, {"sk", -1}, {"v", "a"}})
+	suite.Require().NoError(err)
+
+	// One copy of _id 4 differs.
+	_, err = dstColl.UpdateOne(
+		ctx,
+		bson.D{{"_id", 4}, {"sk", 1}},
+		bson.D{{"$set", bson.D{{"v", "changed"}}}},
+	)
+	suite.Require().NoError(err)
+
+	verifier := suite.BuildVerifier()
+	verifier.SetSrcNamespaces(mslices.Of(namespace))
+	verifier.SetDstNamespaces(mslices.Of(namespace))
+	verifier.SetNamespaceMap()
+
+	// This ensures that generation 0 actually partitions the collection.
+	// (Collections smaller than a partition skip that.)
+	verifier.partitionSizeInBytes = 50
+
+	runner := RunVerifierCheck(ctx, suite.T(), verifier)
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	gen0Mismatches := suite.getMismatchesForGeneration(verifier, 0)
+
+	missing, others := lo.FilterReject(
+		gen0Mismatches,
+		func(r compare.Result, _ int) bool {
+			return r.DocumentIsMissing()
+		},
+	)
+
+	if suite.Assert().Len(missing, 1, "should find 1 missing document; mismatches: %+v", gen0Mismatches) {
+		suite.Assert().Equal(0, lo.Must(bsontools.RawValueTo[int](missing[0].ID)), "missing document’s _id")
+		suite.Assert().Equal(constants.ClusterSource, missing[0].Cluster, "missing document’s cluster")
+	}
+
+	suite.assertOnlyMismatchIs(others, 4)
+
+	// Remove the destination-only document, and fix the destination’s copy
+	// of _id 4. Also update both copies of _id 2, identically on both
+	// clusters, so that _id 2 gets rechecked.
+	_, err = dstColl.DeleteOne(ctx, bson.D{{"_id", 0}})
+	suite.Require().NoError(err)
+
+	_, err = dstColl.UpdateOne(
+		ctx,
+		bson.D{{"_id", 4}, {"sk", 1}},
+		bson.D{{"$set", bson.D{{"v", "b"}}}},
+	)
+	suite.Require().NoError(err)
+
+	for _, coll := range mslices.Of(srcColl, dstColl) {
+		_, err := coll.UpdateMany(
+			ctx,
+			bson.D{{"_id", 2}},
+			bson.D{{"$set", bson.D{{"v", "updated"}}}},
+		)
+		suite.Require().NoError(err)
+	}
+
+	// Rechecks should find no mismatches.
+	pendingRechecks := map[int]struct{}{0: {}, 2: {}, 4: {}}
+	for len(pendingRechecks) > 0 {
+		generation := suite.runNextGeneration(runner, verifier)
+
+		suite.Require().Empty(
+			suite.getMismatchesForGeneration(verifier, generation),
+			"generation %d should find no mismatches",
+			generation,
+		)
+
+		for id := range pendingRechecks {
+			if suite.generationRechecked(verifier, generation, id) {
+				delete(pendingRechecks, id)
+			}
+		}
+	}
+
+	// Now make one copy of _id 2 differ. A recheck should find just that.
+	_, err = dstColl.UpdateOne(
+		ctx,
+		bson.D{{"_id", 2}, {"sk", -1}},
+		bson.D{{"$set", bson.D{{"v", "changed"}}}},
+	)
+	suite.Require().NoError(err)
+
+	var mismatches []compare.Result
+	for len(mismatches) == 0 {
+		generation := suite.runNextGeneration(runner, verifier)
+		mismatches = suite.getMismatchesForGeneration(verifier, generation)
+	}
+
+	suite.assertOnlyMismatchIs(mismatches, 2)
+}
+
+// skipUnlessShardedSrcAndDst skips the test unless both source and
+// destination are sharded clusters.
+func (suite *IntegrationTestSuite) skipUnlessShardedSrcAndDst() {
+	if suite.GetTopology(suite.srcMongoClient) != util.TopologySharded {
+		suite.T().Skip("sharded source required")
+	}
+
+	if suite.GetTopology(suite.dstMongoClient) != util.TopologySharded {
+		suite.T().Skip("sharded destination required")
+	}
+}
+
+// runNextGeneration runs the verifier’s next generation and returns that
+// generation’s number. It fails the test if there are too many generations.
+func (suite *IntegrationTestSuite) runNextGeneration(
+	runner *CheckRunner,
+	verifier *Verifier,
+) int {
+	// This gives change events time to arrive.
+	time.Sleep(200 * time.Millisecond)
+
+	suite.Require().NoError(runner.StartNextGeneration())
+	suite.Require().NoError(runner.AwaitGenerationEnd())
+
+	generation, _ := verifier.getGeneration()
+	suite.Require().Less(generation, 100, "too many generations")
+
+	return generation
+}
+
+// generationRechecked indicates whether the given generation rechecked
+// the given document _id.
+func (suite *IntegrationTestSuite) generationRechecked(
+	verifier *Verifier,
+	generation int,
+	id int,
+) bool {
+	count, err := verifier.verificationTaskCollection().CountDocuments(
+		suite.T().Context(),
+		bson.D{
+			{"generation", generation},
+			{"type", tasks.VerifyDocuments},
+			{"_ids", id},
+		},
+	)
+	suite.Require().NoError(err)
+
+	return count > 0
+}
+
+func (suite *IntegrationTestSuite) getMismatchesForGeneration(
+	verifier *Verifier,
+	generation int,
+) []compare.Result {
+	ctx := suite.T().Context()
+
+	cursor, err := verifier.verificationDatabase().Collection(mismatchesCollectionName).Find(
+		ctx,
+		bson.D{{"generation", generation}},
+	)
+	suite.Require().NoError(err)
+
+	var infos []MismatchInfo
+	suite.Require().NoError(cursor.All(ctx, &infos))
+
+	return lo.Map(
+		infos,
+		func(mi MismatchInfo, _ int) compare.Result {
+			return mi.Detail
+		},
+	)
+}
+
+// assertOnlyMismatchIs asserts that the given mismatches are all content
+// mismatches for the given _id.
+//
+// There may be more than one such mismatch because a document whose _id is
+// a partition boundary gets compared in both adjacent partitions.
+//
+// The test’s duplicated _ids have different `sk` values. So if the verifier
+// compared a source copy with the wrong destination copy, it would report
+// either a duplicate _id or a mismatch in `sk`.
+func (suite *IntegrationTestSuite) assertOnlyMismatchIs(
+	mismatches []compare.Result,
+	id int,
+) {
+	if !suite.Assert().NotEmpty(mismatches, "should find a mismatch") {
+		return
+	}
+
+	for _, mismatch := range mismatches {
+		suite.Assert().Equal(id, lo.Must(bsontools.RawValueTo[int](mismatch.ID)), "mismatched _id: %+v", mismatch)
+		suite.Assert().NotEqual(compare.DuplicateID, mismatch.Details, "should not report a duplicate: %+v", mismatch)
+		suite.Assert().False(mismatch.DocumentIsMissing(), "document should not be missing: %+v", mismatch)
+		suite.Assert().NotEqual("sk", mismatch.Field, "should compare the matching copy: %+v", mismatch)
+	}
 }

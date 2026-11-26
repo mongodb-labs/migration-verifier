@@ -6,8 +6,6 @@ import (
 	"slices"
 
 	"github.com/10gen/migration-verifier/internal/logger"
-	"github.com/10gen/migration-verifier/internal/partitions"
-	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mslices"
@@ -251,104 +249,5 @@ func (suite *IntegrationTestSuite) TestShardingMismatch() {
 				"mismatched topologies, so task should have succeeded: %+v", task,
 			)
 		}
-	}
-}
-
-// TestPartitionTasksHaveShardKeys confirms that generation 0’s
-// document-verification tasks store the source collection’s shard key.
-// That works regardless of which method the verifier uses to partition
-// (e.g., $sample on older source versions, or $sampleRate on newer ones).
-func (suite *IntegrationTestSuite) TestPartitionTasksHaveShardKeys() {
-	ctx := suite.Context()
-
-	srcInfo, err := util.GetClusterInfo(ctx, logger.NewDefaultLogger(), suite.srcMongoClient)
-	suite.Require().NoError(err, "should fetch src cluster info")
-
-	if srcInfo.Topology != util.TopologySharded {
-		suite.T().Skip("Need a sharded source.")
-	}
-
-	dbName := suite.DBNameForTest()
-	collName := "coll"
-
-	suite.Require().NoError(
-		suite.srcMongoClient.Database("admin").RunCommand(
-			ctx,
-			bson.D{{"enableSharding", dbName}},
-		).Err(),
-	)
-
-	suite.Require().NoError(
-		suite.srcMongoClient.Database("admin").RunCommand(
-			ctx,
-			bson.D{
-				{"shardCollection", dbName + "." + collName},
-				{"key", bson.D{{"x", 1}}},
-			},
-		).Err(),
-	)
-
-	coll := suite.srcMongoClient.Database(dbName).Collection(collName)
-
-	_, err = coll.InsertMany(
-		ctx,
-		lo.RepeatBy(
-			2_000,
-			func(i int) any {
-				return bson.D{
-					{"_id", i},
-					{"x", i % 10},
-					{"payload", testutil.RandomString(100)},
-				}
-			},
-		),
-	)
-	suite.Require().NoError(err)
-
-	verifier := suite.BuildVerifier()
-	verifier.partitionSizeInBytes = 10_000
-
-	collBytes, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
-		ctx,
-		logger.NewDebugLogger(),
-		coll,
-	)
-	suite.Require().NoError(err)
-
-	suite.Require().NoError(
-		verifier.partitionCollection(
-			ctx,
-			&tasks.Task{
-				PrimaryKey: bson.NewObjectID(),
-				Type:       tasks.VerifyCollection,
-				QueryFilter: tasks.QueryFilter{
-					Namespace: dbName + "." + collName,
-				},
-			},
-			0,
-			collBytes,
-			docsCount,
-			isCapped,
-		),
-	)
-
-	cursor, err := verifier.verificationTaskCollection().Find(
-		ctx,
-		bson.D{{"type", tasks.VerifyDocuments}},
-	)
-	suite.Require().NoError(err)
-
-	var docTasks []tasks.Task
-	suite.Require().NoError(cursor.All(ctx, &docTasks))
-
-	suite.Require().Greater(len(docTasks), 1, "should create multiple partitions")
-
-	for _, task := range docTasks {
-		suite.Assert().Equal(
-			mslices.Of("x"),
-			task.QueryFilter.ShardKeys,
-			"task %v should store the shard key",
-			task.PrimaryKey,
-		)
 	}
 }
