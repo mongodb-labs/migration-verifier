@@ -1710,7 +1710,6 @@ func (verifier *Verifier) partitionCollection(
 				Msg("Source MongoDB version lacks $sampleRate. Using legacy partitioning logic. This may cause imbalanced partitions, which will impede performance.")
 
 			var partitions []*partitions.Partition
-			var shardKeys []string
 
 			partitions, err := verifier.partitionAndInspectNamespace(ctx, srcNs)
 			if err != nil {
@@ -1720,7 +1719,7 @@ func (verifier *Verifier) partitionCollection(
 			partitionsCount = len(partitions)
 
 			for _, partition := range partitions {
-				_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeys, dstNs)
+				_, err := verifier.InsertPartitionVerificationTask(ctx, partition, shardKeyFields, dstNs)
 				if err != nil {
 					return errors.Wrapf(
 						err,
