@@ -13,6 +13,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/mongodb-labs/migration-tools/option"
@@ -354,6 +355,10 @@ func (suite *IntegrationTestSuite) TestDuplicateIDOnShardedSource() {
 	// comparator before their destination counterparts. A comparator that
 	// distinguishes documents only by _id would then misreport the second
 	// source copy as a duplicate.
+	//
+	// This document stays mismatched for the whole test, so every
+	// generation rechecks it. That keeps the destination one document ahead
+	// in rechecks, too.
 	_, err := dstColl.InsertOne(ctx, bson.D{{"_id", 0}, {"sk", -1}, {"v", "a"}})
 	suite.Require().NoError(err)
 
@@ -377,28 +382,10 @@ func (suite *IntegrationTestSuite) TestDuplicateIDOnShardedSource() {
 	runner := RunVerifierCheck(ctx, suite.T(), verifier)
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
-	gen0Mismatches := suite.getMismatchesForGeneration(verifier, 0)
+	suite.assertOnlyMismatchIs(suite.withoutDstOnlyDoc(verifier, 0), 4)
 
-	missing, others := lo.FilterReject(
-		gen0Mismatches,
-		func(r compare.Result, _ int) bool {
-			return r.DocumentIsMissing()
-		},
-	)
-
-	if suite.Assert().Len(missing, 1, "should find 1 missing document; mismatches: %+v", gen0Mismatches) {
-		suite.Assert().Equal(0, lo.Must(bsontools.RawValueTo[int](missing[0].ID)), "missing document’s _id")
-		suite.Assert().Equal(constants.ClusterSource, missing[0].Cluster, "missing document’s cluster")
-	}
-
-	suite.assertOnlyMismatchIs(others, 4)
-
-	// Remove the destination-only document, and fix the destination’s copy
-	// of _id 4. Also update both copies of _id 2, identically on both
-	// clusters, so that _id 2 gets rechecked.
-	_, err = dstColl.DeleteOne(ctx, bson.D{{"_id", 0}})
-	suite.Require().NoError(err)
-
+	// Fix the destination’s copy of _id 4. Also update both copies of
+	// _id 2, identically on both clusters, so that _id 2 gets rechecked.
 	_, err = dstColl.UpdateOne(
 		ctx,
 		bson.D{{"_id", 4}, {"sk", 1}},
@@ -406,48 +393,94 @@ func (suite *IntegrationTestSuite) TestDuplicateIDOnShardedSource() {
 	)
 	suite.Require().NoError(err)
 
-	for _, coll := range mslices.Of(srcColl, dstColl) {
-		_, err := coll.UpdateMany(
-			ctx,
-			bson.D{{"_id", 2}},
-			bson.D{{"$set", bson.D{{"v", "updated"}}}},
-		)
-		suite.Require().NoError(err)
-	}
+	_, err = dstColl.UpdateMany(
+		ctx,
+		bson.D{{"_id", 2}},
+		bson.D{{"$set", bson.D{{"v", "updated"}}}},
+	)
+	suite.Require().NoError(err)
 
-	// Rechecks should find no mismatches.
-	pendingRechecks := map[int]struct{}{0: {}, 2: {}, 4: {}}
-	for len(pendingRechecks) > 0 {
-		generation := suite.runNextGeneration(runner, verifier)
+	srcUpdateStart := suite.getClusterTime(ctx, suite.srcMongoClient)
 
-		suite.Require().Empty(
-			suite.getMismatchesForGeneration(verifier, generation),
-			"generation %d should find no mismatches",
+	_, err = srcColl.UpdateMany(
+		ctx,
+		bson.D{{"_id", 2}},
+		bson.D{{"$set", bson.D{{"v", "updated"}}}},
+	)
+	suite.Require().NoError(err)
+
+	// Generation 0’s mismatches already enqueued rechecks for _ids 0 & 4.
+	// _id 2’s recheck comes from the source’s change event.
+	suite.awaitRecheckEnqueued(verifier, namespace, 2, false, srcUpdateStart)
+
+	generation := suite.runNextGeneration(runner, verifier)
+
+	for _, id := range mslices.Of(0, 2, 4) {
+		suite.Assert().True(
+			suite.generationRechecked(verifier, generation, id),
+			"generation %d should recheck _id %d",
 			generation,
+			id,
 		)
-
-		for id := range pendingRechecks {
-			if suite.generationRechecked(verifier, generation, id) {
-				delete(pendingRechecks, id)
-			}
-		}
 	}
+
+	suite.Assert().Empty(
+		suite.withoutDstOnlyDoc(verifier, generation),
+		"generation %d should find no other mismatches",
+		generation,
+	)
 
 	// Now make one copy of _id 2 differ. A recheck should find just that.
-	_, err = dstColl.UpdateOne(
+	//
+	// The destination’s update touches both of its shards. That matters
+	// because a sharded change stream can’t report an event until all
+	// shards’ oplogs pass that event’s time. Idle shards only advance
+	// periodically, which would delay the change event that we await.
+	dstUpdateStart := suite.getClusterTime(ctx, suite.dstMongoClient)
+
+	_, err = dstColl.UpdateMany(
 		ctx,
-		bson.D{{"_id", 2}, {"sk", -1}},
+		bson.D{{"_id", 2}},
 		bson.D{{"$set", bson.D{{"v", "changed"}}}},
 	)
 	suite.Require().NoError(err)
 
-	var mismatches []compare.Result
-	for len(mismatches) == 0 {
-		generation := suite.runNextGeneration(runner, verifier)
-		mismatches = suite.getMismatchesForGeneration(verifier, generation)
+	_, err = srcColl.UpdateOne(
+		ctx,
+		bson.D{{"_id", 2}, {"sk", 1}},
+		bson.D{{"$set", bson.D{{"v", "changed"}}}},
+	)
+	suite.Require().NoError(err)
+
+	suite.awaitRecheckEnqueued(verifier, namespace, 2, true, dstUpdateStart)
+
+	generation = suite.runNextGeneration(runner, verifier)
+
+	suite.assertOnlyMismatchIs(suite.withoutDstOnlyDoc(verifier, generation), 2)
+}
+
+// withoutDstOnlyDoc fetches the given generation’s mismatches for
+// TestDuplicateIDOnShardedSource. It asserts that they include its
+// destination-only document (_id 0), then returns the other mismatches.
+func (suite *IntegrationTestSuite) withoutDstOnlyDoc(
+	verifier *Verifier,
+	generation int,
+) []compare.Result {
+	mismatches := suite.getMismatchesForGeneration(verifier, generation)
+
+	missing, others := lo.FilterReject(
+		mismatches,
+		func(r compare.Result, _ int) bool {
+			return r.DocumentIsMissing()
+		},
+	)
+
+	if suite.Assert().Len(missing, 1, "generation %d should find 1 missing document; mismatches: %+v", generation, mismatches) {
+		suite.Assert().Equal(0, lo.Must(bsontools.RawValueTo[int](missing[0].ID)), "missing document’s _id")
+		suite.Assert().Equal(constants.ClusterSource, missing[0].Cluster, "missing document’s cluster")
 	}
 
-	suite.assertOnlyMismatchIs(mismatches, 2)
+	return others
 }
 
 // skipUnlessShardedSrcAndDst skips the test unless both source and
@@ -463,21 +496,63 @@ func (suite *IntegrationTestSuite) skipUnlessShardedSrcAndDst() {
 }
 
 // runNextGeneration runs the verifier’s next generation and returns that
-// generation’s number. It fails the test if there are too many generations.
+// generation’s number.
 func (suite *IntegrationTestSuite) runNextGeneration(
 	runner *CheckRunner,
 	verifier *Verifier,
 ) int {
-	// This gives change events time to arrive.
-	time.Sleep(200 * time.Millisecond)
-
 	suite.Require().NoError(runner.StartNextGeneration())
 	suite.Require().NoError(runner.AwaitGenerationEnd())
 
 	generation, _ := verifier.getGeneration()
-	suite.Require().Less(generation, 100, "too many generations")
 
 	return generation
+}
+
+// awaitRecheckEnqueued waits until the verifier has enqueued, for its next
+// generation, a recheck of the given _id that a change event caused after
+// the given cluster time.
+//
+// This requires the verifier to be paused between generations.
+func (suite *IntegrationTestSuite) awaitRecheckEnqueued(
+	verifier *Verifier,
+	namespace string,
+	id int,
+	fromDst bool,
+	after bson.Timestamp,
+) {
+	ctx := suite.T().Context()
+
+	dbName, collName := mmongo.SplitNamespace(namespace)
+
+	generation, _ := verifier.getGeneration()
+	recheckColl := verifier.getRecheckQueueCollection(1 + generation)
+
+	filter := bson.D{
+		{"_id.db", dbName},
+		{"_id.coll", collName},
+		{"_id.docID", id},
+		{"changeOpTime", bson.D{{"$gt", after}}},
+		{"fromDst", lo.Ternary(
+			fromDst,
+			bson.D{{"$eq", true}},
+			bson.D{{"$ne", true}},
+		)},
+	}
+
+	suite.Require().Eventually(
+		func() bool {
+			count, err := recheckColl.CountDocuments(ctx, filter)
+			suite.Require().NoError(err)
+
+			return count > 0
+		},
+		time.Minute,
+		10*time.Millisecond,
+		"%s change event should enqueue a recheck of _id %d",
+		lo.Ternary(fromDst, "destination", "source"),
+		id,
+	)
 }
 
 // generationRechecked indicates whether the given generation rechecked
