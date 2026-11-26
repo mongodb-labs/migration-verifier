@@ -549,6 +549,11 @@ func (verifier *Verifier) SetMetricsHandler(handler http.Handler) {
 // instruments. Without it, the verifier records to no-op instruments. Call it
 // before starting a check.
 func (verifier *Verifier) SetMeterProvider(provider otelmetric.MeterProvider) {
+	if verifier.metrics != nil {
+		if registration, has := verifier.metrics.workerCallback.Get(); has {
+			lo.Must0(registration.Unregister())
+		}
+	}
 	verifier.metrics = newVerifierMetrics(provider)
 	verifier.metrics.recordPhase(context.Background(), Idle)
 
