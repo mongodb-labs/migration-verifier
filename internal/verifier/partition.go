@@ -10,7 +10,6 @@ import (
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mmongo"
-	"github.com/10gen/migration-verifier/mslices"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/pkg/errors"
@@ -20,28 +19,28 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-// idPartitionRanges returns the _id ranges into which a collection’s
-// generation-0 partitioning is split. Each range gets its own
-// partitionIDRange task, which lets multiple workers partition the
-// collection concurrently.
-//
-// The ranges are:
-//   - MinKey to the lowest possible ObjectID
-//   - the lowest possible ObjectID to the highest possible ObjectID
-//   - the highest possible ObjectID to MaxKey
-//
-// Note that, as with any adjacent partitions, adjacent ranges share a
-// boundary value.
-func idPartitionRanges() [][2]bson.RawValue {
-	minOID := bsontools.ToRawValue(bson.ObjectID{})
-	maxOID := bsontools.ToRawValue(bson.ObjectID(bytes.Repeat([]byte{0xff}, len(bson.ObjectID{}))))
+var (
+	minOID = bsontools.ToRawValue(bson.ObjectID{})
+	maxOID = bsontools.ToRawValue(bson.ObjectID(bytes.Repeat([]byte{0xff}, len(bson.ObjectID{}))))
 
-	return mslices.Of(
-		[2]bson.RawValue{bsontools.ToRawValue(bson.MinKey{}), minOID},
-		[2]bson.RawValue{minOID, maxOID},
-		[2]bson.RawValue{maxOID, bsontools.ToRawValue(bson.MaxKey{})},
-	)
-}
+	// idPartitionRanges are the _id ranges into which a collection’s
+	// generation-0 partitioning is split. Each range gets its own
+	// partitionIDRange task, which lets multiple workers partition the
+	// collection concurrently.
+	//
+	// The ranges are:
+	//   - MinKey to the lowest possible ObjectID
+	//   - the lowest possible ObjectID to the highest possible ObjectID
+	//   - the highest possible ObjectID to MaxKey
+	//
+	// Note that, as with any adjacent partitions, adjacent ranges share a
+	// boundary value.
+	idPartitionRanges = [][2]bson.RawValue{
+		{bsontools.ToRawValue(bson.MinKey{}), minOID},
+		{minOID, maxOID},
+		{maxOID, bsontools.ToRawValue(bson.MaxKey{})},
+	}
+)
 
 // createPartitionIDRangeTasks creates the partitionIDRange tasks that
 // partition the given collection task’s namespace.
@@ -49,23 +48,11 @@ func (verifier *Verifier) createPartitionIDRangeTasks(
 	ctx context.Context,
 	task *tasks.Task,
 	shardKeyFields []string,
-	isCapped bool,
 ) (int, error) {
 	srcColl := verifier.srcClientCollection(task)
 	dstNs := FullName(verifier.dstClientCollection(task))
 
-	ranges := idPartitionRanges()
-
-	// Capped collections’ partitions disregard _id bounds, so there’s no
-	// point in splitting them.
-	if isCapped {
-		ranges = mslices.Of([2]bson.RawValue{
-			bsontools.ToRawValue(bson.MinKey{}),
-			bsontools.ToRawValue(bson.MaxKey{}),
-		})
-	}
-
-	for _, idRange := range ranges {
+	for _, idRange := range idPartitionRanges {
 		err := verifier.ensurePartitionIDRangeTask(
 			ctx,
 			&partitions.Partition{
@@ -76,8 +63,7 @@ func (verifier *Verifier) createPartitionIDRangeTasks(
 					srcColl.Database().Name(),
 					srcColl.Name(),
 				},
-				Upper:    idRange[1],
-				IsCapped: isCapped,
+				Upper: idRange[1],
 			},
 			shardKeyFields,
 			dstNs,
@@ -94,7 +80,7 @@ func (verifier *Verifier) createPartitionIDRangeTasks(
 		}
 	}
 
-	return len(ranges), nil
+	return len(idPartitionRanges), nil
 }
 
 // ProcessPartitionIDRangeTask processes a partitionIDRange task.
@@ -256,31 +242,29 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 	// new lower bound.
 	lowerBound := resumeFromOpt.OrElse(rangeLower)
 
-	if lowerBound.Type != bson.TypeMinKey || rangeUpper.Type != bson.TypeMaxKey {
-		predicates, err := partitions.FilterIdBounds(
-			verifier.srcClusterInfo,
-			lowerBound,
-			rangeUpper,
-		)
-		if err != nil {
-			return 0, errors.Wrapf(err, "getting _id filter predicates (%v to %v)", lowerBound, rangeUpper)
-		}
-
-		var filter bson.D
-		switch len(predicates) {
-		case 2:
-			filter = bson.D{{"$and", predicates}}
-		case 1:
-			filter = predicates[0]
-		default:
-			panic("no filter predicates??")
-		}
-
-		pipeline = append(
-			pipeline,
-			bson.D{{"$match", filter}},
-		)
+	predicates, err := partitions.FilterIdBounds(
+		verifier.srcClusterInfo,
+		lowerBound,
+		rangeUpper,
+	)
+	if err != nil {
+		return 0, errors.Wrapf(err, "getting _id filter predicates (%v to %v)", lowerBound, rangeUpper)
 	}
+
+	var filter bson.D
+	switch len(predicates) {
+	case 2:
+		filter = bson.D{{"$and", predicates}}
+	case 1:
+		filter = predicates[0]
+	default:
+		panic("no filter predicates??")
+	}
+
+	pipeline = append(
+		pipeline,
+		bson.D{{"$match", filter}},
+	)
 
 	idealPartitionBytes := verifier.partitionSizeInBytes
 

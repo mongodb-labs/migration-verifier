@@ -1716,7 +1716,6 @@ func (verifier *Verifier) partitionCollection(
 				ctx,
 				task,
 				shardKeyFields,
-				isCapped,
 			)
 			if err != nil {
 				return errors.Wrapf(err, "creating %#q’s _id-partitioning tasks", srcNs)
@@ -1727,7 +1726,7 @@ func (verifier *Verifier) partitionCollection(
 				Any("task", task.PrimaryKey).
 				Str("namespace", srcNs).
 				Int("rangesCount", rangesCount).
-				Msgf("Created %#q tasks.", tasks.PartitionIDRange)
+				Msgf("Created %#q _id-partitioning tasks.", tasks.PartitionIDRange)
 
 			return nil
 		}
