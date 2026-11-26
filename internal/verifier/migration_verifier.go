@@ -549,8 +549,21 @@ func (verifier *Verifier) SetMetricsHandler(handler http.Handler) {
 // instruments. Without it, the verifier records to no-op instruments. Call it
 // before starting a check.
 func (verifier *Verifier) SetMeterProvider(provider otelmetric.MeterProvider) {
+	// Just in case metrics were already set, unregister existing
+	// callbacks before creating new metrics.
+	if verifier.metrics != nil {
+		if registration, has := verifier.metrics.workerCallback.Get(); has {
+			lo.Must0(registration.Unregister())
+		}
+
+		if registration, has := verifier.metrics.changeReaderCallback.Get(); has {
+			lo.Must0(registration.Unregister())
+		}
+	}
 	verifier.metrics = newVerifierMetrics(provider)
 	verifier.metrics.recordPhase(context.Background(), Idle)
+
+	lo.Must0(verifier.metrics.observeWorkers(verifier.workerTracker))
 }
 
 func (verifier *Verifier) SetNumWorkers(arg int) error {

@@ -130,6 +130,11 @@ type verifierMetrics struct {
 
 	mismatchPersistDuration otelmetric.Float64Histogram
 	taskUpdateDuration      otelmetric.Float64Histogram
+
+	activeWorkers otelmetric.Int64ObservableGauge
+
+	// workerCallback observes the workers.
+	workerCallback option.Option[otelmetric.Registration]
 }
 
 // newVerifierMetrics creates the verifier’s instruments. Creating an
@@ -257,6 +262,12 @@ func newVerifierMetrics(provider otelmetric.MeterProvider) *verifierMetrics {
 			otelmetric.WithDescription("How long updating a task’s status in the metadata database took, including any retries."),
 			otelmetric.WithExplicitBucketBoundaries(commandDurationBuckets...),
 		)),
+
+		activeWorkers: lo.Must(meter.Int64ObservableGauge(
+			"migration_verifier_active_workers",
+			otelmetric.WithUnit("{worker}"),
+			otelmetric.WithDescription("Workers that are processing a task."),
+		)),
 	}
 }
 
@@ -383,6 +394,35 @@ func (m *verifierMetrics) recordMismatchPersistDuration(ctx context.Context, ela
 
 func (m *verifierMetrics) recordTaskUpdateDuration(ctx context.Context, elapsed time.Duration) {
 	m.taskUpdateDuration.Record(ctx, elapsed.Seconds())
+}
+
+// workerGaugeSource is what the active-workers gauge reads.
+type workerGaugeSource interface {
+	CountActive() int
+}
+
+var _ workerGaugeSource = &WorkerTracker{}
+
+// observeWorkers makes the active-workers gauge observe workers. It may be
+// called only once.
+func (m *verifierMetrics) observeWorkers(workers workerGaugeSource) error {
+	lo.Assertf(m.workerCallback.IsNone(), "workers are already observed")
+
+	registration, err := m.meter.RegisterCallback(
+		func(_ context.Context, observer otelmetric.Observer) error {
+			observer.ObserveInt64(m.activeWorkers, int64(workers.CountActive()))
+
+			return nil
+		},
+		m.activeWorkers,
+	)
+	if err != nil {
+		return err
+	}
+
+	m.workerCallback = option.Some(registration)
+
+	return nil
 }
 
 // changeReaderGaugeSource is what the change reader gauges read. Its methods
