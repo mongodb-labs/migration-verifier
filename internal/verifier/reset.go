@@ -247,7 +247,7 @@ func (verifier *Verifier) resetPartitionIDRangeTasksIfNeeded(ctx context.Context
 	if result.ModifiedCount > 0 {
 		verifier.logger.Info().
 			Int64("count", result.ModifiedCount).
-			Msg("Previous verifier run left _id-partitioning task(s) pending. Reset them; they will resume from their latest partitions.")
+			Msg("Previous verifier run left _id-partitioning task(s) pending. They will resume from their latest partitions.")
 	}
 
 	return nil
