@@ -135,7 +135,7 @@ func (verifier *Verifier) ProcessPartitionIDRangeTask(
 }
 
 // findLatestPartitionUpperBound returns the highest upper bound among
-// the verify-documents tasks that the given partitionIDRange task created.
+// the verify-documents tasks that the referent partitionIDRange task created.
 func (verifier *Verifier) findLatestPartitionUpperBound(
 	ctx context.Context,
 	parentTaskID bson.ObjectID,
