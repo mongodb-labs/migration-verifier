@@ -10,9 +10,9 @@ import (
 // QueryFilter stores namespace and partition info
 type QueryFilter struct {
 	Partition *partitions.Partition `bson:"partition"`
-	ShardKeys []string
-	Namespace string `bson:"namespace"    json:"namespace"`
-	To        string `bson:"to,omitempty" json:"to,omitempty"`
+	ShardKeys []string              `bson:"shardkeys,omitempty"`
+	Namespace string                `bson:"namespace"    json:"namespace"`
+	To        string                `bson:"to,omitempty" json:"to,omitempty"`
 }
 
 func (qf QueryFilter) GetDocKeyFields() []string {

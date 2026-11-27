@@ -14,6 +14,7 @@ import (
 	"github.com/10gen/migration-verifier/internal/retry"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/internal/uuidutil"
 	"github.com/10gen/migration-verifier/internal/verifier/recheck"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
 	"github.com/10gen/migration-verifier/mbson"
@@ -443,6 +444,10 @@ func (verifier *Verifier) GenerateRecheckTasks(
 		totalInserts++
 	}
 
+	// Recheck tasks, like generation 0’s tasks, need the shard key so that
+	// they can distinguish documents that share an _id on different shards.
+	shardKeysCache := map[string][]string{}
+
 	persistBufferedRechecks := func() error {
 		if len(idAccum) == 0 {
 			return nil
@@ -450,12 +455,30 @@ func (verifier *Verifier) GenerateRecheckTasks(
 
 		namespace := prevDBName + "." + prevCollName
 
+		shardKeys, cached := shardKeysCache[namespace]
+		if !cached {
+			var err error
+			shardKeys, err = verifier.getShardKeyFields(
+				ctx,
+				&uuidutil.NamespaceAndUUID{
+					DBName:   prevDBName,
+					CollName: prevCollName,
+				},
+			)
+			if err != nil {
+				return errors.Wrapf(err, "getting %#q’s shard key", namespace)
+			}
+
+			shardKeysCache[namespace] = shardKeys
+		}
+
 		task, err := verifier.createDocumentRecheckTask(
 			idAccum,
 			firstMismatchTime,
 			option.IfNotZero(latestSrcTimestamp),
 			option.IfNotZero(latestDstTimestamp),
 			namespace,
+			shardKeys,
 		)
 		if err != nil {
 			return errors.Wrapf(
