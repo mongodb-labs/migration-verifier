@@ -144,7 +144,7 @@ func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
 		},
 	}
 
-	err := verifier.partitionCollection(ctx, task, 0, 0, 0, false)
+	err := verifier.partitionCollection(ctx, task, 0, 0, 0)
 	require.NoError(err, "should partition collection")
 
 	taskOpt, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
@@ -1985,7 +1985,10 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
-	suite.Equal(tasks.Failed, task.Status)
+
+	// Cappedness doesn’t affect partitioning, so the data is still compared.
+	suite.Equal(tasks.MetadataMismatch, task.Status)
+
 	// Capped and size should differ
 	var wrongFields []string
 

@@ -268,7 +268,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 
 	idealPartitionBytes := verifier.partitionSizeInBytes
 
-	collBytes, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
+	collBytes, docsCount, err := partitions.GetSizeAndDocumentCount(
 		ctx,
 		verifier.logger,
 		srcColl,
@@ -290,8 +290,7 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 				srcColl.Database().Name(),
 				srcColl.Name(),
 			},
-			Upper:    upperBound,
-			IsCapped: isCapped,
+			Upper: upperBound,
 		}
 
 		_, err := verifier.insertPartitionVerificationTask(

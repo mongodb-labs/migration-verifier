@@ -152,7 +152,7 @@ func PartitionCollectionNaturalOrder(
 
 	pChan := make(chan mo.Result[Partition])
 
-	collSizeInBytes, docCount, _, err := GetSizeAndDocumentCount(ctx, subLogger, coll)
+	collSizeInBytes, docCount, err := GetSizeAndDocumentCount(ctx, subLogger, coll)
 	if err != nil {
 		return nil, errors.Wrapf(err, "getting collection size & count")
 	}

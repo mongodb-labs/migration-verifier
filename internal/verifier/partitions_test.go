@@ -18,7 +18,7 @@ func (suite *IntegrationTestSuite) TestGetSizeAndDocumentCount() {
 	_, err := db.Collection("stuff").InsertOne(ctx, bson.D{})
 	suite.Require().NoError(err, "must insert")
 
-	byteSize, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
+	byteSize, docsCount, err := partitions.GetSizeAndDocumentCount(
 		ctx,
 		logger.NewDebugLogger(),
 		db.Collection("stuff"),
@@ -27,7 +27,6 @@ func (suite *IntegrationTestSuite) TestGetSizeAndDocumentCount() {
 
 	suite.Assert().Positive(byteSize, "must have nonzero size")
 	suite.Assert().EqualValues(1, docsCount, "docs count")
-	suite.Assert().False(isCapped, "must say not capped")
 
 	if suite.BuildVerifier().srcClusterInfo.VersionArray[0] >= 5 {
 		err = db.CreateCollection(
@@ -49,7 +48,7 @@ func (suite *IntegrationTestSuite) TestGetSizeAndDocumentCount() {
 		)
 		suite.Require().NoError(err, "must insert timeseries")
 
-		byteSize, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
+		byteSize, docsCount, err := partitions.GetSizeAndDocumentCount(
 			ctx,
 			logger.NewDebugLogger(),
 			db.Collection(timeseries.BucketPrefix+"weather"),
@@ -58,10 +57,9 @@ func (suite *IntegrationTestSuite) TestGetSizeAndDocumentCount() {
 
 		suite.Assert().Positive(byteSize, "must have nonzero size")
 		suite.Assert().EqualValues(1, docsCount, "docs count")
-		suite.Assert().False(isCapped, "must say not capped")
 
 		// Ensure that the view triggers an error:
-		_, _, _, err = partitions.GetSizeAndDocumentCount(
+		_, _, err = partitions.GetSizeAndDocumentCount(
 			ctx,
 			logger.NewDebugLogger(),
 			db.Collection("weather"),

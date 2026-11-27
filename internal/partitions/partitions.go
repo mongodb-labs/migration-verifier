@@ -193,27 +193,22 @@ func partitionCollectionWithParameters(
 
 	// Get the collection's size in bytes and its document count. It is okay if these return zero since there might still be
 	// items in the collection. Rely on getOuterIDBound to do a majority read to determine if we continue processing the collection.
-	collSizeInBytes, collDocCount, isCapped, err := GetSizeAndDocumentCount(ctx, subLogger, srcColl)
+	collSizeInBytes, collDocCount, err := GetSizeAndDocumentCount(ctx, subLogger, srcColl)
 	if err != nil {
 		return nil, err
 	}
 
-	// The total number of partitions needed for the collection. If it is a capped collection, we
-	// must only create one partition for the entire collection. Otherwise, calculate the
-	// appropriate number of partitions.
-	numPartitions := 1
-	if !isCapped {
-		// By default, number of partitions is calculated without considering the ratio of filtered documents.
-		numPartitions = getNumPartitions(collSizeInBytes, partitionBytes, 1)
+	// The total number of partitions needed for the collection. By default,
+	// this is calculated without considering the ratio of filtered documents.
+	numPartitions := getNumPartitions(collSizeInBytes, partitionBytes, 1)
 
-		// If a filter is used for partitioning, number of partitions is calculated with the ratio of filtered documents.
-		if len(globalFilter) > 0 {
-			numFilteredDocs, filteredCntErr := GetDocumentCountAfterFiltering(ctx, subLogger, srcColl, globalFilter)
-			if filteredCntErr == nil {
-				numPartitions = getNumPartitions(collSizeInBytes, partitionBytes, float64(numFilteredDocs)/float64(collDocCount))
-			} else {
-				return nil, filteredCntErr
-			}
+	// If a filter is used for partitioning, number of partitions is calculated with the ratio of filtered documents.
+	if len(globalFilter) > 0 {
+		numFilteredDocs, filteredCntErr := GetDocumentCountAfterFiltering(ctx, subLogger, srcColl, globalFilter)
+		if filteredCntErr == nil {
+			numPartitions = getNumPartitions(collSizeInBytes, partitionBytes, float64(numFilteredDocs)/float64(collDocCount))
+		} else {
+			return nil, filteredCntErr
 		}
 	}
 
@@ -284,7 +279,6 @@ func partitionCollectionWithParameters(
 	subLogger.Debug().
 		Int("numPartitions", len(allIDBounds)-1).
 		Str("namespace", uuidEntry.DBName+"."+uuidEntry.CollName).
-		Bool("isCapped", isCapped).
 		Msg("Creating partitions.")
 
 	// Create the partitions with the index key bounds.
@@ -296,10 +290,9 @@ func partitionCollectionWithParameters(
 			Lower:      allIDBounds[i],
 		}
 		partition := &Partition{
-			Key:      partitionKey,
-			Ns:       &Namespace{uuidEntry.DBName, uuidEntry.CollName},
-			Upper:    allIDBounds[i+1],
-			IsCapped: isCapped,
+			Key:   partitionKey,
+			Ns:    &Namespace{uuidEntry.DBName, uuidEntry.CollName},
+			Upper: allIDBounds[i+1],
 		}
 		partitions = append(partitions, partition)
 	}
@@ -307,11 +300,11 @@ func partitionCollectionWithParameters(
 	return partitions, nil
 }
 
-// GetSizeAndDocumentCount uses collStats to return a collection's byte size, document count, and
-// capped status, in that order.
+// GetSizeAndDocumentCount uses collStats to return a collection's byte size
+// and document count, in that order.
 //
 // Exported for usage in integration tests.
-func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl *mongo.Collection) (types.ByteCount, types.DocumentCount, bool, error) {
+func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl *mongo.Collection) (types.ByteCount, types.DocumentCount, error) {
 	srcDB := srcColl.Database()
 	collName := srcColl.Name()
 
@@ -319,7 +312,6 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 		Namespace string `bson:"_id"`
 		Size      int64
 		Count     int64
-		Capped    bool
 	}{}
 
 	err := retry.New().WithCallback(
@@ -340,7 +332,6 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 						Else: "$storageStats.count",
 					}}},
 					{"size", accum.Sum{"$storageStats.size"}},
-					{"capped", accum.First{"$capped"}},
 				}}},
 			}
 
@@ -366,16 +357,16 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 	// and the aggregation did not fail so we do not want to return an error. A
 	// NamespaceNotFoundError can happen if the database does not exist.
 	if util.IsNamespaceNotFoundError(err) {
-		return 0, 0, false, nil
+		return 0, 0, nil
 	}
 
 	if err != nil {
-		return 0, 0, false, errors.Wrapf(err, "failed to run aggregation for $collStats for source namespace %s.%s", srcDB.Name(), collName)
+		return 0, 0, errors.Wrapf(err, "failed to run aggregation for $collStats for source namespace %s.%s", srcDB.Name(), collName)
 	}
 
 	// This prevents timeseries views.
 	if value.Namespace != util.FullName(srcColl) {
-		return 0, 0, false, fmt.Errorf("queried $collStats on %#q but got %#q", util.FullName(srcColl), value.Namespace)
+		return 0, 0, fmt.Errorf("queried $collStats on %#q but got %#q", util.FullName(srcColl), value.Namespace)
 	}
 
 	logger.Debug().
@@ -383,10 +374,9 @@ func GetSizeAndDocumentCount(ctx context.Context, logger *logger.Logger, srcColl
 		Str("size", reportutils.FmtBytes(value.Size)).
 		Int64("sizeInBytes", value.Size).
 		Int64("docsCount", value.Count).
-		Bool("isCapped", value.Capped).
 		Msg("Collection stats.")
 
-	return types.ByteCount(value.Size), types.DocumentCount(value.Count), value.Capped, nil
+	return types.ByteCount(value.Size), types.DocumentCount(value.Count), nil
 }
 
 // GetDocumentCountAfterFiltering counts the number of filtered documents in a collection.

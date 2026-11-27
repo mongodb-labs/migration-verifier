@@ -68,7 +68,7 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 		suite.Require().NoError(err, "must insert measurements")
 	}
 
-	collBytes, docsCount, _, err := partitions.GetSizeAndDocumentCount(
+	collBytes, docsCount, err := partitions.GetSizeAndDocumentCount(
 		ctx,
 		logger.NewDebugLogger(),
 		db.Collection(bucketsCollName),
@@ -97,7 +97,6 @@ func (suite *IntegrationTestSuite) TestTimeSeries_Partition() {
 		0,
 		collBytes,
 		docsCount,
-		false,
 	)
 	suite.Require().NoError(err)
 
