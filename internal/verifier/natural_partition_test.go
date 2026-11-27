@@ -217,7 +217,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 					},
 				}
 
-				collBytes, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
+				collBytes, docsCount, err := partitions.GetSizeAndDocumentCount(
 					ctx,
 					verifier.logger,
 					coll,
@@ -230,7 +230,6 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 					0,
 					collBytes,
 					docsCount,
-					isCapped,
 				)
 				suite.Require().NoError(err)
 
