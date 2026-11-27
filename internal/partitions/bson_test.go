@@ -415,7 +415,15 @@ func (suite *UnitTestSuite) Test_splitBSONTypesForId() {
 			after: []bson.Type{},
 		},
 	} {
-		before, after, err := getTypeBracketExcludedBSONTypes(tc.value)
+		valType, valueBytes, err := bson.MarshalValue(tc.value)
+		suite.Require().NoError(err)
+
+		valueRV := bson.RawValue{
+			Type:  valType,
+			Value: valueBytes,
+		}
+
+		before, after, err := getTypeBracketExcludedBSONTypes(valueRV)
 		suite.Require().NoError(err)
 
 		suite.Assert().ElementsMatch(
