@@ -208,29 +208,44 @@ func getExprPredicates(lower, upper bson.RawValue) ([]bson.D, error) {
 // by matching _id types between the partition’s min & max boundaries.
 // It should yield the same result as getExprPredicates.
 func getExplicitTypeCheckPredicates(lower, upper bson.RawValue) ([]bson.D, error) {
-	_, betweenTypes, err := getTypeBracketExcludedBSONTypes(lower)
+	_, typesAboveLower, err := getTypeBracketExcludedBSONTypes(lower)
 	if err != nil {
 		return nil, errors.Wrapf(err, "getting types above lower bound (%s: %v)", lower.Type, lower)
 	}
 
+	var betweenTypes []bson.Type
+
 	var orPredicates []bson.D
 
 	// $gte MinKey would match everything, so match MinKey exactly instead.
-	rangePredicate := lo.Ternary(
+	lowerPredicate := lo.Ternary(
 		lower.Type == bson.TypeMinKey,
 		bson.D{{"_id", lower}},
 		bson.D{{"_id", bson.D{{"$gte", lower}}}},
 	)
 
 	if upper.Type == bson.TypeMaxKey {
-		orPredicates = mslices.Of(rangePredicate)
+		// Include all types above the lower bound.
+		// So our query will look like:
+		// - $gte lower (and same type bracket) OR
+		// - $type above lower
+
+		betweenTypes = typesAboveLower
+		orPredicates = mslices.Of(lowerPredicate)
 	} else {
 		typesBelowUpper, typesAboveUpper, err := getTypeBracketExcludedBSONTypes(upper)
 		if err != nil {
 			return nil, errors.Wrapf(err, "getting types around upper bound (%s: %v)", upper.Type, upper)
 		}
 
+		// Three possible scenarios for the type brackets:
+		// A. The lower type is above the upper type. (error)
+		// B. The lower type is below the upper type.
+		// C. The lower type is within the upper type bracket.
+		// --------------------------------------------------
+
 		if slices.Contains(typesAboveUpper, lower.Type) {
+			// Scenario A: failure
 			return nil, fmt.Errorf(
 				"lower bound’s BSON type (%s) sorts later than upper bound’s (%s)",
 				lower.Type,
@@ -239,18 +254,25 @@ func getExplicitTypeCheckPredicates(lower, upper bson.RawValue) ([]bson.D, error
 		}
 
 		bothLimitsPredicate := mslices.Of(
-			rangePredicate,
+			lowerPredicate,
 			bson.D{{"_id", bson.D{{"$lte", upper}}}},
 		)
 
 		if slices.Contains(typesBelowUpper, lower.Type) {
-			betweenTypes = lo.Intersect(betweenTypes, typesBelowUpper)
-			// If the limits’ types don’t sort together, then we OR the
-			// predicates together. This is correct because, in a non-$expr
-			// query, “foo > 5” means “foo > 5 AND foo is numeric”.
+			// Scenario B: lower type is below the upper type.
+			// Here our query looks like:
+			// - $gte lower (and same type bracket) OR
+			// - $lte upper (and same type bracket) OR
+			// - $type between types
+
+			betweenTypes = lo.Intersect(typesAboveLower, typesBelowUpper)
 			orPredicates = bothLimitsPredicate
 		} else {
-			// If the limits sort together, then we AND them together.
+			// Scenario C: lower & upper types share a type bracket.
+			// This is the easy one:
+			// - $gte lower (and same type bracket) AND
+			// - $lte upper (and same type bracket)
+
 			return bothLimitsPredicate, nil
 		}
 	}
