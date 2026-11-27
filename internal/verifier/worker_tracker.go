@@ -75,6 +75,20 @@ func (wt *WorkerTracker) Unset(workerNum int) {
 	})
 }
 
+// CountActive returns the number of workers that are processing a task.
+func (wt *WorkerTracker) CountActive() int {
+	var count int
+	wt.guard.Load(func(m WorkerStatusMap) {
+		for _, status := range m {
+			if status.TaskID != nil {
+				count++
+			}
+		}
+	})
+
+	return count
+}
+
 // Load duplicates and returns the WorkerTracker’s internal
 // state map.
 func (wt *WorkerTracker) Load() WorkerStatusMap {
