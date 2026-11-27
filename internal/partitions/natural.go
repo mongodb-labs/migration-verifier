@@ -332,7 +332,7 @@ func GetTopRecordID(
 			options.Find().
 				SetSort(bson.D{{"$natural", -1}}).
 				SetLimit(1).
-				SetProjection(bson.D{{"id", 0}}).
+				SetProjection(bson.D{{"_id", 0}}).
 				SetShowRecordID(true),
 		)
 
