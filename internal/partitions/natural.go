@@ -244,18 +244,19 @@ func PartitionCollectionNaturalOrder(
 			var recIDRV bson.RawValue
 
 			curToken, hasToken := curTokenOpt.Get()
-			if !hasToken {
+			if hasToken {
+				recIDRV, err = curToken.LookupErr(RecordID)
+				if err != nil {
+					err = errors.Wrapf(err, "reading record ID from resume token (%v)", curToken)
+					break
+				}
+			} else {
 				if !c.IsFinished() {
-					err = errors.New("server omitted resume token from cursor response?!?!")
+					err = errors.New("server omitted resume token from unfinished cursor’s response?!?!")
+					break
 				}
 
-				break
-			}
-
-			recIDRV, err = curToken.LookupErr(RecordID)
-			if err != nil {
-				err = errors.Wrapf(err, "reading record ID from resume token (%v)", curToken)
-				break
+				recIDRV = topRecordID
 			}
 
 			// This can happen at the end of a cursor.

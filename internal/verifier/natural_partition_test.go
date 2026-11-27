@@ -340,7 +340,8 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 
 	for _, clustered := range mslices.Of(true, false) {
 		if srcVersion[0] < 6 && clustered {
-			suite.T().Skip("clustered requires v6+")
+			suite.T().Log("clustered requires v6+")
+			continue
 		}
 
 		suite.Require().NoError(coll.Drop(ctx))
