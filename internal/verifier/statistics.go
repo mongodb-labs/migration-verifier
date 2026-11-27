@@ -114,9 +114,9 @@ func perNsStatsPipeline(generation int) mongo.Pipeline {
 			{"totalDocs", accum.Sum{"$totalDocs"}},
 			{"bytesCompared", accum.Sum{"$bytesCompared"}},
 			{"totalBytes", accum.Sum{"$totalBytes"}},
-			{"taskAdded", accum.Sum{"$taskAdded"}},
-			{"taskProcessing", accum.Sum{"$taskProcessing"}},
-			{"taskDone", accum.Sum{"$taskDone"}},
+			{"tasksAdded", accum.Sum{"$taskAdded"}},
+			{"tasksProcessing", accum.Sum{"$taskProcessing"}},
+			{"tasksDone", accum.Sum{"$taskDone"}},
 		}}},
 		{{"$sort", bson.D{{"_id", 1}}}},
 	}
