@@ -418,7 +418,7 @@ func (suite *IntegrationTestSuite) TestDuplicateIDOnShardedSource() {
 	for _, id := range mslices.Of(0, 2, 4) {
 		suite.Assert().True(
 			suite.generationRechecked(verifier, generation, id),
-			"generation %d should recheck _id %d",
+			"generation %d should recheck _id %d with the shard key",
 			generation,
 			id,
 		)
@@ -555,8 +555,13 @@ func (suite *IntegrationTestSuite) awaitRecheckEnqueued(
 	)
 }
 
-// generationRechecked indicates whether the given generation rechecked
-// the given document _id.
+// generationRechecked indicates whether the given generation rechecked the
+// given document _id with a task that stores the shard key (sk) of
+// TestDuplicateIDOnShardedSource’s collection.
+//
+// The shard key check matters because the test’s mismatch assertions catch
+// a recheck task that lacks the shard key only if the clusters return the
+// duplicate copies in a revealing order, which they don’t guarantee.
 func (suite *IntegrationTestSuite) generationRechecked(
 	verifier *Verifier,
 	generation int,
@@ -568,6 +573,7 @@ func (suite *IntegrationTestSuite) generationRechecked(
 			{"generation", generation},
 			{"type", tasks.VerifyDocuments},
 			{"_ids", id},
+			{"query_filter.shardkeys", "sk"},
 		},
 	)
 	suite.Require().NoError(err)
