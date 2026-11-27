@@ -1584,17 +1584,15 @@ func TestVerifierCompareDocs(t *testing.T) {
 	makeDocBatchChannel := func(docs []bson.D) <-chan compare.ToComparatorMsg {
 		theChan := make(chan compare.ToComparatorMsg, 1)
 
-		theChan <- compare.ToComparatorMsg{
-			DocsWithTS: lo.Map(
-				docs,
-				func(doc bson.D, i int) compare.DocWithTS {
-					return compare.NewDocWithTSFromPool(
-						testutil.MustMarshal(doc),
-						bson.Timestamp{1, uint32(i)},
-					)
-				},
-			),
-		}
+		theChan <- compare.DocsToComparatorMsg(lo.Map(
+			docs,
+			func(doc bson.D, i int) compare.DocWithTS {
+				return compare.NewDocWithTSFromPool(
+					testutil.MustMarshal(doc),
+					bson.Timestamp{1, uint32(i)},
+				)
+			},
+		))
 
 		close(theChan)
 

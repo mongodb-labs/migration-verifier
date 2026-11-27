@@ -268,7 +268,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 
 				for _, task := range theTasks {
 					toCompare := make(chan compare.ToComparatorMsg, len(undeletedDocs))
-					toDst := make(chan []compare.DocID, len(undeletedDocs))
+					toDst := make(chan compare.NaturalSrcToDstMsg, len(undeletedDocs))
 
 					err = compare.ReadNaturalPartitionFromSource(
 						ctx,
@@ -286,7 +286,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 					require.NoError(t, err, "should read")
 
 					for msg := range toCompare {
-						batch := msg.DocsWithTS
+						batch := docsFromComparatorMsg(t, msg)
 						assert.LessOrEqual(t, len(batch), compare.ToComparatorBatchSize)
 
 						for _, d := range batch {
@@ -565,7 +565,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							}
 
 							toCompare := make(chan compare.ToComparatorMsg, 100)
-							toDst := make(chan []compare.DocID, 100)
+							toDst := make(chan compare.NaturalSrcToDstMsg, 100)
 
 							err = compare.ReadNaturalPartitionFromSource(
 								ctx,
@@ -585,10 +585,10 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							compared := lo.Flatten(lo.Map(
 								lo.ChannelToSlice(toCompare),
 								func(msg compare.ToComparatorMsg, _ int) []compare.DocWithTS {
-									return msg.DocsWithTS
+									return docsFromComparatorMsg(suite.T(), msg)
 								},
 							))
-							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
+							dstFetches := docIDsFromBatches(suite.T(), lo.ChannelToSlice(toDst))
 
 							defer func() {
 								for _, c := range compared {
@@ -667,7 +667,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							}
 
 							toCompare := make(chan compare.ToComparatorMsg, 100)
-							toDst := make(chan []compare.DocID, 100)
+							toDst := make(chan compare.NaturalSrcToDstMsg, 100)
 
 							err = compare.ReadNaturalPartitionFromSource(
 								ctx,
@@ -687,10 +687,10 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							compared := lo.Flatten(lo.Map(
 								lo.ChannelToSlice(toCompare),
 								func(msg compare.ToComparatorMsg, _ int) []compare.DocWithTS {
-									return msg.DocsWithTS
+									return docsFromComparatorMsg(suite.T(), msg)
 								},
 							))
-							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
+							dstFetches := docIDsFromBatches(suite.T(), lo.ChannelToSlice(toDst))
 
 							defer func() {
 								for _, c := range compared {
@@ -771,7 +771,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							}
 
 							toCompare := make(chan compare.ToComparatorMsg, 100)
-							toDst := make(chan []compare.DocID, 100)
+							toDst := make(chan compare.NaturalSrcToDstMsg, 100)
 
 							err = compare.ReadNaturalPartitionFromSource(
 								ctx,
@@ -791,10 +791,10 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							compared := lo.Flatten(lo.Map(
 								lo.ChannelToSlice(toCompare),
 								func(msg compare.ToComparatorMsg, _ int) []compare.DocWithTS {
-									return msg.DocsWithTS
+									return docsFromComparatorMsg(suite.T(), msg)
 								},
 							))
-							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
+							dstFetches := docIDsFromBatches(suite.T(), lo.ChannelToSlice(toDst))
 
 							defer func() {
 								for _, c := range compared {
@@ -878,7 +878,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							}
 
 							toCompare := make(chan compare.ToComparatorMsg, 100)
-							toDst := make(chan []compare.DocID, 100)
+							toDst := make(chan compare.NaturalSrcToDstMsg, 100)
 
 							err = compare.ReadNaturalPartitionFromSource(
 								ctx,
@@ -898,10 +898,10 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 							compared := lo.Flatten(lo.Map(
 								lo.ChannelToSlice(toCompare),
 								func(msg compare.ToComparatorMsg, _ int) []compare.DocWithTS {
-									return msg.DocsWithTS
+									return docsFromComparatorMsg(suite.T(), msg)
 								},
 							))
-							dstFetches := lo.Flatten(lo.ChannelToSlice(toDst))
+							dstFetches := docIDsFromBatches(suite.T(), lo.ChannelToSlice(toDst))
 
 							defer func() {
 								for _, c := range compared {
@@ -1008,4 +1008,22 @@ func getDocIDs[T constraints.Integer](ctx context.Context, coll *mongo.Collectio
 			return doc.Lookup("_id")
 		},
 	), nil
+}
+
+// docIDsFromBatches returns the document IDs in batches, which the source
+// reader sent to the destination reader. It also checks that the batches are
+// numbered in order from 0.
+func docIDsFromBatches(t *testing.T, batches []compare.NaturalSrcToDstMsg) []compare.DocID {
+	t.Helper()
+
+	for i, batch := range batches {
+		assert.EqualValues(t, i, batch.BatchNum, "batch %d’s number", i)
+	}
+
+	return lo.FlatMap(
+		batches,
+		func(batch compare.NaturalSrcToDstMsg, _ int) []compare.DocID {
+			return batch.IDs
+		},
+	)
 }

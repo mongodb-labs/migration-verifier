@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -37,6 +38,13 @@ type comparator struct {
 	srcClosed bool
 	dstClosed bool
 	readTimer *time.Timer
+
+	// In natural partitioning, each reader’s last-sent batch-end message.
+	// When one is set, the comparator reads only from the other reader until
+	// it also sends a batch-end message. The comparator asserts that the two
+	// messages match.
+	srcFinishedNaturalBatch option.Option[compare.BatchDoneComparatorMsg]
+	dstFinishedNaturalBatch option.Option[compare.BatchDoneComparatorMsg]
 
 	// Caches
 	srcCache map[string]compare.DocWithTS
@@ -90,31 +98,30 @@ func newComparator(v *Verifier, workerNum int, fi retry.SuccessNotifier, task *t
 	}
 }
 
+// stillReading indicates whether the comparator should read from either
+// reader. It skips a reader that is closed or that is waiting for the other
+// reader to finish the same natural batch.
 func (c *comparator) stillReading() bool {
-	return !c.srcClosed || !c.dstClosed
+	return (!c.srcClosed && c.srcFinishedNaturalBatch.IsNone()) ||
+		(!c.dstClosed && c.dstFinishedNaturalBatch.IsNone())
 }
 
-// readBatches handles the concurrent errgroup I/O and timeout logic.
-// It returns: a batch of src docs, a batch of dst docs, a flag to indicate
-// reception of cursor-done from the destination, and an error.
-//
-// NB: The cursor-done flag means that the cursor finished *before* reading
-// the dst docs. Thus, the caller MUST process that flag before
-// processing the returned dst docs.
+// readBatches reads up to 1 message from both src & dst channels. It returns
+// those messages’ documents plus a flag to indicate whether a natural batch
+// boundary is reached.
 func (c *comparator) readBatches(
 	ctx context.Context,
 	srcChannel, dstChannel <-chan compare.ToComparatorMsg,
 ) ([]compare.DocWithTS, []compare.DocWithTS, bool, error) {
-	simpleTimerReset(c.readTimer, readTimeout)
+	c.readTimer.Reset(readTimeout)
 
 	var srcBatch, dstBatch []compare.DocWithTS
-	var dstCursorDone bool
 
 	waitStart := time.Now()
 
 	eg, egCtx := contextplus.ErrGroup(ctx)
 
-	if !c.srcClosed {
+	if !c.srcClosed && c.srcFinishedNaturalBatch.IsNone() {
 		eg.Go(func() error {
 			select {
 			case <-egCtx.Done():
@@ -131,84 +138,62 @@ func (c *comparator) readBatches(
 
 				c.fi.NoteSuccess("received message from source reader")
 
-				lo.Assertf(
-					msg.Type == compare.MsgTypeDocs,
-					"source reader must send only docs (got: %v)",
-					msg.Type,
-				)
+				switch payload := msg.(type) {
+				case compare.DocsToComparatorMsg:
+					lo.Assertf(
+						len(payload) <= compare.ToComparatorBatchSize,
+						"src reader should send <= %d docs but sent %d",
+						compare.ToComparatorBatchSize,
+						len(payload),
+					)
 
-				lo.Assertf(
-					len(msg.DocsWithTS) <= compare.ToComparatorBatchSize,
-					"src reader should send <= %d docs but sent %d",
-					compare.ToComparatorBatchSize,
-					len(msg.DocsWithTS),
-				)
+					c.recordSrcMetrics(ctx, payload)
 
-				c.recordSrcMetrics(ctx, msg.DocsWithTS)
-
-				srcBatch = msg.DocsWithTS
+					srcBatch = payload
+				case compare.BatchDoneComparatorMsg:
+					c.srcFinishedNaturalBatch = option.Some(payload)
+				default:
+					panic(fmt.Sprintf("bad message (%T) from source reader", msg))
+				}
 			}
 			return nil
 		})
 	}
 
-	if !c.dstClosed {
+	if !c.dstClosed && c.dstFinishedNaturalBatch.IsNone() {
 		eg.Go(func() error {
-			// This loop can receive several messages, so it times each
-			// receive from the previous one.
-			dstWaitStart := waitStart
+			select {
+			case <-egCtx.Done():
+				return egCtx.Err()
+			case <-c.readTimer.C:
+				return errors.Errorf("failed to read from destination after %s", readTimeout)
+			case msg, alive := <-dstChannel:
+				if !alive {
+					c.dstClosed = true
+					return nil
+				}
 
-			// Reading from the destination reader is trickier than reading
-			// from the source reader because the messages can contain flags.
-			for {
-				select {
-				case <-egCtx.Done():
-					return egCtx.Err()
-				case <-c.readTimer.C:
-					return errors.Errorf("failed to read from destination after %s", readTimeout)
-				case msg, alive := <-dstChannel:
-					if !alive {
-						c.dstClosed = true
-						return nil
-					}
+				c.recordReadWait(ctx, dst, waitStart)
 
-					c.recordReadWait(ctx, dst, dstWaitStart)
-					dstWaitStart = time.Now()
+				c.fi.NoteSuccess("received message from destination reader")
 
-					c.fi.NoteSuccess("received message (type=%v) from destination reader", msg.Type)
+				switch payload := msg.(type) {
+				case compare.DocsToComparatorMsg:
+					lo.Assertf(
+						len(payload) <= compare.ToComparatorBatchSize,
+						"dst reader should send <= %d docs but sent %d",
+						compare.ToComparatorBatchSize,
+						len(payload),
+					)
 
-					switch msg.Type {
-					case compare.MsgTypePadding:
-						lo.Assertf(
-							len(msg.DocsWithTS) == 0,
-							"expect no documents (found: %d)",
-							len(msg.DocsWithTS),
-						)
-
-						return nil
-					case compare.MsgTypeDocs:
-						lo.Assertf(
-							len(msg.DocsWithTS) <= compare.ToComparatorBatchSize,
-							"dst reader should send <= %d docs but sent %d",
-							compare.ToComparatorBatchSize,
-							len(msg.DocsWithTS),
-						)
-
-						dstBatch = msg.DocsWithTS
-						return nil
-					case compare.MsgTypeCursorDone:
-						lo.Assertf(
-							len(msg.DocsWithTS) == 0,
-							"expect no documents (found: %d)",
-							len(msg.DocsWithTS),
-						)
-
-						dstCursorDone = true
-					default:
-						lo.Assertf(false, "unknown msg type: %v", msg.Type)
-					}
+					dstBatch = payload
+				case compare.BatchDoneComparatorMsg:
+					c.dstFinishedNaturalBatch = option.Some(payload)
+				default:
+					panic(fmt.Sprintf("bad message (%T) from destination reader", msg))
 				}
 			}
+			return nil
 		})
 	}
 
@@ -216,15 +201,25 @@ func (c *comparator) readBatches(
 		return nil, nil, false, errors.Wrap(err, "failed to read documents")
 	}
 
-	return srcBatch, dstBatch, dstCursorDone, nil
-}
+	var naturalBatchDone bool
 
-func simpleTimerReset(t *time.Timer, dur time.Duration) {
-	if !t.Stop() {
-		<-t.C
+	batchNumFromSrc, srcFinishedNaturalBatch := c.srcFinishedNaturalBatch.Get()
+	batchNumFromDst, dstFinishedNaturalBatch := c.dstFinishedNaturalBatch.Get()
+
+	if srcFinishedNaturalBatch && dstFinishedNaturalBatch {
+		lo.Assertf(
+			batchNumFromSrc == batchNumFromDst,
+			"src finished natural batch %d, but dst finished batch %d",
+			batchNumFromSrc,
+			batchNumFromDst,
+		)
+
+		naturalBatchDone = true
+		c.srcFinishedNaturalBatch = option.None[compare.BatchDoneComparatorMsg]()
+		c.dstFinishedNaturalBatch = option.None[compare.BatchDoneComparatorMsg]()
 	}
 
-	t.Reset(dur)
+	return srcBatch, dstBatch, naturalBatchDone, nil
 }
 
 // recordReadWait records how long the comparator waited for a reader’s

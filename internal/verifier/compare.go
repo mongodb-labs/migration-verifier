@@ -227,25 +227,19 @@ func (verifier *Verifier) compareDocsFromChannels(
 ) (DocCompareReport, error) {
 	// 1. Initialize State
 	c := newComparator(verifier, workerNum, fi, task)
-	defer func() {
-		if !c.readTimer.Stop() {
-			<-c.readTimer.C
-		}
-	}()
+	defer c.readTimer.Stop()
 
 	verifier.docsComparedHistory.Add(0)
 	verifier.bytesComparedHistory.Add(0)
 
 	// 2. Stream Processing Loop
 	for c.stillReading() {
-		srcBatch, dstBatch, dstCursorDone, err := c.readBatches(ctx, srcChannel, dstChannel)
+		srcBatch, dstBatch, naturalBatchDone, err := c.readBatches(ctx, srcChannel, dstChannel)
 		if err != nil {
 			return DocCompareReport{}, err
 		}
 
-		// NB: This MUST precede the actual comparison because any dst documents
-		// will be from the next dst cursor.
-		if dstCursorDone {
+		if naturalBatchDone {
 			whyFlush, err := c.flushIfNeeded(ctx, reportsChan)
 			if err != nil {
 				return DocCompareReport{}, errors.Wrapf(err, "flushing problems")
@@ -344,7 +338,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 	srcToCompareChannel := make(chan compare.ToComparatorMsg)
 	dstToCompareChannel := make(chan compare.ToComparatorMsg)
 
-	srcToDstChannel := make(chan []compare.DocID, 1_000)
+	srcToDstChannel := make(chan compare.NaturalSrcToDstMsg, 1_000)
 
 	// Read documents between the lower & upper bounds. Since we can’t actually
 	// query the server that way, though, we subtract the record IDs & set that
@@ -395,15 +389,17 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 		readerMetrics := verifier.createReaderMetrics(dst, coll)
 
 		for {
-			docIDsOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
+			idBatchOpt, err := chanutil.ReadWithDoneCheck(sctx, srcToDstChannel)
 			if err != nil {
 				return err
 			}
-			docIDs, isOpen := docIDsOpt.Get()
+			idBatch, isOpen := idBatchOpt.Get()
 			if !isOpen {
 				state.NoteSuccess("saw channel from source closed")
 				break
 			}
+
+			docIDs := idBatch.IDs
 
 			state.NoteSuccess("received %d doc IDs from source to fetch", len(docIDs))
 
@@ -450,7 +446,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				Int("idsInQuery", len(docIDs)).
 				Msg("Iterating dst cursor.")
 
-			dstDocsFound, err := iterateCursorToChannel(
+			dstDocsFound, err := iterateCursorToComparator(
 				sctx,
 				state,
 				theCursor,
@@ -465,84 +461,23 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				)
 			}
 
+			err = compare.SendToComparator(
+				sctx,
+				readerMetrics,
+				dstToCompareChannel,
+				// Echo the source’s batch number so the comparator can check
+				// that both sides finished the same batch.
+				compare.ToComparatorMsg(compare.BatchDoneComparatorMsg(idBatch.BatchNum)),
+			)
+			if err != nil {
+				return errors.Wrapf(err, "sending batch-done message (batch %d) to compare thread", idBatch.BatchNum)
+			}
+
 			verifier.logger.Trace().
 				Any("task", task.PrimaryKey).
 				Int("docsFound", dstDocsFound).
 				Stringer("elapsed", time.Since(cursorStartTime)).
 				Msg("Done iterating dst cursor.")
-
-			// The compare thread, to prevent OOMs, always reads documents
-			// from the src & dst together. It only stops listening on one
-			// side or the other when the channel closes. This is fine for
-			// ID-partitioned verification because there is exactly 1 query
-			// per partition & cluster.
-			//
-			// With natural partitioning, though, the destination runs
-			// a separate query for each document batch from the source.
-			// So if there are missing documents on the destination, we’ll
-			// block the compare thread unless the destination “compensates”
-			// by sending dummy values. We do that here.
-			//
-			// TODO: This count CAN be negative if the destination has duplicate
-			// IDs while the source has a unique one. This can happen if the
-			// destination’s chunk distribution differs from the source’s, as
-			// typically happens in mongosync-driven migrations. In a very
-			// obscure edge case that could, after 1,000s of repeated dupes in
-			// the same source cursor, deadlock. REP-8267 will fix that.
-			missingDocsCount := len(docIDs) - dstDocsFound
-
-			if missingDocsCount > 0 {
-				verifier.logger.Trace().
-					Any("task", task.PrimaryKey).
-					Int("count", missingDocsCount).
-					Msg("Sending dummy dst docs to compare thread.")
-			}
-
-			// Reader threads send documents to the comparator in slices rather
-			// than individually. We could send 1 slice per document, but if
-			// there are 1,000 documents missing then we’re sending 1,000
-			// messages, which is a bit unideal. We thus optimize by sending
-			// only as many dummy messages as we need to unblock the comparator.
-			srcBatchesSent := compare.ToComparatorBatchCount(len(docIDs))
-			dstBatchesSent := compare.ToComparatorBatchCount(dstDocsFound)
-
-			for i := range srcBatchesSent - dstBatchesSent {
-				err := compare.SendToComparator(
-					ctx,
-					readerMetrics,
-					dstToCompareChannel,
-					compare.ToComparatorMsg{
-						Type: compare.MsgTypePadding,
-					},
-				)
-				if err != nil {
-					return errors.Wrapf(err, "sending dummy doc %d of %d dst->compare", 1+i, missingDocsCount)
-				}
-
-				state.NoteSuccess(
-					"sent dummy doc #%d of %d to compare thread",
-					1+i,
-					missingDocsCount,
-				)
-			}
-
-			// We send one more to tell the comparator that any mismatches
-			// seen heretofore are “real” and should trigger persistence.
-			//
-			// NB: This has to be a dedicated message rather than a flag
-			// attached to documents. This is because because there might be
-			// no documents.
-			err = compare.SendToComparator(
-				ctx,
-				readerMetrics,
-				dstToCompareChannel,
-				compare.ToComparatorMsg{
-					Type: compare.MsgTypeCursorDone,
-				},
-			)
-			if err != nil {
-				return errors.Wrap(err, "sending cursor-done msg dst->compare")
-			}
 		}
 
 		return nil
@@ -594,7 +529,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 		if err == nil {
 			state.NoteSuccess("opened src find cursor")
 
-			_, err = iterateCursorToChannel(
+			_, err = iterateCursorToComparator(
 				sctx,
 				state,
 				theCursor,
@@ -646,7 +581,7 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 		if err == nil {
 			state.NoteSuccess("opened dst find cursor")
 
-			_, err = iterateCursorToChannel(
+			_, err = iterateCursorToComparator(
 				sctx,
 				state,
 				theCursor,
@@ -673,12 +608,15 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForIDPartition(
 	return srcChannel, dstChannel, readSrcCallback, readDstCallback
 }
 
-// iterateCursorToChannel returns the # of documents sent to the channel.
+// iterateCursorToComparator reads the given cursor & sends its payloads to
+// the comparator.
+//
+// This returns the # of documents sent to the channel.
 // readTimer advances the cursor and measures its batches. If metrics is
 // non-nil, it receives how long each send to writer waited.
 //
 // NB: This DOES NOT close the given channel.
-func iterateCursorToChannel(
+func iterateCursorToComparator(
 	sctx context.Context,
 	state retry.SuccessNotifier,
 	cursor *mongo.Cursor,
@@ -701,9 +639,7 @@ func iterateCursorToChannel(
 			sctx,
 			metrics,
 			writer,
-			compare.ToComparatorMsg{
-				DocsWithTS: slices.Clone(docsWithTSCache),
-			},
+			compare.ToComparatorMsg(compare.DocsToComparatorMsg(slices.Clone(docsWithTSCache))),
 		)
 		if err != nil {
 			return errors.Wrapf(

@@ -70,11 +70,33 @@ Buffering prevents blocking here: the source is always ahead of the
 destination, even though the comparator still compares their results
 together.
 
-Also note that, unlike with `_id` partitioning, the destination here opens a
-separate cursor for each batch of `_id`s it receives from the source. This
-means we cannot close the dst->comparator channel after a cursor closes.
-Instead, the destination reader sends enough 0-length document batches to the
-comparator to avoid blocking.
+### Natural batch flushing
+
+In `_id` partitioning the source & destination reader channels send documents
+until their cursors finish. They then close their channels. At that point we
+know that any missing documents can be reported as mismatches.
+
+With pre-v4.4 sources, natural-order scans are unpartitioned, though, so the
+source’s cursor doesn’t close until it has iterated an entire collection. The
+comparator needs some boundary, though, to flush mismatches, or else it’ll
+buffer them in memory indefinitely. To achieve this, the source & destination
+both send notifications to the comparator when they have finished reading the
+documents for a batch of source document `_id`s. The comparator can safely
+flush mismatches when it sees that message from both readers.
+
+Note that either reader can send this batch-end message first. The typical case,
+of course, is where the source has documents that are not replicated to the
+destination, in which case the destination will send batch-end first. In RS->SC
+migrations, though, the destination can store up to 1 document per shard for a
+given `_id`; thus, the destination’s document count could exceed the source’s.
+In that case the source could send batch-end before the destination. (In
+practice this should be extremely rare since duplicate `_id`s will be transient
+artifacts of change event replication.)
+
+In either case, a batch-end from one reader causes the comparator to stop
+reading from that reader until it receives the other reader’s batch-end. The
+batch-end message itself is an incrementing u64; the comparator asserts that
+the source & destination messages match.
 
 ### Direct connection requirement
 

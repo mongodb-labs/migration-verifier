@@ -1,18 +1,41 @@
 package compare
 
 import (
-	"math"
-
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-type ComparatorMsgType byte
+type ToComparatorMsg interface {
+	_isToComparatorMsg()
+}
 
-type ToComparatorMsg struct {
-	DocsWithTS []DocWithTS
-	Type       ComparatorMsgType
+type DocsToComparatorMsg []DocWithTS
+
+func (DocsToComparatorMsg) _isToComparatorMsg() {}
+
+// BatchDoneComparatorMsg ends one source cursor batch in natural partitioning.
+// The source reader sends it after the batch’s documents, and the destination
+// reader sends it after the documents from its query for that batch’s IDs.
+// Its value is the batch’s number, which the comparator checks matches on
+// both sides.
+type BatchDoneComparatorMsg uint64
+
+func (BatchDoneComparatorMsg) _isToComparatorMsg() {}
+
+var (
+	_ ToComparatorMsg = DocsToComparatorMsg(nil)
+	_ ToComparatorMsg = BatchDoneComparatorMsg(0)
+)
+
+// NaturalSrcToDstMsg is one source cursor batch’s document IDs, which natural
+// partitioning sends from the source reader to the destination reader.
+type NaturalSrcToDstMsg struct {
+	// BatchNum is the batch’s number, which the destination reader echoes
+	// in its BatchDoneComparatorMsg.
+	BatchNum uint64
+
+	IDs []DocID
 }
 
 const (
@@ -23,24 +46,7 @@ const (
 	// ToComparatorByteLimit is the max # of bytes that readers send to the
 	// comparator thread at once. This value is somewhat arbitrarily chosen.
 	ToComparatorByteLimit = 32 << 20
-
-	// The default (i.e., zero-value) message type. Indicates a payload of
-	// fetched documents.
-	MsgTypeDocs ComparatorMsgType = 0
-
-	// Indicates no documents; this is used in natural partitioning to ensure
-	// that the destination reader sends the same # of messages as the source
-	// reader, even if there are missing documents on the destination.
-	MsgTypePadding ComparatorMsgType = 1
-
-	// Indicates completion of a destination cursor. Used for flushing
-	// mismatches in natural partitioning.
-	MsgTypeCursorDone ComparatorMsgType = 2
 )
-
-func ToComparatorBatchCount(totalDocs int) int {
-	return int(math.Ceil(float64(totalDocs) / ToComparatorBatchSize))
-}
 
 // DocID is how natural partitioning sends document IDs from the
 // source-reader thread to the destination. This wraps a document ID
