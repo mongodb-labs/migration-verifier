@@ -533,6 +533,56 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder_CoversWho
 	}
 }
 
+// TestNaturalPartitioning_AfterClusterTime checks that natural partitioning’s
+// reads send the given afterClusterTime. The server rejects an
+// afterClusterTime beyond its own cluster time, so a maximal timestamp must
+// cause an error.
+func (suite *IntegrationTestSuite) TestNaturalPartitioning_AfterClusterTime() {
+	srcVersion := suite.getSourceReplsetVersion()
+	if why := mmongo.WhyFindCannotResume([2]int(srcVersion[:])); why != nil {
+		suite.T().Skip(why.Error())
+	}
+
+	ctx := suite.T().Context()
+
+	logger, _ := getLoggerAndWriter("stdout")
+
+	coll := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("c")
+
+	_, err := coll.InsertOne(ctx, bson.D{{"_id", 1}})
+	suite.Require().NoError(err)
+
+	maxTimestamp := bson.Timestamp{T: math.MaxUint32, I: math.MaxUint32}
+
+	assertAfterClusterTimeError := func(err error) {
+		suite.Require().Error(err)
+
+		var srvErr mongo.ServerError
+		suite.Require().ErrorAs(err, &srvErr)
+
+		suite.Assert().Contains(srvErr.ErrorCodes(), util.InvalidOptionsErrCode, "error code")
+		suite.Assert().ErrorContains(err, "afterClusterTime")
+	}
+
+	suite.Run("GetTopRecordID", func() {
+		_, err := partitions.GetTopRecordID(ctx, coll, maxTimestamp)
+		assertAfterClusterTimeError(err)
+	})
+
+	suite.Run("PartitionCollectionNaturalOrder", func() {
+		_, err := partitions.PartitionCollectionNaturalOrder(
+			ctx,
+			coll,
+			1,
+			logger,
+			suite.srcConnStr,
+			readpref.Primary(),
+			maxTimestamp,
+		)
+		assertAfterClusterTimeError(err)
+	})
+}
+
 func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 	srcVersion := suite.getSourceReplsetVersion()
 	if why := mmongo.WhyFindCannotResume([2]int(srcVersion[:])); why != nil {
