@@ -1788,6 +1788,7 @@ func (verifier *Verifier) partitionCollection(
 				srcColl,
 				verifier.srcURI,
 				verifier.readPreference,
+				verifier.srcChangeReader.getReadConcernTimestamp(),
 			)
 			if err != nil {
 				return errors.Wrapf(err, "creating partition for %#q", FullName(srcColl))
@@ -1824,6 +1825,7 @@ func (verifier *Verifier) partitionCollection(
 			verifier.logger,
 			verifier.srcURI,
 			verifier.readPreference,
+			verifier.srcChangeReader.getReadConcernTimestamp(),
 		)
 		if err != nil {
 			return fmt.Errorf("starting natural partitioning: %w", err)
