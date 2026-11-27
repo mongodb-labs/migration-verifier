@@ -25,19 +25,26 @@ type NamespaceStats struct {
 	// Byte sizes for the compared source documents
 	BytesCompared, TotalBytes types.ByteCount
 
-	// Number of tasks in the relevant tasks.Status.
-	TasksAdded, TasksProcessing, TasksDone uint32
+	// Number of partitions in the relevant tasks.Status.
+	PartitionsAdded, PartitionsProcessing, PartitionsDone uint32
+
+	// TasksPending is the number of the namespace’s tasks of any type
+	// (e.g., collection, _id-partitioning, and partition tasks) that are
+	// added or processing. The namespace is complete only once this is 0.
+	TasksPending uint32
 }
 
 func perNsStatsPipeline(generation int) mongo.Pipeline {
 	isVerifyDocs := expr.Eq{"$type", tasks.VerifyDocuments}
 	isVerifyColl := expr.Eq{"$type", tasks.VerifyCollection}
 
-	isFinishedTask := expr.Not{expr.In("$status", tasks.Added, tasks.Processing)}
+	isDocsTaskWithStatus := func(status tasks.Status) expr.And {
+		return expr.And{isVerifyDocs, expr.Eq{"$status", status}}
+	}
 
 	isFinishedDocsTask := expr.And{
 		isVerifyDocs,
-		isFinishedTask,
+		expr.In("$status", tasks.Completed, tasks.Failed),
 	}
 
 	oneIf := func(cond any) expr.Cond {
@@ -54,9 +61,10 @@ func perNsStatsPipeline(generation int) mongo.Pipeline {
 			{"generation", generation},
 		}}},
 		{{"$addFields", bson.D{
-			{"taskAdded", oneIf(expr.Eq{"$status", tasks.Added})},
-			{"taskProcessing", oneIf(expr.Eq{"$status", tasks.Processing})},
-			{"taskDone", oneIf(isFinishedDocsTask)},
+			{"partitionAdded", oneIf(isDocsTaskWithStatus(tasks.Added))},
+			{"partitionProcessing", oneIf(isDocsTaskWithStatus(tasks.Processing))},
+			{"partitionDone", oneIf(isFinishedDocsTask)},
+			{"taskPending", oneIf(expr.In("$status", tasks.Added, tasks.Processing))},
 
 			// If (and only if) a verify-docs task is finished, its
 			// documents are done. In generation 0 we don’t actually
@@ -114,9 +122,10 @@ func perNsStatsPipeline(generation int) mongo.Pipeline {
 			{"totalDocs", accum.Sum{"$totalDocs"}},
 			{"bytesCompared", accum.Sum{"$bytesCompared"}},
 			{"totalBytes", accum.Sum{"$totalBytes"}},
-			{"tasksAdded", accum.Sum{"$taskAdded"}},
-			{"tasksProcessing", accum.Sum{"$taskProcessing"}},
-			{"tasksDone", accum.Sum{"$taskDone"}},
+			{"partitionsAdded", accum.Sum{"$partitionAdded"}},
+			{"partitionsProcessing", accum.Sum{"$partitionProcessing"}},
+			{"partitionsDone", accum.Sum{"$partitionDone"}},
+			{"tasksPending", accum.Sum{"$taskPending"}},
 		}}},
 		{{"$sort", bson.D{{"_id", 1}}}},
 	}

@@ -137,6 +137,9 @@ func (suite *IntegrationTestSuite) TestPartitionIDRange_MixedIDTypes() {
 
 	verifier.partitionSizeInBytes = 10_000
 
+	// Only _id partitioning creates partitionIDRange tasks.
+	verifier.SetPartitioningScheme(partitions.SchemeID)
+
 	collBytes, docsCount, err := partitions.GetSizeAndDocumentCount(
 		ctx,
 		logger.NewDebugLogger(),
