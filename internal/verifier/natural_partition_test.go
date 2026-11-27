@@ -317,6 +317,14 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 						}
 					}
 				}
+
+				// The partitions together should contain every remaining
+				// document, through the end of the collection.
+				suite.Assert().Equal(
+					len(undeletedDocs),
+					taskDocCounter,
+					"partitions should contain every document",
+				)
 			},
 		)
 	}
