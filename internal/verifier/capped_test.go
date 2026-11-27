@@ -46,6 +46,7 @@ func (suite *IntegrationTestSuite) TestCappedCollection_Partitioning() {
 	}
 
 	verifier := suite.BuildVerifier()
+	verifier.SetPartitioningScheme("_id")
 	verifier.SetSrcNamespaces(mslices.Of(ns))
 	verifier.SetDstNamespaces(mslices.Of(ns))
 	verifier.SetNamespaceMap()
