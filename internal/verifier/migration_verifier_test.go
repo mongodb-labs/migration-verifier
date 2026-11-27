@@ -1018,12 +1018,12 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_OneDoc() 
 
 	suite.Assert().Equal(
 		mslices.Of(NamespaceStats{
-			Namespace:      dbName + ".foo",
-			DocsCompared:   1,
-			TotalDocs:      1,
-			BytesCompared:  stats[0].BytesCompared,
-			TotalBytes:     types.ByteCount(len(bsonDoc)),
-			PartitionsDone: 1,
+			Namespace:     dbName + ".foo",
+			DocsCompared:  1,
+			TotalDocs:     1,
+			BytesCompared: stats[0].BytesCompared,
+			TotalBytes:    types.ByteCount(len(bsonDoc)),
+			TasksDone:     1,
 		}),
 		stats,
 		"stats should be as expected",
@@ -1040,11 +1040,11 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_OneDoc() 
 
 	suite.Assert().Equal(
 		mslices.Of(NamespaceStats{
-			Namespace:      dbName + ".foo",
-			DocsCompared:   1,
-			TotalDocs:      1,
-			BytesCompared:  stats[0].BytesCompared,
-			PartitionsDone: 1,
+			Namespace:     dbName + ".foo",
+			DocsCompared:  1,
+			TotalDocs:     1,
+			BytesCompared: stats[0].BytesCompared,
+			TasksDone:     1,
 
 			// NB: TotalBytes is 0 because we can’t compute that from the
 			// change stream.
@@ -1104,14 +1104,14 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 	suite.Assert().Equal(
 		[]NamespaceStats{
 			{
-				Namespace:       "mydb.coll1",
-				TotalDocs:       1,
-				PartitionsAdded: 1,
+				Namespace:  "mydb.coll1",
+				TotalDocs:  1,
+				TasksAdded: 1,
 			},
 			{
-				Namespace:       "mydb.coll2",
-				TotalDocs:       1,
-				PartitionsAdded: 1,
+				Namespace:  "mydb.coll2",
+				TotalDocs:  1,
+				TasksAdded: 1,
 			},
 		},
 		stats,
@@ -1233,16 +1233,16 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	suite.Assert().Equal(
 		[]NamespaceStats{
 			{
-				Namespace:       task1.QueryFilter.Namespace,
-				TotalDocs:       task1.DocumentsCount,
-				TotalBytes:      task1.SourceBytesCount,
-				PartitionsAdded: 2,
+				Namespace:  task1.QueryFilter.Namespace,
+				TotalDocs:  task1.DocumentsCount,
+				TotalBytes: task1.SourceBytesCount,
+				TasksAdded: 2,
 			},
 			{
-				Namespace:       task2.QueryFilter.Namespace,
-				TotalDocs:       task2.DocumentsCount,
-				TotalBytes:      task2.SourceBytesCount,
-				PartitionsAdded: 2,
+				Namespace:  task2.QueryFilter.Namespace,
+				TotalDocs:  task2.DocumentsCount,
+				TotalBytes: task2.SourceBytesCount,
+				TasksAdded: 2,
 			},
 		},
 		stats,
@@ -1261,17 +1261,17 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	suite.Assert().Equal(
 		[]NamespaceStats{
 			{
-				Namespace:            task1.QueryFilter.Namespace,
-				TotalDocs:            task1.DocumentsCount,
-				TotalBytes:           task1.SourceBytesCount,
-				PartitionsAdded:      1,
-				PartitionsProcessing: 1,
+				Namespace:       task1.QueryFilter.Namespace,
+				TotalDocs:       task1.DocumentsCount,
+				TotalBytes:      task1.SourceBytesCount,
+				TasksAdded:      1,
+				TasksProcessing: 1,
 			},
 			{
-				Namespace:       task2.QueryFilter.Namespace,
-				TotalDocs:       task2.DocumentsCount,
-				TotalBytes:      task2.SourceBytesCount,
-				PartitionsAdded: 2,
+				Namespace:  task2.QueryFilter.Namespace,
+				TotalDocs:  task2.DocumentsCount,
+				TotalBytes: task2.SourceBytesCount,
+				TasksAdded: 2,
 			},
 		},
 		stats,
@@ -1300,19 +1300,19 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 	suite.Assert().Equal(
 		[]NamespaceStats{
 			{
-				Namespace:            task1.QueryFilter.Namespace,
-				TotalDocs:            task1.DocumentsCount,
-				TotalBytes:           task1.SourceBytesCount,
-				PartitionsAdded:      1,
-				PartitionsProcessing: 1,
+				Namespace:       task1.QueryFilter.Namespace,
+				TotalDocs:       task1.DocumentsCount,
+				TotalBytes:      task1.SourceBytesCount,
+				TasksAdded:      1,
+				TasksProcessing: 1,
 			},
 			{
-				Namespace:      task2.QueryFilter.Namespace,
-				TotalDocs:      task2.DocumentsCount,
-				TotalBytes:     task2.SourceBytesCount,
-				PartitionsDone: 2,
-				DocsCompared:   task2.DocumentsCount,
-				BytesCompared:  task2.SourceBytesCount,
+				Namespace:     task2.QueryFilter.Namespace,
+				TotalDocs:     task2.DocumentsCount,
+				TotalBytes:    task2.SourceBytesCount,
+				TasksDone:     2,
+				DocsCompared:  task2.DocumentsCount,
+				BytesCompared: task2.SourceBytesCount,
 			},
 		},
 		stats,

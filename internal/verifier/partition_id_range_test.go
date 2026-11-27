@@ -137,7 +137,7 @@ func (suite *IntegrationTestSuite) TestPartitionIDRange_MixedIDTypes() {
 
 	verifier.partitionSizeInBytes = 10_000
 
-	collBytes, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
+	collBytes, docsCount, err := partitions.GetSizeAndDocumentCount(
 		ctx,
 		logger.NewDebugLogger(),
 		coll,
@@ -156,7 +156,7 @@ func (suite *IntegrationTestSuite) TestPartitionIDRange_MixedIDTypes() {
 	// duplicate its range tasks.
 	for range 2 {
 		suite.Require().NoError(
-			verifier.partitionCollection(ctx, collTask, 0, collBytes, docsCount, isCapped),
+			verifier.partitionCollection(ctx, collTask, 0, collBytes, docsCount),
 		)
 	}
 

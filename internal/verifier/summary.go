@@ -375,9 +375,9 @@ func (verifier *Verifier) getComparisonStatistics(
 		comparedBytes += result.BytesCompared
 
 		totalNss++
-		if result.PartitionsDone > 0 {
-			partitionsPending := result.PartitionsAdded + result.PartitionsProcessing
-			if partitionsPending == 0 {
+		if result.TasksDone > 0 {
+			tasksPending := result.TasksAdded + result.TasksProcessing
+			if tasksPending == 0 {
 				completedNss++
 			}
 		}
@@ -515,7 +515,7 @@ func (verifier *Verifier) printNamespaceStatistics(
 	tableHasRows := false
 
 	for _, result := range compareStats.nsStats {
-		if result.PartitionsProcessing == 0 {
+		if result.TasksProcessing == 0 {
 			continue
 		}
 
@@ -609,8 +609,8 @@ func (verifier *Verifier) printEndOfGenerationStatistics(
 		comparedDocs += result.DocsCompared
 		comparedBytes += result.BytesCompared
 
-		partitionsPending := result.PartitionsAdded + result.PartitionsProcessing
-		if partitionsPending == 0 {
+		tasksPending := result.TasksAdded + result.TasksProcessing
+		if tasksPending == 0 {
 			completedNss++
 		}
 	}
