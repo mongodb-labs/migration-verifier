@@ -3,15 +3,15 @@ package verifier
 // This file holds logic to gather statistics on the verification.
 
 import (
-	"bytes"
 	"context"
-	"fmt"
-	"sync"
-	"text/template"
 
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/mslices"
+	"github.com/mongodb-labs/migration-tools/mongotools/expr"
+	"github.com/mongodb-labs/migration-tools/mongotools/expr/accum"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // NamespaceStats represents progress statistics for a single namespace.
@@ -29,148 +29,99 @@ type NamespaceStats struct {
 	PartitionsAdded, PartitionsProcessing, PartitionsDone uint32
 }
 
-// We could store this pipeline using the Go driver’s bson.D, bson.A, etc.,
-// but that would be awfully ugly for a pipeline as complex as this.
-// For ease of maintenance, then, we store this pipeline as JSON.
-const perNsStatsPipelineTemplate = `[
-	{
-		"$match": {
-			"type": { "$in": ["{{.VerifyDocsType}}", "{{.VerifyCollType}}"] },
-			"generation": {{.Generation}}
-		}
-	},
-	{
-		"$addFields": {
-			"partitionAdded": {
-				"$cond": [
-					{ "$and": [
-						{ "$eq": [ "$type", "{{.VerifyDocsType}}" ] },
-						{ "$eq": [ "$status", "{{.AddedStatus}}" ] }
-					] },
-					1,
-					0
-				]
-			},
-			"partitionProcessing": {
-				"$cond": [
-					{ "$and": [
-						{ "$eq": [ "$type", "{{.VerifyDocsType}}" ] },
-						{ "$eq": [ "$status", "{{.ProcessingStatus}}" ] }
-					] },
-					1,
-					0
-				]
-			},
-			"partitionDone": {
-				"$cond": [
-					{ "$and": [
-						{ "$eq": [ "$type", "{{.VerifyDocsType}}" ] },
-						{ "$in": [ "$status", [
-							"{{.CompletedStatus}}",
-							"{{.FailedStatus}}"
-						] ] }
-					] },
-					1,
-					0
-				]
-			},
+func perNsStatsPipeline(generation int) mongo.Pipeline {
+	isVerifyDocs := expr.Eq{"$type", tasks.VerifyDocuments}
+	isVerifyColl := expr.Eq{"$type", tasks.VerifyCollection}
 
-			{{/*
-				If (and only if) a verify-docs task is finished, its
-				documents are done. In generation 0 we don’t actually
-				need to check task status (since verify-docs tasks only
-				have document & byte counts added once they’re done), but
-				for simplicity we might as well treat all generations the
-				same here.
-			*/}}
-			"docsCompared": {
-				"$cond": [
-					{ "$and": [
-						{ "$eq": [ "$type", "{{.VerifyDocsType}}" ] },
-						{ "$in": [ "$status", [
-							"{{.CompletedStatus}}",
-							"{{.FailedStatus}}"
-						] ] }
-					] },
-					"$found_source_documents_count",
-					0
-				]
-			},
-			"bytesCompared": {
-				"$cond": [
-					{ "$and": [
-						{ "$eq": [ "$type", "{{.VerifyDocsType}}" ] },
-						{ "$in": [ "$status", [
-							"{{.CompletedStatus}}",
-							"{{.FailedStatus}}"
-						] ] }
-					] },
-					"$source_bytes_count",
-					0
-				]
-			},
+	isDocsTaskWithStatus := func(status tasks.Status) expr.And {
+		return expr.And{isVerifyDocs, expr.Eq{"$status", status}}
+	}
 
-			{{/*
-				In generation 0 we can get the total docs from the
-				verify-collection tasks.
+	isFinishedDocsTask := expr.And{
+		isVerifyDocs,
+		expr.In("$status", tasks.Completed, tasks.Failed),
+	}
 
-				In generation 1+ we total the docs from the # of documents
-				to recheck.
-			*/}}
-			"totalDocs": {
-				"$cond": {
-					"if": {"$eq": [ "$generation", 0 ]},
-					"then": { "$cond": {
-						"if": { "$eq": [ "$type", "{{.VerifyCollType}}" ] },
-						"then": "$documents_count",
-						"else": 0
-					} },
-					"else": { "$cond": {
-						"if": { "$eq": [ "$type", "{{.VerifyDocsType}}" ] },
-						"then": "$documents_count",
-						"else": 0
-					} }
-				}
-			},
+	oneIf := func(cond any) expr.Cond {
+		return expr.Cond{If: cond, Then: 1, Else: 0}
+	}
 
-			{{/*
-				As with totalDocs, in generation 0 we can get totalBytes from
-				the verify-collection tasks.
+	return mongo.Pipeline{
+		{{"$match", bson.D{
+			{"type", bson.D{{"$in", mslices.Of(
+				tasks.VerifyDocuments,
+				tasks.VerifyCollection,
+			)}}},
+			{"generation", generation},
+		}}},
+		{{"$addFields", bson.D{
+			{"partitionAdded", oneIf(isDocsTaskWithStatus(tasks.Added))},
+			{"partitionProcessing", oneIf(isDocsTaskWithStatus(tasks.Processing))},
+			{"partitionDone", oneIf(isFinishedDocsTask)},
 
-				Ideally we could also approach later generations as we do with
-				totalDocs; however, the source_bytes_count figures for those
-				tasks aren’t meaningful because change events don’t always let
-				us know document size. So, after generation 0 we have to report
-				totalBytes as 0.
-			*/}}
-			"totalBytes": {
-				"$cond": [
-					{ "$eq": [ "$type", "{{.VerifyCollType}}" ] },
-					"$source_bytes_count",
-					0
-				]
-			}
-		}
-	},
-	{
-		"$group": {
-			"_id": "$query_filter.namespace",
-			"docsCompared": {"$sum": "$docsCompared"},
-			"totalDocs": {"$sum": "$totalDocs"},
-			"bytesCompared": {"$sum": "$bytesCompared"},
-			"totalBytes": {"$sum": "$totalBytes"},
-			"partitionsAdded": {"$sum": "$partitionAdded"},
-			"partitionsProcessing": {"$sum": "$partitionProcessing"},
-			"partitionsDone": {"$sum": "$partitionDone"}
-		}
-	},
-	{ "$sort": { "_id": 1 } }
-]`
+			// If (and only if) a verify-docs task is finished, its
+			// documents are done. In generation 0 we don’t actually
+			// need to check task status (since verify-docs tasks only
+			// have document & byte counts added once they’re done), but
+			// for simplicity we might as well treat all generations the
+			// same here.
+			{"docsCompared", expr.Cond{
+				If:   isFinishedDocsTask,
+				Then: "$found_source_documents_count",
+				Else: 0,
+			}},
+			{"bytesCompared", expr.Cond{
+				If:   isFinishedDocsTask,
+				Then: "$source_bytes_count",
+				Else: 0,
+			}},
 
-var (
-	templateOnce sync.Once
-	jsonTemplate *template.Template
-)
+			// In generation 0 we can get the total docs from the
+			// verify-collection tasks.
+			//
+			// In generation 1+ we total the docs from the # of documents
+			// to recheck.
+			{"totalDocs", expr.Cond{
+				If: expr.Eq{"$generation", 0},
+				Then: expr.Cond{
+					If:   isVerifyColl,
+					Then: "$documents_count",
+					Else: 0,
+				},
+				Else: expr.Cond{
+					If:   isVerifyDocs,
+					Then: "$documents_count",
+					Else: 0,
+				},
+			}},
+
+			// As with totalDocs, in generation 0 we can get totalBytes from
+			// the verify-collection tasks.
+			//
+			// Ideally we could also approach later generations as we do with
+			// totalDocs; however, the source_bytes_count figures for those
+			// tasks aren’t meaningful because change events don’t always let
+			// us know document size. So, after generation 0 we have to report
+			// totalBytes as 0.
+			{"totalBytes", expr.Cond{
+				If:   isVerifyColl,
+				Then: "$source_bytes_count",
+				Else: 0,
+			}},
+		}}},
+		{{"$group", bson.D{
+			{"_id", "$query_filter.namespace"},
+			{"docsCompared", accum.Sum{"$docsCompared"}},
+			{"totalDocs", accum.Sum{"$totalDocs"}},
+			{"bytesCompared", accum.Sum{"$bytesCompared"}},
+			{"totalBytes", accum.Sum{"$totalBytes"}},
+			{"partitionsAdded", accum.Sum{"$partitionAdded"}},
+			{"partitionsProcessing", accum.Sum{"$partitionProcessing"}},
+			{"partitionsDone", accum.Sum{"$partitionDone"}},
+		}}},
+		{{"$sort", bson.D{{"_id", 1}}}},
+	}
+}
 
 // GetPersistedNamespaceStatistics queries the verifier’s metadata for statistics
 // on progress for each namespace. The returned array is sorted by
@@ -179,43 +130,9 @@ func (verifier *Verifier) GetPersistedNamespaceStatistics(
 	ctx context.Context,
 	generation int,
 ) ([]NamespaceStats, error) {
-	templateOnce.Do(func() {
-		tmpl, err := template.New("").Parse(perNsStatsPipelineTemplate)
-		if err != nil {
-			panic(fmt.Sprintf("Bad template in source: %+v", err))
-		}
-
-		jsonTemplate = tmpl
-	})
-
-	jsonBytes := bytes.Buffer{}
-	err := jsonTemplate.Execute(
-		&jsonBytes,
-		map[string]any{
-			"Generation": generation,
-
-			"VerifyDocsType": tasks.VerifyDocuments,
-			"VerifyCollType": tasks.VerifyCollection,
-
-			"AddedStatus":      tasks.Added,
-			"ProcessingStatus": tasks.Processing,
-			"CompletedStatus":  tasks.Completed,
-			"FailedStatus":     tasks.Failed,
-		},
-	)
-	if err != nil {
-		panic(fmt.Sprintf("Bad template run in source: %+v", err))
-	}
-
-	pipeline := []bson.M{}
-	err = bson.UnmarshalExtJSON(jsonBytes.Bytes(), true, &pipeline)
-	if err != nil {
-		panic(fmt.Sprintf("Bad extended JSON in source: %+v", err))
-	}
-
 	taskCollection := verifier.verificationTaskCollection()
 
-	cursor, err := taskCollection.Aggregate(ctx, pipeline)
+	cursor, err := taskCollection.Aggregate(ctx, perNsStatsPipeline(generation))
 	if err != nil {
 		return nil, err
 	}
