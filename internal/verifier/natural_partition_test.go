@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/10gen/migration-verifier/chanutil"
+	"github.com/10gen/migration-verifier/contextplus"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -480,7 +481,11 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder_Empty() {
 	)
 	require.NoError(t, err)
 
-	readCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	readCtx, cancel := contextplus.WithTimeoutCause(
+		ctx,
+		time.Minute,
+		nil,
+	)
 	defer cancel()
 
 	resultOpt, err := chanutil.ReadWithDoneCheck(readCtx, pChan)
