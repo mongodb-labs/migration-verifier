@@ -236,6 +236,8 @@ github.com/mongodb-labs/migration-tools/fstools
 github.com/mongodb-labs/migration-tools/future
 github.com/mongodb-labs/migration-tools/humantools
 github.com/mongodb-labs/migration-tools/mongotools
+github.com/mongodb-labs/migration-tools/mongotools/expr
+github.com/mongodb-labs/migration-tools/mongotools/expr/accum
 github.com/mongodb-labs/migration-tools/mongotools/index
 github.com/mongodb-labs/migration-tools/option
 github.com/mongodb-labs/migration-tools/oteltools
