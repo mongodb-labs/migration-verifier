@@ -163,7 +163,7 @@ func (suite *IntegrationTestSuite) TestPartitionIDRange_MixedIDTypes() {
 	rangeTasks := suite.findPartitionIDRangeTasks(verifier, ns)
 	suite.Require().Len(rangeTasks, 3, "range tasks")
 
-	expectedRanges := idPartitionRanges()
+	expectedRanges := idPartitionRanges
 	for i, rangeTask := range rangeTasks {
 		suite.Assert().Equal(tasks.Added, rangeTask.Status)
 		suite.Assert().Equal(expectedRanges[i][0], rangeTask.QueryFilter.Partition.Key.Lower, "range %d lower", i)
@@ -246,7 +246,7 @@ func (suite *IntegrationTestSuite) TestPartitionIDRange_Resume() {
 
 	verifier.partitionSizeInBytes = 10_000
 
-	objIDRange := idPartitionRanges()[1]
+	objIDRange := idPartitionRanges[1]
 	resumeFrom := bsontools.ToRawValue(ids[len(ids)/2])
 
 	suite.Require().NoError(
@@ -336,7 +336,7 @@ func (suite *IntegrationTestSuite) TestPartitionIDRange_Reset() {
 		collTask.Status = lo.Ternary(fullNs == "foo.bar", tasks.Processing, tasks.Completed)
 		suite.Require().NoError(verifier.UpdateVerificationTask(ctx, collTask))
 
-		for _, idRange := range idPartitionRanges() {
+		for _, idRange := range idPartitionRanges {
 			suite.Require().NoError(
 				verifier.ensurePartitionIDRangeTask(
 					ctx,
