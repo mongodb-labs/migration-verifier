@@ -147,7 +147,8 @@ func PartitionCollectionNaturalOrder(
 		return nil, err
 	}
 
-	if !topRecordIDOpt.IsSome() {
+	topRecordID, hasDocs := topRecordIDOpt.Get()
+	if !hasDocs {
 		// If the collection is empty then there’s no point in partitioning it.
 		// Any documents created during generation 0 will be rechecked in
 		// generation 1.
@@ -231,7 +232,7 @@ func PartitionCollectionNaturalOrder(
 		priorToken := bsontools.ToRawValue(bson.Null{})
 		var err error
 
-		for !c.IsFinished() {
+		for {
 			var curTokenOpt option.Option[bson.Raw]
 			curTokenOpt, err = cursor.GetResumeToken(c)
 			if err != nil {
@@ -239,20 +240,23 @@ func PartitionCollectionNaturalOrder(
 				break
 			}
 
+			var recIDRV bson.RawValue
+
 			curToken, hasToken := curTokenOpt.Get()
 			if !hasToken {
+				err = errors.New("server omitted resume token from cursor response?!?!")
 				break
 			}
 
-			var recIDRV bson.RawValue
 			recIDRV, err = curToken.LookupErr(RecordID)
 			if err != nil {
 				err = errors.Wrapf(err, "reading record ID from resume token (%v)", curToken)
 				break
 			}
 
+			// This can happen at the end of a cursor.
 			if recIDRV.Type == bson.TypeNull {
-				recIDRV = topRecordIDOpt.MustGetf("got null resume token but have no top record ID?!?")
+				recIDRV = topRecordID
 			}
 
 			partition := Partition{
@@ -323,6 +327,7 @@ func GetTopRecordID(
 	if err != nil {
 		return option.None[bson.RawValue](), errors.Wrap(err, "starting session")
 	}
+	defer sess.EndSession(ctx)
 
 	sess.AdvanceOperationTime(&afterClusterTime)
 	sctx := mongo.NewSessionContext(ctx, sess)

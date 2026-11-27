@@ -30,6 +30,7 @@ const (
 	CursorKilledErrCode            = 237
 	DuplicateKeyErrCode            = 11000
 	KeyNotFoundErrCode             = 211
+	InvalidOptionsErrCode          = 72
 )
 
 //
@@ -136,7 +137,7 @@ func IsTransientError(err error) bool {
 	}
 
 	// All w:majority write concern errors are retryable.
-	if _, ok := stderrors.AsType[*mongo.WriteConcernError](err); ok {
+	if _, ok := stderrors.AsType[mongo.WriteConcernError](err); ok {
 		return true
 	}
 
@@ -170,7 +171,27 @@ func IsTransientError(err error) bool {
 		return true
 	}
 
+	if isStaleReadConcernError(err) {
+		return true
+	}
+
 	return false
+}
+
+// This happens when a read concern has a stale `afterClusterTime` (i.e.,
+// a session’s operation time) but the request didn’t include a $clusterTime
+// (session cluster time). It indicates that the `afterClusterTime` was ahead
+// of the mongod that processed the request. This is probably a delta of a few
+// seconds at most, so it’s retryable.
+func isStaleReadConcernError(err error) bool {
+	codes := mongo.ErrorCodes(err)
+	if len(codes) != 1 {
+		return false
+	}
+
+	return codes[0] == InvalidOptionsErrCode &&
+		errorChainHasMessage(err, "afterClusterTime") &&
+		errorChainHasMessage(err, "clusterTime")
 }
 
 // errorChainHasMessage checks if any error in the chain has the exact message.
