@@ -369,6 +369,7 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 			logger,
 			suite.srcConnStr,
 			readpref.Primary(),
+			bson.Timestamp{},
 		)
 		require.NoError(t, err)
 
@@ -518,6 +519,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 					topRecordOpt, err := partitions.GetTopRecordID(
 						ctx,
 						coll,
+						bson.Timestamp{},
 					)
 					suite.Require().NoError(err)
 

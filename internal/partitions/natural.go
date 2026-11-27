@@ -40,8 +40,9 @@ func CreateSingleNaturalOrderPartition(
 	srcColl *mongo.Collection,
 	srcURI string,
 	readPref *readpref.ReadPref,
+	afterClusterTime bson.Timestamp,
 ) (option.Option[Partition], error) {
-	_, hostnameAndPort, topIDOpt, err := getDirectCollAndTopID(ctx, srcColl, srcURI, readPref)
+	_, hostnameAndPort, topIDOpt, err := getDirectCollAndTopID(ctx, srcColl, srcURI, readPref, afterClusterTime)
 	if err != nil {
 		return option.None[Partition](), err
 	}
@@ -69,6 +70,7 @@ func getDirectCollAndTopID(
 	srcColl *mongo.Collection,
 	srcURI string,
 	readPref *readpref.ReadPref,
+	afterClusterTime bson.Timestamp,
 ) (*mongo.Collection, string, option.Option[bson.RawValue], error) {
 	helloRaw, err := util.GetHelloRaw(
 		ctx,
@@ -95,7 +97,7 @@ func getDirectCollAndTopID(
 
 		// Avoid storing a null upper limit. See architecture
 	// documentation for rationale.
-	topRecordIDOpt, err := GetTopRecordID(ctx, coll)
+	topRecordIDOpt, err := GetTopRecordID(ctx, coll, afterClusterTime)
 	if err != nil {
 		return nil, "", option.None[bson.RawValue](), errors.Wrapf(err, "fetching top record ID")
 	}
@@ -123,6 +125,7 @@ func PartitionCollectionNaturalOrder(
 	subLogger *logger.Logger,
 	srcURI string,
 	readPref *readpref.ReadPref,
+	afterClusterTime bson.Timestamp,
 ) (chan mo.Result[Partition], error) {
 
 	// Time-series bucket collections’ `_id`s are always auto-assigned, which
@@ -138,6 +141,7 @@ func PartitionCollectionNaturalOrder(
 		baseColl,
 		srcURI,
 		readPref,
+		afterClusterTime,
 	)
 	if err != nil {
 		return nil, err
@@ -173,6 +177,7 @@ func PartitionCollectionNaturalOrder(
 		{"$_requestResumeToken", true},
 		{"readConcern", bson.D{
 			{"level", "majority"},
+			{"afterClusterTime", afterClusterTime},
 		}},
 
 		// Discard the actual document. All we want are the resume tokens.
@@ -310,14 +315,25 @@ func PartitionCollectionNaturalOrder(
 func GetTopRecordID(
 	ctx context.Context,
 	coll *mongo.Collection,
+	afterClusterTime bson.Timestamp,
 ) (option.Option[bson.RawValue], error) {
+	sess, err := coll.Database().Client().StartSession(
+		options.Session().SetCausalConsistency(true),
+	)
+	if err != nil {
+		return option.None[bson.RawValue](), errors.Wrap(err, "starting session")
+	}
+
+	sess.AdvanceOperationTime(&afterClusterTime)
+	sctx := mongo.NewSessionContext(ctx, sess)
+
 	cursor, err := coll.
 		Database().
 		Collection(coll.Name(), options.Collection().
 			SetReadConcern(readconcern.Majority()),
 		).
 		Find(
-			ctx,
+			sctx,
 			bson.D{},
 			options.Find().
 				SetSort(bson.D{{"$natural", -1}}).
@@ -334,7 +350,7 @@ func GetTopRecordID(
 	}
 
 	var docs []bson.Raw
-	err = cursor.All(ctx, &docs)
+	err = cursor.All(sctx, &docs)
 	if err != nil {
 		return option.None[bson.RawValue](), errors.Wrap(
 			err,
