@@ -40,9 +40,8 @@ func CreateSingleNaturalOrderPartition(
 	srcColl *mongo.Collection,
 	srcURI string,
 	readPref *readpref.ReadPref,
-	afterClusterTime bson.Timestamp,
 ) (option.Option[Partition], error) {
-	_, hostnameAndPort, topIDOpt, err := getDirectCollAndTopID(ctx, srcColl, srcURI, readPref, afterClusterTime)
+	_, hostnameAndPort, topIDOpt, err := getDirectCollAndTopID(ctx, srcColl, srcURI, readPref)
 	if err != nil {
 		return option.None[Partition](), err
 	}
@@ -70,7 +69,6 @@ func getDirectCollAndTopID(
 	srcColl *mongo.Collection,
 	srcURI string,
 	readPref *readpref.ReadPref,
-	afterClusterTime bson.Timestamp,
 ) (*mongo.Collection, string, option.Option[bson.RawValue], error) {
 	helloRaw, err := util.GetHelloRaw(
 		ctx,
@@ -97,7 +95,7 @@ func getDirectCollAndTopID(
 
 		// Avoid storing a null upper limit. See architecture
 	// documentation for rationale.
-	topRecordIDOpt, err := GetTopRecordID(ctx, coll, afterClusterTime)
+	topRecordIDOpt, err := GetTopRecordID(ctx, coll)
 	if err != nil {
 		return nil, "", option.None[bson.RawValue](), errors.Wrapf(err, "fetching top record ID")
 	}
@@ -125,7 +123,6 @@ func PartitionCollectionNaturalOrder(
 	subLogger *logger.Logger,
 	srcURI string,
 	readPref *readpref.ReadPref,
-	afterClusterTime bson.Timestamp,
 ) (chan mo.Result[Partition], error) {
 
 	// Time-series bucket collections’ `_id`s are always auto-assigned, which
@@ -141,14 +138,12 @@ func PartitionCollectionNaturalOrder(
 		baseColl,
 		srcURI,
 		readPref,
-		afterClusterTime,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	topRecordID, hasDocs := topRecordIDOpt.Get()
-	if !hasDocs {
+	if !topRecordIDOpt.IsSome() {
 		// If the collection is empty then there’s no point in partitioning it.
 		// Any documents created during generation 0 will be rechecked in
 		// generation 1.
@@ -178,7 +173,6 @@ func PartitionCollectionNaturalOrder(
 		{"$_requestResumeToken", true},
 		{"readConcern", bson.D{
 			{"level", "majority"},
-			{"afterClusterTime", afterClusterTime},
 		}},
 
 		// Discard the actual document. All we want are the resume tokens.
@@ -197,6 +191,13 @@ func PartitionCollectionNaturalOrder(
 	if err != nil {
 		return nil, errors.Wrapf(err, "starting session")
 	}
+
+	startedPartitioning := false
+	defer func() {
+		if !startedPartitioning {
+			sess.EndSession(ctx)
+		}
+	}()
 
 	sessCtx := mongo.NewSessionContext(ctx, sess)
 
@@ -226,6 +227,8 @@ func PartitionCollectionNaturalOrder(
 		}
 	}
 
+	startedPartitioning = true
+
 	go func() {
 		defer sess.EndSession(ctx)
 		defer close(pChan)
@@ -233,7 +236,7 @@ func PartitionCollectionNaturalOrder(
 		priorToken := bsontools.ToRawValue(bson.Null{})
 		var err error
 
-		for {
+		for !c.IsFinished() {
 			var curTokenOpt option.Option[bson.Raw]
 			curTokenOpt, err = cursor.GetResumeToken(c)
 			if err != nil {
@@ -241,27 +244,20 @@ func PartitionCollectionNaturalOrder(
 				break
 			}
 
-			var recIDRV bson.RawValue
-
 			curToken, hasToken := curTokenOpt.Get()
-			if hasToken {
-				recIDRV, err = curToken.LookupErr(RecordID)
-				if err != nil {
-					err = errors.Wrapf(err, "reading record ID from resume token (%v)", curToken)
-					break
-				}
-			} else {
-				if !c.IsFinished() {
-					err = errors.New("server omitted resume token from unfinished cursor’s response?!?!")
-					break
-				}
-
-				recIDRV = topRecordID
+			if !hasToken {
+				break
 			}
 
-			// This can happen at the end of a cursor.
+			var recIDRV bson.RawValue
+			recIDRV, err = curToken.LookupErr(RecordID)
+			if err != nil {
+				err = errors.Wrapf(err, "reading record ID from resume token (%v)", curToken)
+				break
+			}
+
 			if recIDRV.Type == bson.TypeNull {
-				recIDRV = topRecordID
+				recIDRV = topRecordIDOpt.MustGetf("got null resume token but have no top record ID?!?")
 			}
 
 			partition := Partition{
@@ -324,31 +320,19 @@ func PartitionCollectionNaturalOrder(
 func GetTopRecordID(
 	ctx context.Context,
 	coll *mongo.Collection,
-	afterClusterTime bson.Timestamp,
 ) (option.Option[bson.RawValue], error) {
-	sess, err := coll.Database().Client().StartSession(
-		options.Session().SetCausalConsistency(true),
-	)
-	if err != nil {
-		return option.None[bson.RawValue](), errors.Wrap(err, "starting session")
-	}
-	defer sess.EndSession(ctx)
-
-	sess.AdvanceOperationTime(&afterClusterTime)
-	sctx := mongo.NewSessionContext(ctx, sess)
-
 	cursor, err := coll.
 		Database().
 		Collection(coll.Name(), options.Collection().
 			SetReadConcern(readconcern.Majority()),
 		).
 		Find(
-			sctx,
+			ctx,
 			bson.D{},
 			options.Find().
 				SetSort(bson.D{{"$natural", -1}}).
 				SetLimit(1).
-				SetProjection(bson.D{{"_id", 0}}).
+				SetProjection(bson.D{{"id", 0}}).
 				SetShowRecordID(true),
 		)
 
@@ -360,7 +344,7 @@ func GetTopRecordID(
 	}
 
 	var docs []bson.Raw
-	err = cursor.All(sctx, &docs)
+	err = cursor.All(ctx, &docs)
 	if err != nil {
 		return option.None[bson.RawValue](), errors.Wrap(
 			err,
