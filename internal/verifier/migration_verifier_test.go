@@ -459,6 +459,7 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	}
 
 	_, err := suite.srcMongoClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
+		bson.D{{"_id", bson.MinKey{}}, {"x", 1}},
 		bson.D{{"_id", nil}},
 		bson.D{{"_id", int32(123)}},
 		bson.D{{"_id", bson.Symbol("oh yeah")}},
@@ -466,6 +467,7 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 	suite.Require().NoError(err)
 
 	_, err = suite.dstMongoClient.Database("keyhole").Collection("dealers").InsertMany(ctx, []any{
+		bson.D{{"_id", bson.MinKey{}}, {"x", 2}},
 		bson.D{{"_id", nil}},
 		bson.D{{"_id", int32(123)}},
 		bson.D{{"_id", "oh yeah"}},
@@ -478,10 +480,18 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 		docsCount, mismatches int
 	}{
 		{
-			label:     "MinKey to int 999",
-			lower:     bsontools.ToRawValue(bson.MinKey{}),
-			upper:     bsontools.ToRawValue(int32(999)),
-			docsCount: 2,
+			label:      "MinKey to int 999",
+			lower:      bsontools.ToRawValue(bson.MinKey{}),
+			upper:      bsontools.ToRawValue(int32(999)),
+			docsCount:  3,
+			mismatches: 1,
+		},
+		{
+			label:      "MinKey to MaxKey",
+			lower:      bsontools.ToRawValue(bson.MinKey{}),
+			upper:      bsontools.ToRawValue(bson.MaxKey{}),
+			docsCount:  4,
+			mismatches: 3,
 		},
 		{
 			label:     "between numeric types",

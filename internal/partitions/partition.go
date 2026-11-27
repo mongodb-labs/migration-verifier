@@ -213,12 +213,14 @@ func getExplicitTypeCheckPredicates(lower, upper bson.RawValue) ([]bson.D, error
 		return nil, errors.Wrapf(err, "getting types above lower bound (%s: %v)", lower.Type, lower)
 	}
 
-	var rangePredicate bson.D
 	var orPredicates []bson.D
 
-	if lower.Type != bson.TypeMinKey {
-		rangePredicate = bson.D{{"_id", bson.D{{"$gte", lower}}}}
-	}
+	// $gte MinKey would match everything, so match MinKey exactly instead.
+	rangePredicate := lo.Ternary(
+		lower.Type == bson.TypeMinKey,
+		bson.D{{"_id", lower}},
+		bson.D{{"_id", bson.D{{"$gte", lower}}}},
+	)
 
 	if upper.Type != bson.TypeMaxKey {
 		typesBelowUpper, typesAboveUpper, err := getTypeBracketExcludedBSONTypes(upper)
@@ -234,11 +236,9 @@ func getExplicitTypeCheckPredicates(lower, upper bson.RawValue) ([]bson.D, error
 			)
 		}
 
-		bothLimitsPredicate := mslices.Compact(
-			mslices.Of(
-				rangePredicate,
-				bson.D{{"_id", bson.D{{"$lte", upper}}}},
-			),
+		bothLimitsPredicate := mslices.Of(
+			rangePredicate,
+			bson.D{{"_id", bson.D{{"$lte", upper}}}},
 		)
 
 		if slices.Contains(typesBelowUpper, lower.Type) {
@@ -262,5 +262,5 @@ func getExplicitTypeCheckPredicates(lower, upper bson.RawValue) ([]bson.D, error
 		)
 	}
 
-	return []bson.D{{{"$or", mslices.Compact(orPredicates)}}}, nil
+	return []bson.D{{{"$or", orPredicates}}}, nil
 }

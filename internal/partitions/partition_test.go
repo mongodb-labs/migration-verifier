@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -142,4 +143,27 @@ func roundTripBSON[T any](t *testing.T, val T) T {
 	require.NoError(t, bson.Unmarshal(raw, &rt))
 
 	return rt
+}
+
+func (suite *UnitTestSuite) TestExplicitTypeCheckPredicates_MinKeyLowerBound() {
+	minKeyPredicate := bson.D{{"_id", bsontools.ToRawValue(bson.MinKey{})}}
+
+	for _, upper := range mslices.Of(
+		bsontools.ToRawValue(bson.MaxKey{}),
+		bsontools.ToRawValue(bson.NewObjectID()),
+	) {
+		predicates, err := getExplicitTypeCheckPredicates(
+			bsontools.ToRawValue(bson.MinKey{}),
+			upper,
+		)
+		suite.Require().NoError(err)
+		suite.Require().Len(predicates, 1)
+		suite.Require().Equal("$or", predicates[0][0].Key)
+
+		suite.Assert().Contains(
+			predicates[0][0].Value,
+			minKeyPredicate,
+			"upper bound %s should match MinKey _id", upper.Type,
+		)
+	}
 }
