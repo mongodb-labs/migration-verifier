@@ -18,12 +18,20 @@ func (suite *UnitTestSuite) TestIsTransientError() {
 	testCases := []testCase{
 		{errors.New("Not transient"), false},
 		{context.Canceled, false},
-		{mongo.WriteConcernError{}, false},
+		{mongo.WriteConcernError{}, true},
 		{mongo.CommandError{Code: 6}, true},
 		{mongo.CommandError{Code: 42}, false},
 		{mongo.CommandError{Code: 175}, true},
 		{mongo.CommandError{Code: 0}, false},
 		{mongo.CommandError{Code: 0, Message: "not master"}, true},
+		{mongo.CommandError{
+			Code:    InvalidOptionsErrCode,
+			Message: "bad options, man!",
+		}, false},
+		{mongo.CommandError{
+			Code:    InvalidOptionsErrCode,
+			Message: "Encountered non-retryable error during query :: caused by :: readConcern afterClusterTime value must not be greater than the current clusterTime. Requested clusterTime: { ts: Timestamp(1895806844, 0) }; current clusterTime: { ts: Timestamp(1795806954, 1) }",
+		}, true},
 		{mongo.CommandError{Code: 1234567, Labels: []string{"NetworkError"}}, true},
 		{mongo.CommandError{Code: 1234567, Labels: []string{"SomeNotTransientThing"}}, false},
 		{mongo.CommandError{Code: 1234567, Labels: []string{"SomeNotTransientThing", "NetworkError"}}, true},

@@ -189,9 +189,17 @@ func isStaleReadConcernError(err error) bool {
 		return false
 	}
 
-	return codes[0] == InvalidOptionsErrCode &&
-		errorChainHasMessage(err, "afterClusterTime") &&
-		errorChainHasMessage(err, "clusterTime")
+	if codes[0] != InvalidOptionsErrCode {
+		return false
+	}
+
+	srvErr, ok := stderrors.AsType[mongo.ServerError](err)
+	if !ok {
+		return false
+	}
+
+	return srvErr.HasErrorMessage("afterClusterTime") &&
+		srvErr.HasErrorMessage("clusterTime")
 }
 
 // errorChainHasMessage checks if any error in the chain has the exact message.
