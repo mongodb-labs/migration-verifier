@@ -1207,9 +1207,6 @@ func (verifier *Verifier) compareCollectionSpecifications(
 		return nil, false, fmt.Errorf("unrecognized collection type (spec: %+v)", srcSpec)
 	}
 
-	// Do not compare data between capped and uncapped collections because the partitioning is different.
-	canCompareData = canCompareData && srcSpec.Options.Lookup("capped").Equal(dstSpec.Options.Lookup("capped"))
-
 	return results, canCompareData, nil
 }
 
@@ -1418,12 +1415,11 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 
 	var collBytes types.ByteCount
 	var docsCount types.DocumentCount
-	var isCapped bool
 
 	if hasSrcSpec && srcSpec.Type == "collection" {
 		// We set the collection size & doc count in the task up-front so that
 		// logs can immediately show progress against the total data size.
-		collBytes, docsCount, isCapped, err = verifier.setCollectionSizeInTask(ctx, task, srcColl)
+		collBytes, docsCount, err = verifier.setCollectionSizeInTask(ctx, task, srcColl)
 		if err != nil {
 			return errors.Wrapf(err, "fetching & persisting collection size")
 		}
@@ -1558,7 +1554,6 @@ func (verifier *Verifier) verifyMetadataAndPartitionCollection(
 			workerNum,
 			collBytes,
 			docsCount,
-			isCapped,
 		)
 		if err != nil {
 			return errors.Wrapf(err, "partitioning collection")
@@ -1576,7 +1571,7 @@ func (verifier *Verifier) setCollectionSizeInTask(
 	ctx context.Context,
 	task *tasks.Task,
 	srcColl *mongo.Collection,
-) (types.ByteCount, types.DocumentCount, bool, error) {
+) (types.ByteCount, types.DocumentCount, error) {
 	lo.Assertf(
 		task.Type == tasks.VerifyCollection,
 		"task %v type should be %#q but is %#q",
@@ -1592,13 +1587,13 @@ func (verifier *Verifier) setCollectionSizeInTask(
 		task.Status,
 	)
 
-	collBytes, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
+	collBytes, docsCount, err := partitions.GetSizeAndDocumentCount(
 		ctx,
 		verifier.logger,
 		srcColl,
 	)
 	if err != nil {
-		return 0, 0, false, errors.Wrapf(err, "getting %#q’s size", FullName(srcColl))
+		return 0, 0, errors.Wrapf(err, "getting %#q’s size", FullName(srcColl))
 	}
 
 	task.DocumentsCount = docsCount
@@ -1617,7 +1612,7 @@ func (verifier *Verifier) setCollectionSizeInTask(
 			Msg("Failed to update verification task with collection stats.")
 	}
 
-	return collBytes, docsCount, isCapped, nil
+	return collBytes, docsCount, nil
 }
 
 func (verifier *Verifier) partitionCollection(
@@ -1626,7 +1621,6 @@ func (verifier *Verifier) partitionCollection(
 	workerNum int,
 	collBytes types.ByteCount,
 	docsCount types.DocumentCount,
-	isCapped bool,
 ) error {
 	lo.Assertf(
 		task.Generation == 0,
@@ -1670,8 +1664,7 @@ func (verifier *Verifier) partitionCollection(
 				srcColl.Database().Name(),
 				srcColl.Name(),
 			},
-			Upper:    bsontools.ToRawValue(bson.MaxKey{}),
-			IsCapped: isCapped,
+			Upper: bsontools.ToRawValue(bson.MaxKey{}),
 		}
 
 		_, err = verifier.InsertPartitionVerificationTask(

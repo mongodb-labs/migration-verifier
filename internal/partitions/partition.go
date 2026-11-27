@@ -56,10 +56,6 @@ type Partition struct {
 	// Unlike the lower bound, this always exists, even in natural partitioning.
 	Upper bson.RawValue `bson:"upperBound"`
 
-	// Set to true if the partition is for a capped collection. If so, this partition's
-	// upper/lower bounds should be set to the minKey and maxKey of the collection.
-	IsCapped bool `bson:"isCapped"`
-
 	Natural bool
 
 	// The hostname to use when querying in $natural order.
@@ -124,29 +120,22 @@ func (p *Partition) GetQueryParameters(clusterInfo *util.ClusterInfo, filterAndP
 		return params, nil
 	}
 
-	if p.IsCapped {
-		// For capped collections, sort the documents by their natural order. We deliberately
-		// exclude the ID filter to ensure that documents are inserted in the correct order.
-		params.sortField = option.Some("$natural")
-	} else {
-		// For non-capped collections, sort by _id to minimize the amount of time
-		// that a given document spends cached in memory.
-		params.sortField = option.Some("_id")
+	// Sort by _id to minimize the amount of time that a given document
+	// spends cached in memory.
+	params.sortField = option.Some("_id")
 
-		newPredicates, err := FilterIdBounds(clusterInfo, p.Key.Lower, p.Upper)
-		if err != nil {
-			return PartitionQueryParameters{}, err
-		}
-
-		// For non-capped collections, the cursor should use the ID filter and the _id index.
-		// Get the bounded query filter from the partition to be used in the Find command.
-		filterAndPredicates = append(
-			slices.Clone(filterAndPredicates),
-			lo.ToAnySlice(newPredicates)...,
-		)
-
-		params.hint = option.Some(bson.D{{"_id", 1}})
+	newPredicates, err := FilterIdBounds(clusterInfo, p.Key.Lower, p.Upper)
+	if err != nil {
+		return PartitionQueryParameters{}, err
 	}
+
+	// The cursor should use the ID filter and the _id index.
+	filterAndPredicates = append(
+		slices.Clone(filterAndPredicates),
+		lo.ToAnySlice(newPredicates)...,
+	)
+
+	params.hint = option.Some(bson.D{{"_id", 1}})
 
 	if len(filterAndPredicates) > 0 {
 		params.filter = option.Some(bson.D{{"$and", filterAndPredicates}})
@@ -159,8 +148,6 @@ func (p *Partition) GetQueryParameters(clusterInfo *util.ClusterInfo, filterAndP
 // effect a non-type-bracketed query for all values between the given boundaries
 // (inclusive). The query will NOT require fetching full documents.
 func FilterIdBounds(clusterInfo *util.ClusterInfo, lower, upper bson.RawValue) ([]bson.D, error) {
-	// For non-capped collections, the cursor should use the ID filter and the _id index.
-	// Get the bounded query filter from the partition to be used in the Find command.
 	useExprFind := true
 
 	if clusterInfo != nil {
