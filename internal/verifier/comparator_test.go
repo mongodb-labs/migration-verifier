@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -210,6 +211,119 @@ func TestCompareDocsFromChannels_NaturalBatchCatchUp(t *testing.T) {
 				}),
 				"each unmatched document is reported once",
 			)
+		})
+	}
+}
+
+// If one reader stops partway through a natural batch (e.g., because it
+// failed) while the comparator is waiting for that reader to finish the
+// batch that the other reader already finished, the comparator returns
+// rather than waiting forever.
+func TestCompareDocsFromChannels_ReaderStopsMidBatch(t *testing.T) {
+	verifier := NewVerifier(VerifierSettings{}, "stderr")
+	verifier.docCompareMethod = compare.Binary
+
+	task := tasks.Task{
+		PrimaryKey:  bson.NewObjectID(),
+		QueryFilter: tasks.QueryFilter{Namespace: "testdb.testns"},
+	}
+
+	docs := func(id int32) compare.ToComparatorMsg {
+		return compare.DocsToComparatorMsg{
+			compare.NewDocWithTSFromPool(
+				testutil.MustMarshal(bson.D{{"_id", id}}),
+				bson.Timestamp{T: 1},
+			),
+		}
+	}
+
+	// This reader finishes batch 0, then tries to send batch 1.
+	//
+	// The messages hold pooled documents, which the comparator releases, so
+	// each subtest needs its own.
+	finishingReader := func() []compare.ToComparatorMsg {
+		return []compare.ToComparatorMsg{
+			docs(1),
+			compare.BatchDoneComparatorMsg(0),
+			docs(2),
+			compare.BatchDoneComparatorMsg(1),
+		}
+	}
+
+	// This reader stops before it finishes batch 0.
+	stoppingReader := func() []compare.ToComparatorMsg {
+		return []compare.ToComparatorMsg{
+			docs(1),
+		}
+	}
+
+	cases := []struct {
+		label    string
+		src, dst func() []compare.ToComparatorMsg
+	}{
+		{
+			label: "destination stops",
+			src:   finishingReader,
+			dst:   stoppingReader,
+		},
+		{
+			label: "source stops",
+			src:   stoppingReader,
+			dst:   finishingReader,
+		},
+	}
+
+	for _, curCase := range cases {
+		t.Run(curCase.label, func(t *testing.T) {
+			// A stall fails the test quickly instead of hanging it.
+			stallErr := errors.New("comparison stalled")
+			ctx, cancel := contextplus.WithTimeoutCause(
+				t.Context(),
+				30*time.Second,
+				stallErr,
+			)
+			defer cancel()
+
+			// Unbuffered, as in production.
+			srcChannel := make(chan compare.ToComparatorMsg)
+			dstChannel := make(chan compare.ToComparatorMsg)
+
+			eg, egCtx := contextplus.ErrGroup(ctx)
+
+			sendAll := func(ch chan<- compare.ToComparatorMsg, msgs []compare.ToComparatorMsg) func() error {
+				return func() error {
+					defer close(ch)
+
+					for _, msg := range msgs {
+						if err := chanutil.WriteWithDoneCheck(egCtx, ch, msg); err != nil {
+							return err
+						}
+					}
+
+					return nil
+				}
+			}
+
+			eg.Go(sendAll(srcChannel, curCase.src()))
+			eg.Go(sendAll(dstChannel, curCase.dst()))
+
+			_, err := verifier.compareDocsFromChannels(
+				ctx,
+				0,
+				&testutil.MockSuccessNotifier{T: t},
+				&task,
+				srcChannel,
+				dstChannel,
+				make(chan DocCompareReport, 10),
+			)
+			require.NoError(t, err, "comparison should end")
+			require.NoError(t, context.Cause(ctx), "comparison should end before the timeout")
+
+			// The finishing reader is still trying to send its next batch,
+			// which nothing will read. In production the retryer cancels
+			// the context; we do likewise.
+			cancel()
+			assert.ErrorIs(t, eg.Wait(), context.Canceled)
 		})
 	}
 }

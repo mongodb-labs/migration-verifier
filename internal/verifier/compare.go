@@ -461,8 +461,9 @@ func (verifier *Verifier) getFetcherChannelsAndCallbacksForNaturalPartition(
 				)
 			}
 
-			err = chanutil.WriteWithDoneCheck(
+			err = compare.SendToComparator(
 				sctx,
+				readerMetrics,
 				dstToCompareChannel,
 				// Echo the source’s batch number so the comparator can check
 				// that both sides finished the same batch.
