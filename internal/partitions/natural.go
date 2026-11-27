@@ -343,7 +343,10 @@ func GetTopRecordID(
 	}
 	defer sess.EndSession(ctx)
 
-	sess.AdvanceOperationTime(&afterClusterTime)
+	if err := sess.AdvanceOperationTime(&afterClusterTime); err != nil {
+		return option.None[bson.RawValue](), errors.Wrap(err, "advancing operation time")
+	}
+
 	sctx := mongo.NewSessionContext(ctx, sess)
 
 	cursor, err := coll.
