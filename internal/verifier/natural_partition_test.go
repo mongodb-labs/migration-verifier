@@ -183,13 +183,15 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 					suite.T().Skip("clustered requires v6+ source")
 				}
 
+				// Each subtest needs its own metadata. Otherwise this
+				// verifier’s change readers would resume from a prior
+				// subtest’s persisted resume token and see that subtest’s
+				// DDL events.
+				suite.Require().NoError(suite.metaMongoClient.Database(metaDBName).Drop(ctx))
+
 				verifier := suite.BuildVerifier()
 				verifier.SetPartitioningScheme(partitions.SchemeNatural)
 				verifier.SetPartitionSizeMB(1)
-
-				suite.Require().NoError(verifier.startChangeHandling(ctx))
-
-				defer suite.Assert().NoError(verifier.verificationTaskCollection().Drop(ctx))
 
 				suite.Require().NoError(coll.Drop(ctx))
 
@@ -211,6 +213,13 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 
 				_, err := coll.InsertMany(ctx, docs)
 				require.NoError(t, err)
+
+				// Start change handling only after the above DDL so that
+				// the change readers don’t see it. The subtest’s context
+				// stops the change readers when the subtest ends, so they
+				// don’t see later subtests’ DDL or persist resume tokens
+				// into later subtests’ metadata.
+				suite.Require().NoError(verifier.startChangeHandling(suite.T().Context()))
 
 				task := &tasks.Task{
 					PrimaryKey: bson.NewObjectID(),
