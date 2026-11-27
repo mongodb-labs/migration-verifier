@@ -213,76 +213,48 @@ func getExplicitTypeCheckPredicates(lower, upper bson.RawValue) ([]bson.D, error
 		return nil, errors.Wrapf(err, "getting types above lower bound (%s: %v)", lower.Type, lower)
 	}
 
-	var betweenTypes []bson.Type
-
-	var orPredicates []bson.D
-
-	// $gte MinKey would match everything, so match MinKey exactly instead.
-	lowerPredicate := lo.Ternary(
-		lower.Type == bson.TypeMinKey,
-		bson.D{{"_id", lower}},
-		bson.D{{"_id", bson.D{{"$gte", lower}}}},
-	)
-
-	if upper.Type == bson.TypeMaxKey {
-		// Include all types above the lower bound.
-		// So our query will look like:
-		// - $gte lower (and same type bracket) OR
-		// - $type above lower
-
-		betweenTypes = typesAboveLower
-		orPredicates = mslices.Of(lowerPredicate)
-	} else {
-		typesBelowUpper, typesAboveUpper, err := getTypeBracketExcludedBSONTypes(upper)
-		if err != nil {
-			return nil, errors.Wrapf(err, "getting types around upper bound (%s: %v)", upper.Type, upper)
-		}
-
-		// Three possible scenarios for the type brackets:
-		// A. The lower type is above the upper type. (error)
-		// B. The lower type is below the upper type.
-		// C. The lower type is within the upper type bracket.
-		// --------------------------------------------------
-
-		if slices.Contains(typesAboveUpper, lower.Type) {
-			// Scenario A: failure
-			return nil, fmt.Errorf(
-				"lower bound’s BSON type (%s) sorts later than upper bound’s (%s)",
-				lower.Type,
-				upper.Type,
-			)
-		}
-
-		bothLimitsPredicate := mslices.Of(
-			lowerPredicate,
-			bson.D{{"_id", bson.D{{"$lte", upper}}}},
-		)
-
-		if slices.Contains(typesBelowUpper, lower.Type) {
-			// Scenario B: lower type is below the upper type.
-			// Here our query looks like:
-			// - $gte lower (and same type bracket) OR
-			// - $lte upper (and same type bracket) OR
-			// - $type between types
-
-			betweenTypes = lo.Intersect(typesAboveLower, typesBelowUpper)
-			orPredicates = bothLimitsPredicate
-		} else {
-			// Scenario C: lower & upper types share a type bracket.
-			// This is the easy one:
-			// - $gte lower (and same type bracket) AND
-			// - $lte upper (and same type bracket)
-
-			return bothLimitsPredicate, nil
-		}
+	typesBelowUpper, typesAboveUpper, err := getTypeBracketExcludedBSONTypes(upper)
+	if err != nil {
+		return nil, errors.Wrapf(err, "getting types below upper bound (%s: %v)", upper.Type, upper)
 	}
 
-	if len(betweenTypes) > 0 {
+	limitPredicates := mslices.Of(
+		boundPredicate("$gte", lower),
+		boundPredicate("$lte", upper),
+	)
+
+	switch {
+	case slices.Contains(typesAboveUpper, lower.Type):
+		return nil, fmt.Errorf(
+			"lower bound’s BSON type (%s) sorts later than upper bound’s (%s)",
+			lower.Type,
+			upper.Type,
+		)
+	case !slices.Contains(typesBelowUpper, lower.Type):
+		// The bounds share a type bracket, so AND them.
+		return limitPredicates, nil
+	}
+
+	// The bounds are in different type brackets. Bracketing confines each
+	// limit to its own bracket, so OR them, plus any brackets in between.
+	orPredicates := limitPredicates
+	if between := lo.Intersect(typesAboveLower, typesBelowUpper); len(between) > 0 {
 		orPredicates = append(
 			orPredicates,
-			bson.D{{"_id", bson.D{{"$type", typesToStrings(betweenTypes)}}}},
+			bson.D{{"_id", bson.D{{"$type", typesToStrings(between)}}}},
 		)
 	}
 
 	return []bson.D{{{"$or", orPredicates}}}, nil
+}
+
+// boundPredicate returns {_id: {<op>: bound}}, except for MinKey & MaxKey.
+// Comparisons with those aren’t type-bracketed and so would match every _id;
+// for those we match the bound itself instead.
+func boundPredicate(op string, bound bson.RawValue) bson.D {
+	if bound.Type == bson.TypeMinKey || bound.Type == bson.TypeMaxKey {
+		return bson.D{{"_id", bound}}
+	}
+
+	return bson.D{{"_id", bson.D{{op, bound}}}}
 }

@@ -463,6 +463,7 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 		bson.D{{"_id", nil}},
 		bson.D{{"_id", int32(123)}},
 		bson.D{{"_id", bson.Symbol("oh yeah")}},
+		bson.D{{"_id", bson.MaxKey{}}, {"x", 1}},
 	})
 	suite.Require().NoError(err)
 
@@ -471,6 +472,7 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 		bson.D{{"_id", nil}},
 		bson.D{{"_id", int32(123)}},
 		bson.D{{"_id", "oh yeah"}},
+		bson.D{{"_id", bson.MaxKey{}}, {"x", 2}},
 	})
 	suite.Require().NoError(err)
 
@@ -490,8 +492,8 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 			label:      "MinKey to MaxKey",
 			lower:      bsontools.ToRawValue(bson.MinKey{}),
 			upper:      bsontools.ToRawValue(bson.MaxKey{}),
-			docsCount:  4,
-			mismatches: 3,
+			docsCount:  5,
+			mismatches: 4,
 		},
 		{
 			label:     "between numeric types",
@@ -522,15 +524,15 @@ func (suite *IntegrationTestSuite) TestTypesBetweenBoundaries() {
 			label:      "0 to MaxKey",
 			lower:      bsontools.ToRawValue(0),
 			upper:      bsontools.ToRawValue(bson.MaxKey{}),
-			docsCount:  2,
-			mismatches: 2,
+			docsCount:  3,
+			mismatches: 3,
 		},
 		{
 			label:      "long 999 to MaxKey",
 			lower:      bsontools.ToRawValue(int64(999)),
 			upper:      bsontools.ToRawValue(bson.MaxKey{}),
-			docsCount:  1,
-			mismatches: 2,
+			docsCount:  2,
+			mismatches: 3,
 		},
 	}
 
