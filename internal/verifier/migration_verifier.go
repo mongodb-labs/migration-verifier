@@ -1665,14 +1665,23 @@ func (verifier *Verifier) partitionCollection(
 
 	idealNumPartitions := util.DivideToF64(collBytes, verifier.partitionSizeInBytes)
 
-	if idealNumPartitions <= 1 {
+	// A capped collection’s partitions are read in natural order, without
+	// _id bounds (see partitions.Partition.GetQueryParameters), so each
+	// partition would compare the entire collection. Hence a capped
+	// collection always gets a single partition.
+	if isCapped || idealNumPartitions <= 1 {
 		verifier.logger.Debug().
 			Any("task", task.PrimaryKey).
 			Str("namespace", FullName(srcColl)).
 			Int64("documentsCount", int64(docsCount)).
 			Int64("collectionBytes", int64(collBytes)).
 			Int64("targetPartitionBytes", int64(verifier.partitionSizeInBytes)).
-			Msg("Collection is small enough not to need partitioning.")
+			Bool("isCapped", isCapped).
+			Msg(lo.Ternary(
+				isCapped,
+				"Collection is capped, so it gets a single partition.",
+				"Collection is small enough not to need partitioning.",
+			))
 
 		partition := partitions.Partition{
 			Key: partitions.PartitionKey{
