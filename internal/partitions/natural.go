@@ -112,7 +112,9 @@ func getDirectCollAndTopID(
 // collection in natural order.
 //
 // Callers should parse the Partition structs from the returned channel.
-// Each Partition gets a dedicated task.
+// Each Partition gets a dedicated task. The channel is closed once all
+// partitions are sent. If the collection is empty, the returned channel
+// is already closed.
 //
 // NB: This ignores document filtering because we’re doing a collection
 // scan anyway later on to compare the documents.
@@ -143,14 +145,21 @@ func PartitionCollectionNaturalOrder(
 		return nil, err
 	}
 
+	pChan := make(chan mo.Result[Partition])
+
 	if !topRecordIDOpt.IsSome() {
 		// If the collection is empty then there’s no point in partitioning it.
 		// Any documents created during generation 0 will be rechecked in
 		// generation 1.
-		return nil, nil
+		//
+		// The caller decided to partition this collection based on its
+		// stats, which can disagree with what we just read (e.g., if
+		// documents were deleted in the interim, or if fast-count is
+		// inaccurate). So we return a closed channel rather than nil:
+		// reading from a nil channel would block forever.
+		close(pChan)
+		return pChan, nil
 	}
-
-	pChan := make(chan mo.Result[Partition])
 
 	collSizeInBytes, docCount, _, err := GetSizeAndDocumentCount(ctx, subLogger, coll)
 	if err != nil {

@@ -8,7 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/10gen/migration-verifier/chanutil"
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/util"
@@ -22,6 +24,7 @@ import (
 	"github.com/mongodb-labs/migration-tools/option"
 	"github.com/rs/zerolog"
 	"github.com/samber/lo"
+	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -447,6 +450,42 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 			)
 		}
 	}
+}
+
+// This ensures that natural partitioning of an empty collection yields no
+// partitions without blocking. Callers may partition a collection whose
+// stats claim it is nonempty, so this must work even though it’s
+// usually avoided.
+func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder_Empty() {
+	srcVersion := suite.getSourceReplsetVersion()
+	if why := mmongo.WhyFindCannotResume([2]int(srcVersion[:])); why != nil {
+		suite.T().Skip(why.Error())
+	}
+
+	t := suite.T()
+	ctx := t.Context()
+
+	logger, _ := getLoggerAndWriter("stdout")
+
+	db := suite.srcMongoClient.Database(suite.DBNameForTest())
+	require.NoError(t, db.CreateCollection(ctx, "c"))
+
+	pChan, err := partitions.PartitionCollectionNaturalOrder(
+		ctx,
+		db.Collection("c"),
+		100_000,
+		logger,
+		suite.srcConnStr,
+		readpref.Primary(),
+	)
+	require.NoError(t, err)
+
+	readCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+
+	resultOpt, err := chanutil.ReadWithDoneCheck(readCtx, pChan)
+	require.NoError(t, err, "channel should close without blocking")
+	assert.Equal(t, option.None[mo.Result[partitions.Partition]](), resultOpt, "no partitions")
 }
 
 func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
