@@ -222,7 +222,9 @@ func getExplicitTypeCheckPredicates(lower, upper bson.RawValue) ([]bson.D, error
 		bson.D{{"_id", bson.D{{"$gte", lower}}}},
 	)
 
-	if upper.Type != bson.TypeMaxKey {
+	if upper.Type == bson.TypeMaxKey {
+		orPredicates = mslices.Of(rangePredicate)
+	} else {
 		typesBelowUpper, typesAboveUpper, err := getTypeBracketExcludedBSONTypes(upper)
 		if err != nil {
 			return nil, errors.Wrapf(err, "getting types around upper bound (%s: %v)", upper.Type, upper)
@@ -251,8 +253,6 @@ func getExplicitTypeCheckPredicates(lower, upper bson.RawValue) ([]bson.D, error
 			// If the limits sort together, then we AND them together.
 			return bothLimitsPredicate, nil
 		}
-	} else {
-		orPredicates = mslices.Of(rangePredicate)
 	}
 
 	if len(betweenTypes) > 0 {
