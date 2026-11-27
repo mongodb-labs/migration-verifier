@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/10gen/migration-verifier/internal/util"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/mongodb-labs/migration-tools/bsontools"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -142,4 +143,37 @@ func roundTripBSON[T any](t *testing.T, val T) T {
 	require.NoError(t, bson.Unmarshal(raw, &rt))
 
 	return rt
+}
+
+func (suite *UnitTestSuite) TestExplicitTypeCheckPredicates_MinKeyMaxKey() {
+	minKey := bsontools.ToRawValue(bson.MinKey{})
+	maxKey := bsontools.ToRawValue(bson.MaxKey{})
+	oid := bsontools.ToRawValue(bson.NewObjectID())
+
+	cases := []struct {
+		label        string
+		lower, upper bson.RawValue
+		expected     []bson.D
+	}{
+		{"MinKey to ObjectID", minKey, oid, mslices.Of(bson.D{{"_id", minKey}})},
+		{"ObjectID to MaxKey", oid, maxKey, mslices.Of(bson.D{{"_id", maxKey}})},
+		{
+			"MinKey to MaxKey",
+			minKey,
+			maxKey,
+			mslices.Of(bson.D{{"_id", minKey}}, bson.D{{"_id", maxKey}}),
+		},
+	}
+
+	for _, c := range cases {
+		suite.Run(c.label, func() {
+			predicates, err := getExplicitTypeCheckPredicates(c.lower, c.upper)
+			suite.Require().NoError(err)
+			suite.Require().Len(predicates, 1)
+			suite.Require().Equal("$or", predicates[0][0].Key)
+			suite.Require().IsType([]bson.D{}, predicates[0][0].Value)
+
+			suite.Assert().Subset(predicates[0][0].Value, c.expected)
+		})
+	}
 }
