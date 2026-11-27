@@ -197,7 +197,6 @@ func PartitionCollectionNaturalOrder(
 	if err != nil {
 		return nil, errors.Wrapf(err, "starting session")
 	}
-	defer sess.EndSession(ctx)
 
 	sessCtx := mongo.NewSessionContext(ctx, sess)
 
@@ -228,6 +227,7 @@ func PartitionCollectionNaturalOrder(
 	}
 
 	go func() {
+		defer sess.EndSession(ctx)
 		defer close(pChan)
 
 		priorToken := bsontools.ToRawValue(bson.Null{})
