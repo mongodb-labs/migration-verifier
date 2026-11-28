@@ -27,6 +27,11 @@ type NamespaceStats struct {
 
 	// Number of partitions in the relevant tasks.Status.
 	PartitionsAdded, PartitionsProcessing, PartitionsDone uint32
+
+	// TasksPending is the number of the namespace’s tasks of any type
+	// (e.g., collection, _id-partitioning, and partition tasks) that are
+	// added or processing. The namespace is complete only once this is 0.
+	TasksPending uint32
 }
 
 func perNsStatsPipeline(generation int) mongo.Pipeline {
@@ -51,6 +56,7 @@ func perNsStatsPipeline(generation int) mongo.Pipeline {
 			{"type", bson.D{{"$in", mslices.Of(
 				tasks.VerifyDocuments,
 				tasks.VerifyCollection,
+				tasks.PartitionIDRange,
 			)}}},
 			{"generation", generation},
 		}}},
@@ -58,6 +64,7 @@ func perNsStatsPipeline(generation int) mongo.Pipeline {
 			{"partitionAdded", oneIf(isDocsTaskWithStatus(tasks.Added))},
 			{"partitionProcessing", oneIf(isDocsTaskWithStatus(tasks.Processing))},
 			{"partitionDone", oneIf(isFinishedDocsTask)},
+			{"taskPending", oneIf(expr.In("$status", tasks.Added, tasks.Processing))},
 
 			// If (and only if) a verify-docs task is finished, its
 			// documents are done. In generation 0 we don’t actually
@@ -118,6 +125,7 @@ func perNsStatsPipeline(generation int) mongo.Pipeline {
 			{"partitionsAdded", accum.Sum{"$partitionAdded"}},
 			{"partitionsProcessing", accum.Sum{"$partitionProcessing"}},
 			{"partitionsDone", accum.Sum{"$partitionDone"}},
+			{"tasksPending", accum.Sum{"$taskPending"}},
 		}}},
 		{{"$sort", bson.D{{"_id", 1}}}},
 	}

@@ -375,11 +375,10 @@ func (verifier *Verifier) getComparisonStatistics(
 		comparedBytes += result.BytesCompared
 
 		totalNss++
-		if result.PartitionsDone > 0 {
-			partitionsPending := result.PartitionsAdded + result.PartitionsProcessing
-			if partitionsPending == 0 {
-				completedNss++
-			}
+		// Pending tasks include _id-partitioning tasks, which may yet
+		// create more partitions.
+		if result.PartitionsDone > 0 && result.TasksPending == 0 {
+			completedNss++
 		}
 	}
 
@@ -609,8 +608,7 @@ func (verifier *Verifier) printEndOfGenerationStatistics(
 		comparedDocs += result.DocsCompared
 		comparedBytes += result.BytesCompared
 
-		partitionsPending := result.PartitionsAdded + result.PartitionsProcessing
-		if partitionsPending == 0 {
+		if result.TasksPending == 0 {
 			completedNss++
 		}
 	}

@@ -144,7 +144,7 @@ func (suite *IntegrationTestSuite) TestPartitionEmptyCollection() {
 		},
 	}
 
-	err := verifier.partitionCollection(ctx, task, 0, 0, 0, false)
+	err := verifier.partitionCollection(ctx, task, 0, 0, 0)
 	require.NoError(err, "should partition collection")
 
 	taskOpt, err := verifier.FindNextVerifyTaskAndUpdate(ctx)
@@ -1107,11 +1107,13 @@ func (suite *IntegrationTestSuite) TestGetPersistedNamespaceStatistics_Recheck()
 				Namespace:       "mydb.coll1",
 				TotalDocs:       1,
 				PartitionsAdded: 1,
+				TasksPending:    1,
 			},
 			{
 				Namespace:       "mydb.coll2",
 				TotalDocs:       1,
 				PartitionsAdded: 1,
+				TasksPending:    1,
 			},
 		},
 		stats,
@@ -1146,11 +1148,11 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 
 	suite.Assert().Equal(
 		[]NamespaceStats{
-			{Namespace: task1.QueryFilter.Namespace},
-			{Namespace: task2.QueryFilter.Namespace},
+			{Namespace: task1.QueryFilter.Namespace, TasksPending: 1},
+			{Namespace: task2.QueryFilter.Namespace, TasksPending: 1},
 		},
 		stats,
-		"One stats struct for each namespace",
+		"One stats struct for each namespace; each collection task is pending",
 	)
 
 	// Now add document counts for each namespace.
@@ -1237,12 +1239,14 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 				TotalDocs:       task1.DocumentsCount,
 				TotalBytes:      task1.SourceBytesCount,
 				PartitionsAdded: 2,
+				TasksPending:    2,
 			},
 			{
 				Namespace:       task2.QueryFilter.Namespace,
 				TotalDocs:       task2.DocumentsCount,
 				TotalBytes:      task2.SourceBytesCount,
 				PartitionsAdded: 2,
+				TasksPending:    2,
 			},
 		},
 		stats,
@@ -1266,12 +1270,14 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 				TotalBytes:           task1.SourceBytesCount,
 				PartitionsAdded:      1,
 				PartitionsProcessing: 1,
+				TasksPending:         2,
 			},
 			{
 				Namespace:       task2.QueryFilter.Namespace,
 				TotalDocs:       task2.DocumentsCount,
 				TotalBytes:      task2.SourceBytesCount,
 				PartitionsAdded: 2,
+				TasksPending:    2,
 			},
 		},
 		stats,
@@ -1305,6 +1311,7 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 				TotalBytes:           task1.SourceBytesCount,
 				PartitionsAdded:      1,
 				PartitionsProcessing: 1,
+				TasksPending:         2,
 			},
 			{
 				Namespace:      task2.QueryFilter.Namespace,
@@ -1318,6 +1325,52 @@ func (suite *IntegrationTestSuite) TestGetNamespaceStatistics_Gen0() {
 		stats,
 		"Stats after one namespace is finished",
 	)
+
+	compareStats, err := verifier.getComparisonStatistics(ctx, verifier.generation, false)
+	suite.Require().NoError(err)
+	suite.Assert().EqualValues(1, compareStats.completedNss, "finished namespace should be complete")
+
+	// A pending _id-partitioning task may yet create more partitions, so
+	// its namespace isn’t complete even if all of its existing partitions
+	// are done. The partitioning task shouldn’t affect partition, document,
+	// or byte counts.
+	suite.Require().NoError(
+		verifier.ensurePartitionIDRangeTask(
+			ctx,
+			&partitions.Partition{
+				Ns: &partitions.Namespace{DB: "mydb", Coll: "coll2"},
+				Key: partitions.PartitionKey{
+					Lower: bsontools.ToRawValue(bson.MinKey{}),
+				},
+				Upper: bsontools.ToRawValue(bson.MaxKey{}),
+			},
+			nil,
+			"faux.dstnamespace",
+		),
+	)
+
+	stats, err = verifier.GetPersistedNamespaceStatistics(ctx, verifier.generation)
+	suite.Require().NoError(err)
+
+	if suite.Assert().Len(stats, 2) {
+		suite.Assert().Equal(
+			NamespaceStats{
+				Namespace:      task2.QueryFilter.Namespace,
+				TotalDocs:      task2.DocumentsCount,
+				TotalBytes:     task2.SourceBytesCount,
+				PartitionsDone: 2,
+				DocsCompared:   task2.DocumentsCount,
+				BytesCompared:  task2.SourceBytesCount,
+				TasksPending:   1,
+			},
+			stats[1],
+			"Stats with a pending _id-partitioning task",
+		)
+	}
+
+	compareStats, err = verifier.getComparisonStatistics(ctx, verifier.generation, false)
+	suite.Require().NoError(err)
+	suite.Assert().Zero(compareStats.completedNss, "namespace with pending partitioning shouldn’t be complete")
 }
 
 func (suite *IntegrationTestSuite) TestFailedVerificationTaskInsertions() {
@@ -1985,7 +2038,10 @@ func (suite *IntegrationTestSuite) TestVerifierCompareMetadata() {
 	suite.Require().NoError(
 		verifier.verifyMetadataAndPartitionCollection(ctx, 1, task),
 	)
-	suite.Equal(tasks.Failed, task.Status)
+
+	// Cappedness doesn’t affect partitioning, so the data is still compared.
+	suite.Equal(tasks.MetadataMismatch, task.Status)
+
 	// Capped and size should differ
 	var wrongFields []string
 

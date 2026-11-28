@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/mslices"
 	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
@@ -19,8 +20,11 @@ var defaultTaskUpdate = bson.M{
 // - If the primary task is not complete: delete all non-primary tasks. Done!
 // - Otherwise:
 //   - For each in-progress collection-metadata task:
-//     -- if generation==0, delete all doc-verification tasks for that namespace
+//     -- if generation==0, delete all doc-verification and
+//     _id-range-partitioning tasks for that namespace
 //     -- reset the metadata task
+//   - For each in-progress _id-range-partitioning task:
+//     -- reset the task (It will resume from its latest partition.)
 //   - For each in-progress process-recheck-queue task:
 //     -- delete all doc-verification tasks for that generation
 //     -- reset the task
@@ -41,6 +45,11 @@ func (verifier *Verifier) ResetInProgressTasks(ctx context.Context) error {
 	err = verifier.resetCollectionTasksIfNeeded(ctx)
 	if err != nil {
 		return errors.Wrap(err, "reset collection tasks")
+	}
+
+	err = verifier.resetPartitionIDRangeTasksIfNeeded(ctx)
+	if err != nil {
+		return errors.Wrapf(err, "reset %#q tasks", tasks.PartitionIDRange)
 	}
 
 	err = verifier.resetProcessRecheckQueueTasksIfNeeded(ctx)
@@ -191,15 +200,17 @@ func (verifier *Verifier) resetCollectionTasksIfNeeded(ctx context.Context) erro
 
 	for _, task := range incompleteCollTasks {
 		if task.Generation == 0 {
+			taskTypes := mslices.Of(tasks.VerifyDocuments, tasks.PartitionIDRange)
+
 			_, err := taskColl.DeleteMany(
 				ctx,
 				bson.M{
-					"type":                   tasks.VerifyDocuments,
+					"type":                   bson.M{"$in": taskTypes},
 					"query_filter.namespace": task.QueryFilter.Namespace,
 				},
 			)
 			if err != nil {
-				return errors.Wrapf(err, "delete namespace %#q's %#q tasks", task.QueryFilter.Namespace, tasks.VerifyDocuments)
+				return errors.Wrapf(err, "delete namespace %#q's %#q tasks", task.QueryFilter.Namespace, taskTypes)
 			}
 		}
 
@@ -213,6 +224,30 @@ func (verifier *Verifier) resetCollectionTasksIfNeeded(ctx context.Context) erro
 		if err != nil {
 			return errors.Wrapf(err, "reset namespace %#q's %#q task", task.QueryFilter.Namespace, tasks.VerifyCollection)
 		}
+	}
+
+	return nil
+}
+
+func (verifier *Verifier) resetPartitionIDRangeTasksIfNeeded(ctx context.Context) error {
+	taskColl := verifier.verificationTaskCollection()
+
+	result, err := taskColl.UpdateMany(
+		ctx,
+		bson.M{
+			"type":   tasks.PartitionIDRange,
+			"status": tasks.Processing,
+		},
+		defaultTaskUpdate,
+	)
+	if err != nil {
+		return errors.Wrapf(err, "failed to reset in-progress %#q tasks", tasks.PartitionIDRange)
+	}
+
+	if result.ModifiedCount > 0 {
+		verifier.logger.Info().
+			Int64("count", result.ModifiedCount).
+			Msg("Previous verifier run left _id-partitioning task(s) pending. They will resume from their latest partitions.")
 	}
 
 	return nil

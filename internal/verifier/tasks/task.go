@@ -52,12 +52,19 @@ const (
 	// `Primary` is excluded from this ordering requirement.
 	// --------------------------------------------------
 
+	// A partitionIDRange task samples a range of _id values and inserts
+	// verify-documents tasks for that range. These exist only in generation
+	// 0. They sort first so that workers create document-verification tasks
+	// as quickly as possible.
+	PartitionIDRange Type = "partitionIDRange"
+
 	// A processRecheckQueue task converts enqueued rechecks into new
 	// document-recheck tasks.
 	ProcessRecheckQueue Type = "processRecheckQueue"
 
 	// A verifyCollection task verifies collection metadata
-	// and, in generation 0, inserts verify-documents tasks for _id ranges.
+	// and, in generation 0, inserts either verify-documents tasks or
+	// partitionIDRange tasks.
 	VerifyCollection Type = "verifyCollection"
 
 	// The “workhorse” task type: verify a partition of documents.
@@ -108,6 +115,10 @@ type Task struct {
 
 	// DstTimestamp is like SrcChangeOpTime but for the destination.
 	DstTimestamp option.Option[bson.Timestamp]
+
+	// ParentTaskID is the ID of the partitionIDRange task that created
+	// this (verify-documents) task, if any.
+	ParentTaskID option.Option[bson.ObjectID] `bson:"parent_task_id,omitempty"`
 }
 
 func (t *Task) AugmentLogWithDetails(evt *zerolog.Event) {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
+	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/util"
 	"github.com/10gen/migration-verifier/internal/verifier/compare"
 	"github.com/10gen/migration-verifier/internal/verifier/constants"
@@ -182,11 +183,15 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 					suite.T().Skip("clustered requires v6+ source")
 				}
 
+				// Each subtest needs its own metadata. Otherwise this
+				// verifier’s change readers would resume from a prior
+				// subtest’s persisted resume token and see that subtest’s
+				// DDL events.
+				suite.Require().NoError(suite.metaMongoClient.Database(metaDBName).Drop(ctx))
+
 				verifier := suite.BuildVerifier()
 				verifier.SetPartitioningScheme(partitions.SchemeNatural)
 				verifier.SetPartitionSizeMB(1)
-
-				defer suite.Assert().NoError(verifier.verificationTaskCollection().Drop(ctx))
 
 				suite.Require().NoError(coll.Drop(ctx))
 
@@ -209,6 +214,13 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 				_, err := coll.InsertMany(ctx, docs)
 				require.NoError(t, err)
 
+				// Start change handling only after the above DDL so that
+				// the change readers don’t see it. The subtest’s context
+				// stops the change readers when the subtest ends, so they
+				// don’t see later subtests’ DDL or persist resume tokens
+				// into later subtests’ metadata.
+				suite.Require().NoError(verifier.startChangeHandling(suite.T().Context()))
+
 				task := &tasks.Task{
 					PrimaryKey: bson.NewObjectID(),
 					Type:       tasks.VerifyCollection,
@@ -217,7 +229,7 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 					},
 				}
 
-				collBytes, docsCount, isCapped, err := partitions.GetSizeAndDocumentCount(
+				collBytes, docsCount, err := partitions.GetSizeAndDocumentCount(
 					ctx,
 					verifier.logger,
 					coll,
@@ -230,7 +242,6 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 					0,
 					collBytes,
 					docsCount,
-					isCapped,
 				)
 				suite.Require().NoError(err)
 
@@ -305,6 +316,14 @@ func (suite *IntegrationTestSuite) TestNaturalPartitionSourceE2E() {
 						}
 					}
 				}
+
+				// The partitions together should contain every remaining
+				// document, through the end of the collection.
+				suite.Assert().Equal(
+					len(undeletedDocs),
+					taskDocCounter,
+					"partitions should contain every document",
+				)
 			},
 		)
 	}
@@ -337,7 +356,8 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 
 	for _, clustered := range mslices.Of(true, false) {
 		if srcVersion[0] < 6 && clustered {
-			suite.T().Skip("clustered requires v6+")
+			suite.T().Log("clustered requires v6+")
+			continue
 		}
 
 		suite.Require().NoError(coll.Drop(ctx))
@@ -369,6 +389,7 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 			logger,
 			suite.srcConnStr,
 			readpref.Primary(),
+			bson.Timestamp{1, 0},
 		)
 		require.NoError(t, err)
 
@@ -449,6 +470,126 @@ func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder() {
 	}
 }
 
+// TestPartitionCollectionNaturalOrder_CoversWholeCollection checks that
+// natural partitioning’s last partition extends to the collection’s last
+// record, however much or little the partitioning scan samples.
+func (suite *IntegrationTestSuite) TestPartitionCollectionNaturalOrder_CoversWholeCollection() {
+	srcVersion := suite.getSourceReplsetVersion()
+	if why := mmongo.WhyFindCannotResume([2]int(srcVersion[:])); why != nil {
+		suite.T().Skip(why.Error())
+	}
+
+	ctx := suite.T().Context()
+
+	logger, _ := getLoggerAndWriter("stdout")
+
+	coll := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("c")
+
+	// About 1,000 × 128 bytes = 128 KB.
+	_, err := coll.InsertMany(
+		ctx,
+		lo.RepeatBy(
+			1_000,
+			func(i int) bson.D {
+				return bson.D{{"_id", i}, {"str", strings.Repeat("x", 100)}}
+			},
+		),
+	)
+	suite.Require().NoError(err)
+
+	topRecordID, err := partitions.GetTopRecordID(ctx, coll, bson.Timestamp{T: 1})
+	suite.Require().NoError(err)
+
+	for _, tc := range []struct {
+		label          string
+		partitionBytes int64
+		minPartitions  int
+	}{
+		// The scan samples about 1 in 20 records here, so it’s unlikely
+		// to sample the collection’s last record.
+		{label: "many partitions", partitionBytes: 2_000, minPartitions: 2},
+
+		// The scan samples essentially nothing here, so every partition
+		// bound must come from the scan’s end.
+		{label: "no samples", partitionBytes: 1 << 50, minPartitions: 1},
+	} {
+		suite.Run(tc.label, func() {
+			pChan, err := partitions.PartitionCollectionNaturalOrder(
+				ctx,
+				coll,
+				types.ByteCount(tc.partitionBytes),
+				logger,
+				suite.srcConnStr,
+				readpref.Primary(),
+				bson.Timestamp{T: 1},
+			)
+			suite.Require().NoError(err)
+
+			results := lo.ChannelToSlice(pChan)
+			suite.Require().GreaterOrEqual(len(results), tc.minPartitions, "partitions")
+
+			lastPartition, err := results[len(results)-1].Get()
+			suite.Require().NoError(err)
+
+			suite.Assert().Equal(
+				topRecordID.MustGet(),
+				lastPartition.Upper,
+				"last partition should end at the collection’s last record",
+			)
+		})
+	}
+}
+
+// TestNaturalPartitioning_AfterClusterTime checks that natural partitioning’s
+// reads send the given afterClusterTime. The server rejects an
+// afterClusterTime beyond its own cluster time, so a maximal timestamp must
+// cause an error.
+func (suite *IntegrationTestSuite) TestNaturalPartitioning_AfterClusterTime() {
+	srcVersion := suite.getSourceReplsetVersion()
+	if why := mmongo.WhyFindCannotResume([2]int(srcVersion[:])); why != nil {
+		suite.T().Skip(why.Error())
+	}
+
+	ctx := suite.T().Context()
+
+	logger, _ := getLoggerAndWriter("stdout")
+
+	coll := suite.srcMongoClient.Database(suite.DBNameForTest()).Collection("c")
+
+	_, err := coll.InsertOne(ctx, bson.D{{"_id", 1}})
+	suite.Require().NoError(err)
+
+	maxTimestamp := bson.Timestamp{T: math.MaxUint32, I: math.MaxUint32}
+
+	assertAfterClusterTimeError := func(err error) {
+		suite.Require().Error(err)
+
+		var srvErr mongo.ServerError
+		suite.Require().ErrorAs(err, &srvErr)
+
+		suite.Assert().Contains(srvErr.ErrorCodes(), util.InvalidOptionsErrCode, "error code")
+		suite.Assert().ErrorContains(err, "afterClusterTime")
+	}
+
+	suite.Run("GetTopRecordID", func() {
+		_, err := partitions.GetTopRecordID(ctx, coll, maxTimestamp)
+		assertAfterClusterTimeError(err)
+	})
+
+	suite.Run("PartitionCollectionNaturalOrder", func() {
+		_, err := partitions.PartitionCollectionNaturalOrder(
+			ctx,
+			coll,
+			1,
+			logger,
+			suite.srcConnStr,
+			readpref.Primary(),
+			maxTimestamp,
+		)
+		assertAfterClusterTimeError(err)
+	})
+}
+
 func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 	srcVersion := suite.getSourceReplsetVersion()
 	if why := mmongo.WhyFindCannotResume([2]int(srcVersion[:])); why != nil {
@@ -518,6 +659,7 @@ func (suite *IntegrationTestSuite) TestReadNaturalPartitionFromSource() {
 					topRecordOpt, err := partitions.GetTopRecordID(
 						ctx,
 						coll,
+						bson.Timestamp{1, 0},
 					)
 					suite.Require().NoError(err)
 

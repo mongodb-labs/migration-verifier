@@ -11,5 +11,7 @@ package verifier
 // 6: Mismatches now record `generation` and `taskType`. `task` is now `taskID`.
 // 7: Task format changed slightly to distinguish expected vs. found docs.
 //    The resume token also now stores change event counts.
+// 8: Generation 0 partitions _id ranges in separate `partitionIDRange`
+//    tasks. Their verify-documents tasks store `parent_task_id`.
 
-const verifierMetadataVersion = 7
+const verifierMetadataVersion = 8
