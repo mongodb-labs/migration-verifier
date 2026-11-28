@@ -1,9 +1,11 @@
 package verifier
 
 import (
+	"github.com/10gen/migration-verifier/internal/partitions"
 	"github.com/10gen/migration-verifier/internal/testutil"
 	"github.com/10gen/migration-verifier/internal/types"
 	"github.com/10gen/migration-verifier/internal/verifier/tasks"
+	"github.com/10gen/migration-verifier/mmongo"
 	"github.com/10gen/migration-verifier/mslices"
 	"github.com/samber/lo"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -70,7 +72,16 @@ func (suite *IntegrationTestSuite) TestCappedCollection_Partitioning() {
 	var docTasks []tasks.Task
 	suite.Require().NoError(cursor.All(ctx, &docTasks))
 
-	suite.Assert().Greater(len(docTasks), 1, "capped collection should get multiple partitions")
+	// Sources that can’t resume natural scans get a single natural partition
+	// per collection.
+	singlePartition := verifier.partitioningScheme == partitions.SchemeNatural &&
+		mmongo.WhyFindCannotResume([2]int(verifier.srcClusterInfo.VersionArray)) != nil
+
+	if singlePartition {
+		suite.Assert().Len(docTasks, 1, "source can’t resume natural scans, so expect 1 partition")
+	} else {
+		suite.Assert().Greater(len(docTasks), 1, "capped collection should get multiple partitions")
+	}
 
 	for _, task := range docTasks {
 		suite.Assert().Equal(tasks.Completed, task.Status, "partition %v should match", task.PrimaryKey)

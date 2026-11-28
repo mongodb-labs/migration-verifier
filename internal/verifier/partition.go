@@ -352,6 +352,11 @@ func (verifier *Verifier) createPartitionTasksWithSampleRateRetryable(
 			return 0, errors.Wrapf(err, "fetching %#q from %#q’s sampling cursor", "_id", srcNs)
 		}
 
+		// A partition with identical lower and upper bounds is useless.
+		if upperBound.Equal(lowerBound) {
+			continue
+		}
+
 		err = createAndInsertPartition(lowerBound, upperBound)
 		if err != nil {
 			return 0, err
